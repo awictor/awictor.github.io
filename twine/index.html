@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Twine — braid weaver</title>
+<style>
+  html,body{margin:0;height:100%;background:#07080f;overflow:hidden;
+    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:#e8ecff;touch-action:none;cursor:pointer}
+  #c{display:block;width:100vw;height:100vh}
+  #hud{position:fixed;inset:0;pointer-events:none;padding:16px 20px;box-sizing:border-box}
+  #top{display:flex;justify-content:space-between;align-items:flex-start;font-size:14px;letter-spacing:.5px}
+  .k{opacity:.55;font-size:11px;text-transform:uppercase;letter-spacing:2px}
+  .v{font-size:26px;font-weight:700;line-height:1}
+  #mult{transition:transform .1s;transform-origin:left}
+  #center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+  #center.hide{display:none}
+  h1{font-size:min(16vw,120px);margin:0;letter-spacing:.12em;font-weight:800;
+     background:linear-gradient(90deg,#4de1ff,#c86bff);-webkit-background-clip:text;background-clip:text;color:transparent;
+     text-shadow:0 0 40px rgba(120,120,255,.35)}
+  #sub{opacity:.7;margin-top:14px;font-size:15px;max-width:520px;line-height:1.6}
+  #gostats{margin-top:18px;font-size:15px;opacity:.9}
+  .accent{color:#4de1ff}.pink{color:#c86bff}.warn{color:#ff5c7a}
+  #tag{position:fixed;bottom:12px;width:100%;text-align:center;font-size:11px;opacity:.4;letter-spacing:2px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div id="top">
+    <div><div class="k">Score</div><div class="v" id="score">0</div></div>
+    <div style="text-align:center"><div class="k">Combo</div><div class="v" id="mult">x1</div></div>
+    <div style="text-align:right"><div class="k">Best</div><div class="v" id="best">0</div></div>
+  </div>
+  <div id="center">
+    <h1>TWINE</h1>
+    <div id="sub"></div>
+    <div id="gostats"></div>
+  </div>
+</div>
+<div id="tag" class="k">tap · click · space to switch rails</div>
+<script>
+(()=>{
+const C=document.getElementById('c'),X=C.getContext('2d');
+let W,H,cx,BY,amp;
+function resize(){const dpr=Math.min(window.devicePixelRatio||1,2);W=innerWidth;H=innerHeight;
+  C.width=W*dpr;C.height=H*dpr;C.style.width=W+'px';C.style.height=H+'px';
+  X.setTransform(dpr,0,0,dpr,0,0);cx=W/2;BY=H*0.72;amp=Math.min(W*0.27,300);}
+addEventListener('resize',resize);resize();
+
+// ---- seeded RNG ----
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+// ---- seed & ghost from URL hash (else daily seed) ----
+function dailySeed(){const d=new Date();return d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate();}
+let SEED, ghostData=null;
+(function parseHash(){
+  const h=new URLSearchParams(location.hash.slice(1));
+  SEED = h.has('s')? (parseInt(h.get('s'),10)||dailySeed()) : dailySeed();
+  if(h.has('g')){ try{ghostData=JSON.parse(atob(h.get('g')));}catch(e){ghostData=null;} }
+  if(!ghostData){ try{const st=JSON.parse(localStorage.getItem('twine_'+SEED)||'null'); if(st)ghostData=st;}catch(e){} }
+})();
+
+const W_FREQ=0.0125;                    // braid frequency (constant → clean twist math)
+const railX=(rail,d)=>cx+(rail?-1:1)*amp*Math.sin(W_FREQ*d);
+const scale=[0,3,5,7,10,12,15,17];      // minor pentatonic-ish semitone steps
+
+// ---- audio ----
+let AC;const ac=()=>{if(!AC)AC=new (window.AudioContext||window.webkitAudioContext)();return AC;};
+function tone(freq,dur,type,vol){const c=ac(),o=c.createOscillator(),g=c.createGain();
+  o.type=type||'sine';o.frequency.value=freq;o.connect(g).connect(c.destination);
+  const t=c.currentTime;g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(vol||0.18,t+0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);o.start(t);o.stop(t+dur+0.03);}
+const midi=n=>440*Math.pow(2,(n-69)/12);
+function arp(combo){const step=scale[Math.min(combo,scale.length*3-1)%scale.length];
+  const oct=Math.floor(Math.min(combo,scale.length*3)/scale.length);
+  tone(midi(60+step+oct*12),0.28,'triangle',0.16);
+  if(combo>=4)tone(midi(67+step+oct*12),0.24,'sine',0.07);      // harmonic layer
+  if(combo>=10)tone(midi(72+step+oct*12),0.2,'sine',0.05);}
+
+// ---- state ----
+let G;
+function reset(){
+  G={rng:mulberry32(SEED),travel:0,speed:200,cur:0,bx:railX(0,0),bvx:0,
+     items:[],nextD:260,score:0,combo:0,mult:1,switches:[],lastSw:0,
+     trail:[],parts:[],floats:[],shake:0,flash:0,pulse:0,lastTwist:-1,slow:0,over:false,started:false,
+     ghost:ghostData?{rail:0,x:railX(0,0),idx:0,sw:ghostData.sw||[]}:null};
+  document.getElementById('best').textContent=(+localStorage.getItem('twine_high')||0).toLocaleString();
+  showMenu();
+}
+function startPlay(){G.started=true;document.getElementById('center').classList.add('hide');}
+function showMenu(){
+  const c=document.getElementById('center');c.classList.remove('hide');
+  document.querySelector('h1').textContent='TWINE';
+  const seedLbl=(SEED===dailySeed())?'DAILY':('#'+SEED);
+  document.getElementById('sub').innerHTML=
+    `Ride one of two braiding rails. <span class="accent">Switch</span> at the twist to grab <span class="accent">nodes</span> and thread the <span class="warn">gaps</span>.<br><span class="k">seed ${seedLbl}</span>`;
+  document.getElementById('gostats').innerHTML=
+    (G.ghost?`racing a <span class="pink">ghost</span> (best ${ghostData.score})<br>`:'')+
+    `<span class="k">press anything to begin</span>`;
+}
+
+// ---- deterministic spawning ----
+function spawnAhead(){
+  const g=G;
+  while(g.nextD < g.travel + H + 300){
+    const t=g.nextD, diff=t/5000;
+    let rail=g.rng()<0.5?0:1, roll=g.rng();
+    let type=roll<0.5?'node':roll<0.5+Math.min(0.32,0.16+diff*0.12)?'spike':'gap';
+    if(type!=='node'){ // fairness: never block both rails at once
+      for(const o of g.items){ if(o.type!=='node'&&o.rail!==rail&&Math.abs(o.d-t)<80){type='node';break;} }
+    }
+    const it={d:t,rail,type,got:false,ev:false};
+    if(type==='gap')it.len=40+g.rng()*34;
+    g.items.push(it);
+    const spacing=Math.max(78,150-diff*70);
+    g.nextD += spacing*(0.75+g.rng()*0.6);
+  }
+  if(g.items.length>90)g.items=g.items.filter(o=>o.d>g.travel-140);
+}
+
+function burst(x,y,hue,n){for(let i=0;i<n;i++){const a=Math.random()*6.28,s=1+Math.random()*4;
+  G.parts.push({x,y,vx:Math.cos(a)*s*40,vy:Math.sin(a)*s*40,life:1,hue});}}
+
+function switchRail(){
+  if(G.over){reset();startPlay();return;}   // one press restarts straight into play
+  if(!G.started){startPlay();}
+  G.cur=1-G.cur;G.shake=Math.min(G.shake+7,14);
+  const from=1-G.cur;G.switches.push(Math.round(G.travel));G.lastSw=G.travel;
+  tone(midi(58+G.cur*5+Math.min(G.combo,12)),0.14,'square',0.12);
+  // near-miss thread check: gap on the rail we just left, just ahead
+  for(const it of G.items){ if(it.type==='gap'&&it.rail===from&&!it.ev){
+     const m=it.d-G.travel; if(m>0&&m<58){thread(it);} } }
+}
+function thread(it){it.ev=true;const bonus=50*G.mult;G.score+=bonus;G.slow=Math.max(G.slow,0.22);
+  G.floats.push({x:G.bx,y:BY-24,txt:'+'+bonus,life:1,hue:180,sz:18});
+  G.flash=Math.min(G.flash+0.5,0.7);burst(G.bx,BY,180,14);tone(midi(84),0.3,'sine',0.14);tone(midi(91),0.3,'sine',0.06);}
+
+function die(){if(G.over)return;G.over=true;G.shake=26;G.flash=1;G.combo=0;G.mult=1;
+  tone(90,0.5,'sawtooth',0.2);tone(60,0.6,'square',0.14);burst(G.bx,BY,0,40);
+  const hi=+localStorage.getItem('twine_high')||0;
+  if(G.score>hi)localStorage.setItem('twine_high',Math.floor(G.score));
+  let prev=null;try{prev=JSON.parse(localStorage.getItem('twine_'+SEED)||'null');}catch(e){}
+  if(!prev||G.score>prev.score){
+    const rec={seed:SEED,score:Math.floor(G.score),sw:G.switches};
+    localStorage.setItem('twine_'+SEED,JSON.stringify(rec));ghostData=rec;
+    history.replaceState(null,'','#s='+SEED+'&g='+btoa(JSON.stringify({sw:rec.sw,score:rec.score})));
+  }
+  const c=document.getElementById('center');c.classList.remove('hide');
+  document.querySelector('h1').textContent='WIPEOUT';
+  document.getElementById('sub').innerHTML=`scored <span class="accent">${Math.floor(G.score).toLocaleString()}</span>`;
+  document.getElementById('gostats').innerHTML=
+    (G.score>hi?'<span class="pink">new best!</span> ghost saved to URL<br>':'')+
+    `<span class="k">press anything to run again</span>`;
+}
+
+// ---- main loop ----
+let last=performance.now();
+function frame(now){
+  let dt=Math.min(0.033,(now-last)/1000);last=now;requestAnimationFrame(frame);
+  const g=G;
+  const flow=g.started&&!g.over;
+  const sdt=dt*(g.slow>0?0.35:1);g.slow=Math.max(0,g.slow-dt);
+
+  if(flow){
+    const prevTravel=g.travel;
+    g.speed=Math.min(200+g.travel*0.011,760);   // cap so a frame step can't tunnel past items
+    g.travel+=g.speed*sdt;
+    spawnAhead();
+    // twist beat → chroma pulse + soft bass
+    const tw=Math.floor(W_FREQ*g.travel/Math.PI);
+    if(tw!==g.lastTwist){g.lastTwist=tw;g.pulse=1;if(g.started)tone(midi(40+ (g.combo>0?7:0)),0.18,'sine',0.06);}
+    // collisions
+    for(const it of g.items){
+      if(it.type==='gap'){
+        // swept: on the gap's rail and the break span was entered this frame
+        if(g.cur===it.rail&&g.travel>it.d&&prevTravel<it.d+it.len)die();
+        if(!it.ev&&g.travel>=it.d){it.ev=true;const m=it.d-g.lastSw;
+          if(g.cur!==it.rail&&m>0&&m<58)thread(it);}
+      }else if(!it.got&&it.rail===g.cur&&it.d<=g.travel&&it.d>prevTravel-6){
+        // swept crossing: any item whose d we passed this frame registers, no tunneling
+        if(it.type==='node'){it.got=true;g.combo++;g.mult=1+Math.floor(g.combo/3);
+          g.score+=10*g.mult;g.floats.push({x:railX(it.rail,it.d),y:BY-20,txt:'+'+(10*g.mult),life:1,hue:190,sz:14});
+          burst(railX(it.rail,it.d),BY,190-g.combo*4,10);arp(g.combo);
+          const m=document.getElementById('mult');m.style.transform='scale(1.5)';setTimeout(()=>m.style.transform='',90);
+        }else die();
+      }
+    }
+    // ghost replay
+    if(g.ghost){const gh=g.ghost;while(gh.idx<gh.sw.length&&gh.sw[gh.idx]<=g.travel){gh.rail=1-gh.rail;gh.idx++;}
+      gh.x+=(railX(gh.rail,g.travel)-gh.x)*Math.min(1,sdt*14);}
+  }
+
+  // bead spring toward current rail
+  const tgt=railX(g.cur,g.travel);g.bvx+=(tgt-g.bx)*60*sdt;g.bvx*=Math.pow(0.0009,sdt);g.bx+=g.bvx*sdt;
+  g.trail.unshift({x:g.bx,y:BY});if(g.trail.length>22)g.trail.pop();
+  for(const t of g.trail)t.y+=g.speed*sdt;
+  for(const p of g.parts){p.x+=p.vx*dt;p.y+=p.vy*dt+g.speed*sdt*0.3;p.vx*=0.94;p.vy*=0.94;p.life-=dt*1.6;}
+  g.parts=g.parts.filter(p=>p.life>0);
+  for(const f of g.floats){f.y-=42*dt;f.life-=dt*1.05;}
+  g.floats=g.floats.filter(f=>f.life>0);
+  g.shake*=Math.pow(0.02,dt);g.flash=Math.max(0,g.flash-dt*1.8);g.pulse=Math.max(0,g.pulse-dt*2.4);
+
+  // ---------- render ----------
+  X.fillStyle='#07080f';X.fillRect(0,0,W,H);
+  const px=(Math.random()-.5)*g.shake,py=(Math.random()-.5)*g.shake;
+  const camX=(cx-railX(g.cur,g.travel+150))*0.22;   // subtle look-ahead pan
+  X.save();X.translate(px+camX,py);
+
+  const R0='#4de1ff',R1='#c86bff';
+  const y2d=d=>BY-(d-g.travel);
+  // rails (skip gap segments) — draw as glowing polylines
+  for(let rail=0;rail<2;rail++){
+    X.lineWidth=4;X.strokeStyle=rail?R1:R0;X.shadowBlur=14;X.shadowColor=rail?R1:R0;
+    X.beginPath();let pen=false;
+    for(let d=g.travel-60;d<g.travel+H+60;d+=6){
+      let gap=false;for(const it of g.items)if(it.type==='gap'&&it.rail===rail&&d>it.d&&d<it.d+it.len){gap=true;break;}
+      const x=railX(rail,d),y=y2d(d);
+      if(gap){pen=false;continue;}
+      if(!pen){X.moveTo(x,y);pen=true;}else X.lineTo(x,y);
+    }
+    X.stroke();
+  }
+  X.shadowBlur=0;
+
+  // upcoming twist telegraph
+  const twD=Math.ceil(W_FREQ*g.travel/Math.PI)*Math.PI/W_FREQ;
+  const dTw=twD-g.travel;
+  if(dTw<340){
+    const ty=y2d(twD),a=1-dTw/340;
+    X.save();X.globalAlpha=a*0.9;X.strokeStyle='#fff';X.lineWidth=2;X.shadowBlur=20;X.shadowColor='#fff';
+    X.beginPath();X.arc(cx,ty,20+8*Math.sin(now/120),0,6.28);X.stroke();X.restore();
+    // flash which rail is safe near the twist
+    let hz0=false,hz1=false;
+    for(const it of g.items)if(it.type!=='node'&&Math.abs(it.d-twD)<70){it.rail?hz1=true:hz0=true;}
+    const safe=hz0&&!hz1?1:hz1&&!hz0?0:-1;
+    if(safe>=0){X.save();X.globalAlpha=a;X.fillStyle=safe?R1:R0;X.shadowBlur=16;X.shadowColor=safe?R1:R0;
+      const sx=railX(safe,twD);X.beginPath();X.moveTo(sx,ty-26);X.lineTo(sx-9,ty-40);X.lineTo(sx+9,ty-40);X.fill();
+      // non-color cue: chevron pointing to the side the safe rail sits on before the crossing
+      X.font='bold 20px ui-monospace,monospace';X.textAlign='center';X.textBaseline='alphabetic';
+      X.fillText(railX(safe,twD-60)<cx?'◄':'►',sx,ty-46);X.restore();}
+  }
+
+  // items
+  for(const it of g.items){
+    if(it.type==='node'&&it.got)continue;
+    const y=y2d(it.d),x=railX(it.rail,it.d);
+    if(y<-40||y>H+40)continue;
+    if(it.type==='node'){X.fillStyle='#eafcff';X.shadowBlur=16;X.shadowColor='#9ff';
+      X.beginPath();X.arc(x,y,6,0,6.28);X.fill();X.shadowBlur=0;}
+    else if(it.type==='spike'){X.fillStyle='#ff5c7a';X.shadowBlur=12;X.shadowColor='#ff5c7a';
+      X.beginPath();X.moveTo(x,y-9);X.lineTo(x-8,y+7);X.lineTo(x+8,y+7);X.fill();X.shadowBlur=0;}
+    else{ // gap: warning brackets at the break ends
+      X.strokeStyle='#ff5c7a';X.lineWidth=3;X.shadowBlur=10;X.shadowColor='#ff5c7a';
+      const y1=y2d(it.d),y2=y2d(it.d+it.len);
+      for(const yy of [y1,y2]){X.beginPath();X.moveTo(x-11,yy);X.lineTo(x,yy);X.lineTo(x,yy+(yy===y1?9:-9));X.stroke();}
+      X.setLineDash([4,7]);X.globalAlpha=.5;X.beginPath();X.moveTo(x,y1);X.lineTo(x,y2);X.stroke();
+      X.setLineDash([]);X.globalAlpha=1;X.shadowBlur=0;}
+  }
+
+  // ghost
+  if(g.ghost){X.save();X.globalAlpha=0.34;X.fillStyle='#fff';X.shadowBlur=14;X.shadowColor='#fff';
+    X.beginPath();X.arc(g.ghost.x,BY,9,0,6.28);X.fill();X.restore();X.shadowBlur=0;}
+
+  // trail + bead
+  for(let i=g.trail.length-1;i>=0;i--){const t=g.trail[i],f=1-i/g.trail.length;
+    X.globalAlpha=f*0.5;X.fillStyle=g.cur?R1:R0;X.beginPath();X.arc(t.x,t.y,10*f,0,6.28);X.fill();}
+  X.globalAlpha=1;
+  X.fillStyle='#fff';X.shadowBlur=24;X.shadowColor=g.cur?R1:R0;
+  X.beginPath();X.arc(g.bx,BY,11,0,6.28);X.fill();X.shadowBlur=0;
+
+  // particles
+  for(const p of g.parts){X.globalAlpha=Math.max(0,p.life);
+    X.fillStyle=`hsl(${p.hue},90%,65%)`;X.beginPath();X.arc(p.x,p.y,3*p.life+1,0,6.28);X.fill();}
+  X.globalAlpha=1;
+  // floating score popups
+  X.textAlign='center';X.textBaseline='alphabetic';
+  for(const f of g.floats){X.globalAlpha=Math.max(0,f.life);X.font=`bold ${f.sz}px ui-monospace,monospace`;
+    X.fillStyle=`hsl(${f.hue},90%,74%)`;X.fillText(f.txt,f.x,f.y);}
+  X.globalAlpha=1;X.textAlign='start';
+  X.restore();
+
+  // chromatic pulse overlay locked to twist rhythm + flash
+  if(g.pulse>0){X.globalAlpha=g.pulse*0.14;const gr=X.createRadialGradient(cx,BY,H*0.1,cx,BY,H*0.8);
+    gr.addColorStop(0,g.cur?'#c86bff':'#4de1ff');gr.addColorStop(1,'transparent');
+    X.fillStyle=gr;X.fillRect(0,0,W,H);X.globalAlpha=1;}
+  if(g.flash>0){X.globalAlpha=g.flash*0.5;X.fillStyle='#fff';X.fillRect(0,0,W,H);X.globalAlpha=1;}
+
+  document.getElementById('score').textContent=Math.floor(g.score).toLocaleString();
+  document.getElementById('mult').textContent='x'+g.mult;
+}
+
+// ---- input ----
+function input(e){
+  if(e&&e.type==='keydown'){
+    const active=G.started&&!G.over;
+    // during play only the switch keys act; on the menu/wipeout screen any key works
+    if(active&&e.code!=='Space'&&e.key!==' '&&e.key!=='ArrowUp'&&e.key!=='w')return;
+    if(e.code==='Space'||e.key===' '||e.key==='ArrowUp'||e.key==='ArrowDown')e.preventDefault();
+  }
+  if(AC&&AC.state==='suspended')AC.resume();switchRail();}
+addEventListener('keydown',input);
+addEventListener('pointerdown',()=>{if(AC&&AC.state==='suspended')AC.resume();input();});
+
+reset();requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

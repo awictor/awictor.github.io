@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JsonToTs — JSON to TypeScript interface generator</title>
+<meta name="description" content="Free offline JSON to TypeScript converter. Paste JSON and get clean TypeScript interfaces — nested objects become named interfaces, arrays infer element types. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/json-to-ts/">
+<style>
+  :root{
+    --c:#3730a3; --bg:#f8f8fd; --fg:#16162b; --muted:#5f5f80;
+    --card:#ffffff; --border:#e3e3f1; --code:#eeeef9;
+  }
+  [data-theme="dark"]{
+    --bg:#0f0f1c; --fg:#e8e8f5; --muted:#9494b6; --card:#181830;
+    --border:#2a2a48; --code:#20203c;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:1040px;margin:0 auto;padding:24px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#6366f1);display:grid;place-items:center;color:#fff;font-size:16px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:1040px;margin:0 auto;padding:6px 20px 60px}
+  .bar{display:flex;gap:12px;align-items:center;margin-top:14px;flex-wrap:wrap}
+  .bar label{font-size:.82rem;font-weight:600;color:var(--muted)}
+  .bar input{padding:8px 11px;border:1px solid var(--border);border-radius:9px;
+    background:var(--card);color:var(--fg);font-family:ui-monospace,monospace;font-size:.9rem}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px}
+  @media(max-width:760px){.grid{grid-template-columns:1fr}}
+  .pane{background:var(--card);border:1px solid var(--border);border-radius:14px;
+    display:flex;flex-direction:column;overflow:hidden}
+  .pane .h{display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);
+    font-size:.8rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .copy{margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);
+    border-radius:7px;padding:3px 11px;cursor:pointer;font-size:.72rem;text-transform:none;letter-spacing:0}
+  .copy:hover{color:var(--c);border-color:var(--c)}
+  textarea,pre{border:none;background:none;color:var(--fg);min-height:420px;margin:0;
+    padding:15px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9rem;line-height:1.6;width:100%}
+  textarea{resize:vertical}
+  textarea:focus{outline:none}
+  pre{overflow:auto;white-space:pre;color:var(--fg)}
+  pre.err{color:#dc2626}
+  footer{max-width:1040px;margin:0 auto;padding:14px 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('j2t.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">{}</div>
+  <div>
+    <h1>JsonToTs</h1>
+    <p class="sub">JSON &rarr; TypeScript interface generator</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="bar">
+    <label for="root">Root interface name</label>
+    <input type="text" id="root" value="Root" spellcheck="false">
+  </div>
+  <div class="grid">
+    <div class="pane">
+      <div class="h">JSON</div>
+      <textarea id="in" spellcheck="false">{
+  "id": 42,
+  "name": "Widget",
+  "inStock": true,
+  "tags": ["new", "sale"],
+  "dimensions": { "width": 10, "height": 5 },
+  "variants": [{ "sku": "A1", "price": 9.99 }]
+}</textarea>
+    </div>
+    <div class="pane">
+      <div class="h">TypeScript <button class="copy" id="copy">Copy</button></div>
+      <pre id="out"></pre>
+    </div>
+  </div>
+</main>
+<footer>
+  JsonToTs is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/json-to-ts">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function pascal(s){
+  var out = String(s).replace(/[^A-Za-z0-9]+/g, ' ').trim().split(/\s+/)
+    .map(function(w){ return w ? w.charAt(0).toUpperCase() + w.slice(1) : ''; }).join('');
+  return out || 'Anon';
+}
+function singular(s){ return /s$/i.test(s) ? s.replace(/s$/i, '') : s; }
+function safeKey(k){ return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(k) ? k : JSON.stringify(k); }
+
+function tsType(value, name, interfaces){
+  if(value === null) return 'null';
+  if(Array.isArray(value)){
+    if(value.length === 0) return 'any[]';
+    var elem = tsType(value[0], singular(name), interfaces);
+    return elem + '[]';
+  }
+  var t = typeof value;
+  if(t === 'object'){
+    var iface = pascal(name);
+    buildInterface(value, iface, interfaces);
+    return iface;
+  }
+  if(t === 'number') return 'number';
+  if(t === 'boolean') return 'boolean';
+  return 'string';
+}
+function buildInterface(obj, name, interfaces){
+  if(interfaces.some(function(e){ return e.name === name; })) return name; // reuse existing
+  var entry = { name: name, body: '' };
+  interfaces.push(entry); // reserve slot so parents come before children
+  var lines = Object.keys(obj).map(function(key){
+    return '  ' + safeKey(key) + ': ' + tsType(obj[key], key, interfaces) + ';';
+  });
+  entry.body = 'interface ' + name + ' {\n' + lines.join('\n') + '\n}';
+  return name;
+}
+function jsonToTs(jsonStr, rootName){
+  rootName = rootName || 'Root';
+  var data;
+  try{ data = JSON.parse(jsonStr); }
+  catch(e){ return { error: 'Invalid JSON: ' + e.message, code: '' }; }
+  var interfaces = [];
+  var rootType = tsType(data, rootName, interfaces);
+  var parts = interfaces.map(function(e){ return e.body; });
+  var isPlainObject = data !== null && typeof data === 'object' && !Array.isArray(data);
+  if(!isPlainObject){
+    parts.unshift('type ' + pascal(rootName) + ' = ' + rootType + ';');
+  }
+  return { error: null, code: parts.join('\n\n') };
+}
+
+if(typeof module !== 'undefined') module.exports = {
+  pascal, singular, safeKey, tsType, jsonToTs
+};
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var inEl = document.getElementById('in');
+  var outEl = document.getElementById('out');
+  var rootEl = document.getElementById('root');
+  function render(){
+    var r = jsonToTs(inEl.value, rootEl.value || 'Root');
+    if(r.error){ outEl.className = 'err'; outEl.textContent = '⚠ ' + r.error; }
+    else { outEl.className = ''; outEl.textContent = r.code; }
+    try{
+      localStorage.setItem('j2t.in', inEl.value);
+      localStorage.setItem('j2t.root', rootEl.value);
+    }catch(e){}
+  }
+  inEl.addEventListener('input', render);
+  rootEl.addEventListener('input', render);
+  document.getElementById('copy').addEventListener('click', function(){
+    if(navigator.clipboard) navigator.clipboard.writeText(outEl.textContent);
+    this.textContent = 'Copied';
+    var b = this; setTimeout(function(){ b.textContent = 'Copy'; }, 1000);
+  });
+  try{
+    var si = localStorage.getItem('j2t.in'); if(si !== null) inEl.value = si;
+    var sr = localStorage.getItem('j2t.root'); if(sr !== null) rootEl.value = sr;
+  }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('j2t.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('j2t.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

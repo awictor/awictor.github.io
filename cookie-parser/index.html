@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CookieParser — Set-Cookie Header Parser &amp; Security Audit</title>
+<meta name="description" content="Paste a Set-Cookie header to break it into name, value, and attributes (Domain, Path, Expires, Max-Age, Secure, HttpOnly, SameSite), with a security audit. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('cookie-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#a16207;
+    --bg:#faf6ee; --card:#ffffff; --fg:#211a0f; --muted:#6b5c42; --line:#efe6d3; --shadow:0 1px 3px rgba(0,0,0,.08);
+    --ok:#16a34a; --warn:#dc2626;
+  }
+  [data-theme="dark"]{
+    --bg:#141007; --card:#1e170c; --fg:#f5efe2; --muted:#a89272; --line:#2c2414; --shadow:0 1px 3px rgba(0,0,0,.5);
+    --ok:#4ade80; --warn:#f87171;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:700px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#78350f);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:700px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  textarea{width:100%;min-height:80px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:.95rem;resize:vertical}
+  h2{font-size:.82rem;margin:0 0 8px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  table{width:100%;border-collapse:collapse;font-size:.92rem}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:.72rem;text-transform:uppercase;width:34%}
+  td.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;word-break:break-all}
+  .flag{display:inline-block;padding:1px 8px;border-radius:6px;font-size:.8rem;font-weight:700}
+  .flag.on{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
+  .flag.off{background:color-mix(in srgb,var(--warn) 15%,transparent);color:var(--warn)}
+  .audit{margin-top:6px;display:flex;flex-direction:column;gap:6px}
+  .audit .w{background:color-mix(in srgb,var(--warn) 12%,transparent);border-left:3px solid var(--warn);border-radius:6px;padding:8px 10px;font-size:.9rem}
+  .audit .none{color:var(--ok);font-weight:600}
+  .err{color:var(--warn);font-size:.85rem;margin-top:8px}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:700px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🍪</div>
+    <div><h1>CookieParser</h1><div class="sub">Set-Cookie parser &amp; audit</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="input">Set-Cookie header</label>
+    <textarea id="input" spellcheck="false">sessionId=abc123; Path=/; Max-Age=3600; Secure; HttpOnly; SameSite=Strict</textarea>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card">
+    <h2>Parsed</h2>
+    <table id="tbl"><tbody></tbody></table>
+  </div>
+  <div class="card">
+    <h2>Security audit</h2>
+    <div class="audit" id="audit"></div>
+  </div>
+</main>
+<footer>
+  Breaks a <span class="mono">Set-Cookie</span> response header into its parts and flags common hardening gaps. Attribute names are case-insensitive; the value keeps everything after the first <span class="mono">=</span>. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/cookie-parser">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  function parseSetCookie(header){
+    const s = String(header).trim();
+    if(!s) throw new Error('empty Set-Cookie header');
+    const parts = s.split(';');
+    const eq = parts[0].indexOf('=');
+    if(eq < 1) throw new Error('missing name=value pair');
+    const c = {
+      name: parts[0].slice(0, eq).trim(),
+      value: parts[0].slice(eq + 1).trim(),
+      domain: null, path: null, expires: null, maxAge: null,
+      secure: false, httpOnly: false, sameSite: null
+    };
+    for(let i = 1; i < parts.length; i++){
+      const p = parts[i].trim();
+      if(!p) continue;
+      const j = p.indexOf('=');
+      const key = (j >= 0 ? p.slice(0, j) : p).trim().toLowerCase();
+      const val = j >= 0 ? p.slice(j + 1).trim() : '';
+      switch(key){
+        case 'domain': c.domain = val; break;
+        case 'path': c.path = val; break;
+        case 'expires': c.expires = val; break;
+        case 'max-age': c.maxAge = /^-?\d+$/.test(val) ? Number(val) : val; break;
+        case 'samesite': c.sameSite = val; break;
+        case 'secure': c.secure = true; break;
+        case 'httponly': c.httpOnly = true; break;
+      }
+    }
+    return c;
+  }
+
+  // Common hardening warnings for a parsed cookie.
+  function audit(c){
+    const w = [];
+    if(!c.secure) w.push('Missing Secure — the cookie can be sent over plain HTTP.');
+    if(!c.httpOnly) w.push('Missing HttpOnly — the cookie is readable by JavaScript (XSS risk).');
+    if(!c.sameSite) w.push('No SameSite — set Lax or Strict to limit cross-site sending.');
+    else if(c.sameSite.toLowerCase() === 'none' && !c.secure) w.push('SameSite=None requires the Secure attribute.');
+    if(!c.expires && c.maxAge == null) w.push('Session cookie — no Expires/Max-Age, cleared when the browser closes.');
+    return w;
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('tbl')){
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s).replace(/[&<>]/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[ch]));
+    const flag = on => `<span class="flag ${on ? 'on' : 'off'}">${on ? '✓ set' : '✗ not set'}</span>`;
+
+    function render(){
+      try{
+        const c = parseSetCookie($('input').value);
+        const rows = [
+          ['Name', esc(c.name)],
+          ['Value', esc(c.value)],
+          ['Domain', c.domain != null ? esc(c.domain) : '<i>(host-only)</i>'],
+          ['Path', c.path != null ? esc(c.path) : '<i>(default)</i>'],
+          ['Expires', c.expires != null ? esc(c.expires) : '<i>(session)</i>'],
+          ['Max-Age', c.maxAge != null ? esc(c.maxAge) : '<i>(none)</i>'],
+          ['SameSite', c.sameSite != null ? esc(c.sameSite) : '<i>(unset)</i>'],
+          ['Secure', flag(c.secure)],
+          ['HttpOnly', flag(c.httpOnly)]
+        ];
+        $('tbl').querySelector('tbody').innerHTML = rows.map(([k, v]) => `<tr><th>${k}</th><td class="mono">${v}</td></tr>`).join('');
+        const w = audit(c);
+        $('audit').innerHTML = w.length ? w.map(x => `<div class="w">${esc(x)}</div>`).join('') : '<div class="none">✓ No common issues found.</div>';
+        $('err').textContent = '';
+      }catch(e){ $('tbl').querySelector('tbody').innerHTML = ''; $('audit').innerHTML = ''; $('err').textContent = e.message; }
+    }
+    $('input').addEventListener('input', render);
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('cookie-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { parseSetCookie, audit };
+</script>
+</body>
+</html>

@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AngleConvert — Angle Unit Converter</title>
+<meta name="description" content="Convert angles between degrees, radians, gradians, turns, arcminutes and arcseconds, and see every unit at once. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('angle-convert-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#0891b2;
+    --bg:#f4f7f8; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e2e6e8; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#0d1416; --card:#151e20; --fg:#eef4f5; --muted:#92a1a4; --line:#233033; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#0e7490);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:720px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;align-items:end}
+  @media(max-width:520px){.grid{grid-template-columns:1fr}}
+  .out{text-align:center;margin-top:14px}
+  .big{font-size:2.4rem;font-weight:800;color:var(--c);letter-spacing:-1px;word-break:break-word}
+  table{width:100%;border-collapse:collapse;font-size:.9rem}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.05em}
+  td.val{font-family:"SF Mono",Menlo,Consolas,monospace;text-align:right}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">📐</div>
+    <div><h1>AngleConvert</h1><div class="sub">Degrees · radians · gradians · turns · arcmin · arcsec</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div><label for="value">Value</label><input type="number" id="value" value="90" step="any"></div>
+      <div><label for="from">From</label><select id="from"></select></div>
+      <div><label for="to">To</label><select id="to"></select></div>
+    </div>
+    <div class="out"><div class="big" id="result">—</div></div>
+  </div>
+  <div class="card">
+    <table><thead><tr><th>Unit</th><th style="text-align:right">Value</th></tr></thead><tbody id="rows"></tbody></table>
+  </div>
+</main>
+<footer>
+  100% offline. Nothing leaves your browser. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/angle-convert">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  const TAU = Math.PI * 2;
+  // factor to convert 1 unit into radians
+  const FACTOR = {
+    deg: Math.PI / 180,
+    rad: 1,
+    grad: Math.PI / 200,
+    turn: TAU,
+    arcmin: Math.PI / 10800,
+    arcsec: Math.PI / 648000
+  };
+  const LABEL = { deg: 'Degrees', rad: 'Radians', grad: 'Gradians', turn: 'Turns', arcmin: 'Arcminutes', arcsec: 'Arcseconds' };
+
+  function toRadians(value, unit){
+    if(!(unit in FACTOR)) throw new Error('unknown unit: ' + unit);
+    return value * FACTOR[unit];
+  }
+  function fromRadians(rad, unit){
+    if(!(unit in FACTOR)) throw new Error('unknown unit: ' + unit);
+    return rad / FACTOR[unit];
+  }
+  function convert(value, from, to){
+    return fromRadians(toRadians(value, from), to);
+  }
+  function allUnits(value, from){
+    const rad = toRadians(value, from);
+    return Object.keys(FACTOR).map(u => ({ unit: u, label: LABEL[u], value: fromRadians(rad, u) }));
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('rows')){
+    const $ = id => document.getElementById(id);
+    const opts = sel => Object.keys(FACTOR).map(u => `<option value="${u}">${LABEL[u]}</option>`).join('');
+    $('from').innerHTML = opts(); $('to').innerHTML = opts();
+    $('from').value = 'deg'; $('to').value = 'rad';
+
+    function fmt(v){
+      if(v === 0) return '0';
+      const a = Math.abs(v);
+      if(a >= 1e9 || a < 1e-6) return v.toExponential(4);
+      return Number(v.toPrecision(8)).toLocaleString(undefined, { maximumFractionDigits: 8 });
+    }
+
+    function render(){
+      const value = +$('value').value, from = $('from').value, to = $('to').value;
+      try{
+        $('result').textContent = fmt(convert(value, from, to)) + ' ' + LABEL[to].toLowerCase();
+        $('rows').innerHTML = allUnits(value, from).map(u =>
+          `<tr><td>${u.label}</td><td class="val">${fmt(u.value)}</td></tr>`).join('');
+      }catch(e){ $('result').textContent = '—'; }
+    }
+
+    ['value', 'from', 'to'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('angle-convert-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { FACTOR, toRadians, fromRadians, convert, allUnits };
+</script>
+</body>
+</html>

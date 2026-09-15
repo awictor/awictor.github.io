@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cycling Power Zones — Coggan zones from FTP</title>
+<meta name="description" content="Calculate your 7 cycling training zones (Coggan) from FTP — watts and % ranges for recovery, endurance, tempo, threshold, VO2max, anaerobic, and neuromuscular. Offline, no tracking.">
+<style>
+  :root{
+    --c:#ea580c;
+    --bg:#fbf6f2; --card:#ffffff; --fg:#20160f; --muted:#77685d;
+    --line:#efe3d9; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#17110b; --card:#211710; --fg:#f5ece4; --muted:#b4a294;
+    --line:#39291c; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:800px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:24px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.4rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:800px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .row{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end}
+  .field{flex:1 1 200px}
+  label{display:block;font-size:.82rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  input[type=number]{width:100%;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .hint{font-size:.78rem;color:var(--muted);margin-top:4px}
+  table{width:100%;border-collapse:collapse;margin-top:6px}
+  th,td{text-align:left;padding:10px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.04em}
+  td.z{font-weight:700}
+  td.w,td.p{text-align:right;font-variant-numeric:tabular-nums;font-family:ui-monospace,monospace}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:8px;vertical-align:0}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🚴</div>
+  <div>
+    <h1>Cycling Power Zones</h1>
+    <p>Coggan training zones from FTP</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="row">
+      <div class="field">
+        <label for="ftp">FTP — Functional Threshold Power (watts)</label>
+        <input type="number" id="ftp" value="250" min="1" step="1">
+        <div class="hint">Your best sustainable 1-hour power (≈95% of a 20-min test).</div>
+      </div>
+      <div class="field">
+        <label for="w">Check a power (watts) — optional</label>
+        <input type="number" id="w" placeholder="e.g. 230" step="1">
+        <div class="hint" id="zoneFor"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Your 7 zones</h2>
+    <table>
+      <thead><tr><th>Zone</th><th>Focus</th><th style="text-align:right">% FTP</th><th style="text-align:right">Watts</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p class="note" style="margin-top:14px">Zones follow Dr. Andrew Coggan's model. FTP is your one-hour threshold power; percentages define training intensity from active recovery (Z1) to sprint/neuromuscular efforts (Z7).</p>
+  </div>
+
+  <p class="foot">100% offline · not medical advice · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var ZONES = [
+    { zone:'Z1', name:'Active recovery', min:0,   max:55,  color:'#94a3b8' },
+    { zone:'Z2', name:'Endurance',       min:55,  max:75,  color:'#22c55e' },
+    { zone:'Z3', name:'Tempo',           min:75,  max:90,  color:'#84cc16' },
+    { zone:'Z4', name:'Threshold',       min:90,  max:105, color:'#eab308' },
+    { zone:'Z5', name:'VO2max',          min:105, max:120, color:'#f97316' },
+    { zone:'Z6', name:'Anaerobic',       min:120, max:150, color:'#ef4444' },
+    { zone:'Z7', name:'Neuromuscular',   min:150, max:Infinity, color:'#b91c1c' }
+  ];
+  function toNum(x){ var n = Number(x); if(!isFinite(n)) throw new Error('inputs must be numbers'); return n; }
+  function powerZones(ftp){
+    ftp = toNum(ftp);
+    if(ftp <= 0) throw new Error('FTP must be positive');
+    return ZONES.map(function(z){
+      return {
+        zone: z.zone, name: z.name, color: z.color,
+        minPct: z.min, maxPct: z.max,
+        minW: ftp * z.min / 100,
+        maxW: z.max === Infinity ? Infinity : ftp * z.max / 100
+      };
+    });
+  }
+  function zoneForPower(watts, ftp){
+    watts = toNum(watts); ftp = toNum(ftp);
+    if(ftp <= 0) throw new Error('FTP must be positive');
+    var pct = watts / ftp * 100;
+    for(var i = 0; i < ZONES.length; i++){
+      if(pct >= ZONES[i].min && pct < ZONES[i].max) return ZONES[i].zone;
+    }
+    return ZONES[ZONES.length - 1].zone;
+  }
+
+  if(typeof module !== 'undefined') module.exports = { ZONES:ZONES, powerZones:powerZones, zoneForPower:zoneForPower };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var ftp=document.getElementById('ftp'), w=document.getElementById('w'), rows=document.getElementById('rows'), zoneFor=document.getElementById('zoneFor');
+    var round=function(x){ return Math.round(x); };
+    function render(){
+      try{
+        var zs = powerZones(ftp.value);
+        rows.innerHTML = zs.map(function(z){
+          var pct = z.maxPct === Infinity ? ('>' + z.minPct + '%') : (z.minPct + '–' + z.maxPct + '%');
+          var wr = z.maxW === Infinity ? ('>' + round(z.minW) + ' W') : (round(z.minW) + '–' + round(z.maxW) + ' W');
+          return '<tr><td class="z"><span class="dot" style="background:' + z.color + '"></span>' + z.zone
+            + '</td><td>' + z.name + '</td><td class="p">' + pct + '</td><td class="w">' + wr + '</td></tr>';
+        }).join('');
+        if(w.value !== ''){
+          var z = zoneForPower(w.value, ftp.value);
+          var name = ZONES.find(function(x){ return x.zone === z; }).name;
+          zoneFor.textContent = w.value + ' W → ' + z + ' · ' + name + ' (' + Math.round(Number(w.value)/Number(ftp.value)*100) + '% FTP)';
+        } else { zoneFor.textContent = ''; }
+      }catch(e){ rows.innerHTML=''; }
+    }
+    ftp.addEventListener('input', render);
+    w.addEventListener('input', render);
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('pz-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('pz-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+
+    render();
+  }
+</script>
+</body>
+</html>

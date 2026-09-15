@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QueryString — URL query string builder &amp; parser</title>
+<meta name="description" content="Free offline URL query string tool. Parse a query string into JSON (repeated keys become arrays) or build a query string from JSON, with correct percent-encoding. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/query-string/">
+<style>
+  :root{
+    --c:#1c1917; --bg:#f8f7f6; --fg:#1c1917; --muted:#57534e;
+    --card:#ffffff; --border:#e3e0dd; --code:#efece9;
+  }
+  [data-theme="dark"]{
+    --bg:#0c0a09; --fg:#e8e4e0; --muted:#8f8880; --card:#161311;
+    --border:#292420; --code:#1c1815;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:900px;margin:0 auto;padding:24px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#57534e);display:grid;place-items:center;color:#fff;font-size:18px}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:900px;margin:0 auto;padding:6px 20px 60px}
+  .seg{display:inline-flex;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-top:14px}
+  .seg button{background:var(--card);border:none;color:var(--fg);padding:9px 16px;cursor:pointer;
+    font-size:.86rem;border-right:1px solid var(--border);font-weight:600}
+  .seg button:last-child{border-right:none}
+  .seg button.on{background:var(--c);color:#fff}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px}
+  @media(max-width:720px){.grid{grid-template-columns:1fr}}
+  .pane{background:var(--card);border:1px solid var(--border);border-radius:14px;display:flex;flex-direction:column;overflow:hidden}
+  .pane .h{display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);
+    font-size:.8rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .copy{margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);
+    border-radius:7px;padding:3px 11px;cursor:pointer;font-size:.72rem;text-transform:none;letter-spacing:0}
+  .copy:hover{color:var(--c);border-color:var(--c)}
+  textarea,pre{border:none;background:none;color:var(--fg);min-height:340px;margin:0;padding:15px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9rem;line-height:1.6;width:100%}
+  textarea{resize:vertical}
+  textarea:focus{outline:none}
+  pre{overflow:auto;white-space:pre-wrap;word-break:break-all}
+  pre.err{color:#dc2626}
+  footer{max-width:900px;margin:0 auto;padding:14px 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('qs.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">?=</div>
+  <div>
+    <h1>QueryString</h1>
+    <p class="sub">URL query string builder &amp; parser</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="seg" id="mode">
+    <button data-m="parse" class="on">Query → JSON</button>
+    <button data-m="build">JSON → Query</button>
+  </div>
+  <div class="grid">
+    <div class="pane">
+      <div class="h" id="inHead">Query string</div>
+      <textarea id="in" spellcheck="false">?q=hello world&tags=a&tags=b&page=2&flag</textarea>
+    </div>
+    <div class="pane">
+      <div class="h" id="outHead">JSON <button class="copy" id="copy">Copy</button></div>
+      <pre id="out"></pre>
+    </div>
+  </div>
+</main>
+<footer>
+  QueryString is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/query-string">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function decode(s){ try{ return decodeURIComponent(String(s).replace(/\+/g, ' ')); }catch(e){ return String(s); } }
+function enc(s){ return encodeURIComponent(String(s)); }
+function parseQuery(qs){
+  var s = String(qs).replace(/^[?#]/, '');
+  var out = {};
+  if(s === '') return out;
+  s.split('&').forEach(function(pair){
+    if(pair === '') return;
+    var i = pair.indexOf('=');
+    var k, v;
+    if(i < 0){ k = decode(pair); v = ''; } else { k = decode(pair.slice(0, i)); v = decode(pair.slice(i + 1)); }
+    if(Object.prototype.hasOwnProperty.call(out, k)){
+      if(Array.isArray(out[k])) out[k].push(v); else out[k] = [out[k], v];
+    } else out[k] = v;
+  });
+  return out;
+}
+function buildQuery(obj){
+  var parts = [];
+  Object.keys(obj).forEach(function(k){
+    var v = obj[k];
+    if(Array.isArray(v)) v.forEach(function(x){ parts.push(enc(k) + '=' + enc(x)); });
+    else parts.push(enc(k) + '=' + enc(v));
+  });
+  return parts.join('&');
+}
+
+if(typeof module !== 'undefined') module.exports = { decode, enc, parseQuery, buildQuery };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var inEl = document.getElementById('in');
+  var outEl = document.getElementById('out');
+  var modeEl = document.getElementById('mode');
+  var mode = 'parse';
+  function setHeads(){
+    document.getElementById('inHead').textContent = mode === 'parse' ? 'Query string' : 'JSON';
+    document.getElementById('outHead').firstChild.textContent = mode === 'parse' ? 'JSON ' : 'Query string ';
+  }
+  function render(){
+    outEl.className = '';
+    if(mode === 'parse'){
+      outEl.textContent = JSON.stringify(parseQuery(inEl.value), null, 2);
+    } else {
+      try{
+        var obj = JSON.parse(inEl.value);
+        if(obj === null || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('Expected a JSON object');
+        outEl.textContent = buildQuery(obj);
+      }catch(e){ outEl.className = 'err'; outEl.textContent = '⚠ ' + e.message; }
+    }
+    try{ localStorage.setItem('qs.in.' + mode, inEl.value); }catch(e){}
+  }
+  modeEl.addEventListener('click', function(e){
+    var b = e.target.closest ? e.target.closest('button') : null;
+    if(!b) return;
+    mode = b.getAttribute('data-m');
+    [].forEach.call(modeEl.querySelectorAll('button'), function(x){ x.className = (x === b) ? 'on' : ''; });
+    setHeads();
+    var saved = null; try{ saved = localStorage.getItem('qs.in.' + mode); }catch(e){}
+    inEl.value = saved !== null ? saved : (mode === 'parse'
+      ? '?q=hello world&tags=a&tags=b&page=2&flag'
+      : '{\n  "q": "hello world",\n  "tags": ["a", "b"],\n  "page": 2\n}');
+    render();
+  });
+  inEl.addEventListener('input', render);
+  document.getElementById('copy').addEventListener('click', function(){
+    if(navigator.clipboard) navigator.clipboard.writeText(outEl.textContent);
+    this.textContent = 'Copied'; var b = this; setTimeout(function(){ b.textContent = 'Copy'; }, 1000);
+  });
+  setHeads();
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('qs.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('qs.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

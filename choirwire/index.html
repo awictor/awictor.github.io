@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Choirwire — live channel vocoder</title>
+<style>
+  :root{ --bg:#0a0d14; --panel:#121826; --ink:#e7ecf5; --dim:#8a97ad; --line:#26314a; --hot:#ff6a3d; --neon:#38f2c8; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:radial-gradient(1200px 600px at 50% -10%,#182238,#0a0d14 60%);color:var(--ink);
+    font:14px/1.5 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  .wrap{max-width:980px;margin:0 auto;padding:22px 18px 60px}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  h1{font-size:26px;margin:0;letter-spacing:.5px}
+  h1 b{color:var(--neon)}
+  .tag{color:var(--dim);font-size:13px;flex:1;min-width:220px}
+  .card{background:linear-gradient(180deg,#131a2b,#0f1524);border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:16px;
+    box-shadow:0 10px 40px -20px #000}
+  #bars{position:relative;display:flex;gap:3px;align-items:flex-end;height:180px;padding:8px 6px 0;border-radius:10px;
+    background:linear-gradient(180deg,#0b0f19,#0d1320);border:1px solid var(--line);overflow:hidden}
+  #barsHint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;
+    color:var(--dim);font-size:14px;letter-spacing:.3px;pointer-events:none;padding:0 20px}
+  #barsHint b{color:var(--neon)}
+  .bar{flex:1;height:100%;display:flex;align-items:flex-end;border-radius:3px 3px 0 0;background:rgba(255,255,255,.02)}
+  .bar i{display:block;width:100%;height:100%;transform:scaleY(.02);transform-origin:bottom;border-radius:3px 3px 0 0;
+    transition:transform .045s linear}
+  .keys{position:relative;height:96px;margin-top:14px;user-select:none}
+  .wk{position:absolute;bottom:0;top:0;border:1px solid #223;border-radius:0 0 5px 5px;background:linear-gradient(180deg,#1a2338,#101726)}
+  .bk{position:absolute;top:0;height:60%;border-radius:0 0 4px 4px;background:linear-gradient(180deg,#05070c,#161d2c);z-index:2;border:1px solid #000}
+  .wk.on{background:linear-gradient(180deg,var(--neon),#0c8f78);box-shadow:0 0 22px var(--neon)}
+  .bk.on{background:linear-gradient(180deg,#ffd0bf,var(--hot));box-shadow:0 0 18px var(--hot)}
+  .row{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-top:14px}
+  label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px}
+  select,input[type=range]{accent-color:var(--neon)}
+  select{background:#0e1626;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:13px}
+  input[type=range]{width:120px}
+  button{background:#17203a;color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:9px 14px;cursor:pointer;
+    font-size:13px;transition:.12s}
+  button:hover{border-color:var(--neon);color:#fff}
+  button.on{background:var(--neon);color:#04120e;border-color:var(--neon);font-weight:600}
+  button.hot.on{background:var(--hot);color:#1a0a04;border-color:var(--hot)}
+  .primary{background:var(--neon);color:#04120e;font-weight:700;border-color:var(--neon)}
+  .presets button{background:#101a2e}
+  .muted{color:var(--dim);font-size:12px}
+  .pill{display:inline-block;font-size:11px;color:var(--neon);border:1px solid #1c3a34;background:#0c1a17;border-radius:20px;padding:3px 10px}
+  #status{font-size:12px;color:var(--dim);margin-left:auto}
+  kbd{background:#0c1424;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:1px 6px;font-size:12px;color:var(--neon)}
+  a.dl{color:var(--hot);font-size:12px}
+  .rv{color:var(--neon);font-size:12px;font-variant-numeric:tabular-nums;text-transform:none;letter-spacing:0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Choir<b>wire</b></h1>
+    <div class="tag">Speak into your mic and a synth choir speaks back in your chord — a real 16-band channel vocoder in one file. <b class="pill">headphones recommended</b></div>
+  </header>
+
+  <div class="card">
+    <div id="bars"><div id="barsHint">Press <b>Start</b>, then hold a chord and talk</div></div>
+    <div class="keys" id="keys"></div>
+    <div class="row">
+      <button id="startBtn" class="primary">Start (demo voice)</button>
+      <button id="micBtn">Use microphone</button>
+      <button id="latchBtn" class="hot">Latch</button>
+      <button id="seqBtn">Sequencer</button>
+      <button id="clearBtn">Clear chord</button>
+      <button id="recBtn">Record</button>
+      <button id="linkBtn">Copy link</button>
+      <span id="status">idle</span>
+    </div>
+    <div class="row presets">
+      <span class="muted">Presets:</span>
+      <button data-preset="daft">Daft-Punk</button>
+      <button data-preset="kraft">Kraftwerk</button>
+      <button data-preset="choir">Robot Choir</button>
+      <button data-preset="vintage">Vintage</button>
+      <a class="dl" id="dl" style="display:none"></a>
+    </div>
+    <div class="row">
+      <label>Carrier<select id="wave"><option value="sawtooth">Saw</option><option value="square">Square</option><option value="pulse">Pulse</option></select></label>
+      <label>Key<select id="key"></select></label>
+      <label>Scale<select id="scale"><option value="major">Major</option><option value="minor">Minor</option><option value="penta">Pentatonic</option></select></label>
+      <label>Bands<select id="nb"><option>8</option><option selected>16</option><option>32</option></select></label>
+      <label>Sensitivity<input type="range" id="sens" min="0.5" max="6" step="0.1" value="2.6"><span class="rv" id="sensVal">2.6</span></label>
+      <label title="Sets the sequencer speed — only audible when Sequencer is on and a chord is held">Tempo<input type="range" id="tempo" min="60" max="180" step="1" value="110"><span class="rv" id="tempoVal">110 BPM</span></label>
+      <label title="3-oscillator detuned supersaw + sub-oscillator for a thicker carrier">Fat (supersaw+sub)<input type="checkbox" id="fat" checked></label>
+    </div>
+    <div class="row"><span class="muted">Play the carrier with <kbd>A W S E D F T G Y H U J K</kbd> · sibilance (s/sh/t) auto-detected · every setting + your held chord lives in the URL.</span></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const NOTE=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+const SCALES={major:[0,2,4,5,7,9,11],minor:[0,2,3,5,7,8,10],penta:[0,3,5,7,10]};
+const KEYMAP={a:60,w:61,s:62,e:63,d:64,f:65,t:66,g:67,y:68,h:69,u:70,j:71,k:72,o:73,l:74,p:75,";":76};
+const SEQ=[0,5,7,3];
+const mtof=m=>440*Math.pow(2,(m-69)/12);
+
+// ---- state ----
+const state={wave:"sawtooth",key:9,scale:"minor",nbands:16,sens:2.6,fat:true,seq:false,tempo:110,latch:false};
+let ctx,master,comp,recDest,analyserMod,modSourceBus,carrierBus,noiseGain,pulseWave,absCurve;
+let bands=[],barEls=[],voices={},demoNodes=[],demoBus=null,micStream=null,started=false;
+const held=new Set();               // RAW (unsnapped) notes user is holding; snapped only in targetNotes()
+const downMap={};                   // physical key -> raw note it emitted, so key/scale changes never orphan a voice
+let seqIdx=0,lastStep=0;
+let rec=null,recChunks=[];
+const td=new Float32Array(1024),fd=new Uint8Array(512);
+
+// ---- scale snapping ----
+function snap(midi){
+  const set=SCALES[state.scale], rel=((midi-state.key)%12+12)%12;
+  let best=0,bd=99;
+  for(const s of set){let d=Math.abs(s-rel); if(d>6)d=12-d; if(d<bd){bd=d;best=s;}}
+  let delta=best-rel; if(delta>6)delta-=12; if(delta<-6)delta+=12;
+  return midi+delta;
+}
+
+// ---- audio graph ----
+function initAudio(){
+  ctx=new (window.AudioContext||window.webkitAudioContext)();
+  master=ctx.createGain(); master.gain.value=0.9;
+  comp=ctx.createDynamicsCompressor(); comp.threshold.value=-14; comp.ratio.value=4;
+  recDest=ctx.createMediaStreamDestination();
+  master.connect(comp); comp.connect(ctx.destination); comp.connect(recDest);
+
+  modSourceBus=ctx.createGain();
+  analyserMod=ctx.createAnalyser(); analyserMod.fftSize=1024; modSourceBus.connect(analyserMod);
+
+  carrierBus=ctx.createGain(); carrierBus.gain.value=0.3;
+  const nb=ctx.createBufferSource(); const buf=ctx.createBuffer(1,ctx.sampleRate,ctx.sampleRate);
+  const dat=buf.getChannelData(0); for(let i=0;i<dat.length;i++)dat[i]=Math.random()*2-1;
+  nb.buffer=buf; nb.loop=true; noiseGain=ctx.createGain(); noiseGain.gain.value=0;
+  nb.connect(noiseGain); noiseGain.connect(carrierBus); nb.start();
+
+  absCurve=new Float32Array(1024);
+  for(let i=0;i<1024;i++){const x=(i/1023)*2-1; absCurve[i]=Math.abs(x);}
+  // pulse periodic wave (~25% duty)
+  const N=1024,re=new Float32Array(N),im=new Float32Array(N),duty=0.25;
+  for(let k=1;k<N;k++)im[k]=(2/(k*Math.PI))*Math.sin(Math.PI*k*duty);
+  pulseWave=ctx.createPeriodicWave(re,im);
+
+  buildBands(state.nbands);
+  buildDemo();
+}
+
+function buildBands(n){
+  bands.forEach(b=>{for(const k of["modBP","shaper","lp","envGain","carrBP","carrGain","envAn"])try{b[k].disconnect();}catch(e){}});
+  bands=[];
+  const lo=140,hi=6800;
+  for(let i=0;i<n;i++){
+    const f=lo*Math.pow(hi/lo,i/(n-1)), Q=n<12?4:7;
+    const modBP=ctx.createBiquadFilter(); modBP.type="bandpass"; modBP.frequency.value=f; modBP.Q.value=Q;
+    const shaper=ctx.createWaveShaper(); shaper.curve=absCurve;
+    const lp=ctx.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=16;
+    const envGain=ctx.createGain(); envGain.gain.value=state.sens*4;
+    const carrBP=ctx.createBiquadFilter(); carrBP.type="bandpass"; carrBP.frequency.value=f; carrBP.Q.value=Q;
+    const carrGain=ctx.createGain(); carrGain.gain.value=0;
+    const envAn=ctx.createAnalyser(); envAn.fftSize=32;
+    modSourceBus.connect(modBP); modBP.connect(shaper); shaper.connect(lp); lp.connect(envGain);
+    envGain.connect(carrGain.gain); envGain.connect(envAn);
+    carrierBus.connect(carrBP); carrBP.connect(carrGain); carrGain.connect(master);
+    bands.push({f,modBP,shaper,lp,envGain,carrBP,carrGain,envAn,buf:new Float32Array(32),val:0});
+  }
+  renderBars();
+}
+
+// ---- synthesized "demo voice": glottal saw through swept formants + syllable gate + consonant hiss ----
+function lfo(param,center,amp,rate){
+  const o=ctx.createOscillator(),g=ctx.createGain();
+  o.frequency.value=rate; g.gain.value=amp; param.value=center; o.connect(g); g.connect(param); o.start();
+  demoNodes.push(o,g);
+}
+function buildDemo(){
+  demoBus=ctx.createGain(); demoBus.gain.value=1.1;
+  const glo=ctx.createOscillator(); glo.type="sawtooth"; glo.frequency.value=125;
+  lfo(glo.frequency,125,5,5.2);                              // vibrato
+  const gate=ctx.createGain(); gate.gain.value=0.55;         // syllable tremolo
+  lfo(gate.gain,0.5,0.5,2.7);
+  [[540,8],[1100,11],[2500,13]].forEach(([cf,Q],i)=>{
+    const bp=ctx.createBiquadFilter(); bp.type="bandpass"; bp.frequency.value=cf; bp.Q.value=Q;
+    glo.connect(bp); bp.connect(gate);
+    lfo(bp.frequency,cf,cf*0.35,0.18+i*0.05);                // vowel morph
+  });
+  gate.connect(demoBus);
+  // consonant hiss on the offbeats
+  const hbuf=ctx.createBuffer(1,ctx.sampleRate,ctx.sampleRate),hd=hbuf.getChannelData(0);
+  for(let i=0;i<hd.length;i++)hd[i]=Math.random()*2-1;
+  const hs=ctx.createBufferSource(); hs.buffer=hbuf; hs.loop=true;
+  const hbp=ctx.createBiquadFilter(); hbp.type="highpass"; hbp.frequency.value=4200;
+  const hg=ctx.createGain(); hg.gain.value=0; lfo(hg.gain,0.14,0.16,1.35);
+  hs.connect(hbp); hbp.connect(hg); hg.connect(demoBus); hs.start();
+  glo.start(); demoNodes.push(glo,gate);
+  demoBus.connect(modSourceBus);
+}
+
+async function useMic(){
+  if(!started)await start();
+  try{
+    micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+    const src=ctx.createMediaStreamSource(micStream);
+    try{demoBus.disconnect(modSourceBus);}catch(e){}
+    src.connect(modSourceBus);
+    $("#micBtn").classList.add("on"); setStatus("microphone live — hold a chord and talk");
+  }catch(e){ setStatus("mic denied — using demo voice"); }
+}
+
+// ---- carrier voices ----
+function noteOn(m){
+  if(voices[m])return;
+  const f=mtof(m),g=ctx.createGain(); g.gain.value=0; g.connect(carrierBus);
+  const oscs=[],dets=state.fat?[-9,-0.5,9]:[0];
+  for(const d of dets){const o=ctx.createOscillator(); if(state.wave==="pulse")o.setPeriodicWave(pulseWave); else o.type=state.wave;
+    o.frequency.value=f; o.detune.value=d; o.connect(g); o.start(); oscs.push(o);}
+  if(state.fat){const sub=ctx.createOscillator(); sub.type="sine"; sub.frequency.value=f/2;
+    const sg=ctx.createGain(); sg.gain.value=0.6; sub.connect(sg); sg.connect(g); sub.start(); oscs.push(sub);}
+  g.gain.setTargetAtTime(0.9,ctx.currentTime,0.015);
+  voices[m]={oscs,g};
+}
+function noteOff(m){
+  const v=voices[m]; if(!v)return; delete voices[m];
+  v.g.gain.setTargetAtTime(0,ctx.currentTime,0.03);
+  setTimeout(()=>v.oscs.forEach(o=>{try{o.stop();o.disconnect();}catch(e){}}),120);
+}
+function targetNotes(){
+  if(!held.size)return new Set();
+  const off=state.seq?SEQ[seqIdx]:0;
+  return new Set([...held].map(n=>snap(n+off)));
+}
+function refreshVoices(){
+  writeHash();
+  if(!started){drawKeys();return;}
+  const t=targetNotes();
+  Object.keys(voices).map(Number).forEach(m=>{if(!t.has(m))noteOff(m);});
+  t.forEach(m=>{if(!voices[m])noteOn(m);});
+  drawKeys();
+}
+// rebuild all held voices (used when carrier waveform / fat changes so held chords update live)
+function revoice(){ writeHash(); if(!started)return;
+  Object.keys(voices).map(Number).forEach(noteOff); refreshVoices();
+}
+
+// ---- UI: bars + keyboard ----
+function renderBars(){
+  $("#bars").innerHTML=""; barEls=[];
+  bands.forEach(()=>{const d=document.createElement("div"); d.className="bar";
+    const i=document.createElement("i"); d.appendChild(i); $("#bars").appendChild(d); barEls.push(i);});
+}
+let keyRects=[];
+function buildKeyboard(){
+  const el=$("#keys"); el.innerHTML=""; keyRects=[];
+  const whites=[],lo=60,hi=84;
+  for(let m=lo;m<hi;m++)if(![1,3,6,8,10].includes(m%12))whites.push(m);
+  const w=100/whites.length;
+  whites.forEach((m,i)=>{const d=document.createElement("div"); d.className="wk"; d.style.left=(i*w)+"%"; d.style.width=w+"%";
+    el.appendChild(d); keyRects.push({m,el:d});});
+  for(let m=lo;m<hi;m++)if([1,3,6,8,10].includes(m%12)){
+    const wi=whites.filter(x=>x<m).length; const d=document.createElement("div"); d.className="bk";
+    d.style.left=(wi*w-w*0.3)+"%"; d.style.width=(w*0.6)+"%"; el.appendChild(d); keyRects.push({m,el:d});
+  }
+}
+function drawKeys(){ // highlight the keys actually held (raw), so out-of-scale clicks light their own key
+  keyRects.forEach(k=>k.el.classList.toggle("on",held.has(k.m)));}
+
+// ---- render loop: envelopes, sibilance detection, sequencer ----
+function loop(){
+  requestAnimationFrame(loop);
+  if(!started)return;
+  for(let i=0;i<bands.length;i++){const b=bands[i]; b.envAn.getFloatTimeDomainData(b.buf);
+    let p=0; for(const v of b.buf)if(v>p)p=v;
+    b.val+=(Math.min(1,p*3.2)-b.val)*0.5;
+    const h=Math.max(0.02,b.val), hue=180-(i/bands.length)*150;
+    barEls[i].style.transform="scaleY("+h+")";
+    barEls[i].style.background="hsl("+hue+",85%,"+(38+h*22)+"%)";
+    barEls[i].style.boxShadow=h>0.15?"0 0 "+(h*22)+"px hsl("+hue+",90%,60%)":"none";
+  }
+  // auto voiced/unvoiced: zero-crossing rate + high-band energy -> noise carrier
+  analyserMod.getFloatTimeDomainData(td); analyserMod.getByteFrequencyData(fd);
+  let rms=0,zc=0; for(let i=0;i<td.length;i++){rms+=td[i]*td[i]; if(i&&((td[i]>0)!==(td[i-1]>0)))zc++;}
+  rms=Math.sqrt(rms/td.length); const zcr=zc/td.length;
+  const hb=Math.floor(fd.length*0.55); let hi=0,tot=0;
+  for(let i=0;i<fd.length;i++){tot+=fd[i]; if(i>=hb)hi+=fd[i];}
+  const highRatio=tot>0?hi/tot:0;
+  const unvoiced=Math.min(1,highRatio*3+Math.max(0,zcr*5-0.5));
+  noiseGain.gain.setTargetAtTime(Math.min(0.7,unvoiced*rms*4),ctx.currentTime,0.02);
+  // sequencer step
+  if(state.seq&&held.size){const now=performance.now();
+    if(now-lastStep>60000/state.tempo){lastStep=now; seqIdx=(seqIdx+1)%SEQ.length; refreshVoices();}}
+}
+
+// ---- hash patches ----
+function encode(){const p=new URLSearchParams();
+  p.set("w",state.wave);p.set("k",state.key);p.set("sc",state.scale);p.set("nb",state.nbands);
+  p.set("se",state.sens);p.set("fa",state.fat?1:0);p.set("sq",state.seq?1:0);p.set("t",state.tempo);
+  p.set("ch",[...held].join(".")); return "#"+p.toString();}
+function writeHash(){history.replaceState(null,"",encode());}
+function applyPatch(o){
+  if(o.w)state.wave=o.w; if(o.k!=null)state.key=+o.k; if(o.sc)state.scale=o.sc;
+  if(o.se!=null)state.sens=+o.se; if(o.fa!=null)state.fat=o.fa==1||o.fa===true;
+  if(o.sq!=null)state.seq=o.sq==1||o.sq===true; if(o.t!=null)state.tempo=+o.t;
+  const newNb=o.nb?+o.nb:state.nbands, oldNb=state.nbands;
+  state.nbands=newNb;              // set BEFORE syncUI so the Bands dropdown shows the new count
+  syncUI();
+  if(started){
+    bands.forEach(b=>b.envGain.gain.setTargetAtTime(state.sens*4,ctx.currentTime,0.05));
+    if(newNb!==oldNb)setBands(newNb);
+  }
+  held.clear(); if(o.ch)String(o.ch).split(".").filter(x=>x!=="").forEach(n=>held.add(+n));
+  seqIdx=0; lastStep=performance.now(); refreshVoices();
+  $("#seqBtn").classList.toggle("on",state.seq);
+}
+function readHash(){const h=location.hash.slice(1); if(!h)return null;
+  const p=new URLSearchParams(h),o={}; for(const[k,v]of p)o[k]=v; return o;}
+
+function setBands(n){ if(!started){state.nbands=n;return;}
+  master.gain.setTargetAtTime(0.0001,ctx.currentTime,0.02);
+  setTimeout(()=>{state.nbands=n; buildBands(n); master.gain.setTargetAtTime(0.9,ctx.currentTime,0.06);},90);
+}
+
+const PRESETS={
+  daft:{w:"sawtooth",k:9,sc:"minor",nb:16,se:3,fa:1,sq:1,t:112,ch:"57.60.64"},
+  kraft:{w:"square",k:0,sc:"major",nb:16,se:2.4,fa:0,sq:0,t:120,ch:"48.55"},
+  choir:{w:"sawtooth",k:2,sc:"major",nb:32,se:3.2,fa:1,sq:0,t:100,ch:"50.54.57.62"},
+  vintage:{w:"pulse",k:7,sc:"minor",nb:8,se:2.2,fa:1,sq:0,t:96,ch:"55.58.62"}
+};
+
+// ---- controls ----
+function setStatus(t){$("#status").textContent=t;}
+function syncUI(){
+  $("#wave").value=state.wave; $("#key").value=state.key; $("#scale").value=state.scale;
+  $("#nb").value=state.nbands; $("#sens").value=state.sens; $("#tempo").value=state.tempo; $("#fat").checked=state.fat;
+  $("#sensVal").textContent=(+state.sens).toFixed(1); $("#tempoVal").textContent=state.tempo+" BPM";
+  $("#tempo").disabled=!state.seq;
+}
+function clearPreset(){$$(".presets button").forEach(x=>x.classList.remove("on"));}
+async function start(){
+  if(started)return; initAudio(); await ctx.resume(); started=true;
+  $("#startBtn").textContent="Running"; $("#startBtn").classList.remove("primary");
+  setStatus("demo voice active — hold a chord (or press Use microphone)");
+  refreshVoices();
+}
+
+// key selector options
+for(let i=0;i<12;i++){const o=document.createElement("option"); o.value=i; o.textContent=NOTE[i]; $("#key").appendChild(o);}
+buildKeyboard(); syncUI();
+
+$("#startBtn").onclick=start;
+$("#micBtn").onclick=useMic;
+$("#latchBtn").onclick=e=>{state.latch=!state.latch; e.target.classList.toggle("on",state.latch);
+  if(!state.latch){ // pedal-release: drop any latched notes whose physical key is no longer down
+    const down=new Set(Object.values(downMap));
+    [...held].forEach(n=>{if(!down.has(n))held.delete(n);}); refreshVoices();
+  }};
+$("#seqBtn").onclick=async e=>{if(!started)await start(); state.seq=!state.seq; e.target.classList.toggle("on",state.seq);
+  $("#tempo").disabled=!state.seq; seqIdx=0; lastStep=performance.now(); refreshVoices();};
+$("#clearBtn").onclick=()=>{held.clear(); refreshVoices();};
+$("#wave").onchange=e=>{state.wave=e.target.value; clearPreset(); revoice();};
+$("#key").onchange=e=>{state.key=+e.target.value; clearPreset(); refreshVoices();};
+$("#scale").onchange=e=>{state.scale=e.target.value; clearPreset(); refreshVoices();};
+$("#sens").oninput=e=>{state.sens=+e.target.value; $("#sensVal").textContent=state.sens.toFixed(1);
+  if(started)bands.forEach(b=>b.envGain.gain.setTargetAtTime(state.sens*4,ctx.currentTime,0.05)); clearPreset(); writeHash();};
+$("#tempo").oninput=e=>{state.tempo=+e.target.value; $("#tempoVal").textContent=state.tempo+" BPM"; clearPreset(); writeHash();};
+$("#fat").onchange=e=>{state.fat=e.target.checked; clearPreset(); revoice();};
+$("#nb").onchange=e=>{clearPreset(); setBands(+e.target.value); writeHash();};
+$$(".presets button").forEach(b=>b.onclick=async()=>{if(!started)await start(); applyPatch(PRESETS[b.dataset.preset]);
+  clearPreset(); b.classList.add("on");});
+
+$("#linkBtn").onclick=async()=>{const url=location.href.split("#")[0]+encode();
+  try{await navigator.clipboard.writeText(url); setStatus("patch link copied to clipboard");}
+  catch(e){prompt("Copy this patch link:",url);}};
+
+let recTimer=null;
+$("#recBtn").onclick=async()=>{
+  if(!window.MediaRecorder){setStatus("recording unsupported in this browser");return;}
+  if(!started)await start();
+  if(rec&&rec.state==="recording"){rec.stop(); return;}
+  // pick a container this browser actually supports (Safari records mp4/aac, not webm)
+  const mime=MediaRecorder.isTypeSupported("audio/webm")?"audio/webm"
+    :(MediaRecorder.isTypeSupported("audio/mp4")?"audio/mp4":"");
+  recChunks=[];
+  try{rec=new MediaRecorder(recDest.stream,mime?{mimeType:mime}:undefined);}
+  catch(err){setStatus("recording failed to start"); return;}
+  rec.ondataavailable=e=>{if(e.data.size)recChunks.push(e.data);};
+  const t0=Date.now();
+  recTimer=setInterval(()=>setStatus("recording… "+(((Date.now()-t0)/1000)|0)+"s"),250);
+  rec.onstop=()=>{clearInterval(recTimer);
+    const type=rec.mimeType||mime||"audio/webm", ext=type.indexOf("mp4")>=0?"mp4":"webm";
+    const blob=new Blob(recChunks,{type}); const a=$("#dl");
+    a.href=URL.createObjectURL(blob); a.download="choirwire-"+Date.now()+"."+ext;
+    a.textContent="download recording"; a.style.display="inline"; a.click();
+    $("#recBtn").classList.remove("on"); $("#recBtn").textContent="Record"; setStatus("recording saved");};
+  rec.start(); $("#recBtn").classList.add("on"); $("#recBtn").textContent="Stop"; setStatus("recording… 0s");
+};
+
+// keyboard playing
+addEventListener("keydown",async e=>{
+  if(e.repeat||e.metaKey||e.ctrlKey)return;
+  const key=e.key.toLowerCase(), base=KEYMAP[key]; if(base==null)return;
+  e.preventDefault(); if(!started)await start();
+  downMap[key]=base; held.add(base); refreshVoices();   // store RAW note; snap happens at play time
+});
+addEventListener("keyup",e=>{
+  const key=e.key.toLowerCase(), base=downMap[key]; if(base==null)return;
+  delete downMap[key];
+  if(state.latch)return;                                 // latch: keep sounding until latch-off / Clear
+  held.delete(base); refreshVoices();
+});
+
+// mini-keyboard click to toggle notes
+$("#keys").addEventListener("pointerdown",async e=>{
+  const wk=e.target.closest(".wk,.bk"); if(!wk)return; if(!started)await start();
+  const k=keyRects.find(x=>x.el===wk); if(!k)return;
+  if(held.has(k.m))held.delete(k.m); else held.add(k.m); refreshVoices();
+});
+
+// boot from hash if present
+const boot=readHash();
+if(boot){applyPatch(boot); setStatus("patch loaded — press Start");}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

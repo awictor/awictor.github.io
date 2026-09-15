@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Braille — Text ⇄ Braille (Grade 1) Translator</title>
+<meta name="description" content="Translate text to Unicode Braille (Grade 1, uncontracted) with capital and number signs, and back. 100% offline, nothing leaves your browser.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('braille-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#4338ca;
+    --bg:#f4f4fb; --card:#ffffff; --fg:#171826; --muted:#5c6072; --line:#e4e4f0; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#0c0d16; --card:#161824; --fg:#eef0f7; --muted:#9296ac; --line:#242736; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:700px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#3730a3);display:flex;align-items:center;justify-content:center;font-size:20px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:700px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  .modes{display:flex;gap:6px;margin-bottom:14px}
+  .modes button{flex:1;padding:9px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;cursor:pointer;font:inherit}
+  .modes button.active{background:var(--c);color:#fff;border-color:var(--c)}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  textarea{width:100%;min-height:100px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem;resize:vertical}
+  .out{min-height:80px;background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--c);border-radius:8px;padding:12px;white-space:pre-wrap;word-break:break-word;font-size:1.6rem;line-height:1.6}
+  .out.text{font-size:1.05rem}
+  .copy{margin-top:10px;background:var(--c);color:#fff;border:0;border-radius:8px;padding:9px 16px;cursor:pointer;font:inherit}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:700px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">⠿</div>
+    <div><h1>Braille</h1><div class="sub">Text ⇄ Braille (Grade 1)</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="modes" id="modes">
+      <button data-m="enc" class="active" type="button">Text → Braille</button>
+      <button data-m="dec" type="button">Braille → Text</button>
+    </div>
+    <label for="input" id="inLabel">Text</label>
+    <textarea id="input" spellcheck="false">Hello World 123</textarea>
+  </div>
+  <div class="card">
+    <label id="outLabel">Braille</label>
+    <div class="out" id="out"></div>
+    <button class="copy" id="copyBtn" type="button">Copy</button>
+  </div>
+</main>
+<footer>
+  Grade 1 (uncontracted) Unicode Braille. A capital sign (⠠) precedes uppercase letters; a number sign (⠼) starts a run of digits (1–0 reuse the letters a–j). 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/braille">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  const LETTERS = {
+    a:'⠁', b:'⠃', c:'⠉', d:'⠙', e:'⠑', f:'⠋', g:'⠛', h:'⠓', i:'⠊', j:'⠚',
+    k:'⠅', l:'⠇', m:'⠍', n:'⠝', o:'⠕', p:'⠏', q:'⠟', r:'⠗', s:'⠎', t:'⠞',
+    u:'⠥', v:'⠧', w:'⠺', x:'⠭', y:'⠽', z:'⠵'
+  };
+  const PUNCT = { '.':'⠲', ',':'⠂', ';':'⠆', ':':'⠒', '?':'⠦', '!':'⠖', "'":'⠄', '-':'⠤' };
+  const CAP = '⠠', NUM = '⠼', SPACE = '⠀';
+  const DIGIT_TO_LETTER = { '1':'a','2':'b','3':'c','4':'d','5':'e','6':'f','7':'g','8':'h','9':'i','0':'j' };
+  const LETTER_TO_DIGIT = Object.fromEntries(Object.entries(DIGIT_TO_LETTER).map(([d, l]) => [l, d]));
+  const REV_LETTERS = Object.fromEntries(Object.entries(LETTERS).map(([l, b]) => [b, l]));
+  const REV_PUNCT = Object.fromEntries(Object.entries(PUNCT).map(([p, b]) => [b, p]));
+
+  function toBraille(text){
+    let out = '', numMode = false;
+    for(const ch of String(text)){
+      if(ch === ' '){ out += SPACE; numMode = false; continue; }
+      if(ch >= '0' && ch <= '9'){ if(!numMode){ out += NUM; numMode = true; } out += LETTERS[DIGIT_TO_LETTER[ch]]; continue; }
+      numMode = false;
+      const low = ch.toLowerCase();
+      if(LETTERS[low]){ out += (ch !== low ? CAP : '') + LETTERS[low]; continue; }
+      if(PUNCT[ch] !== undefined){ out += PUNCT[ch]; continue; }
+      out += ch;   // pass through anything unmapped
+    }
+    return out;
+  }
+
+  function fromBraille(braille){
+    let out = '', capNext = false, numMode = false;
+    for(const cell of [...String(braille)]){
+      if(cell === CAP){ capNext = true; continue; }
+      if(cell === NUM){ numMode = true; continue; }
+      if(cell === SPACE){ out += ' '; numMode = false; capNext = false; continue; }
+      const letter = REV_LETTERS[cell];
+      if(letter !== undefined){
+        if(numMode && LETTER_TO_DIGIT[letter]) out += LETTER_TO_DIGIT[letter];
+        else { out += capNext ? letter.toUpperCase() : letter; capNext = false; }
+        continue;
+      }
+      if(REV_PUNCT[cell] !== undefined){ out += REV_PUNCT[cell]; numMode = false; continue; }
+      out += cell;
+    }
+    return out;
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('out')){
+    const $ = id => document.getElementById(id);
+    let mode = 'enc';
+
+    function render(){
+      const val = $('input').value;
+      $('out').textContent = mode === 'enc' ? toBraille(val) : fromBraille(val);
+      $('out').classList.toggle('text', mode === 'dec');
+    }
+    $('modes').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+      mode = b.dataset.m;
+      $('modes').querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
+      $('inLabel').textContent = mode === 'enc' ? 'Text' : 'Braille';
+      $('outLabel').textContent = mode === 'enc' ? 'Braille' : 'Text';
+      render();
+    }));
+    $('input').addEventListener('input', render);
+    $('copyBtn').addEventListener('click', () => {
+      navigator.clipboard?.writeText($('out').textContent);
+      $('copyBtn').textContent = 'Copied!'; setTimeout(() => $('copyBtn').textContent = 'Copy', 1200);
+    });
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('braille-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { LETTERS, toBraille, fromBraille };
+</script>
+</body>
+</html>

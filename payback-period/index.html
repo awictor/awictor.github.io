@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Payback Period Calculator — recoup an investment</title>
+<meta name="description" content="Calculate the payback period (and discounted payback) of an investment from its cash flows, with fractional-period precision. Offline, no tracking.">
+<style>
+  :root{
+    --c:#047857;
+    --bg:#f2f8f5; --card:#ffffff; --fg:#12201a; --muted:#586d63;
+    --line:#dcebe3; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#0c1410; --card:#141e18; --fg:#e8f3ec; --muted:#8ea398;
+    --line:#233029; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:800px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.35rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:800px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.82rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  input[type=number],input[type=text]{width:100%;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .row{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+  .row>div{flex:1 1 160px}
+  .hint{font-size:.78rem;color:var(--muted);margin-top:4px}
+  .results{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:6px}
+  @media(max-width:560px){.results{grid-template-columns:1fr}}
+  .stat{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:18px;text-align:center}
+  .stat .k{font-size:.76rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .stat .v{font-size:2rem;font-weight:800;color:var(--c);font-variant-numeric:tabular-nums;margin-top:4px}
+  table{width:100%;border-collapse:collapse;margin-top:10px;font-size:.9rem}
+  th,td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:right;font-variant-numeric:tabular-nums;font-family:ui-monospace,monospace}
+  th{color:var(--muted);font-size:.74rem;text-transform:uppercase;letter-spacing:.04em}
+  th:first-child,td:first-child{text-align:left}
+  td.pos{color:#16a34a}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">⏱️</div>
+  <div>
+    <h1>Payback Period</h1>
+    <p>How long to recoup an investment</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="row">
+      <div><label for="init">Initial investment ($)</label><input type="number" id="init" value="1000" step="any"></div>
+      <div><label for="rate">Discount rate (%/period)</label><input type="number" id="rate" value="10" step="any"><div class="hint">for discounted payback</div></div>
+    </div>
+    <label for="flows">Cash flows per period (comma-separated)</label>
+    <input type="text" id="flows" spellcheck="false" value="300, 400, 400, 400">
+    <div class="hint">e.g. yearly returns: 300, 400, 400, 400</div>
+    <div class="results" style="margin-top:16px">
+      <div class="stat"><div class="k">Payback period</div><div class="v" id="simple">—</div></div>
+      <div class="stat"><div class="k">Discounted payback</div><div class="v" id="disc">—</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Cumulative recovery</h2>
+    <table>
+      <thead><tr><th>Period</th><th>Cash flow</th><th>Cumulative</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p class="note" style="margin-top:12px">Payback is the point where cumulative cash flow turns positive (fractional periods interpolated). Discounted payback discounts each flow first, so it's always longer. Payback ignores anything after recovery and the time value of money — pair it with NPV or ROI for the full picture.</p>
+  </div>
+
+  <p class="foot">100% offline · not financial advice · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function toNum(x){ var n = Number(x); if(!isFinite(n)) throw new Error('inputs must be numbers'); return n; }
+  function paybackPeriod(initial, cashFlows){
+    initial = toNum(initial);
+    if(initial < 0) throw new Error('initial investment must be non-negative');
+    var remaining = initial;
+    for(var i = 0; i < cashFlows.length; i++){
+      var cf = toNum(cashFlows[i]);
+      if(cf >= remaining) return i + (cf === 0 ? 0 : remaining / cf);
+      remaining -= cf;
+    }
+    return null; // not recovered within the given periods
+  }
+  function discountedPaybackPeriod(initial, cashFlows, ratePct){
+    var r = toNum(ratePct) / 100;
+    var dcf = cashFlows.map(function(cf, i){ return toNum(cf) / Math.pow(1 + r, i + 1); });
+    return paybackPeriod(initial, dcf);
+  }
+  function cumulative(initial, cashFlows){
+    var out = [], cum = -toNum(initial);
+    for(var i = 0; i < cashFlows.length; i++){ cum += toNum(cashFlows[i]); out.push(cum); }
+    return out;
+  }
+
+  if(typeof module !== 'undefined') module.exports = { paybackPeriod:paybackPeriod, discountedPaybackPeriod:discountedPaybackPeriod, cumulative:cumulative };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var init=document.getElementById('init'), rate=document.getElementById('rate'), flows=document.getElementById('flows');
+    function parseFlows(){ return flows.value.split(',').map(function(s){ return Number(s.trim()); }).filter(function(x){ return isFinite(x); }); }
+    var fmt=function(p){ return p == null ? 'never' : p.toFixed(2) + ' periods'; };
+    function render(){
+      try{
+        var cf = parseFlows();
+        document.getElementById('simple').textContent = fmt(paybackPeriod(init.value, cf));
+        document.getElementById('disc').textContent = fmt(discountedPaybackPeriod(init.value, cf, rate.value));
+        var cum = cumulative(init.value, cf);
+        document.getElementById('rows').innerHTML = cf.map(function(c, i){
+          var cls = cum[i] >= 0 ? ' class="pos"' : '';
+          return '<tr><td>' + (i + 1) + '</td><td>' + c.toLocaleString() + '</td><td' + cls + '>' + Math.round(cum[i]).toLocaleString() + '</td></tr>';
+        }).join('');
+      }catch(e){ document.getElementById('simple').textContent='—'; }
+    }
+    [init,rate,flows].forEach(function(el){ el.addEventListener('input', render); });
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('payback-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('payback-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+
+    render();
+  }
+</script>
+</body>
+</html>

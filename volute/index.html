@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Volute — grow a galaxy from Hubble grammar</title>
+<style>
+  :root{ --ink:#0a0b14; --panel:rgba(14,16,28,.72); --edge:rgba(150,170,255,.16);
+         --txt:#dfe6ff; --dim:#8b93b8; --accent:#8fb4ff; --hot:#ff6fa0; }
+  *{ box-sizing:border-box; margin:0; padding:0 }
+  html,body{ height:100%; background:var(--ink); overflow:hidden;
+    font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; color:var(--txt) }
+  #stage{ position:fixed; inset:0; display:block }
+  .glass{ background:var(--panel); border:1px solid var(--edge); border-radius:14px;
+    backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+    box-shadow:0 8px 40px rgba(0,0,0,.5) }
+  /* Readout (top-left) */
+  #readout{ position:fixed; top:16px; left:16px; padding:14px 18px; min-width:220px; z-index:5 }
+  #cat{ font-size:22px; font-weight:700; letter-spacing:.5px; color:#fff }
+  #cat b{ color:var(--hot); font-weight:700 }
+  #sub{ font-size:12.5px; color:var(--dim); margin-top:2px; letter-spacing:.3px }
+  .stats{ margin-top:11px; display:grid; grid-template-columns:auto auto; gap:4px 16px; font-size:12.5px }
+  .stats .k{ color:var(--dim) } .stats .v{ color:var(--accent); text-align:right; font-variant-numeric:tabular-nums }
+  /* Control dock (bottom) */
+  #dock{ position:fixed; left:50%; bottom:16px; transform:translateX(-50%);
+    padding:12px 14px; z-index:5; display:flex; flex-direction:column; gap:11px; max-width:min(94vw,940px) }
+  .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:center }
+  .sliders{ display:flex; gap:16px; flex-wrap:wrap; justify-content:center }
+  .sl{ display:flex; flex-direction:column; gap:3px; min-width:118px }
+  .sl label{ font-size:10.5px; color:var(--dim); text-transform:uppercase; letter-spacing:1px;
+    display:flex; justify-content:space-between }
+  .sl label span{ color:var(--accent); font-variant-numeric:tabular-nums }
+  input[type=range]{ -webkit-appearance:none; appearance:none; height:4px; border-radius:3px;
+    background:linear-gradient(90deg,var(--accent),var(--hot)); outline:none; cursor:pointer }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:14px; height:14px; border-radius:50%;
+    background:#fff; box-shadow:0 0 0 3px rgba(143,180,255,.35); cursor:pointer }
+  input[type=range]::-moz-range-thumb{ width:14px; height:14px; border:0; border-radius:50%;
+    background:#fff; box-shadow:0 0 0 3px rgba(143,180,255,.35); cursor:pointer }
+  input[type=range]:disabled{ cursor:not-allowed; opacity:.5 }
+  .sl.off{ opacity:.4 }
+  button{ font:inherit; font-size:12.5px; color:var(--txt); background:rgba(143,180,255,.1);
+    border:1px solid var(--edge); border-radius:9px; padding:7px 13px; cursor:pointer;
+    transition:background .15s,transform .06s; white-space:nowrap }
+  button:hover{ background:rgba(143,180,255,.22) } button:active{ transform:translateY(1px) }
+  button.primary{ background:linear-gradient(90deg,#3a56d4,#7a3ad4); border-color:transparent; font-weight:600 }
+  button.on{ background:rgba(255,111,160,.28); border-color:rgba(255,111,160,.5) }
+  .presets{ display:flex; gap:6px; flex-wrap:wrap; justify-content:center }
+  .presets button{ padding:5px 10px; font-size:11.5px; border-radius:20px }
+  .presets button.sel{ background:rgba(143,180,255,.28); border-color:var(--accent); color:#fff }
+  #hint{ position:fixed; bottom:16px; right:16px; font-size:11px; color:var(--dim); z-index:5;
+    text-align:right; line-height:1.5; pointer-events:none }
+  @media (max-width:640px){ #readout{ min-width:0 } #hint{ display:none } }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+
+<div id="readout" class="glass">
+  <div id="cat">Volute</div>
+  <div id="sub">seeding an island universe…</div>
+  <div class="stats" id="stats"></div>
+</div>
+
+<div id="dock" class="glass">
+  <div class="presets" id="presets"></div>
+  <div class="sliders">
+    <div class="sl"><label for="sArms">Arms <span id="vArms">2</span></label><input type="range" id="sArms" min="1" max="5" step="1" aria-label="Spiral arm count"></div>
+    <div class="sl"><label for="sPitch">Pitch <span id="vPitch">18°</span></label><input type="range" id="sPitch" min="8" max="42" step="1" aria-label="Arm pitch angle in degrees"></div>
+    <div class="sl"><label for="sDens">Density <span id="vDens">100%</span></label><input type="range" id="sDens" min="40" max="160" step="5" aria-label="Star density percent"></div>
+    <div class="sl"><label for="sSize">Size <span id="vSize">100%</span></label><input type="range" id="sSize" min="60" max="130" step="5" aria-label="Galaxy size percent"></div>
+  </div>
+  <div class="row">
+    <button class="primary" id="bReseed">✦ Reseed</button>
+    <button id="bCompanion">Companion: off</button>
+    <button id="bRotate">Rotation: off</button>
+    <button id="bCopy">Copy link</button>
+    <button id="bPng">Export PNG</button>
+  </div>
+</div>
+
+<div id="hint">drag a slider or reseed to grow a new galaxy<br>the full state lives in the URL — copy &amp; share it</div>
+
+<script>
+"use strict";
+(function(){
+// ---------- PRNG: mulberry32 (deterministic) ----------
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+let rnd=Math.random;
+const rr=(a,b)=>a+(b-a)*rnd();
+const ri=(a,b)=>Math.floor(rr(a,b+1));
+const gauss=()=>(rnd()+rnd()+rnd()+rnd()-2)/2;          // ~N(0,~0.29)
+const pick=arr=>arr[Math.floor(rnd()*arr.length)];
+
+// ---------- Morphology grammar ----------
+// key -> {label, tag, arms, pitch, bar, bulge, ring, ell, floc, hii, dust}
+const MORPH={
+  SBb:{label:"Barred grand-design",tag:"SBb", arms:2, pitch:16, bar:.34, bulge:.9, floc:.15, hii:1,  dust:1  },
+  SBc:{label:"Barred multi-arm",   tag:"SBc", arms:4, pitch:30, bar:.26, bulge:.55,floc:.35, hii:1.2,dust:.8 },
+  Sa :{label:"Tight grand-design", tag:"Sa",  arms:2, pitch:11, bar:0,   bulge:1.2,floc:.1, hii:.6, dust:1  },
+  Sc :{label:"Flocculent spiral",  tag:"Sc",  arms:5, pitch:36, bar:0,   bulge:.4, floc:.85,hii:1.3,dust:.6 },
+  S0 :{label:"Lenticular",         tag:"S0",  arms:0, pitch:0,  bar:.15, bulge:1.3,floc:0,  hii:0,  dust:.25,smooth:1},
+  ring:{label:"Ring galaxy",       tag:"(R)SB",arms:0,pitch:0,  bar:.22, bulge:.7, floc:.2, hii:1.1,dust:.4, ringR:.66},
+  E  :{label:"Elliptical",         tag:"E4",  arms:0, pitch:0,  bar:0,   bulge:2,  floc:0,  hii:0,  dust:0,  ell:1 }
+};
+const PRESETS=[["SBb","SBb barred"],["Sc","Sc flocculent"],["S0","S0 lenticular"],["ring","Ring"],["E","Elliptical"]];
+const CAT_PREFIX=["NGC","UGC","IC","PGC","Messier"];
+
+// ---------- State ----------
+const cvs=document.getElementById("stage"), ctx=cvs.getContext("2d");
+let W=0,H=0,DPR=Math.min(devicePixelRatio||1,2);
+let P=null;            // params
+let scene=null;        // generated arrays
+let buf=null, bgBuf=null;   // offscreen buffers
+let growStart=0, rotating=false, rot=0, rafId=0, playing=false;
+// feature-detect Canvas2D ctx.filter (unsupported on Safari <17 / some old WebViews)
+const CANVAS_FILTER=(()=>{ try{ const t=document.createElement("canvas").getContext("2d");
+  t.filter="blur(2px)"; return t.filter==="blur(2px)"; }catch(e){ return false; } })();
+// respect reduced-motion: snap to final frame instead of animating the wind-in
+const reduceMotion=!!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+
+function defaultParams(){
+  return { seed:(Math.random()*1e9)|0, type:"SBb", arms:2, pitch:16, dens:100, size:100, companion:false };
+}
+
+// ---------- Parameter derivation from seed ----------
+function deriveFromSeed(p){
+  rnd=mulberry32(p.seed);
+  // choose a morphology type (weighted toward spirals — they show off the grammar)
+  const bag=["SBb","SBb","SBc","SBc","Sa","Sc","Sc","S0","ring","E"];
+  p.type=bag[Math.floor(rnd()*bag.length)];
+  const m=MORPH[p.type];
+  p.arms  = m.arms? Math.max(1,Math.min(5, m.arms + ri(-1,1))) : m.arms;
+  p.pitch = m.pitch? Math.max(8,Math.min(42, Math.round(m.pitch+rr(-4,4)))) : m.pitch;
+  p.companion = rnd()<0.28 && !m.ell;
+  return p;
+}
+
+// ================= GENERATION =================
+function generate(){
+  rnd=mulberry32(P.seed ^ 0x9e3779b9);   // stable per-seed field
+  const m=MORPH[P.type];
+  // effective arm count comes from the user-facing param P.arms (slider / seed / URL),
+  // gated by whether this morphology has arms at all
+  const nArms = m.arms ? Math.max(1,Math.min(5, P.arms||m.arms)) : 0;
+  const cx=W/2, cy=H/2;
+  const R=Math.min(W,H)*0.40*(P.size/100);
+  const dens=P.dens/100;
+  const stars=[], knots=[], glob=[], dust=[], bg=[];
+  const barA=rr(0,Math.PI);                    // bar orientation
+
+  // --- background field: faint stars + distant galaxies (do not rotate) ---
+  const nfs=Math.floor(240*(W*H)/(1440*900));
+  for(let i=0;i<nfs;i++) bg.push({t:"s", x:rr(0,W), y:rr(0,H), r:rr(.3,1.1), a:rr(.05,.4)});
+  for(let i=0;i<9;i++){ const rad=rr(9,26);
+    bg.push({t:"g", x:rr(0,W), y:rr(0,H), r:rad, e:rr(.35,.9), ang:rr(0,Math.PI),
+      hue:pick([[210,220,255],[255,235,215],[255,215,225]]), a:rr(.06,.16)}); }
+
+  // --- helpers ---
+  const R0 = m.bar? R*m.bar : R*0.06;          // arm inner radius
+  const b  = Math.tan((P.pitch||18)*Math.PI/180) || 0.28;   // log-spiral coefficient
+  const thetaMax = Math.log(R/Math.max(R0,R*.04))/Math.max(b,0.05);
+  function spine(armBase,theta){ const r=R0*Math.exp(b*theta), a=armBase+theta;
+    return {x:Math.cos(a)*r, y:Math.sin(a)*r, r:r, a:a}; }
+
+  const OLD=(bri)=>{const g=205+ri(-25,35),bl=150+ri(-15,55);return `rgba(255,${g},${bl},${bri})`;};
+  const BLUE=(bri)=>{const g=190+ri(-25,25);return `rgba(${150+ri(-20,20)},${g},255,${bri})`;};
+  const YEL =(bri)=>`rgba(255,${232+ri(-12,12)},${190+ri(-15,25)},${bri})`;
+
+  // --- ELLIPTICAL: smooth spheroid of old stars, no arms/dust/hii ---
+  if(m.ell){
+    const N=Math.floor(9000*dens), q=rr(.55,.8), pa=rr(0,Math.PI);
+    for(let i=0;i<N;i++){ const rr2=Math.pow(rnd(),1.7), rad=rr2*R*1.15;
+      const th=rr(0,Math.PI*2); let x=Math.cos(th)*rad, y=Math.sin(th)*rad*q;
+      const c=Math.cos(pa),s=Math.sin(pa); const X=x*c-y*s, Y=x*s+y*c;
+      stars.push({x:X,y:Y, r:rr(.5,1.3), c:YEL(0.5-rr2*0.3) }); }
+    finishScene(cx,cy,R,{stars,knots,glob,dust,bg,barA,barLen:0,bulge:R*0.5,m}); return;
+  }
+
+  // --- BULGE + BAR (old populous core) ---
+  const bulgeR=R*0.16*m.bulge;
+  const nb=Math.floor(2200*dens*m.bulge);
+  for(let i=0;i<nb;i++){ const rad=Math.abs(gauss())*bulgeR*2;
+    const th=rr(0,Math.PI*2); stars.push({x:Math.cos(th)*rad, y:Math.sin(th)*rad, r:rr(.5,1.4), c:YEL(.55)}); }
+  const barLen = m.bar? R*m.bar : 0;
+  if(barLen>0){ const nbar=Math.floor(1800*dens*m.bar*2.4);
+    for(let i=0;i<nbar;i++){ const u=(rnd()*2-1);            // along bar
+      const along=u*barLen, across=gauss()*R*0.05;
+      const x=along*Math.cos(barA)-across*Math.sin(barA), y=along*Math.sin(barA)+across*Math.cos(barA);
+      stars.push({x, y, r:rr(.5,1.3), c:YEL(.5)}); } }
+
+  // --- DISK old stars (exponential radial profile) ---
+  const nd=Math.floor(3200*dens);
+  for(let i=0;i<nd;i++){ let rad=-Math.log(rnd())*R*0.34; if(rad>R*1.15) continue;
+    const th=rr(0,Math.PI*2); stars.push({x:Math.cos(th)*rad, y:Math.sin(th)*rad, r:rr(.4,1.1), c:OLD(.4)}); }
+
+  // --- RING galaxy: bright star ring ---
+  if(m.ringR){ const rg=R*m.ringR, n=Math.floor(3600*dens);
+    for(let i=0;i<n;i++){ const th=rr(0,Math.PI*2), rad=rg+gauss()*R*0.07;
+      const blue=rnd()<.5; stars.push({x:Math.cos(th)*rad, y:Math.sin(th)*rad, r:rr(.5,1.3), c:blue?BLUE(.7):OLD(.5)});
+      if(rnd()<.03) knots.push({x:Math.cos(th)*rad,y:Math.sin(th)*rad,r:rr(3,6)}); }
+  }
+
+  // --- SPIRAL ARMS: density-wave star placement ---
+  if(m.arms>0 && !m.smooth && !m.ringR){
+    const perArm=Math.floor(2600*dens/Math.max(1,nArms)*1.4);
+    const width=R*(0.028+0.06*m.floc);          // flocculent = fuzzier arms
+    for(let arm=0; arm<nArms; arm++){
+      const base = barLen>0 ? barA + arm*Math.PI*2/nArms + (arm%2)*Math.PI : arm*Math.PI*2/nArms;
+      for(let i=0;i<perArm;i++){
+        const u=Math.pow(rnd(),0.85), theta=u*thetaMax;
+        const sp=spine(base,theta);
+        // perpendicular unit (leading edge = toward rotation)
+        const px=-Math.sin(sp.a), py=Math.cos(sp.a);
+        const off=gauss()*width*(0.5+u);
+        let x=sp.x+px*off, y=sp.y+py*off;
+        // young blue crowd the leading (inner) edge of the arm; old red fill wider
+        const young = rnd()< (0.55-0.25*u)*(1-m.floc*0.3);
+        if(young){ x-=px*width*0.4; y-=py*width*0.4;
+          stars.push({x,y,r:rr(.6,1.6),c:BLUE(.8)}); }
+        else stars.push({x,y,r:rr(.4,1.2),c:OLD(.45)});
+        // HII star-forming knots strung along arms
+        if(m.hii && rnd()<0.012*m.hii && u<0.95)
+          knots.push({x:sp.x+px*gauss()*width, y:sp.y+py*gauss()*width, r:rr(2.5,6.5)});
+      }
+      // dark dust lane hugging the inner edge of each arm
+      if(m.dust) for(let i=0;i<Math.floor(perArm*0.5*m.dust);i++){
+        const theta=Math.pow(rnd(),0.85)*thetaMax, sp=spine(base,theta);
+        const px=-Math.sin(sp.a), py=Math.cos(sp.a);
+        const off=width*(0.6+0.4*rnd());
+        dust.push({x:sp.x+px*off+gauss()*width*.3, y:sp.y+py*off+gauss()*width*.3, r:rr(width*.4,width*.9)});
+      }
+    }
+  } else if(m.smooth){   // lenticular: extra smooth disk, faint dust
+    const n=Math.floor(3000*dens);
+    for(let i=0;i<n;i++){ let rad=-Math.log(rnd())*R*0.4; if(rad>R) continue;
+      const th=rr(0,Math.PI*2), q=0.5; stars.push({x:Math.cos(th)*rad,y:Math.sin(th)*rad*q,r:rr(.4,1.1),c:OLD(.5)}); }
+  }
+
+  // --- Globular cluster halo ---
+  const ng=ri(70,150);
+  for(let i=0;i<ng;i++){ const rad=Math.abs(gauss())*R*1.3+R*0.1, th=rr(0,Math.PI*2);
+    glob.push({x:Math.cos(th)*rad, y:Math.sin(th)*rad, r:rr(1.5,3.4)}); }
+
+  finishScene(cx,cy,R,{stars,knots,glob,dust,bg,barA,barLen,bulge:bulgeR,m});
+}
+
+// interacting companion + tidal bridge derived from same seed
+function finishScene(cx,cy,R,s){
+  s.cx=cx; s.cy=cy; s.R=R;
+  if(P.companion && !s.m.ell){
+    rnd=mulberry32(P.seed ^ 0x1b56c4e9);
+    const dist=R*rr(1.15,1.5), ang=rr(0,Math.PI*2);
+    const ox=Math.cos(ang)*dist, oy=Math.sin(ang)*dist, cR=R*rr(0.32,0.5);
+    const dens=P.dens/100;
+    // companion: compact bluish disk
+    const n=Math.floor(2600*dens);
+    for(let i=0;i<n;i++){ let rad=-Math.log(rnd())*cR*0.4; if(rad>cR*1.1) continue;
+      const th=rr(0,Math.PI*2), blue=rnd()<.45;
+      s.stars.push({x:ox+Math.cos(th)*rad, y:oy+Math.sin(th)*rad, r:rr(.4,1.3),
+        c:blue?`rgba(170,205,255,.8)`:`rgba(255,215,180,.5)`}); }
+    for(let i=0;i<Math.floor(cR*0.9);i++){ const th=rr(0,Math.PI*2), rad=Math.abs(gauss())*cR*.6;
+      if(rnd()<.15) s.knots.push({x:ox+Math.cos(th)*rad,y:oy+Math.sin(th)*rad,r:rr(2,5)}); }
+    // tidal bridge: a stream of stars drawn from main disk toward companion + a tail
+    const nb=Math.floor(900*dens);
+    for(let i=0;i<nb;i++){ const t=rnd(); const bend=Math.sin(t*Math.PI)*R*0.28;
+      const bx=ox*t + (-oy/dist)*bend, by=oy*t + (ox/dist)*bend;
+      const j=R*0.05; s.stars.push({x:bx+gauss()*j, y:by+gauss()*j, r:rr(.4,1.1), c:`rgba(210,220,255,.55)`}); }
+    for(let i=0;i<Math.floor(nb*0.7);i++){ const t=rnd(); // counter-tail flung from main
+      const tx=-ox*t*0.9 + (-oy/dist)*Math.sin(t*Math.PI)*R*0.35;
+      const ty=-oy*t*0.9 + (ox/dist)*Math.sin(t*Math.PI)*R*0.35;
+      const j=R*0.06; s.stars.push({x:tx+gauss()*j, y:ty+gauss()*j, r:rr(.4,1), c:`rgba(255,210,190,.4)`}); }
+    s.companion={ox,oy,cR};
+  }
+  scene=s;
+  buildBuffers();
+}
+
+// ================= RENDER (once) into offscreen buffers =================
+function mkCanvas(){ const c=document.createElement("canvas"); c.width=W*DPR; c.height=H*DPR;
+  const x=c.getContext("2d"); x.scale(DPR,DPR); return {c,x}; }
+
+function buildBuffers(){
+  // --- background buffer (static) ---
+  const bgo=mkCanvas(); const bx=bgo.x;
+  const grd=bx.createRadialGradient(W/2,H/2,0,W/2,H/2,Math.max(W,H)*0.75);
+  grd.addColorStop(0,"#12142400"); grd.addColorStop(1,"#02030a");
+  bx.fillStyle="#04050d"; bx.fillRect(0,0,W,H); bx.fillStyle=grd; bx.fillRect(0,0,W,H);
+  for(const o of scene.bg){
+    if(o.t==="s"){ bx.globalAlpha=o.a; bx.fillStyle="#cfe0ff"; bx.beginPath(); bx.arc(o.x,o.y,o.r,0,7); bx.fill(); }
+    else { bx.save(); bx.translate(o.x,o.y); bx.rotate(o.ang); bx.scale(1,o.e); bx.globalAlpha=o.a;
+      const g=bx.createRadialGradient(0,0,0,0,0,o.r); const[r,gg,b]=o.hue;
+      g.addColorStop(0,`rgba(${r},${gg},${b},1)`); g.addColorStop(1,`rgba(${r},${gg},${b},0)`);
+      bx.fillStyle=g; bx.beginPath(); bx.arc(0,0,o.r,0,7); bx.fill(); bx.restore(); }
+  }
+  bx.globalAlpha=1; bgBuf=bgo.c;
+
+  // --- galaxy buffer (centered at W/2,H/2 in css px) ---
+  const go=mkCanvas(); const g=go.x; const cx=W/2, cy=H/2;
+  g.translate(cx,cy);
+  // stars (additive)
+  g.globalCompositeOperation="lighter";
+  for(const st of scene.stars){ g.fillStyle=st.c; g.beginPath(); g.arc(st.x,st.y,st.r,0,7); g.fill(); }
+  // dust lanes carved out (subtractive)
+  if(scene.dust.length){ g.globalCompositeOperation="destination-out";
+    for(const d of scene.dust){ const gr=g.createRadialGradient(d.x,d.y,0,d.x,d.y,d.r);
+      gr.addColorStop(0,"rgba(0,0,0,0.5)"); gr.addColorStop(1,"rgba(0,0,0,0)");
+      g.fillStyle=gr; g.beginPath(); g.arc(d.x,d.y,d.r,0,7); g.fill(); } }
+  // globular halo (additive)
+  g.globalCompositeOperation="lighter";
+  for(const gb of scene.glob){ const gr=g.createRadialGradient(gb.x,gb.y,0,gb.x,gb.y,gb.r*2.2);
+    gr.addColorStop(0,"rgba(255,235,190,.9)"); gr.addColorStop(.4,"rgba(255,225,170,.35)"); gr.addColorStop(1,"rgba(255,225,170,0)");
+    g.fillStyle=gr; g.beginPath(); g.arc(gb.x,gb.y,gb.r*2.2,0,7); g.fill(); }
+  // HII knots (pink emission)
+  for(const k of scene.knots){ const gr=g.createRadialGradient(k.x,k.y,0,k.x,k.y,k.r);
+    gr.addColorStop(0,"rgba(255,150,190,.95)"); gr.addColorStop(.4,"rgba(255,90,150,.5)"); gr.addColorStop(1,"rgba(255,60,140,0)");
+    g.fillStyle=gr; g.beginPath(); g.arc(k.x,k.y,k.r,0,7); g.fill(); }
+
+  // --- BLOOM: bright sources -> blurred -> composited additively ---
+  const bo=mkCanvas(); const bl=bo.x; bl.translate(cx,cy); bl.globalCompositeOperation="lighter";
+  const coreR=Math.max(scene.bulge,scene.R*0.12)*1.6;
+  const cg=bl.createRadialGradient(0,0,0,0,0,coreR);
+  cg.addColorStop(0,"rgba(255,246,220,.95)"); cg.addColorStop(.5,"rgba(255,225,170,.4)"); cg.addColorStop(1,"rgba(255,220,160,0)");
+  bl.fillStyle=cg; bl.beginPath(); bl.arc(0,0,coreR,0,7); bl.fill();
+  if(scene.barLen>0){ bl.save(); bl.rotate(scene.barA); bl.scale(1,0.32);
+    const bgr=bl.createRadialGradient(0,0,0,0,0,scene.barLen*1.2);
+    bgr.addColorStop(0,"rgba(255,240,200,.7)"); bgr.addColorStop(1,"rgba(255,230,180,0)");
+    bl.fillStyle=bgr; bl.beginPath(); bl.arc(0,0,scene.barLen*1.2,0,7); bl.fill(); bl.restore(); }
+  for(const k of scene.knots){ const gr=bl.createRadialGradient(k.x,k.y,0,k.x,k.y,k.r*2.4);
+    gr.addColorStop(0,"rgba(255,110,170,.8)"); gr.addColorStop(1,"rgba(255,90,150,0)");
+    bl.fillStyle=gr; bl.beginPath(); bl.arc(k.x,k.y,k.r*2.4,0,7); bl.fill(); }
+  if(scene.companion){ const cp=scene.companion; const gr=bl.createRadialGradient(cp.ox,cp.oy,0,cp.ox,cp.oy,cp.cR);
+    gr.addColorStop(0,"rgba(220,235,255,.6)"); gr.addColorStop(1,"rgba(200,220,255,0)");
+    bl.fillStyle=gr; bl.beginPath(); bl.arc(cp.ox,cp.oy,cp.cR,0,7); bl.fill(); }
+  // blur the bloom layer onto the galaxy buffer (guard: ctx.filter isn't universal)
+  g.globalCompositeOperation="lighter"; g.setTransform(DPR,0,0,DPR,0,0);
+  if(CANVAS_FILTER){ g.filter="blur(14px)"; g.drawImage(bo.c,0,0,W,H); g.filter="none"; }
+  else { g.globalAlpha=0.35; g.drawImage(bo.c,0,0,W,H); g.globalAlpha=1; }  // degrade to soft, not hard blobs
+  buf=go.c;
+
+  // kick off grow animation (cancel any pending frame so rapid reseeds can't double-schedule)
+  cancelAnimationFrame(rafId); playing=false;
+  growStart=performance.now(); rot=0; ensurePlaying();
+  updateHUD();
+}
+
+// ================= ANIMATION (cheap: transform the cached buffer) =================
+const easeOut=t=>1-Math.pow(1-t,3);
+function frame(now){
+  const cx=W/2, cy=H/2;
+  const gt=reduceMotion?1:Math.min(1,(now-growStart)/1050);
+  const e=easeOut(gt);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.clearRect(0,0,W,H);
+  ctx.drawImage(bgBuf,0,0,W,H);            // static field
+  ctx.save();
+  ctx.translate(cx,cy);
+  ctx.rotate(rot + (1-e)*0.9);             // arms wind into place, then optional spin
+  // radial reveal: grow the disk outward from the core
+  const reveal=(scene.R*1.5)*(0.15+0.85*e) + scene.R*0.15;
+  ctx.beginPath(); ctx.arc(0,0,reveal,0,7); ctx.clip();
+  ctx.globalAlpha=Math.min(1,0.3+0.7*e);
+  ctx.drawImage(buf,-cx,-cy,W,H);
+  ctx.restore();
+  ctx.globalAlpha=1;
+  if(rotating) rot+=0.0016;
+  if(gt<1||rotating){ rafId=requestAnimationFrame(frame); }
+  else playing=false;
+}
+function ensurePlaying(){ if(!playing){ playing=true; rafId=requestAnimationFrame(frame); } }
+
+// ================= HUD =================
+function updateHUD(){
+  const m=MORPH[P.type];
+  rnd=mulberry32(P.seed ^ 0x51ed270b);
+  const pre=CAT_PREFIX[Math.floor(rnd()*CAT_PREFIX.length)];
+  const num=ri(1000,9999);
+  const arms= m.arms? P.arms: 0;
+  const tag = m.tag + (arms>2?("·"+arms+"arm"):"");
+  document.getElementById("cat").innerHTML = `${pre} <b>${num}</b>`;
+  document.getElementById("sub").textContent = `${m.label}${P.companion?" · interacting pair":""}`;
+  const n=scene.stars.length + scene.knots.length + scene.glob.length;
+  document.getElementById("stats").innerHTML =
+    `<div class="k">Hubble type</div><div class="v">${tag}</div>`+
+    `<div class="k">Arms</div><div class="v">${arms||"—"}</div>`+
+    `<div class="k">Pitch angle</div><div class="v">${m.pitch?P.pitch+"°":"—"}</div>`+
+    `<div class="k">Luminous sources</div><div class="v">${n.toLocaleString()}</div>`+
+    `<div class="k">Seed</div><div class="v">${(P.seed>>>0).toString(36)}</div>`;
+  // sync controls
+  const sA=document.getElementById("sArms"), sP=document.getElementById("sPitch");
+  sA.value=arms||1; document.getElementById("vArms").textContent=arms||"—";
+  sP.value=m.pitch?P.pitch:18; document.getElementById("vPitch").textContent=(m.pitch?P.pitch:"—")+(m.pitch?"°":"");
+  // arms/pitch do nothing for non-spiral morphologies — disable to match the "—" readout
+  sA.disabled=!m.arms; sP.disabled=!m.pitch;
+  sA.closest(".sl").classList.toggle("off",!m.arms); sP.closest(".sl").classList.toggle("off",!m.pitch);
+  document.getElementById("sDens").value=P.dens; document.getElementById("vDens").textContent=P.dens+"%";
+  document.getElementById("sSize").value=P.size; document.getElementById("vSize").textContent=P.size+"%";
+  document.getElementById("bCompanion").textContent="Companion: "+(P.companion?"on":"off");
+  document.getElementById("bCompanion").className=P.companion?"on":"";
+  [...document.querySelectorAll("#presets button")].forEach(b=>b.classList.toggle("sel",b.dataset.t===P.type));
+  writeHash();
+}
+
+// ================= URL hash serialization =================
+function writeHash(){ const h=[P.seed>>>0,P.type,P.arms,P.pitch,P.dens,P.size,P.companion?1:0].join("~");
+  // replaceState can throw on opaque origins (file://) in some browsers — fall back to location.hash
+  try{ history.replaceState(null,"","#"+h); }catch(e){ try{ location.hash=h; }catch(e2){} } }
+function readHash(){ const h=location.hash.slice(1); if(!h) return null;
+  const a=h.split("~"); if(a.length<7||!MORPH[a[1]]) return null;
+  return { seed:(+a[0])>>>0, type:a[1], arms:+a[2], pitch:+a[3], dens:+a[4], size:+a[5], companion:a[6]==="1" }; }
+
+// ================= EVENTS =================
+function regen(){ generate(); }
+document.getElementById("bReseed").onclick=()=>{ P=deriveFromSeed({...defaultParams(), seed:(Math.random()*1e9)|0}); regen(); };
+document.getElementById("bCompanion").onclick=()=>{ P.companion=!P.companion; regen(); };
+document.getElementById("bRotate").onclick=(e)=>{ rotating=!rotating; e.target.textContent="Rotation: "+(rotating?"on":"off");
+  e.target.className=rotating?"on":""; if(rotating) ensurePlaying(); };
+document.getElementById("bCopy").onclick=(e)=>{
+  const t=e.currentTarget, restore=()=>{ t.textContent="Copy link"; };
+  const done=()=>{ t.textContent="Copied ✓"; setTimeout(restore,1300); };
+  try{ navigator.clipboard.writeText(location.href).then(done,()=>{ t.textContent="Copy failed"; setTimeout(restore,1300); }); }
+  catch(err){ t.textContent="Copy failed"; setTimeout(restore,1300); } };
+document.getElementById("bPng").onclick=()=>{
+  // composite a clean, fully-grown frame (no grow rotation / radial reveal / partial alpha)
+  ctx.setTransform(DPR,0,0,DPR,0,0); ctx.globalAlpha=1; ctx.clearRect(0,0,W,H);
+  ctx.drawImage(bgBuf,0,0,W,H);
+  ctx.save(); ctx.translate(W/2,H/2); ctx.rotate(rot); ctx.drawImage(buf,-W/2,-H/2,W,H); ctx.restore();
+  const a=document.createElement("a"); a.download="volute_"+(P.seed>>>0).toString(36)+".png";
+  a.href=cvs.toDataURL("image/png"); a.click();
+  if(playing||rotating) ensurePlaying();   // let the live view resume/redraw
+};
+
+function bindSlider(id,vid,key,fmt){ const s=document.getElementById(id);
+  s.addEventListener("input",()=>{ P[key]=+s.value; document.getElementById(vid).textContent=fmt(+s.value); });
+  s.addEventListener("change",()=>{ P[key]=+s.value; regen(); }); }
+bindSlider("sArms","vArms","arms",v=>v);
+bindSlider("sPitch","vPitch","pitch",v=>v+"°");
+bindSlider("sDens","vDens","dens",v=>v+"%");
+bindSlider("sSize","vSize","size",v=>v+"%");
+
+// presets
+const pc=document.getElementById("presets");
+for(const [t,name] of PRESETS){ const b=document.createElement("button"); b.textContent=name; b.dataset.t=t;
+  b.onclick=()=>{ const m=MORPH[t]; P={...(P||defaultParams()), type:t,
+    arms:m.arms||2, pitch:m.pitch||18, companion:P?P.companion:false, seed:(P?P.seed:defaultParams().seed) };
+    regen(); }; pc.appendChild(b); }
+
+// resize
+function resize(){ W=innerWidth; H=innerHeight; DPR=Math.min(devicePixelRatio||1,2);
+  cvs.width=W*DPR; cvs.height=H*DPR; cvs.style.width=W+"px"; cvs.style.height=H+"px";
+  if(P){ generate(); } }
+let rt; addEventListener("resize",()=>{ clearTimeout(rt); rt=setTimeout(resize,150); });
+
+// ================= BOOT =================
+W=innerWidth; H=innerHeight;
+cvs.width=W*DPR; cvs.height=H*DPR; cvs.style.width=W+"px"; cvs.style.height=H+"px";
+P=readHash() || deriveFromSeed(defaultParams());
+generate();
+})();
+</script>
+</body>
+</html>

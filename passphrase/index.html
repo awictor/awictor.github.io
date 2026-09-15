@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Passphrase Generator — memorable, strong, XKCD-style</title>
+<meta name="description" content="Generate memorable but strong passphrases from random words (correct-horse-battery-staple style), with a real entropy and crack-time readout. Crypto-random, 100% offline.">
+<style>
+  :root{
+    --c:#6366f1;
+    --bg:#f1f2fb; --card:#ffffff; --fg:#161726; --muted:#5b5e78;
+    --line:#dfe0f0; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#0b0c18; --card:#151726; --fg:#e9eaf6; --muted:#9698b8;
+    --line:#262943; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:760px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:760px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .out{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.5rem;font-weight:700;word-break:break-all;
+    text-align:center;padding:18px;background:var(--bg);border:1px dashed var(--line);border-radius:12px;min-height:64px;display:flex;align-items:center;justify-content:center}
+  .btnrow{display:flex;gap:10px;margin-top:14px}
+  .btn{flex:1;background:var(--c);color:#fff;border:0;border-radius:10px;padding:12px;font-weight:700;cursor:pointer;font-size:.95rem}
+  .btn.sec{background:var(--card);color:var(--fg);border:1px solid var(--line)}
+  .meter{height:10px;border-radius:6px;background:var(--line);overflow:hidden;margin:16px 0 6px}
+  .meter i{display:block;height:100%;width:0;transition:width .2s,background .2s}
+  .stats{display:flex;justify-content:space-between;color:var(--muted);font-size:.85rem}
+  .controls{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:6px}
+  @media(max-width:560px){.controls{grid-template-columns:1fr}}
+  .ctl label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  .ctl .row{display:flex;align-items:center;gap:10px}
+  .ctl input[type=range]{flex:1;accent-color:var(--c)}
+  .ctl .v{font-variant-numeric:tabular-nums;font-weight:700;min-width:28px;text-align:right}
+  select,input[type=text]{width:100%;font:inherit;padding:9px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  .opts{display:flex;gap:16px;flex-wrap:wrap;margin-top:14px}
+  .opts label{font-size:.88rem;display:flex;gap:6px;align-items:center}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🎲</div>
+  <div>
+    <h1>Passphrase Generator</h1>
+    <p>Memorable, strong, crypto-random</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="out" id="out">—</div>
+    <div class="btnrow">
+      <button class="btn" id="gen">Generate</button>
+      <button class="btn sec" id="copy">Copy</button>
+    </div>
+    <div class="meter"><i id="bar"></i></div>
+    <div class="stats"><span id="bits">—</span><span id="crack">—</span></div>
+
+    <div class="controls">
+      <div class="ctl"><label>Words <span id="wv" class="v"></span></label><div class="row"><input type="range" id="words" min="3" max="8" value="4" step="1"></div></div>
+      <div class="ctl"><label>Separator</label>
+        <select id="sep">
+          <option value="-">hyphen ( - )</option>
+          <option value=".">dot ( . )</option>
+          <option value="_">underscore ( _ )</option>
+          <option value=" ">space</option>
+          <option value="">none</option>
+        </select>
+      </div>
+    </div>
+    <div class="opts">
+      <label><input type="checkbox" id="cap" checked> Capitalize words</label>
+      <label><input type="checkbox" id="num" checked> Append a number</label>
+      <label><input type="checkbox" id="sym"> Append a symbol</label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Why word passphrases?</h2>
+    <p class="note">Four random words from a large list are far easier to remember than <code>xK7#qW2!</code> — and often stronger. Entropy is <code>words × log₂(list size)</code>; this list has <span id="lsize">—</span> words, so each adds about <span id="perword">—</span> bits. A capital, number or symbol adds a little more. Everything is generated locally with <code>crypto.getRandomValues</code> and unbiased rejection sampling — nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · crypto-random · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var WORDS = ("able acid acorn actor adapt add admit adopt adore afar agile agree ahead aide airy alarm album alert alike alive allow aloe aloft alone amber amend ample angel anger apart apple april apron arbor arch arena argue arise armor aroma array arrow ash aside asset atlas atom attic auto avoid awake award aware awoke axis bacon badge baker balmy banjo barge basic basil batch beach beam bean bear beat beaver began begin being belt bench bend berry best bias bike bind birch bird black blade blaze blend bless blink bloom blue blush board boat bold bolt bond bonus book boost booth boss both bough bound bowl brace brain brand brass brave bread break breeze brick bride brief bring brisk broad broil brook broom brown brush buddy buffalo build bulb bulk bunch bundle bunny burn burst bush cabin cable cacao cadet cage cake calm camel canal candy cane cargo carol carry carve case cash cause cedar cello chalk champ chant chaos charm chart chase cheek cheer chef cherry chess chest chief chili chime chin chip chirp choir chord chose chunk churn cider cigar cinema circle citrus civic civil claim clamp clang clap clasp class clay clean clear cleft clerk click cliff climb cloak clock clone close cloth cloud clove clown club clump clung coach coal coast cobra cocoa coin cola cold comet comfy comic coral cork corn cosmic cost couch cough could count court cove cover cozy crab craft crane crash crate crave crawl crazy cream creek crepe crest crew crib crisp crop cross crowd crown crumb cruise crush crust cube cuff cumin curb cure curl curve cyan cycle daily dairy daisy dance dandy dare dark dart dash data dawn deal dean debit debt decal decay decor deed deep deer delta demo dense depot depth derby desk dial diary dice diet dime diner dingo diode ditch diver dizzy dock dodge dogma dome donor donut dose dot dove down dozen draft drag drama drank draw dream dress dried drift drill drink drive drone drop drove drum dryer duck duel duet duke dune dusk dust duty dwarf eager eagle early earth easel east easy eaten ebony echo edge edit eel eight elbow elder elect elf elite elk elm elope ember emit empty enact enemy enjoy enter entry envoy epic equal equip erase error essay ethic evade even event ever evict evoke exact exam excel exile exist exit expo extra fable fair fairy faith fake fall false fancy fang farm fast fate fauna favor feast feat fence fern ferry fetch fever fiber field fifth fifty film final finch find fine finish fire firm first fish fist five fix fizz flag flair flame flap flare flash flask flat flaw fleet flesh flex flip float flock flood floor floppy flora flour flow fluid flush flute foam focus foggy foil fold folk font food fool foot force forge fork form fort forum found four fox frame frank fresh fried frisk frog front frost fruit fudge fuel full fume fund funny fur fuse fuzzy gadget gain gala game gamma gap garden gate gauge gave gaze gear gecko gem genre gentle germ ghost giant gift gill given giver glad glade gland glass glaze gleam glide globe gloom glory gloss glove glow glue goal goat gold golf gone good goose gopher gorge gospel gotten grab grace grade grain gram grand grant grape graph grasp grass grave gravy graze great greed green greet grid grief grill grim grind grip grit groom groove gross group grove growl grown gruff guard guess guest guide guild gulf gully gulp gummy guru gust habit hair half hall halo halt hand hang happy harbor hard hare harm harp harsh haste hatch haul haven hawk hazel head heap heart heat heavy hedge heel hefty helm help herb herd hero hertz hidden high hike hill hint hippo hive hoax hobby hold hollow holy honey hood hoof hook hope horn horse hose host hotel hound hour house hover howl hub huge human humid hurry husky hutch hyena ice icing icon idea ideal idle idol igloo image imply inbox inch index infer ingot inlet input intro ionic iris iron issue ivory ivy jacket jade jaguar jam jar jaunt jazz jeans jelly jet jewel jiffy jog join joint joke jolly jolt joust judge juice july jumbo jump june junk juror keen keep kelp kept kernel ketchup key kick kind king kiosk kite kitten kiwi knack knead knee knelt knife knock knot know koala label labor lace lady lagoon lair lake lamb lamp lance land lane lapel large lark lash last latch late lava lawn layer lazy leaf leak lean leap learn lease leash least ledge leech left legal lemon lend lens level lever light lilac lily limb lime limit line linen link lion lip liquid list liter live lizard llama load loaf loan lobby local lock lodge loft logic lone long look loop loose lord lose lotus loud lounge love lower loyal lucky lunar lunch lung lure lush lyric macro madam magic magma magnet maid mail main major maker mango manor maple march margin marine marsh mask mason match mate math matrix maze meadow meal mean meat medal media melody melon melt memo mend menu mercy merge merit merry mesh metal meter metro micro midst might mild mile milk mimic mind mint minus mirror mist mix moat mocha modal model modem moist molar mold mole money monk mood moon moose moral morph moss most motel motif motor mound mount mouse mouth move movie mud mug mulch mule mummy muse music musk mute nacho nail name nasal navy near neat neck nectar need needle neon nerve nest net never newt next niche nickel night noble noise north nose note notify nova novel nudge nugget null numb nurse nylon oak oasis oat obey ocean octave odd offer often ogre oil okay olive omega omit once onion only onset onto onyx opal open opera opt orange orbit orca order organ osprey otter ounce outer oval oven owl owner oxen oxygen oyster ozone pace pack pact paddle page pail pair palm panda panel pang panic pants papaya paper parade parcel parent park parody parole party pasta patch path patio pause pave peace peach peak peanut pear pearl pebble pecan pedal peer pelt penny pepper perch peril petal petty phase phone photo piano pick piece pier pigeon pike pilot pinch pine pink pint pipe pistol pivot pixel pizza place plaid plain plan plank plant plate plaza plead pleat plot plow pluck plug plum plume plus poem poet point poise poker polar pole polish pond pony pooch poppy porch pork port pose posh post pouch pound pour power prank pray press price pride prime print prior prism prize probe prom proof props proud prove prune public pucker puddle puff pull pulp pulse punch pupil puppy puree purple purse push putty quail quake quart queen query quest queue quick quiet quill quilt quirk quiz quota quote rabbit race rack radar radio raft rage raid rail rain raise rally ramp ranch range rank rapid rare rash raven ray razor reach react ready realm reap rebel recap reef reel refer regal reign relax relay relic renew repay reply reset resin rest revamp revel rhino rhyme rib rice rich ridge rifle right rigid rind ring rinse rise risk ritual rival river roach road roam roar roast robe robin robot rock rodeo rogue role roll roman roof rook room roost root rope rose rosy rotor rouge rough round route rover royal ruby rudder ruff rug ruin rule rumor rune rung runt rural rust sable sadly safe saga sage sail saint salad salmon salon salsa salt sample sand sandal sane sash satin sauce saver savor scale scan scarf scene scent scoff scone scoop scope score scorn scout scrap scrub scuba seal seam sear season seat sedan seed seek seem seize sense serve seven sew shack shade shaft shaky shale shall shame shape share shark sharp shawl shed sheep sheet shelf shell shift shine ship shirt shoal shock shoe shone shop shore short shove shown shrub shrug shy sift sigh sight silk silly silo silver simple since sing sink siren sirup sit sixth size skate ski skid skill skip skirt skull skunk sky slab slam slang slant slap slash slate sled sleek sleep sleet slice slide slim slime sling slip slob slope slot sloth slug slump smack small smart smash smell smelt smile smirk smog smoke snack snail snake snap snare snarl sneak snip snort snow snug soak soap soar sober social sock soda sofa soft soggy solar solid solo solve some song sonic soot sorry sort soul sound soup sour south sow space spade span spare spark spawn speak spear speck speed spell spend spent spice spike spill spin spine spiral spire spite splash split spoke sponge spool spoon sport spot spout spray spree sprig spring sprint spruce spud spunk spur squad square squash squid stack staff stage stair stake stale stalk stall stamp stand stark start stash state stay steak steam steed steel steep steer stem step stern stew stick stiff still sting stir stock stone stood stool stoop store stork storm stout stove strap straw stray strip stub stud study stuff stump stung stunt style suave sugar suit sultan summer sunny super surf surge sushi swab swamp swan swap swarm sway swear sweat sweep sweet swell swift swim swing swirl switch sword swore syrup table tacit tack taco tag tail take tale talent tally tame tango tank tap tapir tardy tarot tart task taste taught taunt taut taxi teach teal team tease tech teeth tempo tempt tenant tend tenor tense tent tenth term test text thank thaw theft theme thick thief thin third thorn those three throb throw thumb thump thyme tidal tidy tiger tight tile timber time timid tin tint tiny tip tire toad toast today toe tofu toga toil token told toll tomato tone tonic took tool tooth top topaz topic torch total tote touch tough tour towel tower town toxic trace track trade trail train tram trap trash tray tread treat tree trek trend trial tribe trick trim trio trip troll troop trophy trot trout truce truck truly trump trunk trust truth tuba tuck tulip tummy tuna tundra tune tunic turbo turf turkey turn turtle tusk tutor tweak tweet twice twig twin twine twins twirl twist tying umber unbox uncle under undo unify union unit unlit unmet untie until unwed unzip upon upper urban urge usage used user usher usual utter vague valet valid valley value valve vapor vast vault veer vein velvet vend venom venue verb verge verse vest veto vial vibe video view vigor villa vine vinyl viola violet viper viral virtue visa visit visor vista vital vivid vocal vodka vogue voice void volt volume vote vowel voyage wafer wage wagon waist wait wake walk wall walnut waltz wander want ward ware warm warn warp wart wasp watch water watt wave wax weary weave web wedge weed week weep weigh weird well welt west whale wharf wheat wheel when whiff while whim whip whirl whisk white whole whoop wick wide widen width wield wig wild will wilt wind wine wing wink winner winter wipe wire wise wish wisp witch with wolf woman won wonder wood wool word work world worm worry worse worth would wound woven wrap wreath wren wrist write wrong yacht yak yam yard yarn yawn year yearn yeast yield yodel yoga yogurt yolk yonder young yo-yo yummy zebra zero zesty zigzag zinc zipper zippy zodiac zone zoom").split(" ");
+
+  function toInt(x){ var n = Number(x); if(!isFinite(n) || Math.floor(n) !== n) throw new Error('must be an integer'); return n; }
+  // Entropy of an N-word passphrase drawn uniformly from a list.
+  function entropyBits(listSize, numWords){
+    listSize = toInt(listSize); numWords = toInt(numWords);
+    if(listSize < 2) throw new Error('list must have at least 2 words');
+    if(numWords < 1) throw new Error('need at least 1 word');
+    return numWords * Math.log2(listSize);
+  }
+  // Unbiased index in [0, max) from a function returning uint32; rejection-sampled.
+  function unbiasedIndex(max, rand){
+    max = toInt(max);
+    if(max < 1) throw new Error('max must be positive');
+    var limit = Math.floor(4294967296 / max) * max; // largest multiple of max <= 2^32
+    var r;
+    do { r = rand() >>> 0; } while(r >= limit);
+    return r % max;
+  }
+  // Human crack-time estimate at a given guess rate (offline attacker default 1e10/s).
+  function crackTime(bits, guessesPerSec){
+    bits = Number(bits); guessesPerSec = guessesPerSec || 1e10;
+    var seconds = Math.pow(2, bits) / 2 / guessesPerSec; // expected: half the space
+    var units = [['second',1],['minute',60],['hour',3600],['day',86400],['year',31557600],['century',3155760000]];
+    if(seconds < 1) return 'instant';
+    for(var i = units.length - 1; i >= 0; i--){
+      var v = seconds / units[i][1];
+      if(v >= 1){
+        if(i === units.length - 1 && v > 1000) return 'centuries';
+        return Math.round(v) + ' ' + units[i][0] + (Math.round(v) === 1 ? '' : 's');
+      }
+    }
+    return 'instant';
+  }
+  // Build the final string from chosen words + formatting options.
+  function buildPassphrase(words, opts){
+    opts = opts || {};
+    var sep = opts.separator == null ? '-' : opts.separator;
+    var w = words.map(function(x){ return opts.capitalize ? x.charAt(0).toUpperCase() + x.slice(1) : x; });
+    var out = w.join(sep);
+    if(opts.number != null) out += (sep && opts.numberSep ? sep : '') + opts.number;
+    if(opts.symbol) out += opts.symbol;
+    return out;
+  }
+
+  if(typeof module !== 'undefined') module.exports = { entropyBits:entropyBits, unbiasedIndex:unbiasedIndex, crackTime:crackTime, buildPassphrase:buildPassphrase, WORDS:WORDS };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var LIST = WORDS.length, PERWORD = Math.log2(LIST);
+    document.getElementById('lsize').textContent = LIST.toLocaleString();
+    document.getElementById('perword').textContent = PERWORD.toFixed(1);
+    var SYMBOLS = '!@#$%&*?';
+    function rand32(){ var a = new Uint32Array(1); crypto.getRandomValues(a); return a[0]; }
+    function gen(){
+      var nWords = Number(document.getElementById('words').value);
+      var sep = document.getElementById('sep').value;
+      var cap = document.getElementById('cap').checked;
+      var num = document.getElementById('num').checked;
+      var sym = document.getElementById('sym').checked;
+      var chosen = [];
+      for(var i = 0; i < nWords; i++) chosen.push(WORDS[unbiasedIndex(LIST, rand32)]);
+      var opts = { separator: sep, capitalize: cap, numberSep: true };
+      if(num) opts.number = unbiasedIndex(100, rand32);
+      if(sym) opts.symbol = SYMBOLS.charAt(unbiasedIndex(SYMBOLS.length, rand32));
+      var phrase = buildPassphrase(chosen, opts);
+      document.getElementById('out').textContent = phrase;
+      var bits = entropyBits(LIST, nWords) + (num ? Math.log2(100) : 0) + (sym ? Math.log2(SYMBOLS.length) : 0);
+      document.getElementById('bits').textContent = bits.toFixed(1) + ' bits';
+      document.getElementById('crack').textContent = 'crack: ' + crackTime(bits);
+      var bar = document.getElementById('bar');
+      var pct = Math.min(100, bits / 128 * 100);
+      bar.style.width = pct + '%';
+      bar.style.background = bits < 50 ? '#dc2626' : bits < 70 ? '#f59e0b' : bits < 90 ? '#10b981' : '#059669';
+    }
+    document.getElementById('words').addEventListener('input', function(){ document.getElementById('wv').textContent = this.value; gen(); });
+    ['sep','cap','num','sym'].forEach(function(id){ document.getElementById(id).addEventListener('input', gen); });
+    document.getElementById('gen').addEventListener('click', gen);
+    document.getElementById('copy').addEventListener('click', function(){
+      var t = document.getElementById('out').textContent;
+      if(navigator.clipboard) navigator.clipboard.writeText(t);
+      this.textContent = 'Copied!'; var b = this; setTimeout(function(){ b.textContent = 'Copy'; }, 1200);
+    });
+    document.getElementById('wv').textContent = document.getElementById('words').value;
+    gen();
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('passphrase-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('passphrase-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

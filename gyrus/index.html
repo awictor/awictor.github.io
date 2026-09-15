@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gyrus — differential growth</title>
+<style>
+  :root{ --bg:#0d0a10; --panel:#161219; --ink:#e7dce4; --dim:#9a8ea0; --acc:#ff5d8f; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font:13px/1.4 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif; overflow:hidden; }
+  #wrap{ display:flex; height:100vh; }
+  #stage{ flex:1; display:flex; align-items:center; justify-content:center; position:relative; min-width:0; }
+  canvas{ background:#000; max-width:100%; max-height:100%; box-shadow:0 0 60px #0008; border-radius:4px; image-rendering:auto; }
+  #panel{ width:270px; flex:none; background:var(--panel); padding:16px 16px 20px; overflow-y:auto;
+    border-left:1px solid #2a2230; }
+  h1{ font-size:19px; margin:0 0 2px; letter-spacing:.5px; color:var(--acc); font-weight:700; }
+  .sub{ color:var(--dim); font-size:11px; margin:0 0 14px; }
+  .row{ margin:11px 0; }
+  label{ display:flex; justify-content:space-between; color:var(--dim); font-size:11px; margin-bottom:3px; text-transform:uppercase; letter-spacing:.4px; }
+  label b{ color:var(--ink); font-variant-numeric:tabular-nums; font-weight:600; }
+  input[type=range]{ width:100%; accent-color:var(--acc); }
+  select,.btn{ width:100%; background:#221b28; color:var(--ink); border:1px solid #362b3f; border-radius:5px;
+    padding:6px 8px; font:inherit; cursor:pointer; }
+  .btns{ display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  .btn:hover{ border-color:var(--acc); }
+  .btn.act{ background:var(--acc); color:#1a0a12; font-weight:700; border-color:var(--acc); }
+  .seg{ display:grid; grid-template-columns:1fr 1fr; gap:0; border:1px solid #362b3f; border-radius:5px; overflow:hidden; }
+  .seg button{ background:#221b28; border:0; color:var(--dim); padding:6px; cursor:pointer; font:inherit; }
+  .seg button.on{ background:var(--acc); color:#1a0a12; font-weight:700; }
+  .presets button{ background:#221b28; border:1px solid #362b3f; color:var(--ink); border-radius:5px; padding:6px 4px; cursor:pointer; font:inherit; }
+  .presets{ display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  .presets button:hover{ border-color:var(--acc); }
+  hr{ border:0; border-top:1px solid #2a2230; margin:15px 0; }
+  .stat{ color:var(--dim); font-size:11px; display:flex; justify-content:space-between; align-items:center; }
+  .hint{ color:var(--dim); font-size:10.5px; line-height:1.5; margin:2px 0 0; }
+  .hint kbd{ background:#221b28; border:1px solid #362b3f; border-radius:3px; padding:0 4px; font:inherit; font-size:10px; color:var(--ink); }
+  #sSeed{ width:96px; background:#221b28; color:var(--ink); border:1px solid #362b3f; border-radius:4px;
+    padding:2px 5px; font:inherit; font-variant-numeric:tabular-nums; text-align:right; }
+  #sSeed:focus{ outline:none; border-color:var(--acc); }
+  #toast{ position:absolute; bottom:14px; left:50%; transform:translateX(-50%); background:#000c; color:var(--ink);
+    padding:7px 14px; border-radius:20px; font-size:12px; opacity:0; transition:opacity .3s; pointer-events:none; }
+  #toast.show{ opacity:1; }
+  @media(max-width:640px){
+    html,body{ overflow:auto; }
+    #wrap{ flex-direction:column; height:auto; min-height:100vh; }
+    #stage{ min-height:56vh; padding:10px; }
+    #panel{ width:100%; flex:none; border-left:0; border-top:1px solid #2a2230; }
+    canvas{ width:100%; height:auto; }
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="stage"><canvas id="c" width="960" height="720"></canvas><div id="toast"></div></div>
+  <div id="panel">
+    <h1>Gyrus</h1>
+    <p class="sub">A closed thread that grows too fast for its own space — and folds into brain-coral.</p>
+
+    <div class="row"><div class="seg" id="mode">
+      <button data-m="line" class="on" title="crisp writhing line, coloured by node age">Line</button><button data-m="fill" title="filled brain-coral surface with fold-depth shading">Solid</button>
+    </div></div>
+
+    <div class="row"><label>Growth <b id="vGrowth"></b></label><input type="range" id="growth" min="0" max="8" step="1"></div>
+    <div class="row"><label>Repulsion radius <b id="vRepel"></b></label><input type="range" id="repel" min="6" max="26" step="1"></div>
+    <div class="row"><label>Attraction <b id="vAttract"></b></label><input type="range" id="attract" min="0.02" max="0.45" step="0.01"></div>
+    <div class="row"><label>Smoothing <b id="vSmooth"></b></label><input type="range" id="smooth" min="0" max="0.5" step="0.01"></div>
+    <div class="row"><label>Max nodes <b id="vMax"></b></label><input type="range" id="maxNodes" min="400" max="4000" step="100"></div>
+
+    <div class="row"><label>Boundary</label><select id="boundary">
+      <option value="none">Free bloom</option><option value="circle">Circle</option><option value="heart">Heart</option>
+    </select></div>
+    <div class="row"><label>Palette</label><select id="palette">
+      <option value="coral">Coral</option><option value="cortex">Cortex</option><option value="gut">Gut</option><option value="bark">Bark</option>
+    </select></div>
+
+    <hr>
+    <label>Presets</label>
+    <div class="presets row">
+      <button data-p="coral">Coral</button><button data-p="cortex">Cortex</button><button data-p="gut">Gut</button>
+    </div>
+
+    <hr>
+    <label>Timelapse scrubber <b id="vScrub">live</b></label>
+    <input type="range" id="scrub" min="0" max="1" step="1" value="1" style="width:100%" title="drag back to freeze & replay growth; drag fully right to resume live">
+    <div class="btns row">
+      <button class="btn" id="play" title="space">Pause</button><button class="btn" id="reset" title="replay this exact bloom (R)">Replay</button>
+    </div>
+    <div class="btns row">
+      <button class="btn" id="newbloom" title="random new seed (N)">New bloom</button><button class="btn" id="png">Export PNG</button>
+    </div>
+    <div class="btns row">
+      <button class="btn" id="link" style="grid-column:1/3">Copy link</button>
+    </div>
+    <p class="hint">Sliders retune live. Scrub to replay growth. <kbd>space</kbd> pause · <kbd>R</kbd> replay · <kbd>N</kbd> new</p>
+    <hr>
+    <div class="stat"><span>nodes</span><b id="sNodes">0</b></div>
+    <div class="stat"><span>frame</span><b id="sFrame">0</b></div>
+    <div class="stat"><span>seed</span><input id="sSeed" type="number" min="0" step="1" value="0" title="type a seed and press Enter to load that exact bloom"></div>
+  </div>
+</div>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const cv=$("c"), ctx=cv.getContext("2d");
+// logical drawing space stays 960x720; scale the backing store for crisp HiDPI + hi-res export
+const W=960, H=720;
+const dpr=Math.min(window.devicePixelRatio||1, 2);
+cv.width=W*dpr; cv.height=H*dpr;
+cv.style.width=W+"px"; cv.style.height=H+"px";
+ctx.scale(dpr,dpr);
+
+// deterministic PRNG
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+const P={ seed:1337, growth:3, repel:13, attract:0.20, smooth:0.26, maxNodes:2400, mode:"line", palette:"coral", boundary:"circle" };
+const PRESETS={
+  coral:{growth:3,repel:14,attract:0.18,smooth:0.22,palette:"coral",boundary:"none",mode:"fill"},
+  cortex:{growth:2,repel:11,attract:0.24,smooth:0.30,palette:"cortex",boundary:"circle",mode:"fill"},
+  gut:{growth:4,repel:16,attract:0.14,smooth:0.16,palette:"gut",boundary:"heart",mode:"line"}
+};
+const BG={coral:"#12060c",cortex:"#100e0d",gut:"#0f0714",bark:"#0c0a07"};
+
+let rnd, nodes, tick, paused=false, live=true;
+
+function reset(){
+  rnd=mulberry32(P.seed>>>0); nodes=[]; tick=0;
+  const cx=W/2, cy=H/2, r=64, n=72;
+  for(let i=0;i<n;i++){
+    const a=i/n*Math.PI*2, j=(rnd()-0.5)*7;
+    nodes.push({x:cx+Math.cos(a)*(r+j), y:cy+Math.sin(a)*(r+j), born:0, cd:0, near:99});
+  }
+  live=true;
+  const vs=$("vScrub"); if(vs)vs.textContent="live";
+}
+
+// ---- boundary field (scaled to ~pixels; >0 inside) ----
+const S=H*0.44;
+function field(x,y){
+  const nx=(x-W/2)/S, ny=(y-H/2)/S;
+  if(P.boundary==="circle") return (1-Math.hypot(nx,ny))*S;
+  if(P.boundary==="heart"){
+    const X=nx*1.35, Y=-ny*1.35+0.35;
+    const v=Math.pow(X*X+Y*Y-1,3)-X*X*Y*Y*Y;
+    return -v*S*0.55;
+  }
+  return 1e9;
+}
+function grad(x,y){
+  const e=3, gx=field(x+e,y)-field(x-e,y), gy=field(x,y+e)-field(x,y-e);
+  const m=Math.hypot(gx,gy)||1e-6; return [gx/m, gy/m];
+}
+const circ=(a,b,n)=>{const d=Math.abs(a-b);return Math.min(d,n-d);};
+
+// ---- one simulation step ----
+function step(){
+  const N=nodes.length, R=P.repel, cell=R, R2=R*R;
+  const cols=Math.ceil(W/cell)+2, rows=Math.ceil(H/cell)+2;
+  const grid=new Array(cols*rows);
+  const cidx=(x,y)=>{let c=Math.floor(x/cell)+1,r=Math.floor(y/cell)+1;
+    if(c<1)c=1;if(r<1)r=1;if(c>=cols-1)c=cols-2;if(r>=rows-1)r=rows-2;return r*cols+c;};
+  for(let i=0;i<N;i++){const k=cidx(nodes[i].x,nodes[i].y);(grid[k]||(grid[k]=[])).push(i);}
+
+  const fx=new Float32Array(N), fy=new Float32Array(N);
+  // self-avoidance: repel each node from nearby NON-adjacent segments (point-to-segment)
+  for(let i=0;i<N;i++){
+    const ni=nodes[i]; let nMin=R*3;
+    // clamp query indices exactly like cidx() so off-canvas nodes still query their stored edge cell
+    let c=Math.floor(ni.x/cell)+1, r=Math.floor(ni.y/cell)+1;
+    if(c<1)c=1;if(r<1)r=1;if(c>=cols-1)c=cols-2;if(r>=rows-1)r=rows-2;
+    for(let dc=-1;dc<=1;dc++)for(let dr=-1;dr<=1;dr++){
+      const b=grid[(r+dr)*cols+(c+dc)]; if(!b)continue;
+      for(let bi=0;bi<b.length;bi++){
+        const j=b[bi], j2=(j+1)%N;
+        if(circ(i,j,N)<=1||circ(i,j2,N)<=1)continue;
+        const ax=nodes[j].x, ay=nodes[j].y, ex=nodes[j2].x-ax, ey=nodes[j2].y-ay;
+        const L2=ex*ex+ey*ey||1e-6;
+        let t=((ni.x-ax)*ex+(ni.y-ay)*ey)/L2; t=t<0?0:t>1?1:t;
+        const dx=ni.x-(ax+ex*t), dy=ni.y-(ay+ey*t), d2=dx*dx+dy*dy;
+        if(d2<R2){
+          const d=Math.sqrt(d2)||1e-6, f=(R-d)/R;
+          fx[i]+=dx/d*f*R*0.55; fy[i]+=dy/d*f*R*0.55;
+          if(d<nMin)nMin=d;
+        }
+      }
+    }
+    ni.near=nMin;
+  }
+  // attraction to bonded neighbours + Laplacian smoothing + soft boundary
+  for(let i=0;i<N;i++){
+    const ni=nodes[i], pa=nodes[(i-1+N)%N], na=nodes[(i+1)%N];
+    fx[i]+=((pa.x-ni.x)+(na.x-ni.x))*P.attract;
+    fy[i]+=((pa.y-ni.y)+(na.y-ni.y))*P.attract;
+    const mx=(pa.x+na.x)/2, my=(pa.y+na.y)/2;
+    fx[i]+=(mx-ni.x)*P.smooth; fy[i]+=(my-ni.y)*P.smooth;
+    if(P.boundary!=="none"){
+      const g=field(ni.x,ni.y), margin=R*1.6;
+      if(g<margin){ const [gx,gy]=grad(ni.x,ni.y), push=Math.min(margin-g,R*4)*0.05;
+        fx[i]+=gx*push; fy[i]+=gy*push; }
+    }
+  }
+  // integrate with velocity clamp; fresh nodes damped (cooldown) to stop pinch-through
+  const cap=R*0.9;
+  for(let i=0;i<N;i++){
+    let mx=fx[i], my=fy[i]; const m2=mx*mx+my*my;
+    if(m2>cap*cap){const s=cap/Math.sqrt(m2); mx*=s; my*=s;}
+    const ni=nodes[i], damp=ni.cd>0?0.2:1;
+    ni.x+=mx*damp; ni.y+=my*damp;
+    if(ni.cd>0)ni.cd--;
+  }
+  // space-driven insertion: split segments longer than threshold (capped rate)
+  tick++;
+  let ins=0; const thr=R*0.9;
+  for(let i=0;i<nodes.length && ins<P.growth && nodes.length<P.maxNodes;i++){
+    const a=nodes[i], b=nodes[(i+1)%nodes.length];
+    if(Math.hypot(b.x-a.x,b.y-a.y)>thr){
+      nodes.splice(i+1,0,{x:(a.x+b.x)/2,y:(a.y+b.y)/2,born:tick,cd:10,near:99});
+      ins++; i++;
+    }
+  }
+}
+
+// ---- palettes ----
+function pal(t){ t=t<0?0:t>1?1:t;
+  switch(P.palette){
+    case "cortex": return `hsl(${348-t*14},${18+t*22}%,${52+t*26}%)`;
+    case "gut":    return `hsl(${296+t*54},${44+t*12}%,${42+t*26}%)`;
+    case "bark":   return `hsl(${28-t*18},${38+t*20}%,${30+t*40}%)`;
+    default:       return `hsl(${338+t*52},${68+t*10}%,${44+t*30}%)`;
+  }
+}
+
+// ---- render ----
+function draw(){
+  const T = live ? tick : +$("scrub").value;
+  ctx.fillStyle=BG[P.palette]||"#0d0a10"; ctx.fillRect(0,0,W,H);
+  const vis=[]; for(let i=0;i<nodes.length;i++) if(nodes[i].born<=T) vis.push(nodes[i]);
+  const M=vis.length; if(M<3) return;
+  const denom=T||1;
+
+  if(P.mode==="fill"){
+    // fleshy surface: filled polygon + depth (occlusion) shading from segment proximity
+    ctx.beginPath(); ctx.moveTo(vis[0].x,vis[0].y);
+    for(let i=1;i<M;i++) ctx.lineTo(vis[i].x,vis[i].y);
+    ctx.closePath();
+    ctx.fillStyle=pal(0.55); ctx.fill("evenodd");
+    ctx.lineJoin="round"; ctx.lineCap="round";
+    const levels=10, paths=Array.from({length:levels},()=>new Path2D());
+    for(let i=0;i<M;i++){
+      const a=vis[i], b=vis[(i+1)%M];
+      let d=a.near/(P.repel*2); d=d<0?0:d>1?1:d;      // deep fold -> dark
+      const lv=Math.min(levels-1,Math.floor(d*levels));
+      paths[lv].moveTo(a.x,a.y); paths[lv].lineTo(b.x,b.y);
+    }
+    ctx.lineWidth=P.repel*1.05;
+    for(let k=0;k<levels;k++){ const l=k/(levels-1);
+      ctx.strokeStyle=`hsl(340,55%,${8+l*30}%)`; ctx.globalAlpha=0.9; ctx.stroke(paths[k]); }
+    ctx.globalAlpha=1;
+  } else {
+    // crisp writhing line, coloured by node age -> growth rings
+    ctx.lineJoin="round"; ctx.lineCap="round"; ctx.lineWidth=1.8;
+    const buckets=28, paths=Array.from({length:buckets},()=>new Path2D());
+    for(let i=0;i<M;i++){
+      const a=vis[i], b=vis[(i+1)%M];
+      let bk=Math.floor(a.born/denom*buckets); bk=bk<0?0:bk>=buckets?buckets-1:bk;
+      paths[bk].moveTo(a.x,a.y); paths[bk].lineTo(b.x,b.y);
+    }
+    for(let k=0;k<buckets;k++){ ctx.strokeStyle=pal(k/(buckets-1)); ctx.stroke(paths[k]); }
+  }
+  $("sNodes").textContent=nodes.length;
+  $("sFrame").textContent=tick;
+}
+
+function loop(){
+  // only advance the sim while live (handle at max) and not paused, so scrubbing back freezes the geometry
+  if(live && !paused){ step(); const s=$("scrub"); s.max=tick; s.value=tick; }
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ---- UI wiring ----
+const SL=[["growth","vGrowth",v=>v],["repel","vRepel",v=>v],["attract","vAttract",v=>v.toFixed(2)],
+  ["smooth","vSmooth",v=>v.toFixed(2)],["maxNodes","vMax",v=>v]];
+function syncUI(){
+  SL.forEach(([id,lab,fmt])=>{ $(id).value=P[id]; $(lab).textContent=fmt(P[id]); });
+  $("boundary").value=P.boundary; $("palette").value=P.palette; $("sSeed").value=P.seed;
+  [...$("mode").children].forEach(b=>b.classList.toggle("on",b.dataset.m===P.mode));
+}
+SL.forEach(([id,lab,fmt])=>{
+  $(id).addEventListener("input",e=>{ P[id]=+e.target.value; $(lab).textContent=fmt(P[id]); saveHash(); });
+});
+$("boundary").addEventListener("change",e=>{P.boundary=e.target.value; saveHash();});
+$("palette").addEventListener("change",e=>{P.palette=e.target.value; saveHash();});
+[...$("mode").children].forEach(b=>b.addEventListener("click",()=>{
+  P.mode=b.dataset.m; syncUI(); saveHash();
+}));
+$("play").addEventListener("click",e=>{ paused=!paused; $("play").textContent=paused?"Play":"Pause"; });
+// Replay: re-grow THIS exact bloom (keep current seed). New bloom: fresh random seed.
+$("reset").addEventListener("click",()=>{ reset(); syncUI(); });
+$("newbloom").addEventListener("click",()=>{ P.seed=(Math.random()*1e9)|0; reset(); syncUI(); saveHash(); });
+$("sSeed").addEventListener("change",e=>{ const v=parseInt(e.target.value,10); if(!isNaN(v)&&v>=0){ P.seed=v; reset(); syncUI(); saveHash(); } });
+$("scrub").addEventListener("input",e=>{ live=(+e.target.value>=+e.target.max);
+  $("vScrub").textContent=live?"live":("@"+e.target.value); });
+document.querySelectorAll(".presets button").forEach(b=>b.addEventListener("click",()=>{
+  Object.assign(P,PRESETS[b.dataset.p]); reset(); syncUI(); saveHash();
+}));
+$("png").addEventListener("click",()=>{
+  const a=document.createElement("a"); a.download=`gyrus-${P.seed}.png`; a.href=cv.toDataURL("image/png"); a.click();
+  toast("PNG exported");
+});
+$("link").addEventListener("click",()=>{
+  saveHash(); const url=location.href;
+  navigator.clipboard?.writeText(url).then(()=>toast("Share link copied"),()=>toast(location.hash));
+});
+function toast(m){ const t=$("toast"); t.textContent=m; t.classList.add("show"); clearTimeout(toast._); toast._=setTimeout(()=>t.classList.remove("show"),1600); }
+
+// ---- URL hash round-trip (full reproducible state) ----
+function saveHash(){
+  const q=`seed=${P.seed}&g=${P.growth}&r=${P.repel}&a=${P.attract}&s=${P.smooth}&m=${P.maxNodes}&mode=${P.mode}&pal=${P.palette}&b=${P.boundary}`;
+  history.replaceState(null,"","#"+q);
+}
+function loadHash(){
+  const h=location.hash.slice(1); if(!h)return false;
+  const q=new URLSearchParams(h), num=(k,d)=>q.has(k)?+q.get(k):d;
+  P.seed=num("seed",P.seed); P.growth=num("g",P.growth); P.repel=num("r",P.repel);
+  P.attract=num("a",P.attract); P.smooth=num("s",P.smooth); P.maxNodes=num("m",P.maxNodes);
+  if(q.get("mode"))P.mode=q.get("mode"); if(q.get("pal"))P.palette=q.get("pal"); if(q.get("b"))P.boundary=q.get("b");
+  return true;
+}
+
+// keyboard affordances (ignore while typing in a field)
+addEventListener("keydown",e=>{
+  if(e.target.tagName==="INPUT"||e.target.tagName==="SELECT")return;
+  if(e.code==="Space"){ e.preventDefault(); $("play").click(); }
+  else if(e.key==="r"||e.key==="R"){ $("reset").click(); }
+  else if(e.key==="n"||e.key==="N"){ $("newbloom").click(); }
+});
+
+loadHash(); reset(); syncUI(); saveHash();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

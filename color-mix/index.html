@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ColorMix — blend two colors &amp; build a step palette</title>
+<meta name="description" content="Free offline color mixer. Blend two colors at any ratio and generate an evenly-stepped palette between them, with copy-ready hex. Great for building tints, ramps and gradients. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/color-mix/">
+<style>
+  :root{
+    --c:#a855f7; --bg:#f8f8f9; --fg:#18181b; --muted:#52525b;
+    --card:#ffffff; --border:#e4e4e7; --code:#efeff1;
+  }
+  [data-theme="dark"]{
+    --bg:#09090b; --fg:#e7e7ea; --muted:#8b8b93; --card:#151518;
+    --border:#27272a; --code:#1c1c20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:760px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#ec4899);display:grid;place-items:center;color:#fff;font-size:16px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:760px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .colorwrap{display:flex;gap:8px;align-items:center}
+  input[type=color]{width:44px;height:44px;padding:0;border:1px solid var(--border);border-radius:10px;background:none;cursor:pointer}
+  input[type=text]{flex:1;width:100%;padding:11px 12px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:1rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .ratio{margin-top:18px}
+  .ratio input[type=range]{width:100%;accent-color:var(--c)}
+  .mixnow{margin-top:12px;display:flex;align-items:center;gap:12px}
+  .mixnow .sw{width:64px;height:44px;border-radius:10px;border:1px solid var(--border)}
+  .mixnow .hx{font-family:ui-monospace,monospace;font-weight:700;font-size:1.2rem;color:var(--c);cursor:pointer;user-select:all}
+  .steps{display:flex;align-items:center;gap:10px;margin-top:18px}
+  .steps input[type=range]{flex:1;accent-color:var(--c)}
+  .ramp{display:flex;margin-top:12px;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .ramp .cell{flex:1;height:66px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:4px;cursor:pointer}
+  .ramp .cell span{font-family:ui-monospace,monospace;font-size:.62rem;background:rgba(255,255,255,.85);color:#111;border-radius:4px;padding:1px 3px}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:760px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+  @media(max-width:520px){.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('cm.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">🎨</div>
+  <div>
+    <h1>ColorMix</h1>
+    <p class="sub">Blend colors &amp; build step palettes</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <div class="row">
+      <div>
+        <label for="aHex">Color A</label>
+        <div class="colorwrap"><input type="color" id="aColor" value="#e11d48"><input type="text" id="aHex" spellcheck="false" value="#e11d48"></div>
+      </div>
+      <div>
+        <label for="bHex">Color B</label>
+        <div class="colorwrap"><input type="color" id="bColor" value="#2563eb"><input type="text" id="bHex" spellcheck="false" value="#2563eb"></div>
+      </div>
+    </div>
+
+    <div class="ratio">
+      <label>Mix ratio <span id="ratioVal" style="color:var(--c);font-family:ui-monospace">50%</span> toward B</label>
+      <input type="range" id="ratio" min="0" max="100" value="50">
+      <div class="mixnow"><div class="sw" id="mixSw"></div><div class="hx" id="mixHex">—</div></div>
+    </div>
+
+    <div class="steps">
+      <label style="margin:0">Palette steps</label>
+      <input type="range" id="stepN" min="2" max="12" value="7">
+      <span id="stepVal" style="font-family:ui-monospace;font-weight:700;color:var(--c)">7</span>
+    </div>
+    <div class="ramp" id="ramp"></div>
+    <p class="hint">Colors are interpolated channel-by-channel in RGB. Click any swatch or the mix value to copy its hex.
+      A step palette makes quick tints/ramps between two brand colors. Runs 100% locally.</p>
+  </div>
+</main>
+<footer>
+  ColorMix is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/color-mix">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function clamp255(x){ x = Math.round(x); return x < 0 ? 0 : x > 255 ? 255 : x; }
+function hexToRgb(hex){
+  var s = String(hex).trim().replace(/^#/, '');
+  if(/^[0-9a-fA-F]{3}$/.test(s)) s = s[0] + s[0] + s[1] + s[1] + s[2] + s[2];
+  if(!/^[0-9a-fA-F]{6}$/.test(s)) return null;
+  return { r: parseInt(s.slice(0, 2), 16), g: parseInt(s.slice(2, 4), 16), b: parseInt(s.slice(4, 6), 16) };
+}
+function rgbToHex(rgb){
+  function h(n){ return clamp255(n).toString(16).padStart(2, '0'); }
+  return '#' + h(rgb.r) + h(rgb.g) + h(rgb.b);
+}
+function mixChannel(a, b, t){ return Math.round(a + (b - a) * t); }
+function mix(hexA, hexB, t){
+  var a = hexToRgb(hexA), b = hexToRgb(hexB);
+  if(!a || !b) return null;
+  t = Math.min(1, Math.max(0, Number(t)));
+  return rgbToHex({ r: mixChannel(a.r, b.r, t), g: mixChannel(a.g, b.g, t), b: mixChannel(a.b, b.b, t) });
+}
+function steps(hexA, hexB, n){
+  n = Math.max(2, Math.floor(n));
+  var out = [];
+  for(var i = 0; i < n; i++) out.push(mix(hexA, hexB, i / (n - 1)));
+  return out;
+}
+
+if(typeof module !== 'undefined') module.exports = { clamp255, hexToRgb, rgbToHex, mixChannel, mix, steps };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var aColor = document.getElementById('aColor'), aHex = document.getElementById('aHex');
+  var bColor = document.getElementById('bColor'), bHex = document.getElementById('bHex');
+  var ratioEl = document.getElementById('ratio'), ratioVal = document.getElementById('ratioVal');
+  var mixSw = document.getElementById('mixSw'), mixHex = document.getElementById('mixHex');
+  var stepN = document.getElementById('stepN'), stepVal = document.getElementById('stepVal');
+  var rampEl = document.getElementById('ramp');
+
+  function textColorFor(hex){
+    var c = hexToRgb(hex); if(!c) return '#000';
+    var lum = (0.299 * c.r + 0.587 * c.g + 0.114 * c.b) / 255;
+    return lum > 0.6 ? '#111' : '#fff';
+  }
+  function render(){
+    if(hexToRgb(aHex.value)) aColor.value = rgbToHex(hexToRgb(aHex.value));
+    if(hexToRgb(bHex.value)) bColor.value = rgbToHex(hexToRgb(bHex.value));
+    var t = +ratioEl.value / 100;
+    ratioVal.textContent = ratioEl.value + '%';
+    stepVal.textContent = stepN.value;
+    var m = mix(aHex.value, bHex.value, t);
+    if(m){ mixSw.style.background = m; mixHex.textContent = m; }
+    else { mixSw.style.background = 'transparent'; mixHex.textContent = '—'; }
+    var pal = (hexToRgb(aHex.value) && hexToRgb(bHex.value)) ? steps(aHex.value, bHex.value, +stepN.value) : [];
+    rampEl.innerHTML = pal.map(function(hex){
+      return '<div class="cell" data-hex="' + hex + '" style="background:' + hex + '"><span style="color:' + textColorFor(hex) + '">' + hex.slice(1) + '</span></div>';
+    }).join('');
+    try{ localStorage.setItem('cm.a', aHex.value); localStorage.setItem('cm.b', bHex.value); localStorage.setItem('cm.ratio', ratioEl.value); localStorage.setItem('cm.n', stepN.value); }catch(e){}
+  }
+  aColor.addEventListener('input', function(){ aHex.value = aColor.value; render(); });
+  bColor.addEventListener('input', function(){ bHex.value = bColor.value; render(); });
+  [aHex, bHex, ratioEl, stepN].forEach(function(x){ x.addEventListener('input', render); });
+  mixHex.addEventListener('click', function(){ if(navigator.clipboard && mixHex.textContent !== '—') navigator.clipboard.writeText(mixHex.textContent); });
+  rampEl.addEventListener('click', function(e){
+    var c = e.target.closest ? e.target.closest('.cell') : null;
+    if(c && navigator.clipboard) navigator.clipboard.writeText(c.getAttribute('data-hex'));
+  });
+  try{
+    var g;
+    if((g = localStorage.getItem('cm.a')) !== null) aHex.value = g;
+    if((g = localStorage.getItem('cm.b')) !== null) bHex.value = g;
+    if((g = localStorage.getItem('cm.ratio')) !== null) ratioEl.value = g;
+    if((g = localStorage.getItem('cm.n')) !== null) stepN.value = g;
+  }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('cm.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('cm.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

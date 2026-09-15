@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>String Hash — FNV-1a & djb2 (non-cryptographic)</title>
+<meta name="description" content="Compute fast non-cryptographic string hashes — FNV-1a and djb2 — in hex and decimal. For hash tables, cache keys, and sharding. Offline, no tracking.">
+<style>
+  :root{
+    --c:#6366f1;
+    --bg:#f5f5fb; --card:#ffffff; --fg:#16162a; --muted:#63637e;
+    --line:#e4e4f1; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#0f0f1a; --card:#181827; --fg:#ececf7; --muted:#9797b6;
+    --line:#282840; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:780px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;font-weight:800;color:#fff;flex:0 0 auto;font-family:ui-monospace,monospace}
+  h1{font-size:1.4rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:780px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.82rem;font-weight:600;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+  textarea{width:100%;font:inherit;font-family:ui-monospace,Menlo,Consolas,monospace;padding:12px;
+    border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);min-height:70px;resize:vertical}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .hash{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+  .hash:last-child{border-bottom:0}
+  .hash .name{flex:0 0 120px;font-weight:700}
+  .hash .name small{display:block;color:var(--muted);font-weight:400;font-size:.76rem}
+  .hash .out{flex:1}
+  .hash .hex{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:1.1rem;color:var(--c)}
+  .hash .dec{color:var(--muted);font-family:ui-monospace,monospace;font-size:.82rem}
+  .hash .copy{background:var(--bg);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:.8rem}
+  .meta{color:var(--muted);font-size:.85rem;margin-top:10px}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">#</div>
+  <div>
+    <h1>String Hash</h1>
+    <p>FNV-1a &amp; djb2 (non-cryptographic)</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <label for="in">Input string (UTF-8)</label>
+    <textarea id="in" spellcheck="false">hello</textarea>
+    <div class="meta" id="bytes"></div>
+    <div style="margin-top:6px">
+      <div class="hash">
+        <div class="name">FNV-1a<small>32-bit</small></div>
+        <div class="out"><div class="hex" id="fnvHex">—</div><div class="dec" id="fnvDec"></div></div>
+        <button class="copy" data-t="fnvHex">Copy</button>
+      </div>
+      <div class="hash">
+        <div class="name">djb2<small>32-bit</small></div>
+        <div class="out"><div class="hex" id="djbHex">—</div><div class="dec" id="djbDec"></div></div>
+        <button class="copy" data-t="djbHex">Copy</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>About</h2>
+    <p class="note">FNV-1a and djb2 are fast <b>non-cryptographic</b> hashes — great for hash tables, cache keys, bloom filters, and sharding, where speed and even distribution matter more than security. They are <em>not</em> collision-resistant and must never be used for passwords or integrity; use SHA-256 for that. Both run over the UTF-8 bytes of your input.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function utf8bytes(str){
+    if(typeof TextEncoder !== 'undefined') return new TextEncoder().encode(String(str));
+    return Array.from(unescape(encodeURIComponent(String(str)))).map(function(c){ return c.charCodeAt(0); });
+  }
+  function fnv1a(str){
+    var h = 0x811c9dc5;
+    var b = utf8bytes(str);
+    for(var i = 0; i < b.length; i++){
+      h ^= b[i];
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h >>> 0;
+  }
+  function djb2(str){
+    var h = 5381;
+    var b = utf8bytes(str);
+    for(var i = 0; i < b.length; i++){
+      h = (Math.imul(h, 33) + b[i]) >>> 0;
+    }
+    return h >>> 0;
+  }
+  function toHex(v){ return '0x' + (v >>> 0).toString(16).toUpperCase().padStart(8, '0'); }
+
+  if(typeof module !== 'undefined') module.exports = { utf8bytes:utf8bytes, fnv1a:fnv1a, djb2:djb2, toHex:toHex };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var inp=document.getElementById('in');
+    function render(){
+      var f = fnv1a(inp.value), d = djb2(inp.value);
+      document.getElementById('fnvHex').textContent = toHex(f);
+      document.getElementById('fnvDec').textContent = f.toString();
+      document.getElementById('djbHex').textContent = toHex(d);
+      document.getElementById('djbDec').textContent = d.toString();
+      document.getElementById('bytes').textContent = utf8bytes(inp.value).length + ' bytes';
+    }
+    inp.addEventListener('input', render);
+    document.querySelectorAll('.copy').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        if(navigator.clipboard) navigator.clipboard.writeText(document.getElementById(btn.getAttribute('data-t')).textContent);
+        var o=btn.textContent; btn.textContent='✓'; setTimeout(function(){ btn.textContent=o; }, 900);
+      });
+    });
+
+    var root=document.documentElement, tb=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); tb.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('strhash-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('strhash-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+
+    render();
+  }
+</script>
+</body>
+</html>

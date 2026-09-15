@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Text Summarizer — extractive TL;DR, offline</title>
+<meta name="description" content="Paste an article and get an instant extractive summary — the most important sentences picked by word-frequency scoring. No AI service, no upload, 100% offline.">
+<style>
+  :root{
+    --c:#e11d48;
+    --bg:#fbf1f3; --card:#ffffff; --fg:#251016; --muted:#75545d;
+    --line:#f2d9df; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#160810; --card:#22101a; --fg:#f7e6ea; --muted:#c0929c;
+    --line:#3a1e26; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:860px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:860px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  textarea{width:100%;min-height:180px;font:inherit;padding:14px;border:1px solid var(--line);border-radius:10px;
+    background:var(--bg);color:var(--fg);resize:vertical;line-height:1.55}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .bar{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:14px}
+  label{font-size:.82rem;font-weight:600;color:var(--muted)}
+  input[type=range]{accent-color:var(--c);flex:1;min-width:140px}
+  .v{font-variant-numeric:tabular-nums;font-weight:700}
+  .summary{margin-top:8px;font-size:1.02rem}
+  .summary p{margin:0 0 10px}
+  .stat{color:var(--muted);font-size:.85rem;margin-top:10px}
+  .btn{background:var(--c);color:#fff;border:0;border-radius:9px;padding:9px 14px;font-weight:600;cursor:pointer;font-size:.88rem}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">✂️</div>
+  <div>
+    <h1>Text Summarizer</h1>
+    <p>Extractive TL;DR — no AI service, all local</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <textarea id="in" placeholder="Paste an article or a few paragraphs here…">The Amazon rainforest is the largest tropical rainforest on Earth. It spans nine countries in South America, with the majority located in Brazil. The forest is home to an astonishing diversity of life, including millions of species of insects, plants, birds, and other organisms. Scientists estimate that a significant portion of these species have not yet been described. The rainforest plays a critical role in regulating the global climate. Its vast number of trees absorb carbon dioxide and release oxygen, which is why it is often called the lungs of the planet. Deforestation, however, threatens this delicate balance. Large areas of forest are cleared each year for agriculture, cattle ranching, and logging. Conservation efforts aim to protect the remaining forest and restore areas that have been damaged. Protecting the Amazon is considered essential for the health of the entire planet.</textarea>
+    <div class="bar">
+      <label for="n">Summary length: <span class="v" id="nv">3</span> sentences</label>
+      <input type="range" id="n" min="1" max="8" value="3" step="1">
+      <button class="btn" id="copy">Copy summary</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Summary</h2>
+    <div class="summary" id="out"></div>
+    <div class="stat" id="stat"></div>
+  </div>
+
+  <div class="card">
+    <h2>How it works</h2>
+    <p class="note">This is an <b>extractive</b> summarizer: it doesn't rewrite anything, it picks the sentences that matter most. It counts how often each meaningful word appears (ignoring common stop-words like "the" and "and"), scores each sentence by the total weight of the words it contains, and keeps the top-scoring ones — presented in their original order so the summary still reads naturally. No machine-learning model, no network calls; everything runs in your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var STOP = new Set(('a an the and or but if then else of to in on at by for with as is are was were be been being it its this that these those i you he she we they them his her their our your my me him us do does did has have had will would can could may might should shall must not no nor so than too very just about over under up down out off into from also more most such only own same other which who whom what when where why how there here all any each few many some'.split(' ')));
+
+  // Lowercase word tokens.
+  function tokenize(text){
+    var m = String(text == null ? '' : text).toLowerCase().match(/[a-z0-9]+(?:'[a-z]+)?/g);
+    return m || [];
+  }
+  // Split prose into sentences on . ! ? keeping trailing quotes/brackets.
+  function splitSentences(text){
+    var m = String(text == null ? '' : text).match(/[^.!?]+[.!?]+["')\]]*|[^.!?]+$/g);
+    if(!m) return [];
+    return m.map(function(s){ return s.trim(); }).filter(function(s){ return s.length > 0; });
+  }
+  // Frequency of each non-stopword content word.
+  function wordFrequencies(text, stop){
+    stop = stop || STOP;
+    var freq = {};
+    tokenize(text).forEach(function(w){ if(!stop.has(w)) freq[w] = (freq[w] || 0) + 1; });
+    return freq;
+  }
+  // Sentence score = sum of the frequencies of its content words.
+  function scoreSentence(sentence, freq){
+    var s = 0;
+    tokenize(sentence).forEach(function(w){ if(Object.prototype.hasOwnProperty.call(freq, w)) s += freq[w]; });
+    return s;
+  }
+  // Pick the top-n sentences by score, returned in original order.
+  function summarize(text, n, stop){
+    n = Math.max(1, Math.floor(Number(n) || 1));
+    var sentences = splitSentences(text);
+    if(sentences.length === 0) return '';
+    if(n >= sentences.length) return sentences.join(' ');
+    var freq = wordFrequencies(text, stop);
+    var scored = sentences.map(function(s, i){ return { s: s, i: i, score: scoreSentence(s, freq) }; });
+    scored.sort(function(a, b){ return b.score - a.score || a.i - b.i; }); // ties: earlier sentence first
+    var chosen = scored.slice(0, n).sort(function(a, b){ return a.i - b.i; }); // restore order
+    return chosen.map(function(x){ return x.s; }).join(' ');
+  }
+
+  if(typeof module !== 'undefined') module.exports = { tokenize:tokenize, splitSentences:splitSentences, wordFrequencies:wordFrequencies, scoreSentence:scoreSentence, summarize:summarize };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var inEl = document.getElementById('in'), nEl = document.getElementById('n');
+    function render(){
+      document.getElementById('nv').textContent = nEl.value;
+      var text = inEl.value;
+      var summary = summarize(text, nEl.value);
+      var out = document.getElementById('out');
+      out.innerHTML = summary ? '<p>' + summary.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</p>' : '<p style="color:var(--muted)">Paste some text above to summarize it.</p>';
+      var srcWords = tokenize(text).length, sumWords = tokenize(summary).length;
+      var srcS = splitSentences(text).length;
+      document.getElementById('stat').textContent = srcWords ? (sumWords + ' of ' + srcWords + ' words · ' + Math.min(Number(nEl.value), srcS) + ' of ' + srcS + ' sentences · ' + (srcWords ? Math.round(sumWords / srcWords * 100) : 0) + '% of the original') : '';
+    }
+    inEl.addEventListener('input', render);
+    nEl.addEventListener('input', render);
+    document.getElementById('copy').addEventListener('click', function(){
+      var t = summarize(inEl.value, nEl.value);
+      if(navigator.clipboard) navigator.clipboard.writeText(t);
+      this.textContent = 'Copied!'; var b = this; setTimeout(function(){ b.textContent = 'Copy summary'; }, 1200);
+    });
+    render();
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('summarizer-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('summarizer-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

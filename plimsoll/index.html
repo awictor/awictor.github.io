@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plimsoll — an Aquarium logic puzzle</title>
+<style>
+  :root{
+    --bg:#0b1a24; --panel:#0f2431; --ink:#e7f2f7; --muted:#7fa6b8;
+    --line:#1f4256; --accent:#38bdf8; --water1:#2b7fb8; --water2:#1f5f8f;
+    --good:#34d399; --bad:#f87171; --sel:#facc15;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:radial-gradient(1200px 700px at 50% -10%,#123244,#0b1a24 60%);
+    color:var(--ink);font:15px/1.45 system-ui,Segoe UI,Roboto,sans-serif;
+    display:flex;flex-direction:column;align-items:center;padding:18px 12px 40px;}
+  h1{margin:0;font-size:26px;letter-spacing:.5px;font-weight:800}
+  h1 span{color:var(--accent)}
+  .tag{color:var(--muted);margin:2px 0 14px;font-size:13px}
+  .wrap{background:var(--panel);border:1px solid var(--line);border-radius:16px;
+    padding:16px;box-shadow:0 20px 60px rgba(0,0,0,.45);max-width:96vw}
+  .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+  button,select{background:#12303f;color:var(--ink);border:1px solid var(--line);
+    border-radius:9px;padding:7px 11px;font:inherit;cursor:pointer;transition:.15s}
+  button:hover,select:hover{background:#17415a;border-color:var(--accent)}
+  button:active{transform:translateY(1px)}
+  button:focus-visible,select:focus-visible,canvas:focus-visible{outline:2px solid var(--sel);outline-offset:2px}
+  button.pri{background:var(--accent);color:#04222f;border-color:var(--accent);font-weight:700}
+  .seg{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .seg button{border:0;border-radius:0;padding:7px 12px}
+  .seg button.on{background:var(--accent);color:#04222f;font-weight:700}
+  canvas{display:block;border-radius:10px;touch-action:manipulation}
+  .status{min-height:22px;margin-top:10px;font-size:13.5px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .status b{color:var(--ink)}
+  .win{color:var(--good);font-weight:700}
+  .streak{margin-left:auto;color:var(--muted)}
+  .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .hint{color:var(--accent)}
+  a.link{color:var(--accent);cursor:pointer;text-decoration:underline}
+  details.help{max-width:560px;width:96vw;margin:0 0 14px;color:var(--muted);font-size:13px;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:2px 14px}
+  details.help summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:13.5px;padding:8px 0}
+  details.help ul{margin:2px 0 10px;padding-left:18px;line-height:1.55}
+  details.help b{color:var(--ink)}
+  @media print{body{background:#fff;color:#000}.bar,.status,.tag,h1 span,details.help{display:none}
+    .wrap{box-shadow:none;border:0}canvas{filter:grayscale(1)}}
+</style>
+</head>
+<body>
+  <h1>Plim<span>soll</span></h1>
+  <div class="tag">Water finds its level. Flood each tank until the margins agree.</div>
+  <details class="help">
+    <summary>How to play</summary>
+    <ul>
+      <li>Each colored region is a <b>tank</b>. Water fills a tank from the <b>bottom up</b>, and its surface is always <b>flat</b> across the tank's full width.</li>
+      <li>The numbers along the <b>top</b> and <b>left</b> count how many <b>watered cells</b> sit in that column / row.</li>
+      <li><b>Click</b> a cell to raise that tank's surface to that row; click the same surface again to <b>drain</b> one level.</li>
+      <li>Mark a tank as empty <b>air</b>: <b>right-click</b> (mouse), <b>long-press</b> (touch), or press <b>A</b> (keyboard).</li>
+      <li>Clues turn <span style="color:#34d399">green&nbsp;✓</span> when satisfied and <span style="color:#f87171">red&nbsp;!</span> when overfilled. Match every clue to win.</li>
+      <li>Arrow keys move the cursor; Enter/Space set the surface; Ctrl+Z / Ctrl+Y undo / redo. Stuck? <b>Hint</b> explains one forced move.</li>
+    </ul>
+  </details>
+  <div class="wrap">
+    <div class="bar">
+      <div class="seg" role="group" aria-label="Difficulty">
+        <button data-d="easy" class="on">Easy</button>
+        <button data-d="medium">Medium</button>
+        <button data-d="hard">Hard</button>
+      </div>
+      <button id="new">New</button>
+      <button id="daily">Daily</button>
+      <button id="undo" aria-label="Undo">↶ Undo</button>
+      <button id="redo" aria-label="Redo">↷ Redo</button>
+      <button id="hint">Hint</button>
+      <button id="solve">Auto-solve</button>
+      <button id="share">Share board</button>
+      <button id="print">Print</button>
+    </div>
+    <canvas id="cv" tabindex="0" role="application"
+      aria-label="Aquarium puzzle grid. Arrow keys move the cursor, Enter sets the water surface at the cursor, A marks the tank as air."></canvas>
+    <div class="status">
+      <span id="msg">Click a cell to set that tank's water surface. Match every row and column clue.</span>
+      <span class="streak" id="streakBox"></span>
+    </div>
+    <div class="sr" aria-live="polite" id="live"></div>
+  </div>
+<script>
+"use strict";
+// ---------- utilities ----------
+const $=id=>document.getElementById(id);
+function seedRng(s){let h=1779033703^s.length;for(let i=0;i<s.length;i++){h=Math.imul(h^s.charCodeAt(i),3432918353);h=h<<13|h>>>19;}
+  let a=h>>>0;return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+const b36="0123456789abcdefghijklmnopqrstuvwxyz";
+
+// ---------- puzzle model ----------
+// Board carved into tanks. A tank's state = fill "level" index (0=empty ... max=full).
+// Level i -> surface row: i===0 -> N (empty); else rowsDesc[i-1]. Cell (r,c) is water iff r>=surface.
+const CFG={easy:{N:5,T:5},medium:{N:6,T:7},hard:{N:7,T:8}};
+let N,diff,tankOf,tanks,colClue,rowClue,colTanks,rowTanks,solution,player,disp,history,future,cursor,startTs,daily,won;
+
+function neighbors(idx){const r=idx/N|0,c=idx%N,o=[];if(r>0)o.push(idx-N);if(r<N-1)o.push(idx+N);if(c>0)o.push(idx-1);if(c<N-1)o.push(idx+1);return o;}
+function growTanks(n,T,rng){
+  N=n;const cells=[...Array(N*N).keys()];
+  for(let i=cells.length-1;i>0;i--){const j=(rng()*(i+1))|0;[cells[i],cells[j]]=[cells[j],cells[i]];}
+  const of=new Array(N*N).fill(-1),frontier=[];
+  for(let t=0;t<T;t++){const c=cells[t];of[c]=t;neighbors(c).forEach(nb=>frontier.push([nb,t]));}
+  while(frontier.length){const i=(rng()*frontier.length)|0,[c,t]=frontier.splice(i,1)[0];
+    if(of[c]!==-1)continue;of[c]=t;neighbors(c).forEach(nb=>{if(of[nb]===-1)frontier.push([nb,t]);});}
+  for(let i=0;i<of.length;i++)if(of[i]===-1)of[i]=of[neighbors(i).find(nb=>of[nb]!==-1)];
+  return of;
+}
+function buildMeta(of){
+  const T=Math.max(...of)+1,ts=[...Array(T)].map(()=>({cells:[],rows:new Set(),colRows:{},rowCount:{}}));
+  for(let idx=0;idx<of.length;idx++){const r=idx/N|0,c=idx%N,t=of[idx],k=ts[t];
+    k.cells.push(idx);k.rows.add(r);(k.colRows[c]=k.colRows[c]||[]).push(r);k.rowCount[r]=(k.rowCount[r]||0)+1;}
+  ts.forEach(k=>{k.rowsDesc=[...k.rows].sort((a,b)=>b-a);k.max=k.rowsDesc.length;
+    Object.values(k.colRows).forEach(a=>a.sort((x,y)=>x-y));});
+  tanks=ts;colTanks=[...Array(N)].map(()=>[]);rowTanks=[...Array(N)].map(()=>[]);
+  ts.forEach((k,t)=>{Object.keys(k.colRows).forEach(c=>colTanks[+c].push(t));
+    [...k.rows].forEach(r=>rowTanks[r].push(t));});
+}
+const surf=(t,i)=>i===0?N:tanks[t].rowsDesc[i-1];
+function contribCol(t,c,i){const s=surf(t,i),a=tanks[t].colRows[c];let n=0;for(const r of a)if(r>=s)n++;return n;}
+function contribRow(t,r,i){return r>=surf(t,i)?(tanks[t].rowCount[r]||0):0;}
+function computeClues(lv){
+  colClue=new Array(N).fill(0);rowClue=new Array(N).fill(0);
+  tanks.forEach((k,t)=>{for(const c in k.colRows)colClue[+c]+=contribCol(t,+c,lv[t]);
+    for(const r of k.rows)rowClue[r]+=contribRow(t,r,lv[t]);});
+}
+// arc-consistency; optional trace of deductions with named technique
+function propagate(doms,trace){
+  const done=new Set();doms.forEach((d,t)=>{if(d.length===1)done.add(t);});
+  for(let loop=0;loop<200;loop++){let changed=false;
+    const lines=[];
+    for(let c=0;c<N;c++)lines.push([colClue[c],colTanks[c],(t,i)=>contribCol(t,c,i)]);
+    for(let r=0;r<N;r++)lines.push([rowClue[r],rowTanks[r],(t,i)=>contribRow(t,r,i)]);
+    for(const[clue,ts,f]of lines){
+      const undet=ts.filter(t=>doms[t].length>1).length;
+      const mm=ts.map(t=>{const d=doms[t];return[f(t,d[0]),f(t,d[d.length-1])];});
+      let sMin=0,sMax=0;mm.forEach(m=>{sMin+=m[0];sMax+=m[1];});
+      if(clue<sMin||clue>sMax)return false;
+      for(let x=0;x<ts.length;x++){const t=ts[x];
+        const lo=clue-(sMax-mm[x][1]),hi=clue-(sMin-mm[x][0]);
+        const nd=doms[t].filter(i=>{const v=f(t,i);return v>=lo&&v<=hi;});
+        if(nd.length<doms[t].length){if(!nd.length)return false;doms[t]=nd;changed=true;
+          if(nd.length===1&&!done.has(t)){done.add(t);
+            if(trace)trace.push({t,value:nd[0],technique:undet<=1?'exhaustion':undet===2?'bounds':'interaction'});}}
+      }
+    }
+    if(!changed)break;
+  }
+  return true;
+}
+function fullDoms(){return tanks.map(k=>[...Array(k.max+1).keys()]);}
+// exhaustion-only solver: repeatedly force any line with a single undetermined tank
+function exhaustSolves(){
+  const d=fullDoms();
+  for(let loop=0;loop<200;loop++){let ch=false;
+    const lines=[];
+    for(let c=0;c<N;c++)lines.push([colClue[c],colTanks[c],(t,i)=>contribCol(t,c,i)]);
+    for(let r=0;r<N;r++)lines.push([rowClue[r],rowTanks[r],(t,i)=>contribRow(t,r,i)]);
+    for(const[clue,ts,f]of lines){const und=ts.filter(t=>d[t].length>1);if(und.length!==1)continue;
+      const t=und[0];let fx=clue;for(const o of ts)if(o!==t)fx-=f(o,d[o][0]);
+      const nd=d[t].filter(i=>f(t,i)===fx);if(nd.length&&nd.length<d[t].length){d[t]=nd;ch=true;}}
+    if(!ch)break;}
+  return d.every(x=>x.length===1);
+}
+// from full domains, is any line occupied by exactly one tank? (exhaustion can begin there)
+function exhaustCanStart(){return colTanks.some(a=>a.length===1)||rowTanks.some(a=>a.length===1);}
+
+// ---------- generation (technique-tiered + unique) ----------
+// Arc-consistency is complete for this waterline CSP, so a fully-singleton propagation
+// result == a unique solution. Tiers ride the deduction-technique ladder:
+//   easy  = solvable by clue exhaustion alone
+//   medium= needs per-tank fill bounds, but a single-tank line lets exhaustion open
+//   hard  = no single-tank line exists, so you must open with bounds/cross-tank reasoning
+function generate(rng){
+  const{N:n,T}=CFG[diff];let fallback=null;
+  for(let att=0;att<700;att++){
+    tankOf=growTanks(n,T,rng);buildMeta(tankOf);
+    const lv=tanks.map(k=>(rng()*(k.max+1))|0);
+    if(lv.every(x=>x===0)||lv.every((x,i)=>x===tanks[i].max))continue;
+    solution=lv;computeClues(lv);
+    const doms=fullDoms(),trace=[];
+    if(!propagate(doms,trace)||!doms.every(d=>d.length===1))continue; // must be uniquely AC-solvable
+    if(!fallback)fallback={tankOf,solution,trace:trace.slice(),colClue:colClue.slice(),rowClue:rowClue.slice()};
+    const l1=exhaustSolves(),start=exhaustCanStart();
+    let ok;
+    if(diff==='easy')ok=l1;
+    else if(diff==='medium')ok=!l1&&start;
+    else ok=!l1&&!start;
+    if(ok){lastTrace=trace;return;}
+  }
+  tankOf=fallback.tankOf;buildMeta(tankOf);solution=fallback.solution;
+  colClue=fallback.colClue;rowClue=fallback.rowClue;lastTrace=fallback.trace;
+}
+let lastTrace=[];
+
+// ---------- serialization ----------
+function encodeBoard(){
+  return N.toString(36)+diff[0]+"."+tankOf.map(t=>b36[t]).join("")+"."+solution.map(v=>b36[v]).join("");
+}
+function decodeBoard(h){
+  try{const[head,cells,sol]=h.split(".");const n=parseInt(head[0],36);
+    const dm={e:"easy",m:"medium",h:"hard"}[head[1]];if(!dm||!cells)return false;
+    diff=dm;setSeg();N=n;tankOf=[...cells].map(ch=>parseInt(ch,36));buildMeta(tankOf);
+    solution=[...sol].map(ch=>parseInt(ch,36));computeClues(solution);
+    const tr=[];propagate(fullDoms(),tr);lastTrace=tr;startGame(false);return true;
+  }catch(e){return false;}
+}
+
+// ---------- game lifecycle ----------
+function startGame(setHash){
+  player=tanks.map(()=>0);disp=tanks.map(()=>N);future=[];history=[];
+  cursor=0;won=false;startTs=Date.now();
+  if(setHash)location.hash=encodeBoard();
+  layout();updateStreak();setMsg(daily?"Daily puzzle — solve it to keep your streak.":"Click a cell to set that tank's water surface.");
+  draw();
+}
+function newBoard(){daily=false;generate(seedRng("r"+Math.random()+Date.now()));startGame(true);}
+function newDaily(){
+  daily=true;diff="medium";setSeg();const d=new Date();
+  const ds=d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate();
+  generate(seedRng("plimsoll-daily-"+ds));startGame(true);
+}
+
+// ---------- interaction ----------
+function pushHist(){history.push(player.slice());if(history.length>200)history.shift();future=[];}
+function setSurfaceAt(idx){
+  if(won)return;const t=tankOf[idx],r=idx/N|0,k=tanks[t];
+  let lvl=k.rowsDesc.indexOf(r)+1;               // level whose surface == row r
+  if(player[t]===lvl)lvl=Math.max(0,lvl-1);       // click same surface -> drain one
+  if(lvl!==player[t]){pushHist();player[t]=lvl;afterMove();}
+}
+function setAir(idx){const t=tankOf[idx];if(!won&&player[t]!==0){pushHist();player[t]=0;afterMove();}}
+function afterMove(){draw();checkWin();}
+function undo(){if(history.length){future.push(player.slice());player=history.pop();draw();checkWin();}}
+function redo(){if(future.length){history.push(player.slice());player=future.pop();draw();checkWin();}}
+function checkWin(){
+  if(won)return;
+  if(player.every((v,i)=>v===solution[i])){won=true;winTs=performance.now();
+    const t=Math.round((Date.now()-startTs)/1000);
+    if(daily)recordDaily(t);              // bump streak BEFORE composing the share line
+    setMsg(`Solved in ${fmt(t)}. `+(daily?"":"Nicely done — try Daily or a harder tier."),"win");
+    if(daily)shareLine(t);
+  }
+}
+function fmt(s){return Math.floor(s/60)+":"+String(s%60).padStart(2,"0");}
+function hint(){
+  if(won){setMsg("Already solved!");return;}
+  for(const step of lastTrace){
+    if(player[step.t]!==step.value){
+      pushHist();player[step.t]=step.value;afterMove();
+      const names={exhaustion:"Clue exhaustion",bounds:"Per-tank fill bounds",interaction:"Cross-tank interaction"};
+      const why={exhaustion:"this tank is the only one left affecting a clue, so its water level is fixed",
+        bounds:"the min/max water each tank can hold squeezes this tank to one level",
+        interaction:"combining several row and column clues pins this tank"};
+      setMsg(`Hint — ${names[step.technique]}: `+why[step.technique]+".","hint");return;
+    }
+  }
+  // nothing in trace deducible/wrong -> reveal a wrong tank as cross-tank interaction
+  for(let t=0;t<tanks.length;t++)if(player[t]!==solution[t]){pushHist();player[t]=solution[t];afterMove();
+    setMsg("Hint — Cross-tank interaction: this level follows only from testing how the tanks fit together.","hint");return;}
+  setMsg("Every deducible tank is already correct.");
+}
+function autosolve(){
+  if(won)return;pushHist();
+  if(reduceMotion){tanks.forEach((k,t)=>player[t]=solution[t]);draw();checkWin();setMsg("Auto-solved.");return;}
+  const order=[...tanks.keys()];
+  order.forEach((t,i)=>setTimeout(()=>{player[t]=solution[t];draw();if(i===order.length-1)checkWin();},i*130));
+  setMsg("Auto-solving with the waterline constraint solver…");
+}
+
+// ---------- streak / share ----------
+function lsKey(){return "plimsoll_streak";}
+function getStreak(){try{return JSON.parse(localStorage.getItem(lsKey()))||{n:0,last:""};}catch(e){return{n:0,last:""};}}
+function dayStr(off=0){const d=new Date(Date.now()-off*864e5);return d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate();}
+function recordDaily(t){
+  try{const s=getStreak(),today=dayStr();if(s.last===today)return;
+    s.n=(s.last===dayStr(1))?s.n+1:1;s.last=today;s.time=t;
+    localStorage.setItem(lsKey(),JSON.stringify(s));updateStreak();
+  }catch(e){/* storage blocked (file://, private mode, quota) — streak just won't persist */}
+}
+function updateStreak(){const s=getStreak();$("streakBox").textContent=s.n?`🔥 streak ${s.n}`:"";}
+function copyText(text,onOk,onFail){
+  // navigator.clipboard is undefined on file:// (insecure context); writeText can also reject
+  if(navigator.clipboard&&navigator.clipboard.writeText)
+    navigator.clipboard.writeText(text).then(onOk,onFail);
+  else onFail();
+}
+function shareLine(t){
+  // spoiler-free decorative wave seeded by the day (same for everyone), + time + difficulty
+  const rng=seedRng("wave-"+dayStr()),blocks=["🟦","🟦","🟦","🟦","⬜"];let g="";
+  for(let r=0;r<3;r++){for(let c=0;c<6;c++)g+=blocks[(rng()*blocks.length)|0];g+="\n";}
+  const txt=`Plimsoll Daily ${dayStr()} 🌊\nMedium · ${fmt(t)} · streak ${getStreak().n||1}\n`+g;
+  const base=$("msg").textContent;
+  copyText(txt,
+    ()=>setMsg(base+" Result copied — paste it to share (no solution leaked).","win"),
+    ()=>setMsg(base+" Couldn't reach the clipboard here — copy your result:\n"+txt,"win"));
+}
+function shareBoard(){location.hash=encodeBoard();
+  copyText(location.href,
+    ()=>setMsg("Board link copied to clipboard."),
+    ()=>setMsg("Board link is now in your address bar — copy it to share."));}
+
+// ---------- rendering ----------
+let cell=46,gut=0,winTs=0,hover=-1;
+const cv=$("cv"),ctx=cv.getContext("2d");
+const reduceMotion=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+function layout(){
+  const maxW=Math.min(window.innerWidth-60,560);
+  gut=Math.max(30,Math.floor(maxW/(N+1)/1.5));
+  cell=Math.floor((maxW-gut)/N);
+  const dpr=window.devicePixelRatio||1,W=gut+cell*N,H=gut+cell*N;
+  cv.width=W*dpr;cv.height=H*dpr;cv.style.width=W+"px";cv.style.height=H+"px";
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+function colWater(){const a=new Array(N).fill(0);tanks.forEach((k,t)=>{for(const c in k.colRows)a[+c]+=contribCol(t,+c,player[t]);});return a;}
+function rowWater(){const a=new Array(N).fill(0);tanks.forEach((k,t)=>{for(const r of k.rows)a[r]+=contribRow(t,r,player[t]);});return a;}
+function draw(){
+  const W=gut+cell*N;ctx.clearRect(0,0,W,W);
+  const cw=colWater(),rw=rowWater();
+  // clue gutters
+  ctx.textAlign="center";ctx.textBaseline="middle";
+  for(let c=0;c<N;c++)clue(gut+c*cell+cell/2,gut/2,colClue[c],cw[c]);
+  for(let r=0;r<N;r++)clue(gut/2,gut+r*cell+cell/2,rowClue[r],rw[r]);
+  // tank tints (hovered tank gets a subtle lightness bump so its extent is visible)
+  const hoverT=hover>=0?tankOf[hover]:-1;
+  for(let idx=0;idx<N*N;idx++){const r=idx/N|0,c=idx%N,t=tankOf[idx];
+    ctx.fillStyle=`hsl(${(t*57)%360} 30% ${13+((t*13)%8)+(t===hoverT?7:0)}%)`;
+    ctx.fillRect(gut+c*cell,gut+r*cell,cell,cell);}
+  // water per column (connected sheet), animated + ripple
+  const now=performance.now()/1000;
+  for(let idx=0;idx<N*N;idx++){const r=idx/N|0,c=idx%N,t=tankOf[idx];
+    const x=gut+c*cell,cellTop=gut+r*cell,cellBot=cellTop+cell;
+    let topY=gut+disp[t]*cell;
+    if(topY>=cellBot)continue;
+    const isSurf=topY>cellTop-cell&&topY>=cellTop;
+    const wig=(isSurf&&!reduceMotion)?Math.sin(now*2.4+c*0.9+t)*Math.min(3,cell*0.07):0;
+    const y=Math.max(cellTop,topY+wig);
+    if(y<cellBot){const g=ctx.createLinearGradient(0,y,0,cellBot);
+      g.addColorStop(0,"#5cc6f0");g.addColorStop(.25,"#2b7fb8");g.addColorStop(1,"#153f5f");
+      ctx.fillStyle=g;ctx.fillRect(x,y,cell,cellBot-y);
+      if(isSurf){ctx.fillStyle="rgba(255,255,255,.35)";ctx.fillRect(x,y,cell,1.5);}}
+  }
+  // tank borders
+  ctx.lineWidth=2.4;ctx.strokeStyle="#0a1620";
+  for(let idx=0;idx<N*N;idx++){const r=idx/N|0,c=idx%N,t=tankOf[idx],x=gut+c*cell,yy=gut+r*cell;
+    ctx.beginPath();
+    if(r===0||tankOf[idx-N]!==t){ctx.moveTo(x,yy);ctx.lineTo(x+cell,yy);}
+    if(c===0||tankOf[idx-1]!==t){ctx.moveTo(x,yy);ctx.lineTo(x,yy+cell);}
+    if(r===N-1){ctx.moveTo(x,yy+cell);ctx.lineTo(x+cell,yy+cell);}
+    if(c===N-1){ctx.moveTo(x+cell,yy);ctx.lineTo(x+cell,yy+cell);}
+    ctx.stroke();}
+  // faint inner grid
+  ctx.lineWidth=1;ctx.strokeStyle="rgba(120,170,200,.12)";
+  for(let i=0;i<=N;i++){ctx.beginPath();ctx.moveTo(gut+i*cell,gut);ctx.lineTo(gut+i*cell,gut+N*cell);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(gut,gut+i*cell);ctx.lineTo(gut+N*cell,gut+i*cell);ctx.stroke();}
+  // cursor
+  const cr=cursor/N|0,cc=cursor%N;
+  ctx.lineWidth=3;ctx.strokeStyle="#facc15";
+  ctx.strokeRect(gut+cc*cell+2,gut+cr*cell+2,cell-4,cell-4);
+  // win glow
+  if(won){const grow=Math.min(.4,(performance.now()-winTs)/600*.4);
+    const a=reduceMotion?.28:grow*Math.abs(Math.sin(now*2));
+    ctx.fillStyle=`rgba(52,211,153,${a})`;
+    ctx.fillRect(gut,gut,cell*N,cell*N);}
+}
+function clue(x,y,val,cur){
+  ctx.font="bold "+Math.floor(gut*0.42)+"px system-ui";
+  if(cur>val){ctx.fillStyle="rgba(248,113,113,.22)";roundRect(x-gut*0.42,y-gut*0.32,gut*0.84,gut*0.64,6);ctx.fill();
+    ctx.fillStyle="#f87171";ctx.fillText(val+"!",x,y);}          // overfilled — color + "!"
+  else if(cur===val){ctx.fillStyle="#34d399";ctx.fillText(val+"✓",x,y);} // satisfied — color + check
+  else{ctx.fillStyle="#7fa6b8";ctx.fillText(""+val,x,y);}
+}
+function roundRect(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+
+// ---------- animation loop ----------
+function tick(){let need=false;
+  for(let t=0;t<tanks.length;t++){const target=surf(t,player[t]),d=target-disp[t];
+    if(reduceMotion){disp[t]=target;}
+    else if(Math.abs(d)>0.01){disp[t]+=d*0.22;need=true;}else disp[t]=target;}
+  if(need||(won&&!reduceMotion))draw();requestAnimationFrame(tick);}
+
+// ---------- input ----------
+function hit(e){const rect=cv.getBoundingClientRect();
+  const x=(e.clientX-rect.left-gut)/cell,y=(e.clientY-rect.top-gut)/cell;
+  if(x<0||y<0||x>=N||y>=N)return-1;return((y|0)*N)+(x|0);}
+cv.addEventListener("click",e=>{const i=hit(e);if(i>=0){cursor=i;setSurfaceAt(i);cv.focus();}});
+cv.addEventListener("contextmenu",e=>{e.preventDefault();const i=hit(e);if(i>=0){cursor=i;setAir(i);}});
+cv.addEventListener("mousemove",e=>{const i=hit(e);if(i!==hover){hover=i;draw();}});
+cv.addEventListener("mouseleave",()=>{if(hover!==-1){hover=-1;draw();}});
+// touch: long-press marks the tank as air (the desktop right-click / 'A' has no touch analogue)
+let tpTimer=null,tpFired=false;
+cv.addEventListener("touchstart",e=>{const tt=e.touches[0],i=hit({clientX:tt.clientX,clientY:tt.clientY});
+  if(i<0)return;tpFired=false;
+  tpTimer=setTimeout(()=>{tpFired=true;cursor=i;setAir(i);if(navigator.vibrate)navigator.vibrate(30);},450);},{passive:true});
+cv.addEventListener("touchmove",()=>{if(tpTimer){clearTimeout(tpTimer);tpTimer=null;}},{passive:true});
+cv.addEventListener("touchend",e=>{if(tpTimer){clearTimeout(tpTimer);tpTimer=null;}
+  if(tpFired)e.preventDefault();},{passive:false});// suppress the synthetic click after a long-press
+cv.addEventListener("keydown",e=>{const r=cursor/N|0,c=cursor%N;let k=e.key;
+  if(k==="ArrowUp"&&r>0)cursor-=N;else if(k==="ArrowDown"&&r<N-1)cursor+=N;
+  else if(k==="ArrowLeft"&&c>0)cursor--;else if(k==="ArrowRight"&&c<N-1)cursor++;
+  else if(k==="Enter"||k===" ")setSurfaceAt(cursor);
+  else if(k==="a"||k==="A"||k==="Delete"||k==="Backspace")setAir(cursor);
+  else if(k==="z"&&(e.ctrlKey||e.metaKey))undo();else if(k==="y"&&(e.ctrlKey||e.metaKey))redo();
+  else return;e.preventDefault();draw();announce();});
+function announce(){const t=tankOf[cursor],lvl=player[t],r=cursor/N|0,c=cursor%N;
+  $("live").textContent=`Cell row ${r+1} column ${c+1}, tank ${t+1}, water level ${lvl} of ${tanks[t].max}.`;}
+
+// ---------- ui wiring ----------
+function setSeg(){document.querySelectorAll("[data-d]").forEach(b=>{const on=b.dataset.d===diff;
+  b.classList.toggle("on",on);b.setAttribute("aria-pressed",on);});}
+function setMsg(m,cls){const el=$("msg");el.textContent=m;el.className=cls==="win"?"win":cls==="hint"?"hint":"";
+  $("live").textContent=m;}
+document.querySelectorAll("[data-d]").forEach(b=>b.addEventListener("click",()=>{diff=b.dataset.d;setSeg();newBoard();}));
+$("new").onclick=newBoard;$("daily").onclick=newDaily;$("undo").onclick=undo;$("redo").onclick=redo;
+$("hint").onclick=hint;$("solve").onclick=autosolve;$("share").onclick=shareBoard;$("print").onclick=()=>window.print();
+window.addEventListener("resize",()=>{layout();draw();});
+
+// ---------- boot ----------
+diff="easy";
+if(!(location.hash.length>3&&decodeBoard(location.hash.slice(1)))){newBoard();}
+tick();
+</script>
+</body>
+</html>

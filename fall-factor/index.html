@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fall Factor 🧗 — Climbing Fall Severity &amp; Impact Force</title>
+<meta name="description" content="Compute a climbing fall factor and the estimated peak rope impact force from fall length, rope out, and climber weight. Offline, private, single file.">
+<style>
+:root{
+  --c:#ea580c;
+  --bg:#f6f8fa; --card:#fff; --fg:#1a1f24; --muted:#5a6470; --line:#e2e6ea;
+}
+[data-theme="dark"]{
+  --bg:#0b1016; --card:#141b23; --fg:#e6edf3; --muted:#8b98a6; --line:#232d38;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.55;transition:background .2s,color .2s}
+.wrap{max-width:640px;margin:0 auto;padding:24px 18px 60px}
+header{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.logo{font-size:2.2rem;line-height:1}
+h1{font-size:1.5rem;margin:0}
+.tag{color:var(--muted);margin:2px 0 22px;font-size:.98rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:18px}
+label{display:block;font-weight:600;margin:14px 0 6px;font-size:.92rem}
+input{width:100%;padding:11px 12px;font-size:1rem;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--fg)}
+input:focus{outline:2px solid var(--c);border-color:var(--c)}
+.out{margin-top:20px;padding:18px;border-radius:12px;background:linear-gradient(135deg,var(--c)20,transparent);border:1px solid var(--c)}
+.big{font-size:2rem;font-weight:700;color:#c2410c}
+[data-theme="dark"] .big{color:#fdba74}
+.sub{color:var(--muted);font-size:.9rem;margin-top:4px}
+table{width:100%;border-collapse:collapse;margin-top:8px;font-size:.95rem}
+th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:600}
+td:last-child{text-align:right;font-weight:700}
+.explain{font-size:.9rem;color:var(--muted)}
+.explain h2{font-size:1rem;color:var(--fg);margin:0 0 8px}
+.explain li{margin:4px 0}
+footer{text-align:center;color:var(--muted);font-size:.85rem;margin-top:30px}
+footer a{color:var(--c);text-decoration:none}
+.theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:7px 11px;cursor:pointer;font-size:1.1rem}
+.note{background:var(--bg);border:1px dashed var(--c);border-radius:9px;padding:10px 12px;font-size:.86rem;color:var(--muted);margin-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <span class="logo">🧗</span>
+  <h1>Fall Factor</h1>
+  <button class="theme" id="themeBtn" title="Toggle theme">🌙</button>
+</header>
+<p class="tag">Fall severity and the rope's peak impact force.</p>
+
+<div class="card">
+  <label for="fall">Fall length (m)</label>
+  <input type="number" id="fall" value="4" min="0" step="0.5">
+
+  <label for="rope">Rope out from belayer (m)</label>
+  <input type="number" id="rope" value="8" min="0.1" step="0.5">
+
+  <label for="mass">Climber weight (kg)</label>
+  <input type="number" id="mass" value="80" min="1" step="1">
+
+  <label for="modulus">Rope modulus (kN)</label>
+  <input type="number" id="modulus" value="22" min="1" step="1">
+
+  <div class="out">
+    <div class="big" id="ffOut">—</div>
+    <div class="sub">Fall factor (fall &divide; rope out)</div>
+    <table>
+      <tr><th>Detail</th><th>Value</th></tr>
+      <tr><td>Severity</td><td id="sevOut">—</td></tr>
+      <tr><td>Peak impact force</td><td id="forceOut">—</td></tr>
+      <tr><td>Force in kN</td><td id="knOut">—</td></tr>
+    </table>
+    <div class="note" id="note"></div>
+  </div>
+</div>
+
+<div class="card explain">
+  <h2>How it works</h2>
+  <ul>
+    <li><strong>Fall factor</strong> = fall length &divide; rope paid out. It ranges 0–2 in normal climbing (2 is a fall directly onto the belay with no rope to absorb it).</li>
+    <li>The counterintuitive part: impact force depends on the <strong>factor, not the height</strong>. A short fall on little rope can hit harder than a long fall on lots of rope.</li>
+    <li>Peak force &asymp; mg + &radic;((mg)&sup2; + 2&thinsp;mg&thinsp;R&thinsp;f), treating the rope as a spring of modulus R.</li>
+    <li>More rope out means more stretch to absorb the fall — softer catch, lower force. Dynamic ropes keep peak force under the UIAA 12 kN limit even at factor 2.</li>
+    <li>Idealized model for learning; real forces depend on knots, belay slippage, friction, and rope age.</li>
+  </ul>
+</div>
+
+<footer>Part of the <a href="https://awictor.github.io/toolkit/" target="_blank" rel="noopener">Toolkit</a> · offline &amp; private · no data leaves your device</footer>
+</div>
+
+<script>
+var G = 9.81;
+
+function fallFactor(fallLength, ropeOut){
+  if(!(fallLength >= 0)) throw new Error("fall length must be zero or more");
+  if(!(ropeOut > 0)) throw new Error("rope out must be positive");
+  return fallLength / ropeOut;
+}
+function impactForce(massKg, factor, ropeModulusN){
+  if(!(massKg > 0)) throw new Error("mass must be positive");
+  if(!(factor >= 0)) throw new Error("fall factor must be zero or more");
+  if(!(ropeModulusN > 0)) throw new Error("rope modulus must be positive");
+  var mg = massKg * G;
+  return mg + Math.sqrt(mg * mg + 2 * mg * ropeModulusN * factor);
+}
+function severity(factor){
+  if(factor < 0.5) return "mild";
+  if(factor < 1) return "moderate";
+  if(factor < 1.5) return "severe";
+  return "extreme";
+}
+
+function render(){
+  var fall = parseFloat(document.getElementById("fall").value);
+  var rope = parseFloat(document.getElementById("rope").value);
+  var mass = parseFloat(document.getElementById("mass").value);
+  var mod = parseFloat(document.getElementById("modulus").value) * 1000;
+  var fO = document.getElementById("ffOut"), sO = document.getElementById("sevOut"),
+      foO = document.getElementById("forceOut"), kO = document.getElementById("knOut"),
+      note = document.getElementById("note");
+  try{
+    var ff = fallFactor(fall, rope);
+    var force = impactForce(mass, ff, mod);
+    fO.textContent = (Math.round(ff * 100) / 100).toFixed(2);
+    sO.textContent = severity(ff);
+    foO.textContent = Math.round(force).toLocaleString() + " N";
+    kO.textContent = (Math.round(force / 100) / 10) + " kN";
+    note.textContent = force / 1000 > 12 ? "Above the 12 kN UIAA limit — idealized; real ropes soften this." : "Idealized model; knots, belay slip, and friction reduce real force.";
+  }catch(e){
+    fO.textContent = "—"; sO.textContent = "—"; foO.textContent = "—"; kO.textContent = "—";
+    note.textContent = "Enter a fall length, rope out, and climber weight.";
+  }
+}
+
+(function(){
+  if(typeof document === "undefined") return;
+  var th = localStorage.getItem("fallFactorTheme") || "dark";
+  document.documentElement.setAttribute("data-theme", th);
+  var btn = document.getElementById("themeBtn");
+  btn.textContent = th === "dark" ? "☀️" : "🌙";
+  btn.addEventListener("click", function(){
+    var cur = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", cur);
+    localStorage.setItem("fallFactorTheme", cur);
+    btn.textContent = cur === "dark" ? "☀️" : "🌙";
+  });
+  ["fall", "rope", "mass", "modulus"].forEach(function(id){
+    document.getElementById(id).addEventListener("input", render);
+  });
+  render();
+})();
+
+if(typeof module !== 'undefined') module.exports = { fallFactor, impactForce, severity, G };
+</script>
+</body>
+</html>

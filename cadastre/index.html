@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cadastre — carve the plat into parcels</title>
+<style>
+  :root{
+    --parch:#efe3c9; --parch2:#e7d7b6; --ink:#3a2f26; --ink2:#5b4a38;
+    --line:#c6b088; --accent:#8a5a2b; --gold:#c8912f; --bad:#b23a2e;
+    --panel:#f6ecd6;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    font-family:"Iowan Old Style","Palatino Linotype",Georgia,serif;
+    background:
+      radial-gradient(120% 90% at 50% -10%, #f7eed8 0%, #e9dabb 55%, #ddc99f 100%);
+    color:var(--ink); min-height:100vh; padding:14px; -webkit-text-size-adjust:100%;
+  }
+  h1{font-size:26px;letter-spacing:2px;margin:0 0 2px;text-transform:uppercase;color:var(--accent)}
+  .tag{font-size:12.5px;color:var(--ink2);margin:0 0 12px;font-style:italic}
+  .wrap{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;max-width:1000px}
+  .left{flex:0 0 auto}
+  .right{flex:1 1 240px;min-width:230px;max-width:340px}
+  .board-frame{
+    background:var(--panel);border:2px solid var(--accent);
+    padding:10px;border-radius:4px;
+    box-shadow:0 2px 0 #b99a63, 0 10px 26px rgba(80,55,20,.25);
+  }
+  canvas{display:block;touch-action:none;border-radius:2px;cursor:crosshair;outline:none}
+  canvas:focus-visible{box-shadow:0 0 0 3px rgba(200,145,47,.6)}
+  .hud{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;margin:8px 2px 2px;color:var(--ink2)}
+  .hud b{color:var(--ink);font-variant-numeric:tabular-nums}
+  .tiers{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+  button,select{
+    font-family:inherit;font-size:13px;color:var(--ink);
+    background:linear-gradient(#faf3e0,#eaddc0);border:1px solid var(--accent);
+    padding:6px 10px;border-radius:4px;cursor:pointer;transition:.12s;
+  }
+  button:hover{background:linear-gradient(#fff7e6,#efe2c6)}
+  button:active{transform:translateY(1px)}
+  button.on{background:var(--accent);color:#f6ecd6;border-color:var(--accent)}
+  button:disabled{opacity:.45;cursor:default}
+  .row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:10px 12px;margin-bottom:12px}
+  .panel h2{font-size:12px;letter-spacing:1.5px;text-transform:uppercase;margin:0 0 8px;color:var(--accent)}
+  .status{min-height:34px;font-size:13px;color:var(--ink2);font-style:italic;line-height:1.35}
+  .stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:13px}
+  .stat-grid b{color:var(--ink);font-variant-numeric:tabular-nums}
+  .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-top:6px}
+  .cal div{font-size:11px;text-align:center;padding:3px 0;border-radius:3px;color:var(--ink2)}
+  .cal .dow{color:var(--accent);font-weight:bold}
+  .cal .day{background:#e2d0aa}
+  .cal .done{background:var(--gold);color:#3a2f26;font-weight:bold}
+  .cal .today{outline:1.5px solid var(--accent)}
+  .foot{font-size:11.5px;color:var(--ink2);margin-top:4px}
+  a{color:var(--accent)}
+  @media (pointer:coarse){
+    button,select{min-height:44px;padding:10px 14px}
+    #clear{margin-left:auto}
+  }
+</style>
+</head>
+<body>
+  <h1>Cadastre</h1>
+  <p class="tag">Survey the plat — divide the land into parcels, one deed per lot.</p>
+  <div class="wrap">
+    <div class="left">
+      <div class="tiers" id="tiers"></div>
+      <div class="board-frame">
+        <canvas id="board" width="480" height="480" tabindex="0"
+          aria-label="Survey grid. Arrow keys move the marker, Enter sets a corner then commits a parcel."></canvas>
+      </div>
+      <div class="hud" aria-live="polite">
+        <span>Time <b id="timer">0:00</b></span>
+        <span>Cells left <b id="left">—</b></span>
+        <span>Deeds satisfied <b id="sat">—</b></span>
+        <span id="seedh">Cat. <b id="seed">—</b></span>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="daily">Daily</button>
+        <button id="random">Random</button>
+        <button id="check">Check</button>
+        <button id="hint">Hint</button>
+        <button id="walk">Walk survey</button>
+      </div>
+      <div class="row">
+        <button id="undo">Undo</button>
+        <button id="redo">Redo</button>
+        <button id="clear">Clear</button>
+        <button id="labels">Labels: off</button>
+        <button id="png">Export PNG</button>
+      </div>
+    </div>
+    <div class="right">
+      <div class="panel">
+        <h2>Surveyor's note</h2>
+        <div class="status" id="status" role="status" aria-live="polite">Drag a rectangle (or tap two corners) so each parcel holds exactly one deed-stone whose number equals its area in cells.</div>
+      </div>
+      <div class="panel">
+        <h2>Field record</h2>
+        <div class="stat-grid" id="stats"></div>
+      </div>
+      <div class="panel">
+        <h2>Daily ledger</h2>
+        <div class="cal" id="cal"></div>
+        <div class="foot" id="streak"></div>
+      </div>
+      <div class="foot">Keyboard: arrows move · Enter sets corner / commits · click a parcel to erase · Ctrl+Z / Ctrl+Y undo. Seed lives in the URL — share it.</div>
+    </div>
+  </div>
+
+<script>
+"use strict";
+(function(){
+  // ---------- PRNG ----------
+  function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+  function hashStr(s){let h=2166136261>>>0;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
+
+  const TIERS={
+    surveyor:{name:'Surveyor',size:7,max:9,min:4,stop:.40},
+    assessor:{name:'Assessor',size:10,max:8,min:3,stop:.50},
+    cartographer:{name:'Cartographer',size:13,max:9,min:4,stop:.40}
+  };
+  const ORDER=['surveyor','assessor','cartographer'];
+  const PAL=['#e69f00','#56b4e9','#009e73','#0072b2','#d55e00','#cc79a7','#8a6d3b','#6a51a3'];
+
+  // ---------- module state ----------
+  let R,C,N,clues,clueAt,tierKey,seed,isDaily;
+  let solution,order;
+  let parcels=[],undoStack=[],redoStack=[];
+  let cell=48,flags=null,tapCorner=null,cursor=0,showLabels=false;
+  let startT=0,elapsed=0,timerId=null,solved=false,sweep=null,walking=false,gen=0;
+
+  const cv=document.getElementById('board'),ctx=cv.getContext('2d');
+  const reduceMotion=()=>!!(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const solvedNudge=()=>setStatus('Plat filed — press Daily or Random for a new survey.');
+
+  // ---------- geometry helpers ----------
+  const eachCell=(p,fn)=>{for(let y=p.y;y<p.y+p.h;y++)for(let x=p.x;x<p.x+p.w;x++)fn(y*C+x);};
+  const inParcel=(p,i)=>{const r=(i/C)|0,c=i%C;return c>=p.x&&c<p.x+p.w&&r>=p.y&&r<p.y+p.h;};
+  function coverage(){const cov=new Int8Array(N);parcels.forEach(p=>eachCell(p,i=>cov[i]++));return cov;}
+  function parcelValid(p){let cnt=0,val=-1;eachCell(p,i=>{if(clueAt[i]!==-1){cnt++;val=clues[clueAt[i]].val;}});return cnt===1&&val===p.w*p.h;}
+
+  // ---------- candidate enumeration + solver ----------
+  function enumCand(k){
+    const idx=clues[k].idx,v=clues[k].val,cr=(idx/C)|0,cc=idx%C,res=[];
+    for(let w=1;w<=v;w++){
+      if(v%w)continue;const h=v/w;if(w>C||h>R)continue;
+      const x0=Math.max(0,cc-w+1),x1=Math.min(cc,C-w),y0=Math.max(0,cr-h+1),y1=Math.min(cr,R-h);
+      for(let x=x0;x<=x1;x++)for(let y=y0;y<=y1;y++){
+        let ok=1;const cells=[];
+        for(let yy=y;yy<y+h&&ok;yy++)for(let xx=x;xx<x+w;xx++){const ci=yy*C+xx;if(clueAt[ci]!==-1&&clueAt[ci]!==k){ok=0;break;}cells.push(ci);}
+        if(ok)res.push({clue:k,cells:Int16Array.from(cells),x,y,w,h});
+      }
+    }
+    return res;
+  }
+  function buildCandidates(){const byClue=[],all=[];for(let k=0;k<clues.length;k++){const c=enumCand(k);byClue[k]=c;for(const x of c)all.push(x);}return{byClue,all};}
+
+  function countSolutions(all,limit){
+    const byCell=Array.from({length:N},()=>[]);
+    for(const c of all)for(let t=0;t<c.cells.length;t++)byCell[c.cells[t]].push(c);
+    const covered=new Uint8Array(N),used=new Uint8Array(clues.length);
+    let count=0,nodes=0;
+    function fits(c){for(let t=0;t<c.cells.length;t++)if(covered[c.cells[t]])return false;return true;}
+    (function rec(){
+      if(count>=limit)return;
+      if(++nodes>250000){count=99;return;}
+      let f=-1,best=1e9;
+      for(let i=0;i<N;i++){
+        if(covered[i])continue;let cnt=0;const l=byCell[i];
+        for(let j=0;j<l.length;j++){const c=l[j];if(!used[c.clue]&&fits(c))cnt++;}
+        if(cnt<best){best=cnt;f=i;if(cnt<=1)break;}
+      }
+      if(f===-1){count++;return;}
+      if(best===0)return;
+      const l=byCell[f];
+      for(let j=0;j<l.length;j++){
+        const c=l[j];if(used[c.clue]||!fits(c))continue;
+        used[c.clue]=1;for(let t=0;t<c.cells.length;t++)covered[c.cells[t]]=1;
+        rec();
+        for(let t=0;t<c.cells.length;t++)covered[c.cells[t]]=0;used[c.clue]=0;
+        if(count>=limit)return;
+      }
+    })();
+    return count;
+  }
+
+  // ---------- deduction order (walk / hint) ----------
+  function deduce(){
+    const {byClue}=buildCandidates();
+    const covered=new Uint8Array(N),rem=new Set(clues.map((_,k)=>k)),out=[];
+    const fits=c=>{for(let t=0;t<c.cells.length;t++)if(covered[c.cells[t]])return false;return true;};
+    while(rem.size){
+      let best=-1,bc=1e9;
+      for(const k of rem){let cnt=0;for(const c of byClue[k])if(fits(c))cnt++;if(cnt<bc){bc=cnt;best=k;}}
+      const par=solution.find(p=>inParcel(p,clues[best].idx));
+      eachCell(par,i=>covered[i]=1);
+      out.push({parcel:par,val:clues[best].val,count:bc,
+        reason:bc<=1?'Only one legal parcel fits this deed — forced.':('Most-constrained deed: only '+bc+' possible parcels remain.')});
+      rem.delete(best);
+    }
+    return out;
+  }
+
+  // ---------- generator ----------
+  function splitRect(rng,x,y,w,h,t,out){
+    const area=w*h;
+    if((w===1&&h===1)||(area<=t.max&&(area<=t.min||rng()<t.stop))){out.push({x,y,w,h});return;}
+    let vert=w>=h;if(w===1)vert=false;if(h===1)vert=true;
+    if(vert&&w>1){const cut=1+((rng()*(w-1))|0);splitRect(rng,x,y,cut,h,t,out);splitRect(rng,x+cut,y,w-cut,h,t,out);}
+    else if(h>1){const cut=1+((rng()*(h-1))|0);splitRect(rng,x,y,w,cut,t,out);splitRect(rng,x,y+cut,w,h-cut,t,out);}
+    else out.push({x,y,w,h});
+  }
+  function generate(tk,sd){
+    const t=TIERS[tk];tierKey=tk;seed=sd>>>0;R=C=t.size;N=R*C;
+    const rng=mulberry32(seed);let fallback=null;
+    for(let att=0;att<900;att++){
+      const out=[];splitRect(rng,0,0,t.size,t.size,t,out);
+      const cl=out.map(p=>{const c=p.x+((rng()*p.w)|0),r=p.y+((rng()*p.h)|0);return{idx:r*C+c,val:p.w*p.h};});
+      clues=cl;clueAt=new Int16Array(N).fill(-1);cl.forEach((q,k)=>clueAt[q.idx]=k);
+      const sol=out.map(p=>({x:p.x,y:p.y,w:p.w,h:p.h,val:p.w*p.h}));
+      if(!fallback)fallback={cl,clueAt:clueAt.slice(),sol};
+      const {all}=buildCandidates();
+      if(countSolutions(all,2)===1){solution=sol;return;}
+    }
+    clues=fallback.cl;clueAt=fallback.clueAt;solution=fallback.sol;
+  }
+
+  // ---------- lifecycle ----------
+  function newPuzzle(tk,sd,daily){
+    gen++;generate(tk,sd);order=deduce();
+    parcels=[];undoStack=[];redoStack=[];flags=null;tapCorner=null;cursor=0;
+    solved=false;sweep=null;walking=false;isDaily=!!daily;
+    elapsed=0;startT=Date.now();startTimer();
+    location.hash=tk+'/'+seed;
+    layout();syncTiers();renderStats();updateHUD();draw();
+    setStatus('New '+TIERS[tk].name+' plat, catalogue '+seed+'. Carve every acre into deeded parcels.');
+  }
+  function startTimer(){clearInterval(timerId);timerId=setInterval(()=>{if(!solved){elapsed=Math.floor((Date.now()-startT)/1000);updateHUD();}},1000);}
+  const fmt=s=>Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+
+  // ---------- editing ----------
+  function snapshot(){undoStack.push(parcels.map(p=>({...p})));if(undoStack.length>200)undoStack.shift();redoStack=[];}
+  function commitRect(a,b){
+    const x=Math.min(a%C,b%C),y=Math.min((a/C)|0,(b/C)|0),
+      w=Math.abs((a%C)-(b%C))+1,h=Math.abs(((a/C)|0)-((b/C)|0))+1;
+    snapshot();
+    parcels=parcels.filter(p=>!(x<p.x+p.w&&x+w>p.x&&y<p.y+p.h&&y+h>p.y));
+    parcels.push({x,y,w,h});tapCorner=null;flags=null;afterChange();
+  }
+  function eraseAt(i){const p=parcels.find(q=>inParcel(q,i));if(p){snapshot();parcels=parcels.filter(q=>q!==p);flags=null;afterChange();}}
+  function afterChange(){updateHUD();draw();if(!walking&&checkWin())win();}
+  function checkWin(){
+    if(parcels.length!==clues.length)return false;
+    const cov=coverage();for(let i=0;i<N;i++)if(cov[i]!==1)return false;
+    return parcels.every(parcelValid);
+  }
+
+  // ---------- win + stats ----------
+  function win(){
+    solved=true;clearInterval(timerId);elapsed=Math.floor((Date.now()-startT)/1000);
+    recordStats();updateHUD();renderStats();animateSweep();
+    setStatus('Plat surveyed in '+fmt(elapsed)+'. '+(isDaily?'Daily deed filed.':'Fresh survey complete.')+' — click "Export PNG" for the finished map.');
+  }
+  function loadStats(){try{return JSON.parse(localStorage.getItem('cadastre'))||{};}catch(e){return{};}}
+  function saveStats(s){try{localStorage.setItem('cadastre',JSON.stringify(s));}catch(e){}}
+  function recordStats(){
+    const s=loadStats();s.times=s.times||{};(s.times[tierKey]=s.times[tierKey]||[]).push(elapsed);
+    if(s.times[tierKey].length>60)s.times[tierKey].shift();
+    if(isDaily){
+      s.daily=s.daily||{};const key=todayKey();
+      if(!s.daily[key]){
+        s.daily[key]=true;const y=new Date(Date.now()-864e5);const yk=iso(y);
+        s.streak=(s.lastDaily===yk)?(s.streak||0)+1:1;s.lastDaily=key;s.best=Math.max(s.best||0,s.streak);
+      }
+    }
+    saveStats(s);
+  }
+  const iso=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  const todayKey=()=>iso(new Date());
+  function dailySeed(tk){return hashStr('cadastre|'+tk+'|'+todayKey());}
+
+  function renderStats(){
+    const s=loadStats(),el=document.getElementById('stats');let h='';
+    for(const tk of ORDER){
+      const arr=(s.times&&s.times[tk])||[];
+      let best='—',med='—';
+      if(arr.length){const a=[...arr].sort((x,y)=>x-y);best=fmt(a[0]);med=fmt(a[(a.length-1)>>1]);}
+      h+='<span>'+TIERS[tk].name+'</span><b>'+arr.length+' · '+best+' / '+med+'</b>';
+    }
+    el.innerHTML='<span style="grid-column:1/3;color:var(--ink2);font-size:11px">tier — solved · best / median</span>'+h;
+    document.getElementById('streak').textContent='Daily streak: '+(s.streak||0)+'  ·  best: '+(s.best||0);
+    // calendar
+    const now=new Date(),ym=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+    const first=new Date(now.getFullYear(),now.getMonth(),1),days=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
+    let cal='';['S','M','T','W','T','F','S'].forEach(d=>cal+='<div class="dow">'+d+'</div>');
+    for(let i=0;i<first.getDay();i++)cal+='<div></div>';
+    for(let d=1;d<=days;d++){
+      const key=ym+'-'+String(d).padStart(2,'0');
+      const done=s.daily&&s.daily[key];const today=key===todayKey();
+      cal+='<div class="day'+(done?' done':'')+(today?' today':'')+'">'+d+'</div>';
+    }
+    document.getElementById('cal').innerHTML=cal;
+  }
+
+  // ---------- assists ----------
+  function hint(){
+    if(solved){solvedNudge();return;}
+    const next=order.find(o=>!parcels.some(p=>p.x===o.parcel.x&&p.y===o.parcel.y&&p.w===o.parcel.w&&p.h===o.parcel.h));
+    if(!next){setStatus('Every deed is already correctly carved.');return;}
+    snapshot();
+    parcels=parcels.filter(p=>!(next.parcel.x<p.x+p.w&&next.parcel.x+next.parcel.w>p.x&&next.parcel.y<p.y+p.h&&next.parcel.y+next.parcel.h>p.y));
+    parcels.push({x:next.parcel.x,y:next.parcel.y,w:next.parcel.w,h:next.parcel.h,hint:true});
+    flags=null;setStatus('Hint — deed '+next.val+': '+next.reason);afterChange();
+  }
+  function walkSurvey(){
+    if(walking)return;walking=true;solved=true;clearInterval(timerId);
+    parcels=[];flags=null;draw();
+    const done='Survey walked — this is the one legal plat. Press Random or Daily for a new board.';
+    if(reduceMotion()){
+      order.forEach(o=>parcels.push({x:o.parcel.x,y:o.parcel.y,w:o.parcel.w,h:o.parcel.h,walk:true}));
+      walking=false;updateHUD();draw();setStatus(done);return;
+    }
+    let i=0;
+    const step=()=>{
+      if(!walking)return;
+      if(i>=order.length){walking=false;setStatus(done);draw();return;}
+      const o=order[i++];parcels.push({x:o.parcel.x,y:o.parcel.y,w:o.parcel.w,h:o.parcel.h,walk:true});
+      updateHUD();draw();
+      setStatus('Step '+i+'/'+order.length+' — deed '+o.val+': '+o.reason);
+      setTimeout(step,650);
+    };
+    setStatus('Walking the solver’s deduction, most-constrained deed first…');step();
+  }
+
+  // ---------- HUD ----------
+  function updateHUD(){
+    const cov=coverage();let left=0;for(let i=0;i<N;i++)if(cov[i]===0)left++;
+    const sat=parcels.filter(parcelValid).length;
+    document.getElementById('timer').textContent=fmt(elapsed);
+    document.getElementById('left').textContent=left;
+    document.getElementById('sat').textContent=sat+'/'+clues.length;
+    document.getElementById('seed').textContent=seed;
+    document.getElementById('undo').disabled=!undoStack.length;
+    document.getElementById('redo').disabled=!redoStack.length;
+  }
+  function setStatus(m){document.getElementById('status').textContent=m;}
+
+  // ---------- rendering ----------
+  function layout(){
+    const avail=Math.min(window.innerWidth-64,560);
+    cell=Math.max(20,Math.min(66,Math.floor(avail/C)));
+    const W=C*cell,H=R*cell,dpr=window.devicePixelRatio||1;
+    cv.width=W*dpr;cv.height=H*dpr;cv.style.width=W+'px';cv.style.height=H+'px';
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  function paintBoard(g,cs,pcs,opts){
+    opts=opts||{};const W=C*cs,H=R*cs;
+    g.fillStyle=opts.bg||'#efe3c9';g.fillRect(0,0,W,H);
+    // faint hatch
+    g.strokeStyle='rgba(150,120,70,.12)';g.lineWidth=1;
+    for(let i=-R;i<C;i++){g.beginPath();g.moveTo(i*cs,0);g.lineTo(i*cs+H,H);g.stroke();}
+    // parcel tints
+    pcs.forEach((p,idx)=>{
+      g.fillStyle=hexA(PAL[idx%PAL.length],.34);
+      g.fillRect(p.x*cs,p.y*cs,p.w*cs,p.h*cs);
+    });
+    // flags overlay
+    if(flags&&!opts.forExport){
+      g.fillStyle=hexA('#b23a2e',.30);flags.overlap.forEach(i=>g.fillRect((i%C)*cs,((i/C)|0)*cs,cs,cs));
+    }
+    // grid
+    g.strokeStyle=opts.line||'#c6b088';g.lineWidth=1;
+    for(let x=0;x<=C;x++){g.beginPath();g.moveTo(x*cs+.5,0);g.lineTo(x*cs+.5,H);g.stroke();}
+    for(let y=0;y<=R;y++){g.beginPath();g.moveTo(0,y*cs+.5);g.lineTo(W,y*cs+.5);g.stroke();}
+    // parcel borders
+    pcs.forEach((p,idx)=>{
+      const bad=flags&&!opts.forExport&&flags.bad.has(p);
+      g.strokeStyle=bad?'#b23a2e':(p.hint?'#c8912f':(opts.pen||'#3a2f26'));
+      g.lineWidth=p.walk?3.2:2.6;
+      g.strokeRect(p.x*cs+1.5,p.y*cs+1.5,p.w*cs-3,p.h*cs-3);
+      if((showLabels||opts.forExport)&&p.w*p.h){
+        g.fillStyle=hexA(PAL[idx%PAL.length],.9);g.font='bold '+Math.max(9,cs*.24)+'px Georgia';
+        g.textAlign='left';g.textBaseline='top';g.fillText(String.fromCharCode(65+(idx%26)),p.x*cs+5,p.y*cs+4);
+      }
+    });
+    // deed stones
+    const rad=Math.max(9,cs*.32);
+    clues.forEach(q=>{
+      const cx=(q.idx%C)*cs+cs/2,cy=((q.idx/C)|0)*cs+cs/2;
+      g.beginPath();g.arc(cx,cy,rad,0,7);g.fillStyle='#f3e8ce';g.fill();
+      g.lineWidth=1.6;g.strokeStyle='#8a5a2b';g.stroke();
+      g.fillStyle='#3a2f26';g.font='bold '+Math.max(11,cs*.42)+'px Georgia';
+      g.textAlign='center';g.textBaseline='middle';g.fillText(q.val,cx,cy);
+    });
+  }
+  function draw(){
+    const W=C*cell,H=R*cell;paintBoard(ctx,cell,parcels,{});
+    // rubber band
+    if(drag.active&&drag.moved){
+      const a=drag.start,b=drag.cur,x=Math.min(a%C,b%C),y=Math.min((a/C)|0,(b/C)|0),
+        w=Math.abs((a%C)-(b%C))+1,h=Math.abs(((a/C)|0)-((b/C)|0))+1;
+      ctx.fillStyle=hexA('#8a5a2b',.22);ctx.fillRect(x*cell,y*cell,w*cell,h*cell);
+      ctx.strokeStyle='#8a5a2b';ctx.lineWidth=2;ctx.setLineDash([5,4]);
+      ctx.strokeRect(x*cell+1,y*cell+1,w*cell-2,h*cell-2);ctx.setLineDash([]);
+    }
+    if(tapCorner!=null){ctx.fillStyle='#8a5a2b';ctx.beginPath();ctx.arc((tapCorner%C)*cell+cell/2,((tapCorner/C)|0)*cell+cell/2,5,0,7);ctx.fill();}
+    if(document.activeElement===cv){ctx.strokeStyle='#c8912f';ctx.lineWidth=2.5;ctx.strokeRect((cursor%C)*cell+2,((cursor/C)|0)*cell+2,cell-4,cell-4);}
+    if(sweep!=null){
+      const t=sweep,d=(W+H)*t;
+      const grd=ctx.createLinearGradient(d-90,0,d,90);
+      grd.addColorStop(0,'rgba(200,145,47,0)');grd.addColorStop(.5,'rgba(230,180,80,.55)');grd.addColorStop(1,'rgba(200,145,47,0)');
+      ctx.fillStyle=grd;ctx.save();ctx.beginPath();ctx.moveTo(d,0);ctx.lineTo(d-90,0);ctx.lineTo(d-90-H,H);ctx.lineTo(d-H,H);ctx.closePath();ctx.fill();ctx.restore();
+    }
+  }
+  function animateSweep(){
+    if(reduceMotion()){sweep=null;draw();return;}
+    const t0=Date.now(),g=gen;
+    (function loop(){
+      if(g!==gen)return;                 // a new puzzle started — abandon this sweep
+      const p=(Date.now()-t0)/950;sweep=Math.min(1,p);draw();
+      if(p<1)requestAnimationFrame(loop);else{sweep=null;draw();}
+    })();
+  }
+  function hexA(hex,a){const n=parseInt(hex.slice(1),16);return'rgba('+(n>>16&255)+','+(n>>8&255)+','+(n&255)+','+a+')';}
+
+  // ---------- input ----------
+  const drag={active:false,start:0,cur:0,moved:false};
+  function ptrCell(e){const r=cv.getBoundingClientRect();let x=Math.floor((e.clientX-r.left)/(r.width/C)),y=Math.floor((e.clientY-r.top)/(r.height/R));x=Math.max(0,Math.min(C-1,x));y=Math.max(0,Math.min(R-1,y));return y*C+x;}
+  cv.addEventListener('pointerdown',e=>{if(solved){solvedNudge();return;}cv.focus();e.preventDefault();drag.active=true;drag.start=drag.cur=cursor=ptrCell(e);drag.moved=false;cv.setPointerCapture(e.pointerId);draw();});
+  cv.addEventListener('pointermove',e=>{if(!drag.active)return;const c=ptrCell(e);if(c!==drag.start)drag.moved=true;drag.cur=cursor=c;draw();});
+  cv.addEventListener('pointerup',e=>{if(!drag.active)return;drag.active=false;const c=ptrCell(e);
+    if(drag.moved)commitRect(drag.start,c);
+    else if(parcels.some(p=>inParcel(p,c)))eraseAt(c);
+    else if(tapCorner==null){tapCorner=c;setStatus('Corner set. Tap the opposite corner to carve the parcel.');draw();}
+    else{const a=tapCorner;tapCorner=null;commitRect(a,c);}
+  });
+  cv.addEventListener('keydown',e=>{
+    const k=e.key;
+    if(k==='ArrowLeft'){cursor=((cursor/C)|0)*C+Math.max(0,cursor%C-1);}
+    else if(k==='ArrowRight'){cursor=((cursor/C)|0)*C+Math.min(C-1,cursor%C+1);}
+    else if(k==='ArrowUp'){cursor=Math.max(0,cursor-C);}
+    else if(k==='ArrowDown'){cursor=Math.min(N-1,cursor+C);}
+    else if(k==='Enter'){if(solved){solvedNudge();return;}if(parcels.some(p=>inParcel(p,cursor))&&tapCorner==null){eraseAt(cursor);}else if(tapCorner==null){tapCorner=cursor;setStatus('Corner set at row '+(((cursor/C)|0)+1)+', col '+((cursor%C)+1)+'. Move and press Enter to commit.');}else{const a=tapCorner;tapCorner=null;commitRect(a,cursor);}}
+    else if((e.ctrlKey||e.metaKey)&&k.toLowerCase()==='z'){undo();return;}
+    else if((e.ctrlKey||e.metaKey)&&k.toLowerCase()==='y'){redo();return;}
+    else return;
+    e.preventDefault();draw();
+  });
+
+  function undo(){if(!undoStack.length)return;redoStack.push(parcels.map(p=>({...p})));parcels=undoStack.pop();flags=null;tapCorner=null;afterChange();}
+  function redo(){if(!redoStack.length)return;undoStack.push(parcels.map(p=>({...p})));parcels=redoStack.pop();flags=null;afterChange();}
+
+  function doCheck(){
+    const cov=coverage(),overlap=new Set(),bad=new Set();let gaps=0;
+    for(let i=0;i<N;i++){if(cov[i]>1)overlap.add(i);if(cov[i]===0)gaps++;}
+    parcels.forEach(p=>{if(!parcelValid(p))bad.add(p);});
+    flags={overlap,bad};draw();
+    const n=overlap.size,b=bad.size;
+    let msg;
+    if(n+b>0)msg='Flagged '+b+' mis-deeded parcel(s) and '+n+' overlapping cell(s).';
+    else if(gaps>0)msg='No conflicts, but '+gaps+' acre'+(gaps===1?'':'s')+' still unsurveyed.';
+    else msg='No conflicts found — every acre is deeded and legal.';
+    setStatus(msg);
+  }
+
+  // ---------- PNG export ----------
+  function exportPNG(){
+    const cs=42,pad=34,titleH=92,W=C*cs+pad*2,H=R*cs+pad*2+titleH;
+    const c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d');
+    g.fillStyle='#e7d7b6';g.fillRect(0,0,W,H);
+    g.strokeStyle='#8a5a2b';g.lineWidth=3;g.strokeRect(9,9,W-18,H-18);
+    g.strokeStyle='#8a5a2b';g.lineWidth=1;g.strokeRect(15,15,W-30,H-30);
+    // title block
+    g.fillStyle='#8a5a2b';g.font='bold 22px Georgia';g.textAlign='center';g.textBaseline='alphabetic';
+    g.fillText('CADASTRAL SURVEY',W/2,46);
+    g.fillStyle='#5b4a38';g.font='italic 13px Georgia';
+    g.fillText(TIERS[tierKey].name+' rank plat',W/2,66);
+    g.font='12px Georgia';g.textAlign='left';
+    g.fillText('Catalogue No. '+seed,pad,84);g.textAlign='right';
+    g.fillText((solved?'Surveyed in '+fmt(elapsed):'Draft')+'  ·  '+todayKey(),W-pad,84);
+    // board
+    g.save();g.translate(pad,pad+titleH);
+    const keepLabels=showLabels;showLabels=false;const keepFlags=flags;flags=null;
+    paintBoard(g,cs,parcels,{forExport:true,bg:'#efe3c9',line:'#c6b088',pen:'#3a2f26'});
+    showLabels=keepLabels;flags=keepFlags;g.restore();
+    const name='cadastre-'+tierKey+'-'+seed+'.png';
+    const supportsDownload='download' in document.createElement('a');
+    if(c.toBlob){
+      // Blob + object URL is far more reliable than a data: URL on iOS Safari.
+      c.toBlob(blob=>{
+        if(!blob)return;
+        const url=URL.createObjectURL(blob),a=document.createElement('a');
+        a.href=url;a.download=name;if(!supportsDownload)a.target='_blank';
+        document.body.appendChild(a);a.click();a.remove();
+        setTimeout(()=>URL.revokeObjectURL(url),4000);
+      },'image/png');
+    }else{
+      const url=c.toDataURL('image/png'),a=document.createElement('a');
+      a.href=url;a.download=name;if(!supportsDownload)a.target='_blank';a.click();
+    }
+    setStatus('Exported '+name);
+  }
+
+  // ---------- tier buttons ----------
+  function syncTiers(){[...document.querySelectorAll('#tiers button')].forEach(b=>b.classList.toggle('on',b.dataset.t===tierKey));}
+  function buildTiers(){
+    const wrap=document.getElementById('tiers');wrap.innerHTML='';
+    ORDER.forEach(tk=>{const b=document.createElement('button');b.dataset.t=tk;b.textContent=TIERS[tk].name+' '+TIERS[tk].size+'×'+TIERS[tk].size;
+      b.onclick=()=>newPuzzle(tk,(Math.random()*1e9)>>>0,false);wrap.appendChild(b);});
+  }
+
+  // ---------- wiring ----------
+  document.getElementById('daily').onclick=()=>newPuzzle(tierKey,dailySeed(tierKey),true);
+  document.getElementById('random').onclick=()=>newPuzzle(tierKey,(Math.random()*1e9)>>>0,false);
+  document.getElementById('check').onclick=doCheck;
+  document.getElementById('hint').onclick=hint;
+  document.getElementById('walk').onclick=walkSurvey;
+  document.getElementById('undo').onclick=undo;
+  document.getElementById('redo').onclick=redo;
+  document.getElementById('clear').onclick=()=>{if(solved){solvedNudge();return;}snapshot();parcels=[];flags=null;tapCorner=null;afterChange();setStatus('Plat cleared.');};
+  document.getElementById('labels').onclick=e=>{showLabels=!showLabels;e.target.textContent='Labels: '+(showLabels?'on':'off');e.target.classList.toggle('on',showLabels);draw();};
+  document.getElementById('png').onclick=exportPNG;
+  window.addEventListener('resize',()=>{layout();draw();});
+
+  // ---------- boot ----------
+  function boot(){
+    buildTiers();
+    const m=location.hash.slice(1).split('/');
+    if(m.length===2&&TIERS[m[0]]&&/^\d+$/.test(m[1])){
+      const dk=dailySeed(m[0]);newPuzzle(m[0],parseInt(m[1],10),parseInt(m[1],10)===dk);
+    }else newPuzzle('assessor',dailySeed('assessor'),true);
+  }
+  boot();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1318 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Silt — Grainy Mesh-Gradient Studio</title>
+<style>
+  :root{
+    --bg:#0d0e12; --panel:#15171d; --panel-2:#1c1f27; --line:#2a2e39;
+    --txt:#e8eaf0; --txt-dim:#9aa0b0; --txt-faint:#666c7a;
+    --accent:#7c8cff; --accent-fill:#4f46e5; --accent-2:#ff7ac0; --ok:#4ade80; --warn:#fbbf24; --bad:#f87171;
+    --radius:10px; --shadow:0 8px 32px rgba(0,0,0,.45);
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  html[data-theme="light"]{
+    --bg:#eef0f5; --panel:#ffffff; --panel-2:#f4f5f9; --line:#dfe2ea;
+    --txt:#1a1d26; --txt-dim:#5a6070; --txt-faint:#9aa0b0;
+    --shadow:0 8px 32px rgba(60,70,110,.14);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:var(--sans); background:var(--bg); color:var(--txt);
+    display:flex; flex-direction:column; overflow:hidden; font-size:13px;
+  }
+  button{font-family:inherit;cursor:pointer;color:inherit}
+  input,select{font-family:inherit}
+
+  /* ---- top bar ---- */
+  header{
+    display:flex; align-items:center; gap:14px; padding:10px 16px;
+    background:var(--panel); border-bottom:1px solid var(--line); flex-shrink:0; z-index:20;
+  }
+  .brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:16px;letter-spacing:.3px}
+  .brand .dot{width:20px;height:20px;border-radius:6px;
+    background:radial-gradient(circle at 30% 30%,#ff7ac0,transparent 60%),
+               radial-gradient(circle at 70% 70%,#7c8cff,transparent 60%),#2a2e39;
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.15)}
+  .brand small{font-weight:400;color:var(--txt-dim);font-size:11px}
+  header .spacer{flex:1}
+  .tbtn{
+    background:var(--panel-2); border:1px solid var(--line); border-radius:8px;
+    padding:7px 12px; font-size:12px; font-weight:600; display:inline-flex; align-items:center; gap:6px;
+    transition:.15s; white-space:nowrap;
+  }
+  .tbtn:hover{border-color:var(--accent);color:var(--accent)}
+  .tbtn.primary{background:var(--accent-fill);color:#fff;border-color:var(--accent-fill)}
+  .tbtn.primary:hover{filter:brightness(1.1)}
+
+  /* ---- layout ---- */
+  main{flex:1;display:flex;min-height:0}
+  .sidebar{
+    width:320px; background:var(--panel); border-right:1px solid var(--line);
+    overflow-y:auto; flex-shrink:0; padding-bottom:40px;
+  }
+  .sidebar.right{border-right:none;border-left:1px solid var(--line);width:340px}
+  .stage-wrap{flex:1;display:flex;flex-direction:column;min-width:0;position:relative;background:
+    repeating-conic-gradient(var(--panel-2) 0% 25%, transparent 0% 50%) 50% / 22px 22px}
+  .stage-pad{flex:1;display:flex;align-items:center;justify-content:center;padding:26px;min-height:0}
+  #stage{
+    position:relative; width:100%; height:100%; max-width:1100px; border-radius:14px;
+    overflow:hidden; box-shadow:var(--shadow); cursor:crosshair;
+    outline:1px solid var(--line);
+  }
+  #gradientLayer{position:absolute;inset:0}
+  #grainLayer{position:absolute;inset:0;pointer-events:none}
+  .empty-hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    text-align:center;padding:0 24px;pointer-events:none;z-index:4;transition:opacity .3s}
+  .empty-hint span{background:rgba(18,20,28,.58);color:#fff;padding:14px 22px;border-radius:12px;
+    font-size:14px;font-weight:600;line-height:1.65;backdrop-filter:blur(3px);
+    box-shadow:0 6px 20px rgba(0,0,0,.35)}
+
+  .pt{
+    position:absolute; width:20px; height:20px; margin:-10px 0 0 -10px; border-radius:50%;
+    border:2px solid #fff; box-shadow:0 0 0 1.5px rgba(0,0,0,.55),0 2px 6px rgba(0,0,0,.4);
+    cursor:grab; transition:transform .08s; z-index:5;
+  }
+  .pt:hover{transform:scale(1.2)}
+  .pt.sel{transform:scale(1.35);box-shadow:0 0 0 2px var(--accent),0 0 0 4px rgba(124,140,255,.35),0 2px 8px rgba(0,0,0,.5)}
+  .pt.dragging{cursor:grabbing;z-index:8}
+
+  .txtprobe{
+    position:absolute; z-index:6; padding:6px 10px; border-radius:6px; font-weight:700;
+    font-size:15px; cursor:grab; user-select:none; white-space:nowrap;
+    display:flex;flex-direction:column;align-items:center;line-height:1.15;
+  }
+  .txtprobe .ratio{font-size:10px;font-weight:600;opacity:.9;margin-top:2px;
+    padding:1px 5px;border-radius:4px;background:rgba(0,0,0,.35)}
+  .txtprobe.light{color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.3)}
+  .txtprobe.dark{color:#111}
+  .txtprobe.dragging{cursor:grabbing}
+
+  /* ---- panels ---- */
+  .sec{border-bottom:1px solid var(--line)}
+  .sec-h{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:11px 16px; font-size:11px; font-weight:700; letter-spacing:.7px;
+    text-transform:uppercase; color:var(--txt-dim); user-select:none; cursor:pointer;
+  }
+  .sec-h:hover{color:var(--txt)}
+  .sec-h .chev{transition:.2s;font-size:10px}
+  .sec.collapsed .chev{transform:rotate(-90deg)}
+  .sec.collapsed .sec-b{display:none}
+  .sec-b{padding:4px 16px 16px}
+
+  .row{display:flex;align-items:center;gap:8px;margin:9px 0}
+  .row label{font-size:11px;color:var(--txt-dim);min-width:74px}
+  .row .val{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--txt-dim);min-width:34px;text-align:right}
+  input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:4px;border-radius:3px;
+    background:var(--line);outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+    background:var(--accent);cursor:pointer;border:2px solid var(--panel)}
+  input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--accent);
+    cursor:pointer;border:2px solid var(--panel)}
+  select,input[type=text],input[type=number]{
+    background:var(--panel-2);border:1px solid var(--line);color:var(--txt);
+    border-radius:7px;padding:6px 8px;font-size:12px;flex:1;min-width:0;
+  }
+  input[type=color]{width:34px;height:28px;border:1px solid var(--line);border-radius:6px;
+    background:none;padding:2px;cursor:pointer}
+  input[type=checkbox]{width:15px;height:15px;accent-color:var(--accent);cursor:pointer}
+
+  .btn-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:8px}
+  .btn-grid.g3{grid-template-columns:1fr 1fr 1fr}
+  .sbtn{
+    background:var(--panel-2);border:1px solid var(--line);border-radius:7px;
+    padding:8px 6px;font-size:11px;font-weight:600;transition:.15s;text-align:center;
+  }
+  .sbtn:hover{border-color:var(--accent);color:var(--accent)}
+  .sbtn.wide{grid-column:1/-1}
+
+  /* point list */
+  .plist{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+  .pitem{display:flex;align-items:center;gap:7px;padding:6px;border-radius:7px;
+    background:var(--panel-2);border:1px solid transparent;transition:.12s}
+  .pitem.sel{border-color:var(--accent)}
+  .pitem .sw{width:18px;height:18px;border-radius:5px;flex-shrink:0;box-shadow:inset 0 0 0 1px rgba(0,0,0,.3);cursor:pointer}
+  .pitem .nm{font-family:var(--mono);font-size:10px;color:var(--txt-dim);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pitem .ix{font-size:10px;color:var(--txt-faint);width:16px;text-align:center}
+  .icbtn{background:none;border:none;color:var(--txt-faint);padding:3px;border-radius:4px;font-size:12px;line-height:1}
+  .icbtn:hover{color:var(--txt);background:var(--line)}
+  .icbtn.del:hover{color:var(--bad)}
+
+  /* presets */
+  .presets{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}
+  .preset{border-radius:9px;overflow:hidden;border:1px solid var(--line);cursor:pointer;transition:.15s;
+    position:relative;aspect-ratio:16/10}
+  .preset:hover{border-color:var(--accent);transform:translateY(-1px)}
+  .preset .thumb{position:absolute;inset:0}
+  .preset .lbl{position:absolute;left:0;right:0;bottom:0;padding:4px 7px;font-size:10px;font-weight:700;
+    color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.6));text-shadow:0 1px 2px rgba(0,0,0,.5)}
+  .preset-link{position:absolute;top:5px;right:5px;z-index:3;background:rgba(0,0,0,.45);border:none;
+    color:#fff;width:24px;height:24px;border-radius:6px;font-size:12px;display:flex;align-items:center;
+    justify-content:center;opacity:0;transition:.15s}
+  .preset:hover .preset-link,.preset-link:focus-visible{opacity:1}
+  .preset-link:hover{background:var(--accent-fill)}
+
+  /* export */
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}
+  .tab{background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:5px 9px;
+    font-size:11px;font-weight:600;color:var(--txt-dim);transition:.12s}
+  .tab.active{background:var(--accent-fill);color:#fff;border-color:var(--accent-fill)}
+  .tab:hover:not(.active){color:var(--txt)}
+  .codebox{position:relative}
+  pre{background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:11px 12px;
+    font-family:var(--mono);font-size:10.5px;line-height:1.55;color:var(--txt);overflow:auto;
+    max-height:230px;white-space:pre;tab-size:2}
+  .copybtn{position:absolute;top:7px;right:7px}
+  .exp-actions{display:flex;gap:7px;margin-top:8px;flex-wrap:wrap}
+
+  .hint{font-size:10.5px;color:var(--txt-faint);line-height:1.5;margin-top:8px}
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(80px);
+    background:var(--txt);color:var(--bg);padding:10px 18px;border-radius:10px;font-weight:700;font-size:12px;
+    box-shadow:var(--shadow);opacity:0;transition:.28s;z-index:100;pointer-events:none}
+  .toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+
+  .drop-hint{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+    background:rgba(124,140,255,.18);border:3px dashed var(--accent);border-radius:14px;
+    font-weight:700;font-size:18px;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.5);z-index:30}
+  .stage-wrap.dragover .drop-hint{display:flex}
+
+  .pill{display:inline-block;padding:2px 7px;border-radius:20px;font-size:9px;font-weight:700;letter-spacing:.5px}
+  .pill.aa{background:rgba(74,222,128,.18);color:var(--ok)}
+  .pill.fail{background:rgba(248,113,113,.18);color:var(--bad)}
+  .pill.aaa{background:rgba(124,140,255,.2);color:var(--accent)}
+
+  .cbrow{display:flex;align-items:center;gap:8px;margin:9px 0;font-size:11px;color:var(--txt-dim)}
+  .cbrow label{flex:1;min-width:0}
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-thumb{background:var(--line);border-radius:5px}
+  ::-webkit-scrollbar-track{background:transparent}
+  @media (max-width:1100px){.sidebar{width:270px}.sidebar.right{width:290px}}
+  @media (max-width:860px){
+    body{overflow:auto}
+    main{flex-direction:column}
+    .sidebar,.sidebar.right{width:100%;border-right:none;border-left:none;
+      border-bottom:1px solid var(--line);overflow-y:visible;padding-bottom:8px}
+    .stage-wrap{order:-1;min-height:56vh;flex:none}
+    #stage{max-width:none}
+    header{flex-wrap:wrap;gap:8px}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="dot"></span>Silt <small>grainy mesh-gradient studio</small></div>
+  <div class="spacer"></div>
+  <button class="tbtn" id="randomAll" title="Randomize everything (R)">🎲 Randomize</button>
+  <button class="tbtn" id="themeBtn" title="Toggle UI theme">☀ Light</button>
+  <button class="tbtn" id="shareBtn" title="Copy shareable link">🔗 Share link</button>
+  <button class="tbtn primary" id="exportPng" title="Download PNG">⬇ PNG</button>
+</header>
+
+<main>
+  <!-- LEFT SIDEBAR -->
+  <aside class="sidebar left">
+    <div class="sec" data-sec="points">
+      <div class="sec-h">Mesh Points <span class="chev">▼</span></div>
+      <div class="sec-b">
+        <div class="hint" style="margin-top:0">Click the canvas to add a point. Drag points to move. Selected point can be nudged with arrow keys.</div>
+        <div class="row" style="margin-top:10px">
+          <label>Background</label>
+          <input type="color" id="bgColor" value="#0b1020">
+          <input type="text" id="bgHex" value="#0b1020" style="max-width:78px">
+        </div>
+        <div class="plist" id="plist"></div>
+        <div class="btn-grid" style="margin-top:10px">
+          <button class="sbtn" id="addPt">+ Add point</button>
+          <button class="sbtn" id="clearPts">Clear all</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec" data-sec="selected">
+      <div class="sec-h">Selected Point <span class="chev">▼</span></div>
+      <div class="sec-b" id="selBody">
+        <div class="hint" style="margin-top:0">No point selected.</div>
+      </div>
+    </div>
+
+    <div class="sec" data-sec="harmony">
+      <div class="sec-h">Palette Harmony <span class="chev">▼</span></div>
+      <div class="sec-b">
+        <div class="row"><label>Seed color</label>
+          <input type="color" id="harmonySeed" value="#7c8cff"></div>
+        <div class="btn-grid">
+          <button class="sbtn" data-harmony="analogous">Analogous</button>
+          <button class="sbtn" data-harmony="complementary">Complementary</button>
+          <button class="sbtn" data-harmony="triadic">Triadic</button>
+          <button class="sbtn" data-harmony="tetradic">Tetradic</button>
+          <button class="sbtn" data-harmony="monochrome">Monochrome</button>
+          <button class="sbtn" data-harmony="random">Random</button>
+        </div>
+        <div class="hint">Harmony generators recolor existing points using color theory around the seed hue.</div>
+      </div>
+    </div>
+
+    <div class="sec" data-sec="image">
+      <div class="sec-h">Extract From Image <span class="chev">▼</span></div>
+      <div class="sec-b">
+        <div class="hint" style="margin-top:0">Drop an image on the canvas, or pick a file. Silt samples dominant colors (median-cut, no dependencies) and seeds the mesh.</div>
+        <div class="row" style="margin-top:10px"><label>Colors</label>
+          <input type="range" id="kColors" min="2" max="8" value="5">
+          <span class="val" id="kColorsVal">5</span></div>
+        <input type="file" id="imgFile" accept="image/*" style="display:none">
+        <button class="sbtn wide" id="pickImg" style="margin-top:6px">📷 Choose image…</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- STAGE -->
+  <div class="stage-wrap" id="stageWrap">
+    <div class="stage-pad">
+      <div id="stage">
+        <div id="gradientLayer"></div>
+        <div id="grainLayer"></div>
+        <div id="emptyHint" class="empty-hint"><span>Click anywhere to add a mesh point<br>· drop an image · or load a preset ·</span></div>
+      </div>
+    </div>
+    <div class="drop-hint">Drop image to extract palette</div>
+  </div>
+
+  <!-- RIGHT SIDEBAR -->
+  <aside class="sidebar right">
+    <div class="sec" data-sec="grain">
+      <div class="sec-h">Film Grain <span class="chev">▼</span></div>
+      <div class="sec-b">
+        <div class="cbrow"><label for="grainOn">Enable grain</label><input type="checkbox" id="grainOn" checked></div>
+        <div class="row"><label>Scale</label>
+          <input type="range" id="grainScale" min="0.3" max="3" step="0.05" value="0.85">
+          <span class="val" id="grainScaleVal">0.85</span></div>
+        <div class="row"><label>Intensity</label>
+          <input type="range" id="grainOpacity" min="0" max="1" step="0.01" value="0.22">
+          <span class="val" id="grainOpacityVal">0.22</span></div>
+        <div class="row"><label>Octaves</label>
+          <input type="range" id="grainOct" min="1" max="5" step="1" value="2">
+          <span class="val" id="grainOctVal">2</span></div>
+        <div class="row"><label>Blend</label>
+          <select id="grainBlend">
+            <option value="overlay">overlay</option>
+            <option value="soft-light">soft-light</option>
+            <option value="multiply">multiply</option>
+            <option value="screen">screen</option>
+            <option value="normal">normal</option>
+          </select></div>
+        <div class="cbrow"><label for="grainMono">Monochrome grain</label><input type="checkbox" id="grainMono" checked></div>
+        <button class="sbtn wide" id="grainPreview" style="margin-top:4px">👁 Isolate grain preview</button>
+      </div>
+    </div>
+
+    <div class="sec" data-sec="legibility">
+      <div class="sec-h">Legibility / WCAG <span class="chev">▼</span></div>
+      <div class="sec-b">
+        <div class="hint" style="margin-top:0">Drop sample text on the gradient to check contrast against the region beneath it. AA needs ≥4.5, AAA needs ≥7.</div>
+        <div class="btn-grid" style="margin-top:10px">
+          <button class="sbtn" id="addLight">+ Light text</button>
+          <button class="sbtn" id="addDark">+ Dark text</button>
+        </div>
+        <button class="sbtn wide" id="clearProbes" style="margin-top:7px">Clear text probes</button>
+        <div id="probeReport" class="hint"></div>
+      </div>
+    </div>
+
+    <div class="sec" data-sec="presets">
+      <div class="sec-h">Preset Gallery <span class="chev">▼</span></div>
+      <div class="sec-b">
+        <div class="hint" style="margin-top:0">Click to load. Right-click or the 🔗 button copies a preset's share link.</div>
+        <div class="presets" id="presetGrid"></div>
+      </div>
+    </div>
+
+    <div class="sec" data-sec="export">
+      <div class="sec-h">Export <span class="chev">▼</span></div>
+      <div class="sec-b">
+        <div class="tabs" id="expTabs">
+          <button class="tab active" data-fmt="css">CSS</button>
+          <button class="tab" data-fmt="animated">Animated</button>
+          <button class="tab" data-fmt="tailwind">Tailwind</button>
+          <button class="tab" data-fmt="react">React</button>
+          <button class="tab" data-fmt="svg">SVG</button>
+          <button class="tab" data-fmt="tokens">Tokens</button>
+        </div>
+        <div class="codebox">
+          <button class="tbtn copybtn" id="copyCode">Copy</button>
+          <pre id="codeOut"></pre>
+        </div>
+        <div class="exp-actions">
+          <button class="sbtn" id="dlSvg">⬇ .svg file</button>
+          <div class="row" style="margin:0;flex:1">
+            <label style="min-width:38px">PNG @</label>
+            <select id="pngScale" style="flex:0 0 auto">
+              <option value="1">1×</option>
+              <option value="2" selected>2×</option>
+              <option value="3">3×</option>
+              <option value="custom">custom w</option>
+            </select>
+            <input type="number" id="pngW" value="1920" min="16" max="8000" style="display:none;max-width:74px">
+          </div>
+          <button class="sbtn" id="dlPng2">⬇ PNG</button>
+        </div>
+        <div class="hint">CSS output is real stacked radial-gradients + an inline-SVG grain overlay — paste-ready, no images. SVG is fully self-contained.</div>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* ============================================================
+   Silt — grainy mesh-gradient studio (single file, zero deps)
+   ============================================================ */
+
+/* ---------- color utilities ---------- */
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+function hexToRgb(hex){
+  hex=(hex||"").replace('#','').trim();
+  if(hex.length===3) hex=hex.split('').map(c=>c+c).join('');
+  if(hex.length!==6||/[^0-9a-f]/i.test(hex)) return {r:0,g:0,b:0};
+  return {r:parseInt(hex.slice(0,2),16),g:parseInt(hex.slice(2,4),16),b:parseInt(hex.slice(4,6),16)};
+}
+function rgbToHex(r,g,b){
+  const h=n=>clamp(Math.round(n),0,255).toString(16).padStart(2,'0');
+  return '#'+h(r)+h(g)+h(b);
+}
+function rgbToHsl(r,g,b){
+  r/=255;g/=255;b/=255;
+  const max=Math.max(r,g,b),min=Math.min(r,g,b);let h,s,l=(max+min)/2;
+  if(max===min){h=s=0;}
+  else{const d=max-min;s=l>0.5?d/(2-max-min):d/(max+min);
+    switch(max){case r:h=(g-b)/d+(g<b?6:0);break;case g:h=(b-r)/d+2;break;default:h=(r-g)/d+4;}
+    h/=6;}
+  return {h:h*360,s:s*100,l:l*100};
+}
+function hslToRgb(h,s,l){
+  h=((h%360)+360)%360;h/=360;s=clamp(s,0,100)/100;l=clamp(l,0,100)/100;
+  let r,g,b;
+  if(s===0){r=g=b=l;}
+  else{
+    const hue2rgb=(p,q,t)=>{if(t<0)t+=1;if(t>1)t-=1;
+      if(t<1/6)return p+(q-p)*6*t;if(t<1/2)return q;
+      if(t<2/3)return p+(q-p)*(2/3-t)*6;return p;};
+    const q=l<0.5?l*(1+s):l+s-l*s,p=2*l-q;
+    r=hue2rgb(p,q,h+1/3);g=hue2rgb(p,q,h);b=hue2rgb(p,q,h-1/3);
+  }
+  return {r:r*255,g:g*255,b:b*255};
+}
+function hslToHex(h,s,l){const c=hslToRgb(h,s,l);return rgbToHex(c.r,c.g,c.b);}
+function relLum(r,g,b){
+  const f=v=>{v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);};
+  return 0.2126*f(r)+0.7152*f(g)+0.0722*f(b);
+}
+function contrastRatio(rgb1,rgb2){
+  const l1=relLum(rgb1.r,rgb1.g,rgb1.b),l2=relLum(rgb2.r,rgb2.g,rgb2.b);
+  const hi=Math.max(l1,l2),lo=Math.min(l1,l2);
+  return (hi+0.05)/(lo+0.05);
+}
+function mixRgb(a,b,t){return {r:a.r+(b.r-a.r)*t,g:a.g+(b.g-a.g)*t,b:a.b+(b.b-a.b)*t};}
+
+/* ---------- state ---------- */
+let state={
+  bg:'#0b1020',
+  points:[],           // {id,x,y,color,size,opacity} x/y in 0..1
+  probes:[],           // {id,x,y,mode:'light'|'dark',text}
+  grain:{on:true,scale:0.85,opacity:0.22,octaves:2,blend:'overlay',mono:true},
+};
+let selectedId=null;
+let uid=1;
+let grainPreviewOn=false;
+let currentFmt='css';
+
+/* ---------- DOM refs ---------- */
+const $=s=>document.querySelector(s);
+const stage=$('#stage'), gradLayer=$('#gradientLayer'), grainLayer=$('#grainLayer');
+
+/* ---------- gradient CSS builder ---------- */
+function buildGradientLayers(){
+  // ordered so later (list-first) points render on top; CSS paints first layer on top.
+  const layers=state.points.map(p=>{
+    const {r,g,b}=hexToRgb(p.color);
+    const cx=(p.x*100).toFixed(2), cy=(p.y*100).toFixed(2);
+    const rad=(p.size*100).toFixed(1);
+    const a=p.opacity.toFixed(2);
+    return `radial-gradient(circle at ${cx}% ${cy}%, rgba(${r|0},${g|0},${b|0},${a}) 0%, rgba(${r|0},${g|0},${b|0},0) ${rad}%)`;
+  });
+  return layers;
+}
+function gradientBackgroundValue(){
+  const layers=buildGradientLayers();
+  if(layers.length===0) return state.bg;
+  return layers.join(',\n  ')+',\n  '+state.bg;
+}
+
+/* ---------- grain SVG builder ---------- */
+function grainTilePx(){return Math.max(1,Math.round(160/state.grain.scale));}
+function grainSvgDataUri(w,h){
+  const g=state.grain;
+  const seed=2;
+  // feColorMatrix: for mono grain collapse channels to luminance then feed alpha
+  const monoMatrix = g.mono
+    ? `<feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0.5 0.5 0.5 0 0"/>`
+    : `<feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0.4 0.4 0.4 0 0"/>`;
+  const svg=
+`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
+<filter id="silt-grain" x="0" y="0" width="100%" height="100%">
+<feTurbulence type="fractalNoise" baseFrequency="${(g.scale).toFixed(3)}" numOctaves="${g.octaves}" seed="${seed}" stitchTiles="stitch" result="noise"/>
+${monoMatrix}
+</filter>
+<rect width="100%" height="100%" filter="url(#silt-grain)"/>
+</svg>`;
+  return 'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+}
+function applyGrainLayer(){
+  const g=state.grain;
+  if(!g.on){grainLayer.style.background='none';grainLayer.style.opacity='0';return;}
+  const uri=grainSvgDataUri(300,300);
+  const tile=grainTilePx();
+  grainLayer.style.backgroundImage=`url("${uri}")`;
+  grainLayer.style.backgroundSize=`${tile}px ${tile}px`;
+  grainLayer.style.mixBlendMode=grainPreviewOn?'normal':g.blend;
+  grainLayer.style.opacity=grainPreviewOn?'1':String(g.opacity);
+}
+
+/* ---------- render ---------- */
+function render(){
+  // background gradient
+  if(grainPreviewOn){
+    gradLayer.style.background='#7a7a7a';
+  }else{
+    gradLayer.style.background=gradientBackgroundValue();
+  }
+  applyGrainLayer();
+  const eh=$('#emptyHint');
+  if(eh) eh.style.display=(state.points.length===0&&!grainPreviewOn)?'flex':'none';
+  renderPoints();
+  renderProbes();
+  renderPointList();
+  renderSelected();
+  renderExport();
+  updateHash();
+}
+
+function renderPoints(){
+  // remove old
+  stage.querySelectorAll('.pt').forEach(e=>e.remove());
+  state.points.forEach(p=>{
+    const el=document.createElement('div');
+    el.className='pt'+(p.id===selectedId?' sel':'');
+    el.style.left=(p.x*100)+'%';
+    el.style.top=(p.y*100)+'%';
+    el.style.background=p.color;
+    el.dataset.id=p.id;
+    stage.appendChild(el);
+    attachPointDrag(el,p);
+  });
+}
+
+function renderProbes(){
+  stage.querySelectorAll('.txtprobe').forEach(e=>e.remove());
+  state.probes.forEach(pr=>{
+    const el=document.createElement('div');
+    el.className='txtprobe '+pr.mode;
+    el.style.left=(pr.x*100)+'%';
+    el.style.top=(pr.y*100)+'%';
+    el.dataset.id=pr.id;
+    const label=document.createElement('span');
+    label.textContent=pr.text;
+    const ratio=document.createElement('span');
+    ratio.className='ratio';
+    // compute contrast vs sampled bg
+    const bg=sampleGradientColor(pr.x,pr.y);
+    const fg=pr.mode==='light'?{r:255,g:255,b:255}:{r:17,g:17,b:17};
+    const cr=contrastRatio(fg,bg);
+    let tag='FAIL',cls='fail';
+    if(cr>=7){tag='AAA';cls='aaa';}
+    else if(cr>=4.5){tag='AA';cls='aa';}
+    else if(cr>=3){tag='AA Large';cls='aa';}
+    ratio.textContent=cr.toFixed(2)+' • '+tag;
+    ratio.className='ratio '+cls;
+    el.appendChild(label);el.appendChild(ratio);
+    stage.appendChild(el);
+    attachProbeDrag(el,pr);
+  });
+  renderProbeReport();
+}
+
+function renderProbeReport(){
+  const box=$('#probeReport');
+  if(state.probes.length===0){box.textContent='';return;}
+  const rows=state.probes.map(pr=>{
+    const bg=sampleGradientColor(pr.x,pr.y);
+    const fg=pr.mode==='light'?{r:255,g:255,b:255}:{r:17,g:17,b:17};
+    const cr=contrastRatio(fg,bg);
+    let tag=cr>=7?'AAA':cr>=4.5?'AA':cr>=3?'AA-Lg':'fail';
+    return `${pr.mode} text: ${cr.toFixed(2)} (${tag}) over ${rgbToHex(bg.r,bg.g,bg.b)}`;
+  });
+  box.innerHTML='<div style="margin-top:10px">'+rows.join('<br>')+'</div>';
+}
+
+/* Approximate the composited gradient color at normalized x,y (matches CSS additive-ish stacking). */
+function sampleGradientColor(x,y){
+  let base=hexToRgb(state.bg);
+  let acc={r:base.r,g:base.g,b:base.b};
+  // paint bottom-to-top: reverse of CSS order (last array item is bottom)
+  for(let i=state.points.length-1;i>=0;i--){
+    const p=state.points[i];
+    const dx=(x-p.x),dy=(y-p.y);
+    const dist=Math.sqrt(dx*dx+dy*dy);
+    const rad=p.size; // fraction of stage (approx; CSS uses % of larger dim, close enough)
+    if(dist>=rad) continue;
+    let a=(1-dist/rad); // linear falloff approximating gradient stop
+    a=a*a; // ease — radial-gradient with rgba fade is roughly quadratic in perceived coverage
+    a*=p.opacity;
+    const c=hexToRgb(p.color);
+    acc=mixRgb(acc,c,clamp(a,0,1));
+  }
+  return {r:acc.r,g:acc.g,b:acc.b};
+}
+
+/* ---------- point list ---------- */
+function renderPointList(){
+  const list=$('#plist');list.innerHTML='';
+  state.points.forEach((p,i)=>{
+    const it=document.createElement('div');
+    it.className='pitem'+(p.id===selectedId?' sel':'');
+    it.innerHTML=`
+      <span class="ix">${i+1}</span>
+      <span class="sw" style="background:${p.color}"></span>
+      <span class="nm">${p.color} · r${Math.round(p.size*100)}</span>
+      <button class="icbtn up" title="Move up">▲</button>
+      <button class="icbtn down" title="Move down">▼</button>
+      <button class="icbtn del" title="Delete">✕</button>`;
+    it.addEventListener('click',e=>{
+      if(e.target.closest('button'))return;
+      selectPoint(p.id);
+    });
+    it.querySelector('.sw').addEventListener('click',()=>{selectPoint(p.id);
+      const inp=$('#selColor'); if(inp) inp.click();});
+    it.querySelector('.up').addEventListener('click',e=>{e.stopPropagation();reorder(i,i-1);});
+    it.querySelector('.down').addEventListener('click',e=>{e.stopPropagation();reorder(i,i+1);});
+    it.querySelector('.del').addEventListener('click',e=>{e.stopPropagation();deletePoint(p.id);});
+    list.appendChild(it);
+  });
+  if(state.points.length===0){
+    list.innerHTML='<div class="hint" style="margin-top:6px">No points yet — click the canvas or load a preset.</div>';
+  }
+}
+function reorder(from,to){
+  if(to<0||to>=state.points.length)return;
+  const [x]=state.points.splice(from,1);
+  state.points.splice(to,0,x);
+  render();
+}
+function deletePoint(id){
+  state.points=state.points.filter(p=>p.id!==id);
+  if(selectedId===id)selectedId=state.points.length?state.points[0].id:null;
+  render();
+}
+
+/* ---------- selected panel ---------- */
+function renderSelected(){
+  const box=$('#selBody');
+  const p=state.points.find(x=>x.id===selectedId);
+  if(!p){box.innerHTML='<div class="hint" style="margin-top:0">No point selected. Click a point on the canvas.</div>';return;}
+  box.innerHTML=`
+    <div class="row"><label>Color</label>
+      <input type="color" id="selColor" value="${p.color}">
+      <input type="text" id="selHex" value="${p.color}" style="max-width:78px"></div>
+    <div class="row"><label>Radius</label>
+      <input type="range" id="selSize" min="0.05" max="1.2" step="0.01" value="${p.size}">
+      <span class="val">${Math.round(p.size*100)}</span></div>
+    <div class="row"><label>Opacity</label>
+      <input type="range" id="selOp" min="0.05" max="1" step="0.01" value="${p.opacity}">
+      <span class="val">${p.opacity.toFixed(2)}</span></div>
+    <div class="row"><label>X</label>
+      <input type="range" id="selX" min="0" max="1" step="0.001" value="${p.x}">
+      <span class="val">${Math.round(p.x*100)}</span></div>
+    <div class="row"><label>Y</label>
+      <input type="range" id="selY" min="0" max="1" step="0.001" value="${p.y}">
+      <span class="val">${Math.round(p.y*100)}</span></div>
+    <div class="btn-grid" style="margin-top:6px">
+      <button class="sbtn" id="dupPt">Duplicate</button>
+      <button class="sbtn" id="delSelPt">Delete</button>
+    </div>`;
+  const upd=()=>render();
+  $('#selColor').addEventListener('input',e=>{p.color=e.target.value;upd();});
+  $('#selHex').addEventListener('change',e=>{const v=e.target.value.trim();if(/^#?[0-9a-f]{6}$/i.test(v)){p.color=v.startsWith('#')?v:'#'+v;upd();}});
+  $('#selSize').addEventListener('input',e=>{p.size=+e.target.value;upd();});
+  $('#selOp').addEventListener('input',e=>{p.opacity=+e.target.value;upd();});
+  $('#selX').addEventListener('input',e=>{p.x=+e.target.value;upd();});
+  $('#selY').addEventListener('input',e=>{p.y=+e.target.value;upd();});
+  $('#dupPt').addEventListener('click',()=>{
+    const np={...p,id:uid++,x:clamp(p.x+0.05,0,1),y:clamp(p.y+0.05,0,1)};
+    state.points.push(np);selectPoint(np.id);
+  });
+  $('#delSelPt').addEventListener('click',()=>deletePoint(p.id));
+}
+
+/* ---------- selection ---------- */
+function revealSelected(){
+  const sec=document.querySelector('.sec[data-sec="selected"]');
+  if(!sec)return;
+  sec.classList.remove('collapsed');
+  requestAnimationFrame(()=>{try{sec.scrollIntoView({block:'nearest',behavior:'smooth'});}catch(e){}});
+}
+function selectPoint(id){
+  const changed=selectedId!==id;
+  selectedId=id;
+  render();
+  if(changed)revealSelected();
+}
+
+/* ---------- dragging points ----------
+   Listeners are bound to window (not the point element) so they survive the
+   full re-render that render() triggers, which detaches/recreates every node. */
+function attachPointDrag(el,p){
+  el.addEventListener('pointerdown',e=>{
+    e.preventDefault();
+    selectPoint(p.id);
+    stage.style.cursor='grabbing';
+    const rect=stage.getBoundingClientRect();
+    const move=ev=>{
+      p.x=clamp((ev.clientX-rect.left)/rect.width,0,1);
+      p.y=clamp((ev.clientY-rect.top)/rect.height,0,1);
+      render();
+    };
+    const up=()=>{
+      stage.style.cursor='';
+      window.removeEventListener('pointermove',move);
+      window.removeEventListener('pointerup',up);
+    };
+    window.addEventListener('pointermove',move);
+    window.addEventListener('pointerup',up);
+  });
+}
+function attachProbeDrag(el,pr){
+  el.addEventListener('pointerdown',e=>{
+    e.preventDefault();
+    stage.style.cursor='grabbing';
+    const rect=stage.getBoundingClientRect();
+    const move=ev=>{
+      pr.x=clamp((ev.clientX-rect.left)/rect.width,0,1);
+      pr.y=clamp((ev.clientY-rect.top)/rect.height,0,1);
+      render();
+    };
+    const up=()=>{
+      stage.style.cursor='';
+      window.removeEventListener('pointermove',move);
+      window.removeEventListener('pointerup',up);
+    };
+    window.addEventListener('pointermove',move);
+    window.addEventListener('pointerup',up);
+  });
+}
+
+/* click stage to add point */
+stage.addEventListener('pointerdown',e=>{
+  if(e.target!==stage&&e.target!==gradLayer&&e.target!==grainLayer)return;
+  const rect=stage.getBoundingClientRect();
+  const x=clamp((e.clientX-rect.left)/rect.width,0,1);
+  const y=clamp((e.clientY-rect.top)/rect.height,0,1);
+  const colors=['#ff7ac0','#7c8cff','#4ade80','#fbbf24','#22d3ee','#f472b6'];
+  const np={id:uid++,x,y,color:colors[state.points.length%colors.length],size:0.55,opacity:0.85};
+  state.points.push(np);selectPoint(np.id);
+});
+
+/* ---------- keyboard nudge ---------- */
+document.addEventListener('keydown',e=>{
+  if(/input|select|textarea/i.test(document.activeElement.tagName))return;
+  if(e.key==='r'||e.key==='R'){randomizeAll();return;}
+  const p=state.points.find(x=>x.id===selectedId);
+  if(!p)return;
+  const step=e.shiftKey?0.05:0.005;
+  let handled=true;
+  if(e.key==='ArrowLeft')p.x=clamp(p.x-step,0,1);
+  else if(e.key==='ArrowRight')p.x=clamp(p.x+step,0,1);
+  else if(e.key==='ArrowUp')p.y=clamp(p.y-step,0,1);
+  else if(e.key==='ArrowDown')p.y=clamp(p.y+step,0,1);
+  else if(e.key==='Delete'||e.key==='Backspace')deletePoint(p.id);
+  else handled=false;
+  if(handled){e.preventDefault();render();}
+});
+
+/* ---------- background controls ---------- */
+$('#bgColor').addEventListener('input',e=>{state.bg=e.target.value;$('#bgHex').value=e.target.value;render();});
+$('#bgHex').addEventListener('change',e=>{const v=e.target.value.trim();if(/^#?[0-9a-f]{6}$/i.test(v)){state.bg=v.startsWith('#')?v:'#'+v;$('#bgColor').value=state.bg;render();}});
+$('#addPt').addEventListener('click',()=>{
+  const colors=['#ff7ac0','#7c8cff','#4ade80','#fbbf24','#22d3ee'];
+  const np={id:uid++,x:Math.random()*0.7+0.15,y:Math.random()*0.7+0.15,color:colors[state.points.length%colors.length],size:0.55,opacity:0.85};
+  state.points.push(np);selectPoint(np.id);
+});
+$('#clearPts').addEventListener('click',()=>{state.points=[];selectedId=null;render();});
+
+/* ---------- grain controls ---------- */
+function bindRange(id,valId,fn,fmt){
+  $(id).addEventListener('input',e=>{fn(+e.target.value);if(valId)$(valId).textContent=fmt?fmt(+e.target.value):e.target.value;render();});
+}
+bindRange('#grainScale','#grainScaleVal',v=>state.grain.scale=v,v=>v.toFixed(2));
+bindRange('#grainOpacity','#grainOpacityVal',v=>state.grain.opacity=v,v=>v.toFixed(2));
+bindRange('#grainOct','#grainOctVal',v=>state.grain.octaves=v);
+$('#grainBlend').addEventListener('change',e=>{state.grain.blend=e.target.value;render();});
+$('#grainOn').addEventListener('change',e=>{state.grain.on=e.target.checked;render();});
+$('#grainMono').addEventListener('change',e=>{state.grain.mono=e.target.checked;render();});
+$('#grainPreview').addEventListener('click',e=>{
+  grainPreviewOn=!grainPreviewOn;
+  e.target.textContent=grainPreviewOn?'👁 Exit grain preview':'👁 Isolate grain preview';
+  e.target.style.color=grainPreviewOn?'var(--accent)':'';
+  render();
+});
+
+/* ---------- harmony ---------- */
+document.querySelectorAll('[data-harmony]').forEach(b=>{
+  b.addEventListener('click',()=>applyHarmony(b.dataset.harmony));
+});
+function applyHarmony(type){
+  const seed=$('#harmonySeed').value;
+  const base=rgbToHsl(...Object.values(hexToRgb(seed)));
+  let n=Math.max(state.points.length,4);
+  if(state.points.length===0){
+    // create default layout
+    const pos=[[0.25,0.3],[0.75,0.28],[0.3,0.75],[0.72,0.72],[0.5,0.5]];
+    for(let i=0;i<Math.min(n,5);i++)state.points.push({id:uid++,x:pos[i][0],y:pos[i][1],color:'#fff',size:0.6,opacity:0.85});
+  }
+  const cols=[];
+  const cnt=state.points.length;
+  for(let i=0;i<cnt;i++){
+    let h=base.h,s=clamp(base.s,45,90),l=clamp(base.l,45,70);
+    const t=cnt>1?i/(cnt-1):0;
+    switch(type){
+      case 'analogous':h=base.h+(i-cnt/2)*22;break;
+      case 'complementary':h=base.h+(i%2?180:0)+(i*8);break;
+      case 'triadic':h=base.h+(i%3)*120;break;
+      case 'tetradic':h=base.h+(i%4)*90;break;
+      case 'monochrome':h=base.h;l=clamp(30+t*45,20,80);s=clamp(base.s-i*4,25,95);break;
+      case 'random':h=Math.random()*360;s=45+Math.random()*45;l=45+Math.random()*25;break;
+    }
+    cols.push(hslToHex(h,s,l));
+  }
+  state.points.forEach((p,i)=>p.color=cols[i]);
+  render();
+  toast(type.charAt(0).toUpperCase()+type.slice(1)+' palette applied');
+}
+
+/* ---------- legibility probes ---------- */
+$('#addLight').addEventListener('click',()=>addProbe('light'));
+$('#addDark').addEventListener('click',()=>addProbe('dark'));
+$('#clearProbes').addEventListener('click',()=>{state.probes=[];render();});
+function addProbe(mode){
+  state.probes.push({id:uid++,x:0.3+Math.random()*0.4,y:0.3+Math.random()*0.4,mode,text:mode==='light'?'Aa Light':'Aa Dark'});
+  render();
+}
+
+/* ---------- image palette extraction (median cut) ---------- */
+$('#pickImg').addEventListener('click',()=>$('#imgFile').click());
+$('#imgFile').addEventListener('change',e=>{if(e.target.files[0])loadImageForPalette(e.target.files[0]);});
+$('#kColors').addEventListener('input',e=>{$('#kColorsVal').textContent=e.target.value;});
+
+const stageWrap=$('#stageWrap');
+['dragenter','dragover'].forEach(ev=>stageWrap.addEventListener(ev,e=>{e.preventDefault();stageWrap.classList.add('dragover');}));
+['dragleave','drop'].forEach(ev=>stageWrap.addEventListener(ev,e=>{e.preventDefault();if(ev==='drop'||e.target===stageWrap)stageWrap.classList.remove('dragover');}));
+stageWrap.addEventListener('drop',e=>{
+  e.preventDefault();stageWrap.classList.remove('dragover');
+  const f=e.dataTransfer.files[0];if(f&&f.type.startsWith('image/'))loadImageForPalette(f);
+});
+
+function loadImageForPalette(file){
+  const url=URL.createObjectURL(file);
+  const img=new Image();
+  img.onload=()=>{
+    const k=+$('#kColors').value;
+    const colors=extractPalette(img,k);
+    URL.revokeObjectURL(url);
+    seedPointsFromColors(colors);
+    toast('Extracted '+colors.length+' colors from image');
+  };
+  img.onerror=()=>{toast('Could not load image');URL.revokeObjectURL(url);};
+  img.src=url;
+}
+function extractPalette(img,k){
+  const cv=document.createElement('canvas');
+  const w=cv.width=100, h=cv.height=Math.max(1,Math.round(100*img.height/img.width));
+  const ctx=cv.getContext('2d');
+  ctx.drawImage(img,0,0,w,h);
+  const data=ctx.getImageData(0,0,w,h).data;
+  const px=[];
+  for(let i=0;i<data.length;i+=4){
+    if(data[i+3]<125)continue;
+    px.push([data[i],data[i+1],data[i+2]]);
+  }
+  if(px.length===0)return ['#888888'];
+  // median cut
+  let buckets=[px];
+  while(buckets.length<k){
+    // pick bucket with greatest channel range
+    let bi=0,bestRange=-1;
+    buckets.forEach((b,i)=>{
+      const r=channelRange(b);
+      if(r.range>bestRange){bestRange=r.range;bi=i;}
+    });
+    const b=buckets[bi];
+    if(b.length<2)break;
+    const ch=channelRange(b).ch;
+    b.sort((a,c)=>a[ch]-c[ch]);
+    const mid=Math.floor(b.length/2);
+    buckets.splice(bi,1,b.slice(0,mid),b.slice(mid));
+  }
+  return buckets.map(b=>{
+    let r=0,g=0,bl=0;
+    b.forEach(p=>{r+=p[0];g+=p[1];bl+=p[2];});
+    return rgbToHex(r/b.length,g/b.length,bl/b.length);
+  }).sort((a,b)=>{
+    const la=relLum(...Object.values(hexToRgb(a))),lb=relLum(...Object.values(hexToRgb(b)));
+    return lb-la;
+  });
+}
+function channelRange(bucket){
+  let min=[255,255,255],max=[0,0,0];
+  bucket.forEach(p=>{for(let c=0;c<3;c++){if(p[c]<min[c])min[c]=p[c];if(p[c]>max[c])max[c]=p[c];}});
+  const ranges=[max[0]-min[0],max[1]-min[1],max[2]-min[2]];
+  const ch=ranges.indexOf(Math.max(...ranges));
+  return {ch,range:ranges[ch]};
+}
+function seedPointsFromColors(colors){
+  const pos=[[0.22,0.25],[0.78,0.22],[0.28,0.78],[0.75,0.75],[0.5,0.45],[0.15,0.55],[0.85,0.5],[0.5,0.15]];
+  state.points=colors.map((c,i)=>({
+    id:uid++,x:pos[i%pos.length][0],y:pos[i%pos.length][1],
+    color:c,size:0.6,opacity:0.85
+  }));
+  // darkest becomes background
+  const darkest=colors.slice().sort((a,b)=>relLum(...Object.values(hexToRgb(a)))-relLum(...Object.values(hexToRgb(b))))[0];
+  state.bg=darkest;$('#bgColor').value=darkest;$('#bgHex').value=darkest;
+  selectedId=state.points.length?state.points[0].id:null;
+  render();
+}
+
+/* ---------- presets ---------- */
+const PRESETS=[
+  {name:'Aurora',bg:'#050a18',grain:{on:true,scale:0.9,opacity:0.2,octaves:2,blend:'overlay',mono:true},
+   points:[{x:0.2,y:0.3,color:'#00e5a0',size:0.7,opacity:0.9},{x:0.7,y:0.2,color:'#5b8cff',size:0.75,opacity:0.85},
+           {x:0.5,y:0.7,color:'#8b5cf6',size:0.65,opacity:0.8},{x:0.85,y:0.6,color:'#00d4ff',size:0.55,opacity:0.7}]},
+  {name:'Dusk',bg:'#1a0f1f',grain:{on:true,scale:0.8,opacity:0.24,octaves:2,blend:'soft-light',mono:true},
+   points:[{x:0.25,y:0.75,color:'#ff6b6b',size:0.7,opacity:0.9},{x:0.75,y:0.3,color:'#ffa94d',size:0.65,opacity:0.85},
+           {x:0.5,y:0.5,color:'#ff5c8a',size:0.6,opacity:0.75},{x:0.85,y:0.85,color:'#845ef7',size:0.6,opacity:0.7}]},
+  {name:'Mesh Glass',bg:'#eef2ff',grain:{on:true,scale:0.7,opacity:0.14,octaves:2,blend:'multiply',mono:true},
+   points:[{x:0.2,y:0.25,color:'#a5b4fc',size:0.7,opacity:0.85},{x:0.78,y:0.2,color:'#f9a8d4',size:0.68,opacity:0.8},
+           {x:0.3,y:0.8,color:'#99f6e4',size:0.65,opacity:0.75},{x:0.8,y:0.78,color:'#fde68a',size:0.6,opacity:0.7}]},
+  {name:'Risograph',bg:'#f4ece0',grain:{on:true,scale:1.4,opacity:0.4,octaves:1,blend:'multiply',mono:false},
+   points:[{x:0.3,y:0.35,color:'#ff5252',size:0.6,opacity:0.85},{x:0.7,y:0.4,color:'#2962ff',size:0.6,opacity:0.8},
+           {x:0.5,y:0.75,color:'#ffd600',size:0.55,opacity:0.8}]},
+  {name:'Nebula',bg:'#0a0416',grain:{on:true,scale:1.0,opacity:0.22,octaves:3,blend:'screen',mono:true},
+   points:[{x:0.35,y:0.4,color:'#e040fb',size:0.65,opacity:0.9},{x:0.7,y:0.55,color:'#7c4dff',size:0.7,opacity:0.85},
+           {x:0.55,y:0.25,color:'#18ffff',size:0.5,opacity:0.7},{x:0.2,y:0.8,color:'#ff4081',size:0.55,opacity:0.6}]},
+  {name:'Citrus',bg:'#fff8ec',grain:{on:true,scale:0.85,opacity:0.16,octaves:2,blend:'soft-light',mono:true},
+   points:[{x:0.25,y:0.3,color:'#ffca28',size:0.65,opacity:0.9},{x:0.75,y:0.35,color:'#ff7043',size:0.6,opacity:0.85},
+           {x:0.5,y:0.8,color:'#9ccc65',size:0.6,opacity:0.8},{x:0.85,y:0.75,color:'#ffee58',size:0.5,opacity:0.7}]},
+  {name:'Deep Sea',bg:'#03141f',grain:{on:true,scale:0.9,opacity:0.2,octaves:2,blend:'overlay',mono:true},
+   points:[{x:0.3,y:0.3,color:'#0891b2',size:0.7,opacity:0.9},{x:0.7,y:0.6,color:'#0e7490',size:0.7,opacity:0.85},
+           {x:0.55,y:0.85,color:'#14b8a6',size:0.55,opacity:0.75},{x:0.8,y:0.2,color:'#1e40af',size:0.6,opacity:0.7}]},
+  {name:'Blush',bg:'#fef2f4',grain:{on:true,scale:0.75,opacity:0.14,octaves:2,blend:'soft-light',mono:true},
+   points:[{x:0.25,y:0.3,color:'#fda4af',size:0.65,opacity:0.85},{x:0.75,y:0.3,color:'#f0abfc',size:0.6,opacity:0.8},
+           {x:0.5,y:0.78,color:'#c4b5fd',size:0.62,opacity:0.78}]},
+];
+function loadPreset(pre){
+  state.bg=pre.bg;
+  state.grain={...pre.grain};
+  state.points=pre.points.map(p=>({id:uid++,...p}));
+  selectedId=state.points.length?state.points[0].id:null;
+  syncGrainUI();
+  $('#bgColor').value=pre.bg;$('#bgHex').value=pre.bg;
+  render();
+}
+function copyPresetLink(pre){
+  // build hash for this preset without disturbing live state
+  const tmp={bg:pre.bg,grain:pre.grain,points:pre.points.map((p,i)=>({id:i,...p})),probes:[]};
+  const link=location.href.split('#')[0]+'#'+serialize(tmp);
+  copyText(link).then(()=>toast('Copied '+pre.name+' share link'));
+}
+function renderPresetGallery(){
+  const grid=$('#presetGrid');grid.innerHTML='';
+  PRESETS.forEach(pre=>{
+    const div=document.createElement('div');
+    div.className='preset';
+    const thumb=document.createElement('div');
+    thumb.className='thumb';
+    const layers=pre.points.map(p=>{
+      const {r,g,b}=hexToRgb(p.color);
+      return `radial-gradient(circle at ${p.x*100}% ${p.y*100}%, rgba(${r},${g},${b},${p.opacity}) 0%, rgba(${r},${g},${b},0) ${p.size*100}%)`;
+    });
+    thumb.style.background=layers.join(',')+','+pre.bg;
+    div.appendChild(thumb);
+    const lbl=document.createElement('div');lbl.className='lbl';lbl.textContent=pre.name;
+    div.appendChild(lbl);
+    const linkBtn=document.createElement('button');
+    linkBtn.className='preset-link';linkBtn.textContent='🔗';
+    linkBtn.title='Copy '+pre.name+' share link';
+    linkBtn.addEventListener('click',e=>{e.stopPropagation();copyPresetLink(pre);});
+    div.appendChild(linkBtn);
+    div.title='Load '+pre.name+' (right-click or 🔗 to copy its share link)';
+    div.addEventListener('click',()=>{loadPreset(pre);toast(pre.name+' preset loaded');});
+    div.addEventListener('contextmenu',e=>{e.preventDefault();copyPresetLink(pre);});
+    grid.appendChild(div);
+  });
+}
+
+function syncGrainUI(){
+  const g=state.grain;
+  $('#grainOn').checked=g.on;
+  $('#grainMono').checked=g.mono;
+  $('#grainScale').value=g.scale;$('#grainScaleVal').textContent=g.scale.toFixed(2);
+  $('#grainOpacity').value=g.opacity;$('#grainOpacityVal').textContent=g.opacity.toFixed(2);
+  $('#grainOct').value=g.octaves;$('#grainOctVal').textContent=g.octaves;
+  $('#grainBlend').value=g.blend;
+}
+
+/* ---------- randomize everything ---------- */
+$('#randomAll').addEventListener('click',randomizeAll);
+function randomizeAll(){
+  const n=3+Math.floor(Math.random()*3);
+  const baseH=Math.random()*360;
+  const dark=Math.random()<0.6;
+  state.bg=dark?hslToHex(baseH,30,8+Math.random()*8):hslToHex(baseH,25,92+Math.random()*5);
+  state.points=[];
+  for(let i=0;i<n;i++){
+    state.points.push({
+      id:uid++,x:0.15+Math.random()*0.7,y:0.15+Math.random()*0.7,
+      color:hslToHex(baseH+(Math.random()*140-70),55+Math.random()*35,50+Math.random()*20),
+      size:0.45+Math.random()*0.4,opacity:0.7+Math.random()*0.25
+    });
+  }
+  state.grain={on:true,scale:0.6+Math.random()*0.8,opacity:0.14+Math.random()*0.18,
+    octaves:1+Math.floor(Math.random()*3),blend:['overlay','soft-light','screen'][Math.floor(Math.random()*3)],mono:Math.random()<0.7};
+  selectedId=state.points[0].id;
+  syncGrainUI();
+  $('#bgColor').value=state.bg;$('#bgHex').value=state.bg;
+  render();
+  toast('Randomized');
+}
+
+/* ---------- export code generation ---------- */
+document.querySelectorAll('#expTabs .tab').forEach(t=>{
+  t.addEventListener('click',()=>{
+    document.querySelectorAll('#expTabs .tab').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');currentFmt=t.dataset.fmt;renderExport();
+  });
+});
+function cssBackgroundString(){
+  const layers=buildGradientLayers();
+  if(layers.length===0)return state.bg;
+  return layers.join(',\n    ')+',\n    '+state.bg;
+}
+function grainOverlayCSS(){
+  const g=state.grain;
+  if(!g.on)return '';
+  const uri=grainSvgDataUri(300,300).replace(/"/g,"'");
+  const size=grainTilePx();
+  return `/* grain overlay — place as a child div or ::after over the gradient */
+.silt-grain::after{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background-image:url("${uri}");
+  background-size:${size}px ${size}px;
+  mix-blend-mode:${g.blend};
+  opacity:${g.opacity};
+}`;
+}
+function genCSS(){
+  return `.silt-gradient{
+  position:relative;
+  background:
+    ${cssBackgroundString()};
+}
+${grainOverlayCSS()}`;
+}
+function genAnimatedCSS(){
+  const layers=state.points.map((p,i)=>{
+    const {r,g,b}=hexToRgb(p.color);
+    return `    radial-gradient(circle at var(--x${i}) var(--y${i}), rgba(${r|0},${g|0},${b|0},${p.opacity.toFixed(2)}) 0%, rgba(${r|0},${g|0},${b|0},0) ${(p.size*100).toFixed(0)}%)`;
+  });
+  const varsFrom=state.points.map((p,i)=>`    --x${i}:${(p.x*100).toFixed(0)}%; --y${i}:${(p.y*100).toFixed(0)}%;`).join('\n');
+  const drift=(v,amt)=>clamp(v+amt,0,1);
+  const varsMid=state.points.map((p,i)=>{
+    const dx=drift(p.x,(i%2?0.12:-0.12)),dy=drift(p.y,(i%2?-0.1:0.1));
+    return `    --x${i}:${(dx*100).toFixed(0)}%; --y${i}:${(dy*100).toFixed(0)}%;`;}).join('\n');
+  const propReg=state.points.map((p,i)=>
+`@property --x${i}{syntax:"<percentage>";inherits:false;initial-value:${(p.x*100).toFixed(0)}%;}
+@property --y${i}{syntax:"<percentage>";inherits:false;initial-value:${(p.y*100).toFixed(0)}%;}`).join('\n');
+  return `/* Animated living mesh — slow drift of the points */
+${propReg}
+.silt-animated{
+  position:relative;
+${varsFrom}
+  background:
+${layers.join(',\n')},
+    ${state.bg};
+  animation:siltDrift 18s ease-in-out infinite alternate;
+}
+@keyframes siltDrift{
+  to{
+${varsMid}
+  }
+}
+${grainOverlayCSS().replace('.silt-grain','.silt-animated')}`;
+}
+function genTailwind(){
+  const layers=buildGradientLayers();
+  const bg=layers.length?layers.join(','):state.bg;
+  const clean=(layers.length?bg+','+state.bg:state.bg).replace(/\s+/g,'_').replace(/,/g,',');
+  return `<!-- Tailwind arbitrary value. Grain via a sibling overlay element. -->
+<div class="relative bg-[${clean}]">
+  <div class="pointer-events-none absolute inset-0
+    bg-[url('data:image/svg+xml;charset=utf-8,...grain...')]
+    mix-blend-${state.grain.blend} opacity-[${state.grain.opacity.toFixed(2)}]"></div>
+  <!-- your content -->
+</div>
+
+<!-- Full grain data-URI (paste into the overlay bg-[url()]): -->
+<!-- ${state.grain.on?grainSvgDataUri(300,300):'(grain disabled)'} -->`;
+}
+function genReact(){
+  const layers=buildGradientLayers();
+  const bgVal=(layers.length?layers.join(', ')+', ':'')+state.bg;
+  const grainUri=state.grain.on?grainSvgDataUri(300,300):'';
+  return `// React / JSX style objects — drop-in inline styles
+const meshStyle = {
+  position: "relative",
+  background: "${bgVal.replace(/"/g,'\\"')}",
+};
+
+const grainStyle = {
+  position: "absolute", inset: 0, pointerEvents: "none",
+  backgroundImage: "url(\\"${grainUri.replace(/"/g,'\\"')}\\")",
+  backgroundSize: "${grainTilePx()}px",
+  mixBlendMode: "${state.grain.blend}",
+  opacity: ${state.grain.opacity.toFixed(2)},
+};
+
+export function SiltBackground({ children }) {
+  return (
+    <div style={meshStyle}>
+      ${state.grain.on?'<div style={grainStyle} />':''}
+      {children}
+    </div>
+  );
+}`;
+}
+function genTokens(){
+  const obj={
+    silt:{
+      background:state.bg,
+      points:state.points.map((p,i)=>({
+        name:'point-'+(i+1),
+        color:p.color,
+        position:{x:+(p.x).toFixed(3),y:+(p.y).toFixed(3)},
+        radius:+(p.size).toFixed(3),
+        opacity:+(p.opacity).toFixed(2)
+      })),
+      grain:{
+        enabled:state.grain.on,
+        scale:+state.grain.scale.toFixed(3),
+        intensity:+state.grain.opacity.toFixed(3),
+        octaves:state.grain.octaves,
+        blendMode:state.grain.blend,
+        monochrome:state.grain.mono
+      }
+    }
+  };
+  return JSON.stringify(obj,null,2);
+}
+function genSVG(scale){
+  const w=1600,h=1000;
+  const g=state.grain;
+  let defs=`<defs>`;
+  const stops=state.points.map((p,i)=>{
+    const {r,g:gg,b}=hexToRgb(p.color);
+    return `<radialGradient id="p${i}" cx="${(p.x*100).toFixed(2)}%" cy="${(p.y*100).toFixed(2)}%" r="${(p.size*70).toFixed(1)}%">
+  <stop offset="0%" stop-color="rgb(${r|0},${gg|0},${b|0})" stop-opacity="${p.opacity.toFixed(2)}"/>
+  <stop offset="100%" stop-color="rgb(${r|0},${gg|0},${b|0})" stop-opacity="0"/>
+</radialGradient>`;
+  }).join('\n');
+  defs+=stops;
+  if(g.on){
+    // Tile the exact same grain the preview + CSS/React/Tailwind exports use,
+    // so on-screen and every exported format share one grain-render routine.
+    const tile=grainTilePx();
+    const grainImg=grainSvgDataUri(300,300);
+    defs+=`
+<pattern id="grainpat" patternUnits="userSpaceOnUse" width="${tile}" height="${tile}">
+  <image href="${grainImg}" xlink:href="${grainImg}" x="0" y="0" width="${tile}" height="${tile}" preserveAspectRatio="none"/>
+</pattern>`;
+  }
+  defs+=`</defs>`;
+  let rects=`<rect width="${w}" height="${h}" fill="${state.bg}"/>`;
+  // reverse so first list point is on top
+  for(let i=state.points.length-1;i>=0;i--){
+    rects+=`\n<rect width="${w}" height="${h}" fill="url(#p${i})"/>`;
+  }
+  let grainRect='';
+  if(g.on){
+    grainRect=`\n<rect width="${w}" height="${h}" fill="url(#grainpat)" opacity="${g.opacity.toFixed(2)}" style="mix-blend-mode:${g.blend}"/>`;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+${defs}
+${rects}${grainRect}
+</svg>`;
+}
+function renderExport(){
+  let code='';
+  switch(currentFmt){
+    case 'css':code=genCSS();break;
+    case 'animated':code=genAnimatedCSS();break;
+    case 'tailwind':code=genTailwind();break;
+    case 'react':code=genReact();break;
+    case 'svg':code=genSVG();break;
+    case 'tokens':code=genTokens();break;
+  }
+  $('#codeOut').textContent=code;
+}
+$('#copyCode').addEventListener('click',()=>{
+  copyText($('#codeOut').textContent).then(()=>toast('Copied '+currentFmt.toUpperCase()));
+});
+
+/* ---------- SVG / PNG download ---------- */
+$('#dlSvg').addEventListener('click',()=>{
+  const svg=genSVG();
+  downloadBlob(new Blob([svg],{type:'image/svg+xml'}),'silt-gradient.svg');
+  toast('SVG downloaded');
+});
+$('#pngScale').addEventListener('change',e=>{
+  $('#pngW').style.display=e.target.value==='custom'?'':'none';
+});
+function exportPNG(){
+  const sel=$('#pngScale').value;
+  let w;
+  if(sel==='custom')w=clamp(+$('#pngW').value||1920,16,8000);
+  else w=1600*(+sel);
+  const h=Math.round(w*1000/1600);
+  const svg=genSVG();
+  const img=new Image();
+  const uri='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+  img.onload=()=>{
+    const cv=document.createElement('canvas');cv.width=w;cv.height=h;
+    const ctx=cv.getContext('2d');
+    ctx.drawImage(img,0,0,w,h);
+    cv.toBlob(b=>{downloadBlob(b,'silt-gradient.png');toast('PNG downloaded ('+w+'×'+h+')');},'image/png');
+  };
+  img.onerror=()=>toast('PNG export failed');
+  img.src=uri;
+}
+$('#exportPng').addEventListener('click',exportPNG);
+$('#dlPng2').addEventListener('click',exportPNG);
+
+function downloadBlob(blob,name){
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();
+  a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+
+/* ---------- clipboard ---------- */
+function copyText(t){
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    return navigator.clipboard.writeText(t).catch(()=>fallbackCopy(t));
+  }
+  return Promise.resolve(fallbackCopy(t));
+}
+function fallbackCopy(t){
+  const ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';
+  document.body.appendChild(ta);ta.select();
+  try{document.execCommand('copy');}catch(e){}
+  ta.remove();
+}
+
+/* ---------- share link ---------- */
+$('#shareBtn').addEventListener('click',()=>{
+  updateHash();
+  copyText(location.href).then(()=>toast('Share link copied — the design is the link'));
+});
+
+/* ---------- hash serialize / deserialize ---------- */
+function serialize(s){
+  // compact array form
+  const obj={
+    v:1,bg:s.bg,
+    p:s.points.map(p=>[round3(p.x),round3(p.y),p.color,round3(p.size),round2(p.opacity)]),
+    g:[s.grain.on?1:0,round2(s.grain.scale),round2(s.grain.opacity),s.grain.octaves,
+       ['overlay','soft-light','multiply','screen','normal'].indexOf(s.grain.blend),s.grain.mono?1:0],
+    t:(s.probes||[]).map(pr=>[round3(pr.x),round3(pr.y),pr.mode==='light'?1:0])
+  };
+  return encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(obj)))));
+}
+function round3(n){return Math.round(n*1000)/1000;}
+function round2(n){return Math.round(n*100)/100;}
+function deserialize(hash){
+  try{
+    const json=decodeURIComponent(escape(atob(decodeURIComponent(hash))));
+    const obj=JSON.parse(json);
+    if(!obj||obj.v!==1)return false;
+    const blends=['overlay','soft-light','multiply','screen','normal'];
+    state.bg=obj.bg||'#0b1020';
+    state.points=(obj.p||[]).map(a=>({id:uid++,x:a[0],y:a[1],color:a[2],size:a[3],opacity:a[4]}));
+    const g=obj.g||[];
+    state.grain={on:!!g[0],scale:g[1]??0.85,opacity:g[2]??0.22,octaves:g[3]??2,
+      blend:blends[g[4]]||'overlay',mono:!!g[5]};
+    state.probes=(obj.t||[]).map(a=>({id:uid++,x:a[0],y:a[1],mode:a[2]?'light':'dark',text:a[2]?'Aa Light':'Aa Dark'}));
+    selectedId=state.points.length?state.points[0].id:null;
+    return true;
+  }catch(e){return false;}
+}
+let hashTimer=null;
+function updateHash(){
+  clearTimeout(hashTimer);
+  hashTimer=setTimeout(()=>{
+    const h=serialize(state);
+    history.replaceState(null,'','#'+h);
+  },120);
+}
+
+/* ---------- section collapse ---------- */
+document.querySelectorAll('.sec-h').forEach(h=>{
+  h.addEventListener('click',()=>h.parentElement.classList.toggle('collapsed'));
+});
+
+/* ---------- theme ---------- */
+$('#themeBtn').addEventListener('click',()=>{
+  const cur=document.documentElement.getAttribute('data-theme');
+  const next=cur==='dark'?'light':'dark';
+  document.documentElement.setAttribute('data-theme',next);
+  $('#themeBtn').textContent=next==='dark'?'☀ Light':'🌙 Dark';
+  try{localStorage.setItem('silt-theme',next);}catch(e){}
+});
+
+/* ---------- toast ---------- */
+let toastTimer=null;
+function toast(msg){
+  const t=$('#toast');t.textContent=msg;t.classList.add('show');
+  clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),1800);
+}
+
+/* ---------- init ---------- */
+function init(){
+  try{const th=localStorage.getItem('silt-theme');if(th){document.documentElement.setAttribute('data-theme',th);
+    $('#themeBtn').textContent=th==='dark'?'☀ Light':'🌙 Dark';}}catch(e){}
+  renderPresetGallery();
+  let loaded=false;
+  if(location.hash&&location.hash.length>3){
+    loaded=deserialize(location.hash.slice(1));
+  }
+  if(!loaded){
+    loadPreset(PRESETS[0]);
+  }
+  syncGrainUI();
+  $('#bgColor').value=state.bg;$('#bgHex').value=state.bg;
+  render();
+}
+init();
+</script>
+</body>
+</html>

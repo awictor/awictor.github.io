@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vernier — CORDIC, by shifts and adds</title>
+<style>
+  :root{
+    --bg:#0e1117; --panel:#161b23; --panel2:#1d232d; --line:#2a323e;
+    --ink:#e8edf3; --dim:#8b97a6; --accent:#ff8a3d; --accent2:#4fd1c5;
+    --good:#63d471; --bad:#ff6b6b; --mono:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  header{padding:16px 22px 8px}
+  h1{margin:0;font-size:22px;letter-spacing:.3px}
+  h1 span{color:var(--accent)}
+  .tag{color:var(--dim);margin:4px 0 0;max-width:900px}
+  .wrap{display:grid;grid-template-columns:minmax(340px,1fr) minmax(360px,1.1fr);
+    gap:16px;padding:12px 22px 30px;align-items:start}
+  @media(max-width:860px){.wrap{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  canvas{display:block;width:100%;border-radius:8px;background:var(--panel2);touch-action:none}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{background:transparent;color:var(--dim);border:0;padding:6px 12px;cursor:pointer;font:inherit}
+  .seg button.on{background:var(--accent);color:#12161d;font-weight:600}
+  label.chk{color:var(--dim);cursor:pointer;user-select:none}
+  input[type=range]{flex:1;accent-color:var(--accent);min-width:120px}
+  .val{font-family:var(--mono);color:var(--accent2)}
+  .rule{font-family:var(--mono);background:var(--panel2);border:1px solid var(--line);
+    border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.7}
+  .rule b{color:var(--accent)} .rule i{color:var(--accent2);font-style:normal}
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
+  th,td{padding:3px 6px;text-align:right;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:500;text-align:right;position:sticky;top:0;background:var(--panel)}
+  td.plus{color:var(--good)} td.minus{color:var(--bad)}
+  .tbl-scroll{max-height:250px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+  tr.hi td{background:rgba(255,138,61,.12)}
+  .kv{display:grid;grid-template-columns:auto 1fr auto;gap:2px 12px;font-family:var(--mono);font-size:12.5px}
+  .kv .lbl{color:var(--dim)} .kv .err{color:var(--accent)}
+  .bits{font-family:var(--mono);font-size:13px;letter-spacing:1px;word-break:break-all}
+  .bits .s0{color:#40495a} .bits .lost{color:var(--bad);background:rgba(255,107,107,.14);border-radius:2px}
+  .bits .sign{color:var(--accent2)}
+  h3{margin:2px 0 8px;font-size:13px;color:var(--dim);text-transform:uppercase;letter-spacing:.8px}
+  .muted{color:var(--dim);font-size:12px} .sp{height:12px}
+  button.share{color:var(--accent2);cursor:pointer;text-decoration:underline;font-size:12px;
+    background:none;border:0;padding:2px 4px;font-family:inherit}
+  :focus-visible{outline:2px solid var(--accent2);outline-offset:2px;border-radius:6px}
+</style>
+</head>
+<body>
+<header>
+  <h1><span>Vernier</span> — sine &amp; atan by shifts and adds</h1>
+  <p class="tag">CORDIC rotates a vector by <span class="val">±arctan(2⁻ⁱ)</span> at each step — a rotation that on real
+  silicon is just a bit-shift and an add, <b>no multiplier</b>. Drag the target; watch the vector ratchet in like a
+  vernier scale. When it settles, (x,y) <b>is</b> (cos θ, sin θ) — scaled by the fixed gain K.</p>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <canvas id="cv" width="640" height="640"></canvas>
+    <div class="row">
+      <div class="seg" id="mode">
+        <button data-m="rot" class="on">Rotation → sin/cos</button>
+        <button data-m="vec">Vectoring → atan2/|v|</button>
+      </div>
+      <label class="chk"><input type="checkbox" id="fixed"> fixed-point (Q15)</label>
+      <button class="share" id="share" type="button">copy share link</button>
+    </div>
+    <div class="row" id="angleRow">
+      <span class="muted" style="min-width:64px">angle θ</span>
+      <input type="range" id="theta" min="-180" max="180" step="0.5" value="60">
+      <span class="val" id="thetaV" style="min-width:56px">60.0°</span>
+    </div>
+    <div class="row">
+      <span class="muted" style="min-width:64px">stages n</span>
+      <input type="range" id="iters" min="1" max="16" step="1" value="12">
+      <span class="val" id="itersV" style="min-width:56px">12</span>
+    </div>
+    <p class="muted" id="hint">Drag the handle on the rim to set the target angle.</p>
+  </div>
+
+  <div class="card">
+    <h3>The update rule — a shift, then an add</h3>
+    <div class="rule" id="rule"></div>
+    <div class="sp"></div>
+    <h3>Bit-shift view, stage <span class="val" id="biStage">0</span> — proof it's just <i>&gt;&gt; i</i></h3>
+    <div class="bits" id="bx"></div>
+    <div class="bits" id="by"></div>
+    <p class="muted">Red = the low <span class="val" id="lostN">i</span> bits shifted out (discarded) by <b>&gt;&gt; i</b>. That is the entire "multiply".</p>
+
+    <div class="sp"></div>
+    <h3>Result vs the real library</h3>
+    <div class="kv" id="readout"></div>
+
+    <div class="sp"></div>
+    <h3>Error vs stages (log scale) — ~1 bit per stage</h3>
+    <canvas id="plot" width="640" height="150"></canvas>
+
+    <div class="sp"></div>
+    <h3>Per-stage trace — the exact numbers</h3>
+    <div class="tbl-scroll"><table id="tbl"></table></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const N=16, ONE_FX=32768, D2R=Math.PI/180, R2D=180/Math.PI;
+// arctan table + CORDIC gain K, computed once (no lookup of sine values anywhere)
+const ATAN=[]; let K=1;
+for(let i=0;i<N;i++){ ATAN[i]=Math.atan(Math.pow(2,-i)); K*=Math.sqrt(1+Math.pow(2,-2*i)); }
+const ATAN_FX=ATAN.map(a=>Math.round(a*ONE_FX));
+
+const S={ mode:'rot', theta:60, n:12, fixed:false };
+
+// ---- CORDIC engine: one loop serves rotation AND vectoring ----
+function run(){
+  const fx=S.fixed, one=fx?ONE_FX:1, at=fx?ATAN_FX:ATAN;
+  let x,y,z,flip=1,off=0;      // flip/off = honest quadrant pre-rotation
+  if(S.mode==='rot'){
+    let t=S.theta*D2R;
+    // quadrant pre-rotation: keep the working angle in [-90,90]. off re-adds the
+    // subtracted ±180° for RENDERING only, so the drawn vector lands on the true θ
+    // (flip drives the numeric cos/sin readout independently).
+    if(t>Math.PI/2){t-=Math.PI;flip=-1;off=Math.PI;} else if(t<-Math.PI/2){t+=Math.PI;flip=-1;off=-Math.PI;}
+    x=one; y=0; z=fx?Math.round(t*ONE_FX):t;
+  } else {
+    // drag point lives in S.px,S.py (unit-ish); pre-rotate so working x>0
+    let px=S.px, py=S.py;
+    if(px<0){ off=(py>=0?Math.PI:-Math.PI); px=-px; py=-py; }
+    x=fx?Math.round(px*ONE_FX):px; y=fx?Math.round(py*ONE_FX):py; z=0;
+  }
+  const z0=z, steps=[], dirs=[Math.atan2(y,x)+off];
+  for(let i=0;i<S.n;i++){
+    const d = S.mode==='rot' ? (z>=0?1:-1) : (y<0?1:-1);   // sign decision
+    let nx,ny;
+    if(fx){ nx = x - d*(y>>i); ny = y + d*(x>>i); }          // >> i : pure shift + add
+    else  { nx = x - d*(y*Math.pow(2,-i)); ny = y + d*(x*Math.pow(2,-i)); }
+    const nz = z - d*at[i];
+    x=nx; y=ny; z=nz;
+    steps.push({i,d, add:ATAN[i]*R2D, acc:((fx?(z0-z)/ONE_FX:(z0-z)))*R2D, x, y, z, zdeg:(fx?z/ONE_FX:z)*R2D});
+    dirs.push(Math.atan2(y,x)+off);
+  }
+  return {fx,one,flip,off,x,y,z,steps,dirs,z0};
+}
+
+// ---- rendering ----
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+const plot=document.getElementById('plot'), pctx=plot.getContext('2d');
+let anim=0, animStart=0, R;
+// logical (CSS-pixel) canvas sizes; backing store is scaled by devicePixelRatio
+let cvW=640, cvH=640, plotW=640, plotH=150;
+function fit(){
+  const dpr=Math.max(1, window.devicePixelRatio||1);
+  const r1=cv.getBoundingClientRect(); cvW=Math.max(1,Math.round(r1.width)); cvH=cvW; // keep it square
+  cv.style.height=cvH+'px';
+  cv.width=Math.round(cvW*dpr); cv.height=Math.round(cvH*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  const r2=plot.getBoundingClientRect(); plotW=Math.max(1,Math.round(r2.width)); plotH=150;
+  plot.style.height=plotH+'px';
+  plot.width=Math.round(plotW*dpr); plot.height=Math.round(plotH*dpr);
+  pctx.setTransform(dpr,0,0,dpr,0,0);
+}
+
+function fmt(v,p=4){ return (v>=0?' ':'')+v.toFixed(p); }
+function draw(res){
+  const W=cvW, H=cvH, cx=W/2, cy=H/2; R=W*0.40;
+  ctx.clearRect(0,0,W,H);
+  // grid + unit circle
+  ctx.strokeStyle='#232b36'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(cx-R-30,cy); ctx.lineTo(cx+R+30,cy);
+  ctx.moveTo(cx,cy-R-30); ctx.lineTo(cx,cy+R+30); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx,cy,R,0,7); ctx.strokeStyle='#33404f'; ctx.stroke();
+
+  const toXY=a=>[cx+Math.cos(a)*R, cy-Math.sin(a)*R];
+  // trail of visited angles (the zig-zag)
+  const nn=res.dirs.length-1, prog=Math.min(anim,nn), fk=Math.floor(prog);
+  ctx.lineWidth=1.4;
+  for(let k=1;k<=fk;k++){
+    const [x0,y0]=toXY(res.dirs[k-1]), [x1,y1]=toXY(res.dirs[k]);
+    ctx.strokeStyle=res.steps[k-1].d>0?'rgba(99,212,113,.55)':'rgba(255,107,107,.55)';
+    ctx.beginPath(); ctx.arc(cx,cy, R, -res.dirs[k-1], -res.dirs[k], res.steps[k-1].d<0); ctx.stroke();
+    ctx.fillStyle='#5b6675'; ctx.beginPath(); ctx.arc(x1,y1,2.5,0,7); ctx.fill();
+  }
+  // target marker
+  if(S.mode==='rot'){
+    const [tx,ty]=toXY(S.theta*D2R);
+    ctx.strokeStyle=var_accent; ctx.setLineDash([4,4]); ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(tx,ty); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle=var_accent; ctx.beginPath(); ctx.arc(tx,ty,7,0,7); ctx.fill();
+    ctx.fillStyle='#12161d'; ctx.font='bold 11px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('θ',tx,ty);
+  } else {
+    // vectoring: show the actual dragged point (x,y) — the dashed line's length IS |v|
+    const tx=cx+S.px*R, ty=cy-S.py*R;
+    ctx.strokeStyle=var_accent; ctx.setLineDash([4,4]); ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(tx,ty); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle=var_accent; ctx.beginPath(); ctx.arc(tx,ty,6,0,7); ctx.fill();
+    ctx.fillStyle=var_accent; ctx.font='11px sans-serif'; ctx.textAlign='left'; ctx.textBaseline='bottom';
+    ctx.fillText('(x,y)', tx+9, ty-2);
+  }
+  // interpolated current vector
+  const a0=res.dirs[fk], a1=res.dirs[Math.min(fk+1,nn)], f=prog-fk;
+  let da=a1-a0; while(da>Math.PI)da-=2*Math.PI; while(da<-Math.PI)da+=2*Math.PI;
+  const ang=a0+da*f, [vx,vy]=toXY(ang);
+  ctx.strokeStyle=var_accent2; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(vx,vy); ctx.stroke();
+  ctx.fillStyle=var_accent2; ctx.beginPath(); ctx.arc(vx,vy,5,0,7); ctx.fill();
+  // axis label
+  ctx.fillStyle='#5b6675'; ctx.font='11px sans-serif'; ctx.textAlign='left'; ctx.textBaseline='top';
+  ctx.fillText(S.mode==='vec'?'drive y → 0 (target: +x axis)':'converging to θ', 8, 8);
+  // legend for the green/red zig-zag steps
+  const ly=H-38; ctx.textAlign='left'; ctx.textBaseline='middle'; ctx.font='11px sans-serif';
+  ctx.fillStyle='rgba(99,212,113,.9)'; ctx.fillRect(8,ly,11,11);
+  ctx.fillStyle='#8b97a6'; ctx.fillText('+  d>0 · rotate CCW', 24, ly+6);
+  ctx.fillStyle='rgba(255,107,107,.9)'; ctx.fillRect(8,ly+17,11,11);
+  ctx.fillStyle='#8b97a6'; ctx.fillText('−  d<0 · rotate CW', 24, ly+23);
+}
+const var_accent='#ff8a3d', var_accent2='#4fd1c5';
+
+function drawPlot(){
+  const W=plotW, H=plotH; pctx.clearRect(0,0,W,H);
+  const pad=26, errs=[];
+  for(let n=1;n<=N;n++){ const sv={...S,n}; errs.push(errOf(sv)); }
+  const logs=errs.map(e=>Math.log10(Math.max(e,1e-9)));
+  const top=0, bot=-8;   // 10^0 .. 10^-8
+  pctx.strokeStyle='#232b36';
+  for(let e=0;e>=-8;e-=2){ const y=pad+(top-e)/(top-bot)*(H-2*pad);
+    pctx.beginPath(); pctx.moveTo(pad,y); pctx.lineTo(W-6,y); pctx.stroke();
+    pctx.fillStyle='#5b6675'; pctx.font='10px monospace'; pctx.textAlign='left'; pctx.textBaseline='middle';
+    pctx.fillText('1e'+e, 2, y); }
+  pctx.strokeStyle=var_accent2; pctx.lineWidth=2; pctx.beginPath();
+  const X=n=>pad+(n-1)/(N-1)*(W-pad-8);
+  const Y=l=>pad+(top-Math.max(bot,Math.min(top,l)))/(top-bot)*(H-2*pad);
+  logs.forEach((l,i)=>{ const x=X(i+1),y=Y(l); i?pctx.lineTo(x,y):pctx.moveTo(x,y); });
+  pctx.stroke();
+  logs.forEach((l,i)=>{ pctx.fillStyle=(i+1===S.n)?var_accent:'#3a4655';
+    pctx.beginPath(); pctx.arc(X(i+1),Y(l),(i+1===S.n)?4:2.2,0,7); pctx.fill(); });
+  // x-axis stage ticks
+  pctx.fillStyle='#5b6675'; pctx.font='9px monospace'; pctx.textAlign='center'; pctx.textBaseline='bottom';
+  [1,4,8,12,16].forEach(n=>pctx.fillText('n='+n, X(n), H-1));
+  // label the current stage's error on its highlighted dot
+  const cur=errs[S.n-1], cxp=X(S.n); pctx.fillStyle=var_accent; pctx.textBaseline='bottom';
+  pctx.textAlign = cxp>W*0.75?'right':(cxp<W*0.25?'left':'center');
+  pctx.fillText('n='+S.n+'  err '+cur.toExponential(1), cxp, Y(logs[S.n-1])-6);
+}
+function errOf(sv){ const r=runWith(sv); return r.err; }
+
+function runWith(sv){ const saved={...S};
+  Object.assign(S,sv); const r=run(); Object.assign(S,saved);
+  // compute error for r
+  let err;
+  if(sv.mode==='rot'){
+    const c=r.flip*r.x/(r.one*K), s=r.flip*r.y/(r.one*K), t=sv.theta*D2R;
+    err=Math.hypot(c-Math.cos(t), s-Math.sin(t));
+  } else {
+    const px=sv.px??S.px, py=sv.py??S.py;
+    const zf=r.fx?r.z/ONE_FX:r.z, ang=zf+r.off, mag=r.x/(r.one*K);
+    err=Math.hypot(ang-Math.atan2(py,px), 0)+Math.abs(mag-Math.hypot(px,py));
+  }
+  r.err=err; return r;
+}
+
+// ---- panels ----
+const el=id=>document.getElementById(id);
+function refresh(){
+  const r=run();
+  // rule
+  const shift=S.fixed?'&gt;&gt; i':'&gt;&gt; i';
+  el('rule').innerHTML = S.mode==='rot'
+    ? `d = sign(z)&nbsp; <span class="muted">// over/undershoot the angle</span><br>`+
+      `x' = x − d·(y <i>${shift}</i>)<br>y' = y + d·(x <i>${shift}</i>)<br>z' = z − d·<b>arctan(2⁻ⁱ)</b>`
+    : `d = −sign(y)&nbsp; <span class="muted">// push y toward 0</span><br>`+
+      `x' = x − d·(y <i>${shift}</i>)<br>y' = y + d·(x <i>${shift}</i>)<br>z' = z − d·<b>arctan(2⁻ⁱ)</b>&nbsp; <span class="muted">// accumulates atan2</span>`;
+  // table
+  let h='<tr><th>i</th><th>d</th><th>+arctan2⁻ⁱ(°)</th><th>Σangle(°)</th><th>x</th><th>y</th></tr>';
+  const hiK=Math.max(0,Math.min(S.n-1,Math.floor(Math.min(anim,S.n))));
+  r.steps.forEach(s=>{
+    const xv=r.fx?s.x:s.x.toFixed(4), yv=r.fx?s.y:s.y.toFixed(4);
+    h+=`<tr class="${s.i===hiK?'hi':''}"><td>${s.i}</td><td class="${s.d>0?'plus':'minus'}">${s.d>0?'+':'−'}</td>`+
+       `<td>${s.add.toFixed(4)}</td><td>${s.acc.toFixed(4)}</td><td>${xv}</td><td>${yv}</td></tr>`;
+  });
+  el('tbl').innerHTML=h;
+  // bit view for highlighted stage
+  const st=r.steps[hiK]||r.steps[r.steps.length-1];
+  el('biStage').textContent=hiK; el('lostN').textContent=hiK;
+  const xi=r.fx?st.x:Math.round(st.x*ONE_FX), yi=r.fx?st.y:Math.round(st.y*ONE_FX);
+  el('bx').innerHTML='x '+bits(xi,hiK); el('by').innerHTML='y '+bits(yi,hiK);
+  // readout
+  let kv;
+  if(S.mode==='rot'){
+    const c=r.flip*r.x/(r.one*K), s=r.flip*r.y/(r.one*K), t=S.theta*D2R;
+    const rc=Math.cos(t), rs=Math.sin(t);
+    kv=`<span class="lbl">CORDIC cos</span><span class="val">${fmt(c,6)}</span><span></span>`+
+       `<span class="lbl">Math.cos</span><span class="val">${fmt(rc,6)}</span><span class="err">Δ ${Math.abs(c-rc).toExponential(1)}</span>`+
+       `<span class="lbl">CORDIC sin</span><span class="val">${fmt(s,6)}</span><span></span>`+
+       `<span class="lbl">Math.sin</span><span class="val">${fmt(rs,6)}</span><span class="err">Δ ${Math.abs(s-rs).toExponential(1)}</span>`;
+    if(r.flip<0) kv+=`<span class="lbl">quadrant</span><span class="val">pre-rotated 180°</span><span></span>`;
+  } else {
+    const zf=r.fx?r.z/ONE_FX:r.z, ang=(zf+r.off)*R2D, mag=r.x/(r.one*K);
+    const ra=Math.atan2(S.py,S.px)*R2D, rm=Math.hypot(S.px,S.py);
+    kv=`<span class="lbl">CORDIC atan2</span><span class="val">${fmt(ang,4)}°</span><span></span>`+
+       `<span class="lbl">Math.atan2</span><span class="val">${fmt(ra,4)}°</span><span class="err">Δ ${Math.abs(ang-ra).toExponential(1)}</span>`+
+       `<span class="lbl">CORDIC |v|</span><span class="val">${fmt(mag,6)}</span><span></span>`+
+       `<span class="lbl">Math.hypot</span><span class="val">${fmt(rm,6)}</span><span class="err">Δ ${Math.abs(mag-rm).toExponential(1)}</span>`;
+  }
+  kv+=`<span class="lbl">gain K</span><span class="val">${K.toFixed(6)}</span><span class="muted">1/K=${(1/K).toFixed(6)}</span>`;
+  if(r.fx) kv+=`<span class="lbl">raw x (pre 1/K)</span><span class="val">${r.x}</span><span class="muted">/${ONE_FX}·K</span>`;
+  el('readout').innerHTML=kv;
+  drawPlot();
+  draw(r);
+}
+function bits(v,lost){
+  const neg=v<0, m=Math.abs(v).toString(2).padStart(17,'0'), keep=17-lost;
+  let out=`<span class="sign">${neg?'-':'+'}</span> `;
+  for(let i=0;i<17;i++){ const b=m[i], cls=(i>=keep)?'lost':(b==='0'?'s0':'');
+    out+=`<span class="${cls}">${b}</span>`; }
+  return out;
+}
+
+// ---- animation ----
+let rafId=0;
+function loop(ts){
+  if(!animStart)animStart=ts;
+  const target=S.n, dur=Math.min(2200, 260+target*140);
+  anim=Math.min(target, (ts-animStart)/dur*target);
+  refresh();
+  if(anim<target) rafId=requestAnimationFrame(loop); else anim=target;
+}
+function restart(){ if(rafId)cancelAnimationFrame(rafId); animStart=0; anim=0; rafId=requestAnimationFrame(loop); }
+
+// ---- input ----
+let dragging=false;
+function evtPt(e){ const r=cv.getBoundingClientRect();
+  const x=(e.clientX-r.left) - r.width/2, y=(e.clientY-r.top) - r.height/2;
+  return {x:x/R, y:-y/R}; }
+cv.addEventListener('pointerdown',e=>{ dragging=true; cv.setPointerCapture(e.pointerId); onDrag(e); });
+cv.addEventListener('pointermove',e=>{ if(dragging)onDrag(e); });
+cv.addEventListener('pointerup',()=>dragging=false);
+function onDrag(e){ const p=evtPt(e);
+  if(S.mode==='rot'){ S.theta=Math.round(Math.atan2(p.y,p.x)*R2D*2)/2; el('theta').value=S.theta; el('thetaV').textContent=S.theta.toFixed(1)+'°'; }
+  else { S.px=Math.max(-1.2,Math.min(1.2,p.x)); S.py=Math.max(-1.2,Math.min(1.2,p.y)); }
+  syncHash(); restart();
+}
+el('theta').addEventListener('input',e=>{ S.theta=+e.target.value; el('thetaV').textContent=S.theta.toFixed(1)+'°'; syncHash(); restart(); });
+el('iters').addEventListener('input',e=>{ S.n=+e.target.value; el('itersV').textContent=S.n; syncHash(); restart(); });
+el('fixed').addEventListener('change',e=>{ S.fixed=e.target.checked; syncHash(); restart(); });
+document.querySelectorAll('#mode button').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('#mode button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+  S.mode=b.dataset.m;
+  el('angleRow').style.display = S.mode==='rot'?'flex':'none';
+  el('hint').textContent = S.mode==='rot'?'Drag the handle on the rim to set the target angle.'
+    :'Drag anywhere to place the vector (x,y); CORDIC recovers its angle and length.';
+  if(S.mode==='vec' && S.px===undefined){ S.px=0.72; S.py=0.55; }
+  syncHash(); restart();
+}));
+function flashShare(msg){ const b=el('share'); b.textContent=msg;
+  setTimeout(()=>b.textContent='copy share link',1400); }
+function legacyCopy(text){
+  try{ const ta=document.createElement('textarea'); ta.value=text;
+    ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta);
+    ta.focus(); ta.select(); const ok=document.execCommand('copy'); document.body.removeChild(ta); return ok;
+  }catch(e){ return false; } }
+el('share').addEventListener('click',()=>{ syncHash();
+  const url=location.href;
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).then(()=>flashShare('copied!'),
+      ()=>flashShare(legacyCopy(url)?'copied!':'link in address bar ↑'));
+  } else {
+    flashShare(legacyCopy(url)?'copied!':'link in address bar ↑');
+  }
+});
+
+function syncHash(){ const p = S.mode==='rot'
+  ? ['r',S.theta,S.n,S.fixed?1:0]
+  : ['v',(S.px||0).toFixed(3),(S.py||0).toFixed(3),S.n,S.fixed?1:0];
+  history.replaceState(null,'','#'+p.join(',')); }
+function loadHash(){ const h=decodeURIComponent(location.hash.slice(1)); if(!h)return;
+  const a=h.split(',');
+  const num=(t,def)=>{ const v=parseFloat(t); return Number.isFinite(v)?v:def; };
+  if(a[0]==='r'){ S.mode='rot'; S.theta=num(a[1],0); S.n=num(a[2],12); S.fixed=a[3]==='1'; }
+  else if(a[0]==='v'){ S.mode='vec'; S.px=num(a[1],0.72); S.py=num(a[2],0.55); S.n=num(a[3],12); S.fixed=a[4]==='1'; }
+}
+
+// init
+S.px=0.72; S.py=0.55;
+loadHash();
+el('theta').value=S.theta; el('thetaV').textContent=S.theta.toFixed(1)+'°';
+el('iters').value=S.n; el('itersV').textContent=S.n;
+el('fixed').checked=S.fixed;
+document.querySelectorAll('#mode button').forEach(b=>b.classList.toggle('on',b.dataset.m===S.mode));
+el('angleRow').style.display=S.mode==='rot'?'flex':'none';
+el('hint').textContent = S.mode==='rot'?'Drag the handle on the rim to set the target angle.'
+  :'Drag anywhere to place the vector (x,y); CORDIC recovers its angle and length.';
+fit();
+window.addEventListener('resize',()=>{ fit(); refresh(); });
+restart();
+</script>
+</body>
+</html>

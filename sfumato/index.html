@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sfumato — strange attractor density lab</title>
+<style>
+  :root{ --bg:#0c0c11; --panel:#15151d; --line:#26262f; --ink:#e8e6df; --dim:#8b8b97; --acc:#ff6100; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font:13px/1.4 ui-sans-serif,-apple-system,Segoe UI,Roboto,sans-serif; }
+  #app{ display:flex; height:100vh; overflow:hidden; }
+  #stage{ flex:1; display:flex; align-items:center; justify-content:center; position:relative; min-width:0; }
+  #view{ max-width:96%; max-height:96%; box-shadow:0 10px 60px #000a; border-radius:2px; image-rendering:auto; }
+  #panel{ width:308px; flex:none; background:var(--panel); border-left:1px solid var(--line);
+    overflow-y:auto; padding:16px; }
+  h1{ font-size:16px; margin:0 0 2px; letter-spacing:.5px; }
+  h1 b{ color:var(--acc); font-weight:700; }
+  .sub{ color:var(--dim); font-size:11px; margin:0 0 14px; }
+  .grp{ border-top:1px solid var(--line); padding:12px 0 4px; }
+  .lbl{ display:flex; justify-content:space-between; font-size:11px; color:var(--dim);
+    text-transform:uppercase; letter-spacing:.6px; margin:0 0 8px; }
+  .row{ display:flex; align-items:center; gap:8px; margin:7px 0; }
+  .row label{ width:64px; color:var(--dim); font-variant-numeric:tabular-nums; }
+  .row .val{ width:52px; text-align:right; color:var(--ink); font-variant-numeric:tabular-nums; }
+  input[type=range]{ flex:1; accent-color:var(--acc); height:4px; }
+  select,button{ background:#1f1f28; color:var(--ink); border:1px solid var(--line);
+    border-radius:5px; padding:7px 9px; font:inherit; cursor:pointer; }
+  select{ width:100%; }
+  .btns{ display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+  button:hover{ border-color:var(--acc); }
+  button.pri{ background:var(--acc); color:#151009; border-color:var(--acc); font-weight:600; }
+  button.on{ background:var(--acc); color:#151009; border-color:var(--acc); }
+  .chips{ display:flex; gap:6px; flex-wrap:wrap; }
+  .chip{ padding:5px 9px; font-size:11px; border-radius:99px; }
+  .chip.on{ background:var(--acc); color:#151009; border-color:var(--acc); }
+  #thumbs{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; }
+  #thumbs canvas{ width:100%; aspect-ratio:1; border-radius:4px; border:1px solid var(--line);
+    cursor:pointer; background:#000; }
+  #thumbs canvas:hover{ border-color:var(--acc); }
+  #thumbs canvas.on{ border-color:var(--acc); box-shadow:0 0 0 1px var(--acc); }
+  .ck{ display:flex; align-items:center; gap:7px; cursor:pointer; color:var(--ink); }
+  .ck input{ accent-color:var(--acc); width:15px; height:15px; }
+  #prog{ position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    background:#000a; flex-direction:column; gap:10px; font-size:13px; }
+  #bar{ width:220px; height:6px; background:#333; border-radius:6px; overflow:hidden; }
+  #bar>i{ display:block; height:100%; width:0; background:var(--acc); }
+  .hint{ position:absolute; left:14px; bottom:12px; color:var(--dim); font-size:11px; }
+  #prog button{ margin-top:4px; }
+  @media (max-width:720px){
+    #app{ flex-direction:column; }
+    #stage{ flex:none; height:55vh; }
+    #panel{ width:100%; flex:1; border-left:none; border-top:1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <canvas id="view" width="760" height="760"></canvas>
+    <div class="hint" id="hint"></div>
+    <div id="prog"><div>Rendering hi-res…</div><div id="bar"><i></i></div><div id="pct">0%</div><button id="cancel" type="button">Cancel</button></div>
+  </div>
+  <div id="panel">
+    <h1><b>Sfumato</b></h1>
+    <p class="sub">Density-painted strange attractors — chaos accumulated into smoky, log-toned silk.</p>
+
+    <div class="grp">
+      <div class="lbl"><span>Family</span></div>
+      <div class="chips" id="fam"></div>
+    </div>
+
+    <div class="grp">
+      <div class="lbl"><span>Coefficients</span><span id="famname"></span></div>
+      <div id="coeffs"></div>
+    </div>
+
+    <div class="grp">
+      <div class="lbl"><span>Presets</span></div>
+      <div id="thumbs"></div>
+    </div>
+
+    <div class="grp">
+      <div class="lbl"><span>Palette</span></div>
+      <select id="pal"></select>
+      <div class="row" style="margin-top:9px">
+        <label>Iterations</label>
+        <input type="range" id="iters" min="0.5" max="5" step="0.1" value="2">
+        <span class="val" id="itersv">2.0M</span>
+      </div>
+      <div style="display:flex;gap:7px;margin-top:6px">
+        <button type="button" class="chip" id="bgtog" aria-pressed="false">Dark bg</button>
+        <button type="button" class="chip on" id="dyn" aria-pressed="true" style="margin-left:auto">Color by dynamics</button>
+      </div>
+    </div>
+
+    <div class="grp">
+      <div class="lbl"><span>Darkroom</span><span>instant</span></div>
+      <div class="row"><label>Exposure</label><input type="range" id="exposure" min="0.2" max="6" step="0.05" value="1.6"><span class="val" id="exposurev"></span></div>
+      <div class="row"><label>Gamma</label><input type="range" id="gamma" min="0.4" max="2.6" step="0.02" value="1"><span class="val" id="gammav"></span></div>
+      <div class="row"><label>Contrast</label><input type="range" id="contrast" min="0.6" max="2.4" step="0.02" value="1"><span class="val" id="contrastv"></span></div>
+      <div class="row"><label>Vignette</label><input type="range" id="vignette" min="0" max="1" step="0.02" value="0"><span class="val" id="vignettev"></span></div>
+    </div>
+
+    <div class="grp">
+      <div class="btns">
+        <button id="shuffle" class="pri">Shuffle</button>
+        <button id="gallery">Gallery mode</button>
+        <button id="png">Export PNG</button>
+        <button id="x2">Export 2×</button>
+        <button id="x4" style="grid-column:span 2">Export 4× (hi-res)</button>
+        <button id="copy" style="grid-column:span 2">Copy link</button>
+      </div>
+      <p class="sub" style="margin:9px 0 0">Your creation lives in the URL — copy the link to share this exact render.</p>
+    </div>
+  </div>
+</div>
+<script>
+"use strict";
+const RES = 760;
+const view = document.getElementById('view');
+const vctx = view.getContext('2d');
+const vimg = vctx.createImageData(RES, RES);
+
+// ---- attractor families ----
+const FAM = {
+  jong:     { name:'de Jong',   f:(x,y,a,b,c,d)=>[Math.sin(a*y)-Math.cos(b*x), Math.sin(c*x)-Math.cos(d*y)] },
+  clifford: { name:'Clifford',  f:(x,y,a,b,c,d)=>[Math.sin(a*y)+c*Math.cos(a*x), Math.sin(b*x)+d*Math.cos(b*y)] },
+  svensson: { name:'Svensson',  f:(x,y,a,b,c,d)=>[d*Math.sin(a*x)-Math.sin(b*y), c*Math.cos(a*x)+Math.cos(b*y)] }
+};
+const PRESETS = {
+  jong:     [[1.641,1.902,0.316,1.525],[-2.7,-0.09,-0.86,-2.2],[1.4,-2.3,2.4,-2.1]],
+  clifford: [[-1.4,1.6,1.0,0.7],[-1.7,1.3,-0.1,-1.2],[1.5,-1.8,1.6,0.9]],
+  svensson: [[1.5,-1.8,1.6,0.9],[-2.337,-2.337,1.0,1.5],[1.4,1.56,1.4,-1.56]]
+};
+// ---- palettes: gradient stops (low t -> high t) ----
+const PALETTES = {
+  ember:   [[0,0,0],[60,10,5],[150,32,10],[236,92,20],[255,182,66],[255,244,206]],
+  ice:     [[3,6,20],[10,42,92],[30,120,190],[120,204,240],[232,250,255]],
+  spectral:[[24,24,96],[0,150,205],[0,200,120],[224,220,44],[234,92,32]],
+  ink:     [[214,196,158],[176,132,84],[104,68,38],[52,34,20],[16,11,7]]
+};
+const BG = { dark:[10,10,17], light:[245,240,230] };
+
+// ---- state ----
+const state = { family:'jong', coeffs:PRESETS.jong[0].slice(), palette:'ember', iters:2,
+  bg:'dark', exposure:1.6, gamma:1, contrast:1, vignette:0, dyn:true };
+
+function makeCtx(W){ return { W, H:W, density:new Float32Array(W*W), speed:new Float32Array(W*W) }; }
+const main = makeCtx(RES);
+
+// ---- core: bounds fit + accumulation ----
+function fitBounds(family, coeffs){
+  const f = FAM[family].f, [a,b,c,d] = coeffs; let x=0.1, y=0.1;
+  for(let i=0;i<1000;i++){ const n=f(x,y,a,b,c,d); x=n[0]; y=n[1]; }
+  let xmin=1e9,xmax=-1e9,ymin=1e9,ymax=-1e9;
+  for(let i=0;i<40000;i++){
+    const n=f(x,y,a,b,c,d); x=n[0]; y=n[1];
+    if(!isFinite(x)||!isFinite(y)){ x=Math.random()*0.2; y=Math.random()*0.2; continue; }
+    if(x<xmin)xmin=x; if(x>xmax)xmax=x; if(y<ymin)ymin=y; if(y>ymax)ymax=y;
+  }
+  const pxp=(xmax-xmin)*0.05||0.1, pyp=(ymax-ymin)*0.05||0.1;
+  return { xmin:xmin-pxp, xmax:xmax+pxp, ymin:ymin-pyp, ymax:ymax+pyp };
+}
+function accumulate(ctx, bounds, family, coeffs, iters, tr){
+  const { xmin,xmax,ymin,ymax } = bounds, W=ctx.W, H=ctx.H;
+  const sx=(W-1)/(xmax-xmin), sy=(H-1)/(ymax-ymin);
+  const f=FAM[family].f, a=coeffs[0], b=coeffs[1], c=coeffs[2], d=coeffs[3];
+  const dens=ctx.density, spd=ctx.speed; let x=tr.x, y=tr.y;
+  for(let i=0;i<iters;i++){
+    const n=f(x,y,a,b,c,d), nx=n[0], ny=n[1];
+    const dx=nx-x, dy=ny-y, step=Math.sqrt(dx*dx+dy*dy);
+    x=nx; y=ny;
+    if(!isFinite(x)||!isFinite(y)){ x=Math.random()*0.2; y=Math.random()*0.2; continue; }
+    const px=(x-xmin)*sx, py=(y-ymin)*sy;
+    if(px>=0&&px<W&&py>=0&&py<H){ const idx=(py|0)*W+(px|0); dens[idx]++; spd[idx]+=step; }
+  }
+  tr.x=x; tr.y=y;
+}
+// ---- tone mapping (log-density + darkroom + palette) ----
+function palette(name,t){
+  const s=PALETTES[name]; t=t<0?0:t>1?1:t;
+  const f=t*(s.length-1), i=f|0, g=f-i, a=s[i], b=s[Math.min(i+1,s.length-1)];
+  return [a[0]+(b[0]-a[0])*g, a[1]+(b[1]-a[1])*g, a[2]+(b[2]-a[2])*g];
+}
+function tonemap(ctx, out, st){
+  const W=ctx.W, H=ctx.H, dens=ctx.density, spd=ctx.speed;
+  let maxD=0, maxAvg=0;
+  for(let i=0;i<dens.length;i++){ const d=dens[i]; if(d>maxD)maxD=d;
+    if(st.dyn && d>0){ const av=spd[i]/d; if(av>maxAvg)maxAvg=av; } }
+  const logMax=Math.log(maxD+1)||1, invAvg=st.dyn?(1/(maxAvg||1)):0;
+  const bg=BG[st.bg], expo=st.exposure, ig=1/st.gamma, ct=st.contrast, vg=st.vignette;
+  const cx=W/2, cy=H/2, maxr2=cx*cx+cy*cy;
+  for(let py=0, p=0, o=0; py<H; py++){
+    const ry=py-cy;
+    for(let px=0; px<W; px++, p++, o+=4){
+      const d=dens[p]; let a=0;
+      if(d>0){
+        a=Math.log(d+1)/logMax;
+        a=1-Math.exp(-expo*a);
+        a=Math.pow(a,ig);
+        a=(a-0.5)*ct+0.5;
+        if(vg>0){ const rx=px-cx; a*=1-vg*((rx*rx+ry*ry)/maxr2); }
+        a=a<0?0:a>1?1:a;
+      }
+      const t=(st.dyn && d>0) ? (spd[p]/d)*invAvg : a;
+      const col=palette(st.palette,t);
+      out[o]  =bg[0]+(col[0]-bg[0])*a;
+      out[o+1]=bg[1]+(col[1]-bg[1])*a;
+      out[o+2]=bg[2]+(col[2]-bg[2])*a;
+      out[o+3]=255;
+    }
+  }
+}
+
+// ---- progressive render loop ----
+let raf=0, rs=null;
+function stop(){ if(raf){ cancelAnimationFrame(raf); raf=0; } }
+function render(){
+  stop(); galleryOff();
+  main.density.fill(0); main.speed.fill(0);
+  const bounds=fitBounds(state.family, state.coeffs);
+  const total=Math.round(state.iters*1e6);
+  rs={ bounds, done:0, total, tr:{x:0.1,y:0.1} };
+  step();
+}
+function step(){
+  const chunk=Math.min(200000, rs.total-rs.done);
+  accumulate(main, rs.bounds, state.family, state.coeffs, chunk, rs.tr);
+  rs.done+=chunk;
+  tonemap(main, vimg.data, state); vctx.putImageData(vimg,0,0);
+  hint.textContent=(rs.done/1e6).toFixed(1)+'M / '+(rs.total/1e6).toFixed(1)+'M pts';
+  if(rs.done<rs.total) raf=requestAnimationFrame(step); else { raf=0; hint.textContent=(rs.total/1e6).toFixed(1)+'M pts · '+FAM[state.family].name; }
+}
+// single synchronous pass (gallery + thumbs)
+function renderOnce(ctx, family, coeffs, iters, st, canvasCtx, imgData){
+  ctx.density.fill(0); ctx.speed.fill(0);
+  const b=fitBounds(family,coeffs);
+  accumulate(ctx,b,family,coeffs,iters,{x:0.1,y:0.1});
+  tonemap(ctx,imgData.data,st); canvasCtx.putImageData(imgData,0,0);
+}
+
+// ---- gallery mode (morph between seeds) ----
+let galleryActive=false, galTarget=null;
+function galleryOff(){ galleryActive=false; galBtn.classList.remove('on'); }
+function galleryFrame(){
+  if(!galleryActive) return;
+  let done=true;
+  for(let i=0;i<4;i++){ state.coeffs[i]+=(galTarget[i]-state.coeffs[i])*0.05;
+    if(Math.abs(galTarget[i]-state.coeffs[i])>0.01) done=false; }
+  if(done) galTarget=shuffleCoeffs(state.family);
+  syncCoeffInputs();
+  renderOnce(main, state.family, state.coeffs, 360000, state, vctx, vimg);
+  raf=requestAnimationFrame(galleryFrame);
+}
+
+// ---- seeded/good shuffle ----
+function goodAttractor(family, c){
+  const f=FAM[family].f, [a,b,cc,d]=c; let x=0.1,y=0.1;
+  for(let i=0;i<400;i++){ const n=f(x,y,a,b,cc,d); x=n[0]; y=n[1]; }
+  let xmin=1e9,xmax=-1e9,ymin=1e9,ymax=-1e9;
+  for(let i=0;i<3000;i++){ const n=f(x,y,a,b,cc,d); x=n[0]; y=n[1];
+    if(!isFinite(x)||!isFinite(y)||Math.abs(x)>1e3||Math.abs(y)>1e3) return false;
+    if(x<xmin)xmin=x; if(x>xmax)xmax=x; if(y<ymin)ymin=y; if(y>ymax)ymax=y; }
+  const w=xmax-xmin, h=ymax-ymin;
+  return w>0.4 && h>0.4 && w*h>0.4;   // reject collapse to point/line
+}
+function shuffleCoeffs(family){
+  for(let t=0;t<400;t++){
+    const c=[0,0,0,0].map(()=>+(Math.random()*6-3).toFixed(3));
+    if(goodAttractor(family,c)) return c;
+  }
+  return PRESETS[family][0].slice();
+}
+
+// ---- URL hash permalink ----
+let hashLock=false;
+function updateHash(){
+  if(hashLock) return;
+  const s=state, h=[s.family, ...s.coeffs.map(n=>+(+n).toFixed(4)), s.palette,
+    s.iters, s.bg, s.exposure, s.gamma, s.contrast, s.vignette, s.dyn?1:0].join(',');
+  history.replaceState(null,'','#'+h);
+}
+function parseHash(){
+  const h=decodeURIComponent(location.hash.slice(1)); if(!h) return false;
+  const p=h.split(','); if(p.length<13||!FAM[p[0]]) return false;
+  state.family=p[0];
+  const cf=[+p[1],+p[2],+p[3],+p[4]];
+  state.coeffs = cf.every(Number.isFinite) ? cf : PRESETS[p[0]][0].slice();
+  state.palette=PALETTES[p[5]]?p[5]:'ember';
+  state.iters=+p[6]||2; state.bg=p[7]==='light'?'light':'dark';
+  state.exposure=+p[8]||1.6; state.gamma=+p[9]||1; state.contrast=+p[10]||1;
+  state.vignette=+p[11]||0; state.dyn=p[12]==='1';
+  return true;
+}
+
+// ---- export ----
+function download(canvas){
+  const a=document.createElement('a');
+  a.download='sfumato-'+state.family+'-'+Date.now()+'.png';
+  a.href=canvas.toDataURL('image/png'); a.click();
+}
+function exportPNG(){ download(view); }
+let exportAbort=false;
+async function exportHi(scale){
+  stop(); galleryOff();
+  exportAbort=false;
+  const W=RES*scale, ctx=makeCtx(W);
+  const bounds=fitBounds(state.family, state.coeffs);
+  const total=Math.round(state.iters*1e6*scale*scale), chunk=600000;
+  const tr={x:0.1,y:0.1}; let done=0;
+  prog.style.display='flex';
+  while(done<total){
+    if(exportAbort) break;
+    const n=Math.min(chunk,total-done);
+    accumulate(ctx,bounds,state.family,state.coeffs,n,tr); done+=n;
+    const pf=done/total; bar.style.width=(pf*100)+'%'; pct.textContent=Math.round(pf*100)+'%';
+    await new Promise(r=>setTimeout(r,0));
+  }
+  if(exportAbort){ prog.style.display='none'; render(); return; }
+  const cv=document.createElement('canvas'); cv.width=W; cv.height=W;
+  const c2=cv.getContext('2d'), img=c2.createImageData(W,W);
+  tonemap(ctx,img.data,state); c2.putImageData(img,0,0);
+  download(cv); prog.style.display='none';
+  render();   // restore live view
+}
+
+// ---- UI wiring ----
+const hint=document.getElementById('hint'), prog=document.getElementById('prog');
+const bar=document.querySelector('#bar>i'), pct=document.getElementById('pct');
+const famBox=document.getElementById('fam'), coeffBox=document.getElementById('coeffs');
+const famName=document.getElementById('famname'), thumbs=document.getElementById('thumbs');
+const palSel=document.getElementById('pal'), bgTog=document.getElementById('bgtog');
+const galBtn=document.getElementById('gallery');
+
+Object.keys(FAM).forEach(k=>{
+  const c=document.createElement('button'); c.type='button'; c.className='chip';
+  c.setAttribute('aria-pressed','false'); c.textContent=FAM[k].name;
+  c.onclick=()=>{ state.family=k; state.coeffs=PRESETS[k][0].slice(); refreshFamUI(); render(); updateHash(); };
+  c.dataset.k=k; famBox.appendChild(c);
+});
+Object.keys(PALETTES).forEach(k=>{ const o=document.createElement('option'); o.value=k;
+  o.textContent=k.replace('ink','ink-on-vellum'); palSel.appendChild(o); });
+
+const coeffInputs=[];
+['a','b','c','d'].forEach((nm,i)=>{
+  const row=document.createElement('div'); row.className='row';
+  row.innerHTML=`<label>${nm}</label><input type="range" min="-3" max="3" step="0.001"><span class="val"></span>`;
+  const r=row.querySelector('input'), v=row.querySelector('.val');
+  r.oninput=()=>{ state.coeffs[i]=+r.value; v.textContent=(+r.value).toFixed(3); render(); refreshThumbActive(); };
+  r.onchange=updateHash;
+  coeffBox.appendChild(row); coeffInputs.push({r,v});
+});
+function syncCoeffInputs(){ coeffInputs.forEach((c,i)=>{ c.r.value=state.coeffs[i]; c.v.textContent=(+state.coeffs[i]).toFixed(3); }); refreshThumbActive(); }
+
+function bindSlider(id, key, fmt){
+  const el=document.getElementById(id), out=document.getElementById(id+'v');
+  const show=()=>{ out.textContent=fmt(state[key]); };
+  el.oninput=()=>{ state[key]=+el.value; show();
+    if(id==='iters'){ render(); } else { restyle(); } };
+  el.onchange=updateHash;
+  return { el, show };
+}
+const sIters=bindSlider('iters','iters',v=>v.toFixed(1)+'M');
+const sExpo=bindSlider('exposure','exposure',v=>v.toFixed(2));
+const sGam=bindSlider('gamma','gamma',v=>v.toFixed(2));
+const sCon=bindSlider('contrast','contrast',v=>v.toFixed(2));
+const sVig=bindSlider('vignette','vignette',v=>v.toFixed(2));
+
+const dynTog=document.getElementById('dyn');
+function restyle(){ tonemap(main,vimg.data,state); vctx.putImageData(vimg,0,0); retonemapThumbs(); }
+palSel.onchange=()=>{ state.palette=palSel.value; restyle(); updateHash(); };
+bgTog.onclick=()=>{ state.bg=state.bg==='dark'?'light':'dark'; refreshTogs(); restyle(); updateHash(); };
+dynTog.onclick=()=>{ state.dyn=!state.dyn; refreshDynTog(); restyle(); updateHash(); };
+
+document.getElementById('shuffle').onclick=()=>{ state.coeffs=shuffleCoeffs(state.family);
+  syncCoeffInputs(); render(); updateHash(); };
+galBtn.onclick=()=>{ galleryActive=!galleryActive; galBtn.classList.toggle('on',galleryActive);
+  if(galleryActive){ stop(); galTarget=shuffleCoeffs(state.family); galleryFrame(); }
+  else { render(); updateHash(); } };
+document.getElementById('png').onclick=exportPNG;
+document.getElementById('x2').onclick=()=>exportHi(2);
+document.getElementById('x4').onclick=()=>exportHi(4);
+
+const copyBtn=document.getElementById('copy');
+copyBtn.onclick=async()=>{
+  updateHash();
+  try{ await navigator.clipboard.writeText(location.href); }
+  catch(e){ /* clipboard blocked (e.g. file:// or denied) — fall through to prompt */
+    try{ prompt('Copy this link:', location.href); }catch(_){} }
+  const prev=copyBtn.textContent; copyBtn.textContent='Copied!';
+  setTimeout(()=>{ copyBtn.textContent=prev; }, 1000);
+};
+document.getElementById('cancel').onclick=()=>{ exportAbort=true; };
+
+// preset thumbnails — each caches its own density buffers so style changes
+// (palette/bg/dynamics/darkroom) re-tonemap instantly without re-accumulating.
+let thumbEntries=[];
+function buildThumbs(){
+  thumbs.innerHTML=''; thumbEntries=[];
+  PRESETS[state.family].forEach(cf=>{
+    const cv=document.createElement('canvas'); cv.width=96; cv.height=96;
+    const cc=cv.getContext('2d'), tctx=makeCtx(96), img=cc.createImageData(96,96);
+    const b=fitBounds(state.family,cf);
+    accumulate(tctx,b,state.family,cf,90000,{x:0.1,y:0.1});
+    tonemap(tctx,img.data,state); cc.putImageData(img,0,0);
+    cv.title='Load preset';
+    cv.onclick=()=>{ state.coeffs=cf.slice(); syncCoeffInputs(); render(); updateHash(); };
+    thumbs.appendChild(cv);
+    thumbEntries.push({cv,cc,tctx,img,cf});
+  });
+  refreshThumbActive();
+}
+function retonemapThumbs(){
+  thumbEntries.forEach(e=>{ tonemap(e.tctx,e.img.data,state); e.cc.putImageData(e.img,0,0); });
+}
+function refreshThumbActive(){
+  thumbEntries.forEach(e=>{
+    const on=e.cf.every((v,i)=>Math.abs(v-state.coeffs[i])<1e-6);
+    e.cv.classList.toggle('on',on);
+  });
+}
+function refreshTogs(){ const on=state.bg==='light'; bgTog.textContent=state.bg==='dark'?'Dark bg':'Light bg';
+  bgTog.classList.toggle('on',on); bgTog.setAttribute('aria-pressed',on); }
+function refreshDynTog(){ dynTog.classList.toggle('on',state.dyn); dynTog.setAttribute('aria-pressed',state.dyn); }
+function refreshFamUI(){
+  [...famBox.children].forEach(c=>{ const on=c.dataset.k===state.family;
+    c.classList.toggle('on',on); c.setAttribute('aria-pressed',on); });
+  famName.textContent=FAM[state.family].name; syncCoeffInputs(); buildThumbs();
+}
+function syncAllInputs(){
+  palSel.value=state.palette; refreshDynTog();
+  sIters.el.value=state.iters; sExpo.el.value=state.exposure; sGam.el.value=state.gamma;
+  sCon.el.value=state.contrast; sVig.el.value=state.vignette;
+  sIters.show(); sExpo.show(); sGam.show(); sCon.show(); sVig.show();
+  refreshTogs(); refreshFamUI();
+}
+
+// ---- boot ----
+hashLock=true; parseHash(); hashLock=false;
+syncAllInputs(); render(); updateHash();
+</script>
+</body>
+</html>

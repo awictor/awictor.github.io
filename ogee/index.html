@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ogee — watch an easing curve build itself</title>
+<style>
+  :root{
+    --bg:#232F3E; --panel:#2b3a4d; --ink:#F5F3EF; --dim:#9fb0c3;
+    --accent:#FF6100; --accent2:#ffb37a; --l1:#57c7ff; --l2:#7CFFB2; --grid:#3a4d63;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(1200px 700px at 70% -10%,#2c3d52,#1c2733 70%);
+    color:var(--ink);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+    display:flex;justify-content:center;padding:22px;min-height:100%;
+  }
+  .wrap{width:100%;max-width:1120px}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+  h1{font-size:26px;margin:0;letter-spacing:.5px}
+  h1 b{color:var(--accent)}
+  .tag{color:var(--dim);font-size:13.5px;max-width:640px;line-height:1.35}
+  .grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(300px,.85fr);gap:18px}
+  .card{background:linear-gradient(180deg,#2b3a4d,#26333f);border:1px solid #38495e;
+    border-radius:14px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.28)}
+  canvas{display:block;width:100%;border-radius:8px}
+  .lbl{font-size:11px;text-transform:uppercase;letter-spacing:1.4px;color:var(--dim);margin:2px 0 8px}
+  .scrubrow{display:flex;align-items:center;gap:10px;margin-top:10px}
+  .scrubrow input[type=range]{flex:1;accent-color:var(--accent)}
+  button{font-family:inherit;cursor:pointer;border-radius:8px;border:1px solid #46596f;
+    background:#33465c;color:var(--ink);padding:7px 11px;font-size:13px;transition:.15s}
+  button:hover{background:#3d5471;border-color:var(--accent)}
+  button.play{width:40px}
+  .chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:4px}
+  .chip{padding:6px 12px;font-size:12.5px}
+  .chip.on{background:var(--accent);border-color:var(--accent);color:#1c2733;font-weight:600}
+  .nums{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:6px}
+  .nums label{font-size:11px;color:var(--dim);display:block;margin-bottom:3px;text-align:center}
+  .nums span{color:var(--accent2)}
+  .nums input{width:100%;background:#1e2833;border:1px solid #46596f;color:var(--ink);
+    border-radius:7px;padding:6px 4px;font-size:14px;text-align:center;font-variant-numeric:tabular-nums}
+  .nums input:focus{outline:none;border-color:var(--accent)}
+  .io{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .io input[type=text]{flex:1;min-width:150px;background:#1e2833;border:1px solid #46596f;
+    color:var(--ink);border-radius:8px;padding:8px 10px;font-family:ui-monospace,'Cascadia Code',monospace;font-size:12.5px}
+  .io input.badpaste{border-color:#ff7a7a;color:#ff7a7a}
+  .io input.badpaste::placeholder{color:#ff7a7a}
+  .css-out{background:#1a232d;border:1px solid #35475b;border-radius:8px;padding:10px 12px;
+    font-family:ui-monospace,'Cascadia Code',monospace;font-size:13px;color:var(--accent2);
+    word-break:break-all;margin-top:10px;display:flex;justify-content:space-between;align-items:center;gap:10px}
+  .css-out code{color:var(--ink)}
+  .css-out code b{color:var(--accent)}
+  .demo{margin-top:12px;position:relative;height:66px;background:#1a232d;border:1px solid #35475b;
+    border-radius:10px;overflow:hidden}
+  .track{position:absolute;left:12px;right:12px;top:14px;height:2px;background:#33465c}
+  #dot{position:absolute;top:8px;left:12px;width:15px;height:15px;border-radius:50%;
+    background:var(--accent);box-shadow:0 0 12px var(--accent)}
+  .strip{position:absolute;left:12px;right:12px;bottom:12px;height:14px}
+  .strip i{position:absolute;top:3px;width:7px;height:7px;border-radius:50%;background:var(--accent2);
+    transform:translateX(-50%);opacity:.8}
+  .stripcap{position:absolute;bottom:0;left:12px;font-size:9px;color:var(--dim);letter-spacing:.5px}
+  .ui-demo{margin-top:12px;background:#1a232d;border:1px solid #35475b;border-radius:10px;padding:12px}
+  .bar{height:9px;background:#33465c;border-radius:5px;overflow:hidden;margin-bottom:11px}
+  .bar>i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2))}
+  .slide{position:relative;height:46px}
+  #mover{position:absolute;left:0;top:0;height:46px;width:64px;border-radius:9px;
+    background:linear-gradient(135deg,var(--accent),#ff8a3d);display:flex;align-items:center;
+    justify-content:center;font-size:12px;font-weight:600;color:#1c2733;box-shadow:0 6px 16px rgba(255,97,0,.4)}
+  .copied{color:var(--l2)!important}
+  .failed{color:#ff7a7a!important;border-color:#ff7a7a!important}
+  small.hint{color:var(--dim);font-size:11px;display:block;margin-top:8px;line-height:1.4}
+  @media(max-width:720px){.grid{grid-template-columns:1fr}body{padding:14px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><b>Ogee</b> · easing, built from lerps</h1>
+    <div class="tag">Drag the two handles. The scrubber sweeps <b style="color:var(--accent2)">t</b> and animates the de&nbsp;Casteljau construction — three segments, two, then one point tracing the curve. That curve <em>is</em> your CSS <code>cubic-bezier()</code>.</div>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <div class="lbl">Bézier construction · drag P1 / P2</div>
+      <canvas id="plot" width="640" height="440"></canvas>
+      <div class="scrubrow">
+        <button id="play" class="play" title="play / pause">⏸︎</button>
+        <input id="scrub" type="range" min="0" max="1000" value="0">
+        <span id="tval" style="font-family:ui-monospace,monospace;font-size:12px;color:var(--accent2);min-width:66px">t=0.000</span>
+      </div>
+      <div class="lbl" style="margin-top:14px">Velocity — dprogress / dtime (where motion speeds up, slows, or reverses)</div>
+      <canvas id="vel" width="640" height="120"></canvas>
+    </div>
+
+    <div class="card">
+      <div class="lbl">Presets — morph one easing into another</div>
+      <div class="chips" id="chips"></div>
+
+      <div class="lbl" style="margin-top:14px">Control points</div>
+      <div class="nums" id="nums">
+        <div><label>x1 <span>time</span></label><input id="i0" type="number" step="0.01"></div>
+        <div><label>y1 <span>prog</span></label><input id="i1" type="number" step="0.01"></div>
+        <div><label>x2 <span>time</span></label><input id="i2" type="number" step="0.01"></div>
+        <div><label>y2 <span>prog</span></label><input id="i3" type="number" step="0.01"></div>
+      </div>
+
+      <div class="css-out">
+        <code id="cssStr"></code>
+        <button id="copyShort">copy</button>
+      </div>
+
+      <div class="io">
+        <input id="paste" type="text" placeholder="paste cubic-bezier(.17,.67,.83,.67) to load…">
+        <button id="loadBtn">load</button>
+        <button id="copyFull">copy CSS snippet</button>
+      </div>
+
+      <div class="lbl" style="margin-top:14px">Feel it — driven live by your curve</div>
+      <div class="ui-demo">
+        <div class="bar"><i id="bar"></i></div>
+        <div class="slide"><div id="mover">slide</div></div>
+      </div>
+
+      <div class="demo">
+        <div class="track"></div>
+        <div id="dot"></div>
+        <div class="strip" id="strip"></div>
+        <div class="stripcap">motion strip · dots bunch where slow, spread where fast</div>
+      </div>
+
+      <small class="hint">Arrow keys nudge a focused field (Shift = ×5). The whole curve lives in the URL hash — copy the link to share it.</small>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+// ---- state: the four numbers CSS wants -------------------------------------
+const S = { p:[0.42,0,0.58,1] };            // x1,y1,x2,y2
+const PRESETS = {
+  linear:[0,0,1,1], ease:[.25,.1,.25,1],
+  "ease-in-out":[.42,0,.58,1], "back-out":[.34,1.56,.64,1], "anticipate":[.6,-0.5,.4,1]
+};
+// ---- bezier math (P0=0, P3=1 on both axes) ---------------------------------
+const bez  =(t,a,b)=>{const u=1-t;return 3*u*u*t*a+3*u*t*t*b+t*t*t;};
+const dbez =(t,a,b)=>{const u=1-t;return 3*u*u*a+6*u*t*(b-a)+3*t*t*(1-b);};
+function solveT(x){                          // invert Bx(t)=x by bisection (x is monotone for valid easing)
+  let lo=0,hi=1,t=x;
+  for(let i=0;i<24;i++){t=(lo+hi)/2;if(bez(t,S.p[0],S.p[2])<x)lo=t;else hi=t;}
+  return t;
+}
+const ease=x=>bez(solveT(Math.max(0,Math.min(1,x))),S.p[1],S.p[3]); // eased progress at real time x
+
+// ---- hash serialize --------------------------------------------------------
+const fmt=n=>(Math.round(n*1000)/1000);
+function writeHash(){history.replaceState(null,"",'#'+S.p.map(fmt).join(','));}
+function readHash(){
+  const m=location.hash.slice(1).split(',').map(Number);
+  if(m.length===4&&m.every(n=>isFinite(n))) S.p=m;
+}
+// ---- canvases --------------------------------------------------------------
+const plot=document.getElementById('plot'), pc=plot.getContext('2d');
+const vel=document.getElementById('vel'),   vc=vel.getContext('2d');
+function fit(cv,ctx){const r=cv.getBoundingClientRect(),d=devicePixelRatio||1;
+  cv.width=r.width*d;cv.height=r.height*d;ctx.setTransform(d,0,0,d,0,0);
+  return {w:r.width,h:r.height};}
+let PW,PH,VW,VH;
+function resize(){({w:PW,h:PH}=fit(plot,pc));({w:VW,h:VH}=fit(vel,vc));draw();}
+addEventListener('resize',resize);
+
+// viewport: x in [0,1]; y expands to include overshoot but math is untouched
+function view(){
+  const lo=Math.min(0,S.p[1],S.p[3])-0.14, hi=Math.max(1,S.p[1],S.p[3])+0.14;
+  return {lo,hi};
+}
+const M=34;                                  // plot margin
+function X(x){return M+x*(PW-2*M);}
+function Y(y){const {lo,hi}=view();return (PH-M)-((y-lo)/(hi-lo))*(PH-2*M);}
+function toBez(px,py){const {lo,hi}=view();
+  return [ (px-M)/(PW-2*M), lo+((PH-M)-py)/(PH-2*M)*(hi-lo) ];}
+
+function lerp(A,B,t){return [A[0]+(B[0]-A[0])*t, A[1]+(B[1]-A[1])*t];}
+function seg(A,B,col,w){pc.strokeStyle=col;pc.lineWidth=w;pc.beginPath();
+  pc.moveTo(X(A[0]),Y(A[1]));pc.lineTo(X(B[0]),Y(B[1]));pc.stroke();}
+function dot(P,r,col){pc.fillStyle=col;pc.beginPath();pc.arc(X(P[0]),Y(P[1]),r,0,7);pc.fill();}
+
+let ghost=null;                              // faded previous curve during a morph
+function drawCurve(pts,col,w,alpha){
+  pc.globalAlpha=alpha;pc.strokeStyle=col;pc.lineWidth=w;pc.beginPath();
+  for(let i=0;i<=64;i++){const t=i/64;pc.lineTo(X(bez(t,pts[0],pts[2])),Y(bez(t,pts[1],pts[3])));}
+  pc.stroke();pc.globalAlpha=1;
+}
+function draw(){
+  pc.clearRect(0,0,PW,PH);
+  // grid + unit square
+  pc.lineWidth=1;
+  for(let i=0;i<=4;i++){const g=i/4;
+    pc.strokeStyle=(i===0||i===4)?'#54697f':'#33465c';
+    pc.beginPath();pc.moveTo(X(g),Y(0));pc.lineTo(X(g),Y(1));pc.stroke();
+    pc.beginPath();pc.moveTo(X(0),Y(g));pc.lineTo(X(1),Y(g));pc.stroke();}
+  pc.fillStyle='#7b8ea3';pc.font='11px system-ui';
+  pc.fillText('time →',PW-56,Y(0)+16); pc.save();pc.translate(14,M+8);pc.rotate(-Math.PI/2);
+  pc.fillText('← progress',0,0);pc.restore();
+  // unit-square tick values, so the auto-expanding overshoot region stays legible
+  pc.fillStyle='#8ea1b5';pc.font='10px ui-monospace,monospace';
+  pc.textAlign='center';
+  pc.fillText('0',X(0),Y(0)+15);pc.fillText('1',X(1),Y(0)+15);          // x axis: time
+  pc.textAlign='right';
+  pc.fillText('0',X(0)-6,Y(0)+3);pc.fillText('1',X(0)-6,Y(1)+3);        // y axis: progress
+  pc.textAlign='left';
+  // ghost of previous curve
+  if(ghost) drawCurve(ghost.pts,'#ffffff',2,ghost.a*0.4);
+  // main curve
+  drawCurve(S.p,'#FF6100',3,1);
+  // control polygon
+  const P0=[0,0],P1=[S.p[0],S.p[1]],P2=[S.p[2],S.p[3]],P3=[1,1];
+  pc.setLineDash([4,4]);seg(P0,P1,'#6d8199',1.2);seg(P3,P2,'#6d8199',1.2);pc.setLineDash([]);
+  // de Casteljau scaffold at current t
+  const t=phase;
+  const A=lerp(P0,P1,t),B=lerp(P1,P2,t),C=lerp(P2,P3,t);
+  const D=lerp(A,B,t),E=lerp(B,C,t),F=lerp(D,E,t);
+  seg(A,B,'#57c7ff',2);seg(B,C,'#57c7ff',2);
+  seg(D,E,'#7CFFB2',2.4);
+  [A,B,C].forEach(p=>dot(p,3.5,'#57c7ff'));
+  dot(D,3.5,'#7CFFB2');dot(E,3.5,'#7CFFB2');
+  dot(F,6,'#ffffff');dot(F,3.5,'#FF6100');
+  // endpoints + draggable handles
+  dot(P0,4,'#8ea1b5');dot(P3,4,'#8ea1b5');
+  [[P1,'P1'],[P2,'P2']].forEach(([p,nm])=>{
+    dot(p,9,'rgba(255,97,0,.25)');dot(p,6,'#FF6100');
+    pc.fillStyle='#F5F3EF';pc.font='bold 11px system-ui';
+    pc.fillText(nm,X(p[0])+10,Y(p[1])-8);
+  });
+  drawVel();
+}
+function drawVel(){
+  vc.clearRect(0,0,VW,VH);
+  const N=80,xs=[],vs=[];let mx=1;
+  for(let i=0;i<=N;i++){const t=i/N;const dx=dbez(t,S.p[0],S.p[2]),dy=dbez(t,S.p[1],S.p[3]);
+    const v=dx<1e-4?0:dy/dx;xs.push(bez(t,S.p[0],S.p[2]));vs.push(v);mx=Math.max(mx,Math.abs(v));}
+  const mX=x=>M+x*(VW-2*M), zero=VH*0.6, sc=(VH*0.42)/mx;
+  vc.strokeStyle='#33465c';vc.lineWidth=1;vc.beginPath();vc.moveTo(mX(0),zero);vc.lineTo(mX(1),zero);vc.stroke();
+  vc.fillStyle='#7b8ea3';vc.font='10px system-ui';vc.fillText('0',mX(0)-14,zero+3);vc.fillText('fast',6,18);
+  // area + line
+  vc.beginPath();vc.moveTo(mX(xs[0]),zero);
+  for(let i=0;i<=N;i++)vc.lineTo(mX(xs[i]),zero-vs[i]*sc);
+  vc.lineTo(mX(xs[N]),zero);vc.closePath();vc.fillStyle='rgba(124,255,178,.12)';vc.fill();
+  vc.beginPath();for(let i=0;i<=N;i++){const y=zero-vs[i]*sc;
+    if(i===0)vc.moveTo(mX(xs[i]),y);else vc.lineTo(mX(xs[i]),y);}
+  vc.strokeStyle='#7CFFB2';vc.lineWidth=2;vc.stroke();
+  // reversal (negative velocity → overshoot) highlighted
+  vc.fillStyle='rgba(255,97,0,.85)';
+  for(let i=0;i<=N;i++) if(vs[i]<0){vc.fillRect(mX(xs[i])-1,zero,2,-vs[i]*sc);}
+  // marker at current playback time
+  const cx=bez(phase,S.p[0],S.p[2]);
+  const dxc=dbez(phase,S.p[0],S.p[2]),dyc=dbez(phase,S.p[1],S.p[3]);
+  const cv=dxc<1e-4?0:dyc/dxc;
+  vc.fillStyle='#FF6100';vc.beginPath();vc.arc(mX(cx),zero-cv*sc,4,0,7);vc.fill();
+}
+
+// ---- DOM sync --------------------------------------------------------------
+const $=id=>document.getElementById(id);
+const ins=[$('i0'),$('i1'),$('i2'),$('i3')];
+const strip=$('strip');
+for(let i=0;i<25;i++){const e=document.createElement('i');strip.appendChild(e);}
+const stripDots=[...strip.children];
+function syncUI(){
+  ins.forEach((el,i)=>{if(document.activeElement!==el)el.value=fmt(S.p[i]);});
+  $('cssStr').innerHTML='cubic-bezier(<b>'+S.p.map(fmt).join('</b>, <b>')+'</b>)';
+  // motion strip: even time samples → eased positions (bunch where slow)
+  stripDots.forEach((e,i)=>{e.style.left=(ease(i/24)*100)+'%';});
+  document.querySelectorAll('.chip').forEach(c=>{
+    c.classList.toggle('on', PRESETS[c.dataset.k].every((v,i)=>Math.abs(v-S.p[i])<1e-6));});
+}
+function commit(){writeHash();syncUI();draw();}
+
+// numeric inputs + arrow nudging
+ins.forEach((el,i)=>{
+  el.addEventListener('input',()=>{const v=parseFloat(el.value);if(isFinite(v)){S.p[i]=v;writeHash();syncUI();draw();}});
+  el.addEventListener('keydown',e=>{
+    if(e.key==='ArrowUp'||e.key==='ArrowDown'){e.preventDefault();
+      const d=(e.shiftKey?0.05:0.01)*(e.key==='ArrowUp'?1:-1);
+      S.p[i]=Math.round((S.p[i]+d)*1000)/1000;commit();}
+  });
+});
+
+// presets with morph + ghost
+const chips=$('chips');
+Object.keys(PRESETS).forEach(k=>{const b=document.createElement('button');
+  b.className='chip';b.textContent=k;b.dataset.k=k;
+  b.onclick=()=>morphTo(PRESETS[k]);chips.appendChild(b);});
+let morph=null;
+function morphTo(target){
+  ghost={pts:S.p.slice(),a:1};
+  morph={from:S.p.slice(),to:target.slice(),t0:performance.now(),dur:520};
+}
+
+// paste-load a cubic-bezier() string
+$('loadBtn').onclick=()=>{
+  const box=$('paste');
+  const m=box.value.match(/-?\d*\.?\d+/g);
+  if(m&&m.length>=4){S.p=m.slice(0,4).map(Number);commit();box.value='';}
+  else{ // couldn't parse — flash the input so the failure is visible
+    const oph=box.placeholder;box.classList.add('badpaste');
+    box.value='';box.placeholder='couldn’t parse — expected 4 numbers';
+    setTimeout(()=>{box.classList.remove('badpaste');box.placeholder=oph;},1400);
+  }
+};
+$('paste').addEventListener('keydown',e=>{if(e.key==='Enter')$('loadBtn').click();});
+
+// copy buttons — with fallback + failure feedback (Clipboard API is often blocked on file://)
+function flash(btn,label,cls){const o=btn.dataset.label||btn.textContent;btn.dataset.label=o;
+  btn.textContent=label;btn.classList.add(cls);
+  setTimeout(()=>{btn.textContent=o;btn.classList.remove(cls);delete btn.dataset.label;},1100);}
+function legacyCopy(txt){
+  const ta=document.createElement('textarea');ta.value=txt;
+  ta.style.position='fixed';ta.style.opacity='0';ta.style.top='0';
+  document.body.appendChild(ta);ta.focus();ta.select();
+  let ok=false;try{ok=document.execCommand('copy');}catch(_){ok=false;}
+  document.body.removeChild(ta);return ok;}
+function copy(txt,btn){
+  const good=()=>flash(btn,'copied ✓','copied');
+  const bad =()=>{ if(legacyCopy(txt)) good(); else flash(btn,'copy failed','failed'); };
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(good).catch(bad);
+  } else { bad(); }
+}
+$('copyShort').onclick=e=>copy(`cubic-bezier(${S.p.map(fmt).join(', ')})`,e.target);
+$('copyFull').onclick=e=>{const cb=`cubic-bezier(${S.p.map(fmt).join(', ')})`;
+  copy(`.ogee {\n  transition: transform .6s ${cb};\n  animation: ogee-slide .6s ${cb} both;\n}\n@keyframes ogee-slide {\n  from { transform: translateX(0); }\n  to   { transform: translateX(240px); }\n}`,e.target);};
+
+// ---- pointer drag on handles ----------------------------------------------
+let drag=-1;
+function pos(e){const r=plot.getBoundingClientRect();return[e.clientX-r.left,e.clientY-r.top];}
+plot.addEventListener('pointerdown',e=>{
+  const [px,py]=pos(e);
+  const H=[[S.p[0],S.p[1]],[S.p[2],S.p[3]]];
+  drag=H.findIndex(h=>Math.hypot(px-X(h[0]),py-Y(h[1]))<16);
+  if(drag>=0){plot.setPointerCapture(e.pointerId);e.preventDefault();}
+});
+plot.addEventListener('pointermove',e=>{
+  if(drag<0)return;let [bx,by]=toBez(...pos(e));
+  bx=Math.max(0,Math.min(1,bx));            // x must stay in [0,1] for a valid easing; y is free (overshoot)
+  S.p[drag*2]=Math.round(bx*1000)/1000;S.p[drag*2+1]=Math.round(by*1000)/1000;
+  commit();
+});
+plot.addEventListener('pointerup',()=>drag=-1);
+plot.style.cursor='grab';
+plot.addEventListener('pointermove',e=>{if(drag<0){const[px,py]=pos(e);
+  const near=[[S.p[0],S.p[1]],[S.p[2],S.p[3]]].some(h=>Math.hypot(px-X(h[0]),py-Y(h[1]))<16);
+  plot.style.cursor=near?'grab':'default';}else plot.style.cursor='grabbing';});
+
+// ---- animation loop --------------------------------------------------------
+let phase=0, playing=true, last=performance.now(), period=2600;
+const scrub=$('scrub'), tval=$('tval');
+const PLAY_GLYPH='▶︎', PAUSE_GLYPH='⏸︎';
+$('play').onclick=()=>{playing=!playing;$('play').textContent=playing?PAUSE_GLYPH:PLAY_GLYPH;};
+scrub.addEventListener('input',()=>{playing=false;$('play').textContent=PLAY_GLYPH;phase=scrub.value/1000;});
+function frame(now){
+  const dt=now-last;last=now;
+  if(morph){const p=Math.min(1,(now-morph.t0)/morph.dur),e=p<.5?2*p*p:1-Math.pow(-2*p+2,2)/2;
+    for(let i=0;i<4;i++)S.p[i]=Math.round((morph.from[i]+(morph.to[i]-morph.from[i])*e)*1000)/1000;
+    if(ghost)ghost.a=1-p; if(p>=1){morph=null;ghost=null;} commit();}
+  if(playing){phase=(phase+dt/period)%1;scrub.value=phase*1000;}
+  tval.textContent='t='+phase.toFixed(3);
+  // demo dot + card + progress bar, timed by the easing (real time → eased progress)
+  const e=ease(phase);
+  $('dot').style.left='calc(12px + '+e+' * (100% - 24px - 15px))';
+  $('bar').style.width=(Math.max(0,Math.min(1,e))*100)+'%';
+  const mv=$('mover'), sr=mv.parentElement.clientWidth-mv.offsetWidth;
+  mv.style.transform='translateX('+(e*sr)+'px) scale('+(0.9+0.2*Math.max(0,Math.min(1.2,e)))+')';
+  draw();
+  requestAnimationFrame(frame);
+}
+// ---- boot ------------------------------------------------------------------
+readHash();
+resize();
+syncUI();
+// don't auto-loop the scrubber for users who prefer reduced motion
+if(window.matchMedia&&matchMedia('(prefers-reduced-motion:reduce)').matches){
+  playing=false;$('play').textContent=PLAY_GLYPH;
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HoursCalc — work hours & timesheet calculator</title>
+<meta name="description" content="Free offline work-hours calculator. Enter clock-in and clock-out times, subtract breaks, and get total hours in decimal and h:m — plus optional pay. Overnight shifts supported. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/hours-calc/">
+<style>
+  :root{
+    --c:#e11d48; --bg:#fbf7f8; --fg:#241419; --muted:#7a5c64;
+    --card:#ffffff; --border:#eddfe3; --code:#fbeef1;
+  }
+  [data-theme="dark"]{
+    --bg:#1a1013; --fg:#f2e6ea; --muted:#b5949c; --card:#26161b;
+    --border:#3a252c; --code:#2e1a20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:28px 20px 8px;
+    display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#fb7185);
+    display:grid;place-items:center;color:#fff;font-size:20px}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);
+    color:var(--fg);border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:720px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);
+    border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .fld{flex:1;min-width:130px}
+  input{width:100%;padding:11px 13px;border:1px solid var(--border);
+    border-radius:11px;background:var(--bg);color:var(--fg);font-size:1rem;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .err{color:#dc2626;font-size:.86rem;margin:12px 0 0;min-height:1.1em}
+  .res{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border);
+    border:1px solid var(--border);border-radius:13px;overflow:hidden;margin-top:20px}
+  .cell{background:var(--card);padding:15px 16px}
+  .cell .k{font-size:.76rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .cell .v{font-size:1.5rem;font-weight:700;margin-top:3px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .cell.pay{grid-column:1 / -1}
+  .cell.pay .v{color:var(--c)}
+  .hint{color:var(--muted);font-size:.82rem;margin:14px 0 0}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+  @media(max-width:520px){.res{grid-template-columns:1fr}.cell.pay{grid-column:auto}}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('hours.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">⏱</div>
+  <div>
+    <h1>HoursCalc</h1>
+    <p class="sub">Work hours &amp; timesheet calculator</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <div class="row">
+      <div class="fld">
+        <label for="start">Clock in</label>
+        <input id="start" value="9:00 AM" spellcheck="false" autocomplete="off" placeholder="9:00 AM">
+      </div>
+      <div class="fld">
+        <label for="end">Clock out</label>
+        <input id="end" value="5:30 PM" spellcheck="false" autocomplete="off" placeholder="5:30 PM">
+      </div>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <div class="fld">
+        <label for="brk">Break (minutes)</label>
+        <input id="brk" value="30" inputmode="numeric" spellcheck="false" placeholder="30">
+      </div>
+      <div class="fld">
+        <label for="rate">Pay rate /hr (optional)</label>
+        <input id="rate" value="" inputmode="decimal" spellcheck="false" placeholder="e.g. 25">
+      </div>
+    </div>
+    <p class="err" id="err"></p>
+    <div class="res" id="out"></div>
+    <p class="hint">Accepts <code>9:00 AM</code>, <code>17:30</code>, or <code>9am</code>.
+      Clock-out earlier than clock-in is treated as an overnight shift. Runs entirely in your browser.</p>
+  </div>
+</main>
+<footer>
+  HoursCalc is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/hours-calc">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function parseTime(str){
+  var s = String(str).trim().toLowerCase().replace(/\s+/g, '');
+  if(s === '') return null;
+  var ampm = null;
+  if(s.endsWith('am')){ ampm = 'am'; s = s.slice(0, -2); }
+  else if(s.endsWith('pm')){ ampm = 'pm'; s = s.slice(0, -2); }
+  var h, m;
+  if(s.indexOf(':') !== -1){
+    var p = s.split(':');
+    if(p.length !== 2) return null;
+    h = p[0]; m = p[1];
+  } else {
+    h = s; m = '0';
+  }
+  if(!/^\d{1,2}$/.test(h) || !/^\d{1,2}$/.test(m)) return null;
+  h = Number(h); m = Number(m);
+  if(m > 59) return null;
+  if(ampm){
+    if(h < 1 || h > 12) return null;
+    if(ampm === 'am') h = (h === 12) ? 0 : h;
+    else h = (h === 12) ? 12 : h + 12;
+  } else {
+    if(h > 23) return null;
+  }
+  return h * 60 + m;
+}
+
+function durationMinutes(startStr, endStr){
+  var a = parseTime(startStr), b = parseTime(endStr);
+  if(a === null || b === null) return null;
+  var d = b - a;
+  if(d < 0) d += 24 * 60; // overnight shift
+  return d;
+}
+
+function workedMinutes(startStr, endStr, breakMin){
+  var d = durationMinutes(startStr, endStr);
+  if(d === null) return null;
+  var brk = Number(breakMin) || 0;
+  if(brk < 0) brk = 0;
+  var net = d - brk;
+  return net < 0 ? 0 : net;
+}
+
+function minutesToDecimal(min){ return Math.round(min / 60 * 100) / 100; }
+
+function minutesToHM(min){
+  var h = Math.floor(min / 60), m = min % 60;
+  return h + 'h ' + (m < 10 ? '0' : '') + m + 'm';
+}
+
+function payFor(min, rate){
+  var r = Number(rate);
+  if(!Number.isFinite(r) || r <= 0) return null;
+  return Math.round(min / 60 * r * 100) / 100;
+}
+
+if(typeof module !== 'undefined') module.exports = {
+  parseTime, durationMinutes, workedMinutes, minutesToDecimal, minutesToHM, payFor
+};
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var ids = ['start','end','brk','rate'];
+  var E = {}; ids.forEach(function(i){ E[i] = document.getElementById(i); });
+  var errEl = document.getElementById('err');
+  var outEl = document.getElementById('out');
+
+  function cell(k, v, cls){
+    return '<div class="cell'+(cls?' '+cls:'')+'"><div class="k">'+k+
+      '</div><div class="v">'+v+'</div></div>';
+  }
+  function render(){
+    var net = workedMinutes(E.start.value, E.end.value, E.brk.value);
+    if(net === null){
+      errEl.textContent = 'Enter valid clock-in and clock-out times.';
+      outEl.innerHTML = '';
+      return;
+    }
+    errEl.textContent = '';
+    var out = cell('Total (decimal)', minutesToDecimal(net).toFixed(2) + ' h') +
+              cell('Total (h:m)', minutesToHM(net));
+    var pay = payFor(net, E.rate.value);
+    if(pay !== null) out += cell('Gross pay', '$' + pay.toFixed(2), 'pay');
+    outEl.innerHTML = out;
+    ids.forEach(function(i){ try{ localStorage.setItem('hours.'+i, E[i].value); }catch(e){} });
+  }
+  ids.forEach(function(i){
+    try{ var v = localStorage.getItem('hours.'+i); if(v !== null) E[i].value = v; }catch(e){}
+    E[i].addEventListener('input', render);
+  });
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('hours.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('hours.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

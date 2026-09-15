@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unicode — character inspector (code points, UTF-8, UTF-16)</title>
+<meta name="description" content="Free offline Unicode inspector. See each character's code point (U+XXXX), decimal value, UTF-8 bytes, UTF-16 code units, and HTML entity. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/unicode/">
+<style>
+  :root{
+    --c:#18181b; --bg:#f8f8f9; --fg:#18181b; --muted:#52525b;
+    --card:#ffffff; --border:#e4e4e7; --code:#efeff1;
+  }
+  [data-theme="dark"]{
+    --bg:#09090b; --fg:#e7e7ea; --muted:#8b8b93; --card:#151518;
+    --border:#27272a; --code:#1c1c20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#52525b);display:grid;place-items:center;color:#fff;font-size:18px}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  input{width:100%;padding:13px 15px;border:1px solid var(--border);border-radius:12px;
+    background:var(--bg);color:var(--fg);font-size:1.3rem}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .summary{color:var(--muted);font-size:.85rem;margin:12px 0 4px}
+  .tbl-wrap{overflow:auto;border:1px solid var(--border);border-radius:12px;margin-top:6px}
+  table{width:100%;border-collapse:collapse;font-size:.85rem}
+  th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap}
+  thead th{position:sticky;top:0;background:var(--code);font-size:.72rem;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
+  td.ch{font-size:1.3rem;text-align:center}
+  td.mono,th.mono{font-family:ui-monospace,monospace}
+  .hint{color:var(--muted);font-size:.82rem;margin:14px 0 0}
+  footer{max-width:820px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('uni.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">U+</div>
+  <div>
+    <h1>Unicode</h1>
+    <p class="sub">Character inspector</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <label for="in">Text</label>
+    <input id="in" value="A€🎉" spellcheck="false" autocomplete="off">
+    <p class="summary" id="summary"></p>
+    <div class="tbl-wrap"><table id="tbl"></table></div>
+    <p class="hint">Each row is one Unicode code point (astral characters like emoji count as one, though
+      they use two UTF-16 units). Everything runs locally.</p>
+  </div>
+</main>
+<footer>
+  Unicode is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/unicode">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function cpHex(cp){
+  var h = cp.toString(16).toUpperCase();
+  while(h.length < 4) h = '0' + h;
+  return 'U+' + h;
+}
+function toUtf8Bytes(cp){
+  if(cp < 0x80) return [cp];
+  if(cp < 0x800) return [0xC0 | (cp >> 6), 0x80 | (cp & 0x3f)];
+  if(cp < 0x10000) return [0xE0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f)];
+  return [0xF0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3f), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f)];
+}
+function toUtf16Units(cp){
+  if(cp < 0x10000) return [cp];
+  cp -= 0x10000;
+  return [0xD800 | (cp >> 10), 0xDC00 | (cp & 0x3FF)];
+}
+function hex2(b){ var h = b.toString(16).toUpperCase(); return h.length < 2 ? '0' + h : h; }
+function hex4(u){ var h = u.toString(16).toUpperCase(); while(h.length < 4) h = '0' + h; return h; }
+function inspectChar(ch){
+  var cp = ch.codePointAt(0);
+  return {
+    char: ch,
+    cp: cp,
+    hex: cpHex(cp),
+    utf8: toUtf8Bytes(cp).map(hex2),
+    utf16: toUtf16Units(cp).map(hex4),
+    entity: '&#' + cp + ';'
+  };
+}
+function codePoints(str){
+  return Array.from(String(str)).map(inspectChar);
+}
+
+if(typeof module !== 'undefined') module.exports = {
+  cpHex, toUtf8Bytes, toUtf16Units, inspectChar, codePoints
+};
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var inEl = document.getElementById('in');
+  var tblEl = document.getElementById('tbl');
+  var summaryEl = document.getElementById('summary');
+  function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function render(){
+    var pts = codePoints(inEl.value);
+    summaryEl.textContent = pts.length + ' code point' + (pts.length === 1 ? '' : 's') +
+      ' · ' + inEl.value.length + ' UTF-16 units';
+    if(pts.length === 0){ tblEl.innerHTML = ''; return; }
+    var head = '<thead><tr><th>Char</th><th class="mono">Code point</th><th class="mono">Dec</th>' +
+      '<th class="mono">UTF-8</th><th class="mono">UTF-16</th><th class="mono">Entity</th></tr></thead>';
+    var body = pts.map(function(p){
+      return '<tr><td class="ch">' + esc(p.char) + '</td><td class="mono">' + p.hex + '</td>' +
+        '<td class="mono">' + p.cp + '</td><td class="mono">' + p.utf8.join(' ') + '</td>' +
+        '<td class="mono">' + p.utf16.join(' ') + '</td><td class="mono">' + esc(p.entity) + '</td></tr>';
+    }).join('');
+    tblEl.innerHTML = head + '<tbody>' + body + '</tbody>';
+    try{ localStorage.setItem('uni.in', inEl.value); }catch(e){}
+  }
+  inEl.addEventListener('input', render);
+  try{ var s = localStorage.getItem('uni.in'); if(s !== null) inEl.value = s; }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('uni.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('uni.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

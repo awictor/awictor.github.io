@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trave — Bridges Logic Puzzle</title>
+<style>
+  :root{
+    --panel:#16324a; --line:#25506f;
+    --ink:#eaf2f8; --dim:#8fb0c8; --accent:#f5a623;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(circle at 50% -10%,#153450,#0b1622 60%);
+    color:var(--ink); font-family:"Segoe UI",system-ui,Arial,sans-serif;
+    display:flex; flex-direction:column; align-items:center; min-height:100%;
+    -webkit-user-select:none; user-select:none; padding:10px 10px 30px;
+  }
+  h1{font-size:26px;margin:6px 0 0;letter-spacing:.5px}
+  h1 b{color:var(--accent)}
+  .tag{color:var(--dim);font-size:12.5px;margin:2px 0 10px;text-align:center;max-width:560px}
+  .tag b{color:var(--ink)}
+  .wrap{width:100%;max-width:600px}
+  .row{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-bottom:8px}
+  button{
+    background:var(--panel);color:var(--ink);border:1px solid var(--line);
+    padding:7px 11px;border-radius:9px;font-size:13px;cursor:pointer;
+    transition:transform .08s,background .15s,border-color .15s;font-weight:600;
+  }
+  button:hover{background:#1d3f5c}
+  button:active{transform:translateY(1px)}
+  button.on{background:var(--accent);color:#20140a;border-color:var(--accent)}
+  button.on:hover{background:#ffb733}
+  button:disabled{opacity:.45;cursor:default}
+  button:disabled:hover{background:var(--panel)}
+  button.tier{min-width:74px}
+  #board{width:100%;display:block;border-radius:14px;
+    background:linear-gradient(160deg,#0e2233,#0a1826);
+    border:1px solid var(--line);touch-action:manipulation}
+  #status{min-height:20px;text-align:center;font-size:13px;margin:9px 4px;color:var(--dim)}
+  #status b{color:var(--ink)}
+  .stats{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:6px;font-size:12px;color:var(--dim)}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:6px 12px;text-align:center;min-width:78px}
+  .stat b{display:block;color:var(--ink);font-size:17px;margin-top:2px}
+  .overlay{position:fixed;inset:0;background:rgba(6,14,22,.82);display:none;
+    align-items:center;justify-content:center;padding:20px;z-index:9}
+  .overlay.show{display:flex;animation:fade .3s}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+  .card{background:linear-gradient(160deg,#16324a,#0e2233);border:1px solid var(--accent);
+    border-radius:16px;padding:24px 26px;max-width:340px;width:100%;text-align:center;
+    box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .card h2{margin:0 0 4px;color:var(--accent);font-size:24px}
+  .card .big{font-size:34px;font-weight:800;margin:8px 0 2px;font-variant-numeric:tabular-nums}
+  .card p{color:var(--dim);font-size:13px;margin:6px 0}
+  .card .row{margin-top:14px}
+</style>
+</head>
+<body>
+  <h1><b>Trave</b> — span every island</h1>
+  <div class="tag">Connect the numbered islands with horizontal &amp; vertical beams (single or double). Every island must carry exactly its number, no beam may cross another, and the whole span must be one connected network. Every board is verified to have exactly one solution.<br><b>Tap one island, then a neighbor, to add a beam — tap the pair again to double it, again to clear.</b></div>
+
+  <div class="wrap">
+    <div class="row">
+      <button class="tier" data-tier="calm">Calm</button>
+      <button class="tier" data-tier="standard">Standard</button>
+      <button class="tier" data-tier="knotted">Knotted</button>
+      <button id="daily">Daily</button>
+      <button id="random">Random</button>
+      <button id="share">Share</button>
+    </div>
+    <canvas id="board"></canvas>
+    <div class="row" style="margin-top:8px">
+      <button id="undo">Undo</button>
+      <button id="redo">Redo</button>
+      <button id="hint">Hint</button>
+      <button id="check">Check</button>
+      <button id="pencil">Pencil</button>
+      <button id="sound" class="on">Sound</button>
+    </div>
+    <div id="status">Pick a difficulty or play today's Daily board.</div>
+    <div class="stats">
+      <div class="stat">Solved<b id="s-solved">0</b></div>
+      <div class="stat">Daily streak<b id="s-streak">0</b></div>
+      <div class="stat">Longest<b id="s-longest">0</b></div>
+      <div class="stat" id="s-best-box">Best (tier)<b id="s-best">—</b></div>
+      <div class="stat">Time<b id="s-time">0:00</b></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlay">
+    <div class="card">
+      <h2>Solved!</h2>
+      <div class="big" id="win-time">0:00</div>
+      <p id="win-sub"></p>
+      <p id="win-streak"></p>
+      <div class="row">
+        <button id="win-copy">Copy result</button>
+        <button id="win-next" class="on">New board</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+"use strict";
+(function(){
+// ---------- utilities ----------
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function strHash(s){let h=2166136261>>>0;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
+function key(a,b){return a<b?a+"_"+b:b+"_"+a;}
+const DIRS=[[0,1],[0,-1],[1,0],[-1,0]];
+const TIERS={
+  calm:{grid:7,islands:9,min:7},
+  standard:{grid:9,islands:16,min:12},
+  knotted:{grid:11,islands:24,min:18}
+};
+
+// ---------- board generation ----------
+function buildBoard(cfg,rng){
+  const N=cfg.grid;
+  const islands=[]; const at={}; const beamCell={};
+  function add(r,c){const id=islands.length;islands.push({r,c,n:0,id});at[r+","+c]=id;return id;}
+  const c0=(N>>1);add(c0,c0);
+  const edgeMap={}; let tries=0;
+  while(islands.length<cfg.islands && tries<cfg.islands*50){
+    tries++;
+    const A=islands[(rng()*islands.length)|0];
+    const d=DIRS[(rng()*4)|0]; const orient=d[0]!==0?"v":"h";
+    let r=A.r+d[0],c=A.c+d[1]; const path=[]; let hit=null;
+    while(r>=0&&r<N&&c>=0&&c<N){
+      const k=r+","+c;
+      if(at[k]!==undefined){hit=at[k];break;}
+      if(beamCell[k]){break;}
+      path.push([r,c]); r+=d[0];c+=d[1];
+    }
+    if(hit!==null){
+      if(hit===A.id)continue;
+      const B=islands[hit]; const kk=key(A.id,B.id); const cur=edgeMap[kk]||0;
+      if(cur<2 && A.n<8 && B.n<8){
+        edgeMap[kk]=cur+1; A.n++; B.n++;
+        for(const p of path)beamCell[p[0]+","+p[1]]=orient;
+      }
+    } else if(path.length>0 && islands.length<cfg.islands){
+      const idx=(rng()*path.length)|0; const [nr,nc]=path[idx];
+      const nid=add(nr,nc);
+      for(let j=0;j<idx;j++)beamCell[path[j][0]+","+path[j][1]]=orient;
+      const dbl=(rng()<0.34)?2:1;
+      edgeMap[key(A.id,nid)]=dbl; A.n+=dbl; islands[nid].n+=dbl;
+    }
+  }
+  if(islands.length<cfg.min)return null;
+  return islands;
+}
+
+function neighborEdges(islands,N){
+  const grid={}; islands.forEach(i=>grid[i.r+","+i.c]=i.id);
+  const seen={}; const edges=[];
+  for(const isl of islands){
+    for(const d of DIRS){
+      let r=isl.r+d[0],c=isl.c+d[1];
+      while(r>=0&&r<N&&c>=0&&c<N){
+        const id=grid[r+","+c];
+        if(id!==undefined){
+          const kk=key(isl.id,id);
+          if(!seen[kk]){seen[kk]=1;edges.push({a:Math.min(isl.id,id),b:Math.max(isl.id,id)});}
+          break;
+        }
+        r+=d[0];c+=d[1];
+      }
+    }
+  }
+  // geometry + crossings
+  edges.forEach(e=>{
+    const A=islands[e.a],B=islands[e.b];
+    e.h=A.r===B.r;
+    e.minR=Math.min(A.r,B.r);e.maxR=Math.max(A.r,B.r);
+    e.minC=Math.min(A.c,B.c);e.maxC=Math.max(A.c,B.c);
+    e.cross=[];
+  });
+  for(let i=0;i<edges.length;i++)for(let j=i+1;j<edges.length;j++){
+    const e=edges[i],f=edges[j];
+    if(e.h===f.h)continue;
+    const H=e.h?e:f, V=e.h?f:e;
+    if(H.minC<V.minC&&V.minC<H.maxC && V.minR<H.minR&&H.minR<V.maxR){
+      edges[i].cross.push(j);edges[j].cross.push(i);
+    }
+  }
+  return edges;
+}
+
+// ---------- verifying / counting solver ----------
+function makeSolverCtx(islands,edges){
+  const nodeEdges=islands.map(()=>[]);
+  edges.forEach((e,idx)=>{nodeEdges[e.a].push(idx);nodeEdges[e.b].push(idx);});
+  return {clue:islands.map(i=>i.n),nodeEdges,edges,n:islands.length};
+}
+function propagate(ctx,val){
+  let changed=true;
+  while(changed){
+    changed=false;
+    for(let v=0;v<ctx.n;v++){
+      const inc=ctx.nodeEdges[v]; let sum=0,cap=0; const open=[];
+      for(const ei of inc){
+        if(val[ei]>=0){sum+=val[ei];continue;}
+        let c=2; for(const x of ctx.edges[ei].cross)if(val[x]>0){c=0;break;}
+        open.push([ei,c]); cap+=c;
+      }
+      const rem=ctx.clue[v]-sum;
+      if(rem<0||rem>cap)return false;
+      if(rem===0){for(const o of open)if(o[1]>=0){val[o[0]]=0;applyCross(ctx,val,o[0]);changed=true;}}
+      else if(rem===cap){for(const o of open){val[o[0]]=o[1];applyCross(ctx,val,o[0]);changed=true;}}
+    }
+  }
+  return true;
+}
+function applyCross(ctx,val,ei){if(val[ei]>0)for(const x of ctx.edges[ei].cross){if(val[x]>0)return;val[x]=0;}}
+function connected(ctx,val){
+  const adj=ctx.nodeEdges; const seen=new Uint8Array(ctx.n); const st=[0]; seen[0]=1; let cnt=1;
+  while(st.length){
+    const v=st.pop();
+    for(const ei of adj[v]){if(val[ei]>0){const e=ctx.edges[ei];const w=e.a===v?e.b:e.a;if(!seen[w]){seen[w]=1;cnt++;st.push(w);}}}
+  }
+  return cnt===ctx.n;
+}
+function countSolutions(ctx,limit,capture){
+  const m=ctx.edges.length; const base=new Int8Array(m).fill(-1);
+  let found=0; let sol=null;
+  function rec(val){
+    if(found>=limit)return;
+    const v=val.slice();
+    if(!propagate(ctx,v))return;
+    let pick=-1,best=99;
+    for(let i=0;i<m;i++)if(v[i]<0){
+      // choose edge on tightest node
+      const e=ctx.edges[i]; const oa=ctx.nodeEdges[e.a].filter(x=>v[x]<0).length;
+      const ob=ctx.nodeEdges[e.b].filter(x=>v[x]<0).length;
+      const t=Math.min(oa,ob); if(t<best){best=t;pick=i;}
+    }
+    if(pick<0){ if(connected(ctx,v)){found++; if(capture&&!sol)sol=v.slice();} return; }
+    for(let cnt=0;cnt<=2;cnt++){
+      if(cnt>0){let ok=true;for(const x of ctx.edges[pick].cross)if(v[x]>0){ok=false;break;}if(!ok)break;}
+      const w=v.slice(); w[pick]=cnt; rec(w);
+      if(found>=limit)return;
+    }
+  }
+  rec(base);
+  return {count:found,solution:sol};
+}
+
+// deterministic unique board for (tier, seed)
+function generate(tier,seed){
+  const cfg=TIERS[tier]; const base=strHash(tier+":"+seed);
+  for(let off=0;off<600;off++){
+    const rng=mulberry32((base^Math.imul(off+1,2654435761))>>>0);
+    const islands=buildBoard(cfg,rng); if(!islands)continue;
+    const edges=neighborEdges(islands,cfg.grid);
+    const ctx=makeSolverCtx(islands,edges);
+    const res=countSolutions(ctx,2,true);
+    if(res.count===1){return {islands,edges,cfg,ctx,solution:res.solution};}
+  }
+  return null;
+}
+
+// ---------- game state ----------
+const cv=document.getElementById("board"),g=cv.getContext("2d");
+let S=null; // {tier,seed,isDaily,islands,edges,cfg,ctx,solution,beams,pencil,edgeIdx,sel,undo,redo,start,solved,anim,pulse}
+let CSS=560,step=1,pad=1,rad=1;
+
+function edgePairIndex(edges){const m={};edges.forEach((e,i)=>m[key(e.a,e.b)]=i);return m;}
+
+function startGame(tier,seed,isDaily){
+  const gen=generate(tier,seed);
+  if(!gen){setStatus("Could not build a board — try Random.");return;}
+  S={tier,seed,isDaily,islands:gen.islands,edges:gen.edges,cfg:gen.cfg,ctx:gen.ctx,
+     solution:gen.solution,beams:{},pencil:{},edgeIdx:edgePairIndex(gen.edges),
+     sel:null,undo:[],redo:[],start:performance.now(),solved:false,anim:{},pulse:{}};
+  if(location.hash!=="#"+tier+"-"+seed)history.replaceState(null,"",isDaily?"#daily":("#"+tier+"-"+seed));
+  markActive(tier,isDaily);
+  layout();
+  setStatus(isDaily?"Daily board — same for everyone today (resolves to your local day).":"<b>"+cap(tier)+"</b> board · seed "+seed);
+  renderStats(); updateControls();
+}
+function cap(s){return s[0].toUpperCase()+s.slice(1);}
+function markActive(tier,isDaily){
+  document.querySelectorAll(".tier").forEach(b=>b.classList.toggle("on",!isDaily&&b.dataset.tier===tier));
+  document.getElementById("daily").classList.toggle("on",!!isDaily);
+  document.getElementById("random").classList.remove("on");
+}
+
+function layout(){
+  const w=Math.min(600,document.querySelector(".wrap").clientWidth);
+  CSS=w; const dpr=Math.min(2,window.devicePixelRatio||1);
+  cv.style.width=w+"px"; cv.style.height=w+"px";
+  cv.width=w*dpr; cv.height=w*dpr; g.setTransform(dpr,0,0,dpr,0,0);
+  const N=S?S.cfg.grid:9; pad=w*0.09; step=(w-2*pad)/(N-1); rad=Math.min(step*0.36,26);
+}
+function px(isl){return [pad+isl.c*step, pad+isl.r*step];}
+
+// ---------- rendering ----------
+function sumFor(id){let s=0;for(const ei of S.ctx.nodeEdges[id]){s+=(S.beams[ei]||0);}return s;}
+function draw(t){
+  if(!S){requestAnimationFrame(draw);return;}
+  g.clearRect(0,0,CSS,CSS);
+  // faint grid dots
+  g.fillStyle="rgba(120,170,205,.10)";
+  const N=S.cfg.grid;
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){g.beginPath();g.arc(pad+c*step,pad+r*step,1.4,0,7);g.fill();}
+  // beams
+  drawBeams(S.beams,false,t);
+  drawBeams(S.pencil,true,t);
+  // islands
+  for(const isl of S.islands){
+    const [x,y]=px(isl); const sum=sumFor(isl.id);
+    let fill="#dbe7f0",ring=null;
+    if(sum===isl.n){fill="#7fe3c9";}
+    else if(sum>isl.n){fill="#f2a07d";}
+    let rr=rad; const p=S.pulse[isl.id];
+    if(p){const k=(t-p)/380; if(k<1){rr=rad*(1+0.18*Math.sin(k*Math.PI));}else delete S.pulse[isl.id];}
+    if(S.sel===isl.id){ring="#4fb0e6";}
+    g.beginPath();g.arc(x,y,rr,0,7);
+    g.fillStyle=fill;g.fill();
+    g.lineWidth=ring?4:2.5;g.strokeStyle=ring||(sum===isl.n?"#00b894":sum>isl.n?"#e8602c":"#254c68");g.stroke();
+    g.fillStyle="#08111b";g.font="bold "+(rr*1.05)+"px 'Segoe UI',sans-serif";
+    g.textAlign="center";g.textBaseline="middle";g.fillText(isl.n,x,y+1);
+  }
+  requestAnimationFrame(draw);
+}
+function drawBeams(map,pencil,t){
+  for(const k in map){
+    const cnt=map[k]; if(!cnt)continue; const e=S.edges[k];
+    const A=S.islands[e.a],B=S.islands[e.b];
+    let [x1,y1]=px(A),[x2,y2]=px(B);
+    let prog=1; if(!pencil){const a=S.anim[k]; if(a){prog=Math.min(1,(t-a)/240);}}
+    const ex=x1+(x2-x1)*prog, ey=y1+(y2-y1)*prog;
+    const off=(cnt===2)?5:0; const perp=e.h?[0,1]:[1,0];
+    g.lineCap="round";
+    for(let s=(cnt===2?-1:0);s<=(cnt===2?1:0);s+=2){
+      const ox=perp[0]*off*s, oy=perp[1]*off*s;
+      g.beginPath();g.moveTo(x1+ox,y1+oy);g.lineTo(ex+ox,ey+oy);
+      g.lineWidth=pencil?2:4; g.strokeStyle=pencil?"rgba(245,166,35,.55)":"#78c6f0";
+      if(pencil)g.setLineDash([5,6]);else g.setLineDash([]);
+      g.stroke();
+      if(cnt!==2)break;
+    }
+    g.setLineDash([]);
+  }
+}
+
+// ---------- audio ----------
+let actx=null,soundOn=true;
+function tone(f,dur,type,vol,when){
+  if(!soundOn)return; try{actx=actx||new (window.AudioContext||window.webkitAudioContext)();}catch(e){return;}
+  const o=actx.createOscillator(),gg=actx.createGain(),tt=actx.currentTime+(when||0);
+  o.type=type||"sine";o.frequency.value=f;o.connect(gg);gg.connect(actx.destination);
+  gg.gain.setValueAtTime(vol||0.07,tt);gg.gain.exponentialRampToValueAtTime(0.0001,tt+dur);
+  o.start(tt);o.stop(tt+dur);
+}
+
+// ---------- input ----------
+function hit(mx,my){let best=null,bd=1e9;for(const isl of S.islands){const [x,y]=px(isl);const d=Math.hypot(mx-x,my-y);if(d<bd){bd=d;best=isl;}}return bd<rad*1.5?best:null;}
+function pushUndo(){S.undo.push(JSON.stringify(S.beams));if(S.undo.length>200)S.undo.shift();S.redo.length=0;}
+function pencilMode(){return document.getElementById("pencil").classList.contains("on");}
+
+function toggleEdge(idx){
+  const map=pencilMode()?S.pencil:S.beams;
+  const cur=map[idx]||0, next=(cur+1)%3;
+  if(next>0){for(const x of S.edges[idx].cross){if((S.beams[x]||0)>0||(pencilMode()&&(S.pencil[x]||0)>0)){setStatus("A beam can't cross another beam.");return false;}}}
+  if(!pencilMode())pushUndo();
+  if(next===0)delete map[idx];else map[idx]=next;
+  if(!pencilMode()){ if(next>0){S.anim[idx]=performance.now();tone(next===2?520:392,0.09,"sine",0.06);} }
+  return true;
+}
+function onTap(mx,my){
+  if(!S||S.solved)return;
+  const isl=hit(mx,my); if(!isl){S.sel=null;return;}
+  if(S.sel===null||S.sel===isl.id){S.sel=(S.sel===isl.id?null:isl.id);return;}
+  const kk=key(S.sel,isl.id); const idx=S.edgeIdx[kk];
+  if(idx===undefined){S.sel=isl.id;return;}
+  const ok=toggleEdge(idx);
+  if(ok){checkComplete();S.sel=null;updateControls();}
+}
+function evPos(ev){const r=cv.getBoundingClientRect();const p=ev.touches?ev.touches[0]:ev;return [p.clientX-r.left,p.clientY-r.top];}
+cv.addEventListener("click",ev=>{const[x,y]=evPos(ev);onTap(x,y);});
+
+// ---------- completion / win ----------
+function checkComplete(){
+  for(const isl of S.islands){if(sumFor(isl.id)!==isl.n)return false;}
+  if(!connected(S.ctx,beamsToVal()))return false;
+  win(); return true;
+}
+function beamsToVal(){const v=new Int8Array(S.edges.length).fill(0);for(const k in S.beams)v[k]=S.beams[k];return v;}
+
+function win(){
+  S.solved=true; const t=(performance.now()-S.start)/1000;
+  for(const isl of S.islands)S.pulse[isl.id]=performance.now()+0; sweepPulse();
+  winChime();
+  const st=loadStats(); st.solved++;
+  if(!st.best[S.tier]||t<st.best[S.tier])st.best[S.tier]=t;
+  let streakMsg="";
+  if(S.isDaily){
+    const today=dateStr(new Date()); const yes=dateStr(new Date(Date.now()-864e5));
+    if(st.streak.last!==today){
+      st.streak.cur=(st.streak.last===yes)?st.streak.cur+1:1;
+      st.streak.last=today; st.streak.max=Math.max(st.streak.max,st.streak.cur);
+    }
+    streakMsg="Daily streak: "+st.streak.cur+" 🔥";
+  }
+  saveStats(st); renderStats(); updateControls();
+  document.getElementById("win-time").textContent=fmt(t);
+  document.getElementById("win-sub").textContent=cap(S.tier)+" · seed "+(S.isDaily?dateStr(new Date()):S.seed);
+  document.getElementById("win-streak").textContent=streakMsg;
+  document.getElementById("overlay").classList.add("show");
+  setStatus("Solved in <b>"+fmt(t)+"</b> — one connected span, every island satisfied.");
+}
+function sweepPulse(){let i=0;const ids=S.islands.map(x=>x.id);const iv=setInterval(()=>{if(i>=ids.length){clearInterval(iv);return;}S.pulse[ids[i]]=performance.now();tone(440+i*18,0.06,"sine",0.04);i++;},45);}
+function winChime(){[523,659,784,1047].forEach((f,i)=>tone(f,0.3,"triangle",0.08,i*0.11));}
+
+// ---------- hint (logical deduction) ----------
+function findHint(){
+  let best=null;
+  for(const isl of S.islands){
+    const inc=S.ctx.nodeEdges[isl.id]; let placed=0; const open=[];
+    for(const ei of inc){
+      const cv2=S.beams[ei]||0; placed+=cv2;
+      let cap=2; for(const x of S.edges[ei].cross)if((S.beams[x]||0)>0){cap=0;break;}
+      const add=cap-cv2; if(add>0)open.push({ei,cap,add});
+    }
+    const rem=isl.n-placed; if(rem<=0)continue;
+    let totalAdd=0; open.forEach(o=>totalAdd+=o.add);
+    if(rem===totalAdd && open.length){
+      const o=open[0]; const nb=S.edges[o.ei].a===isl.id?S.edges[o.ei].b:S.edges[o.ei].a; const NB=S.islands[nb];
+      best={isl,ei:o.ei,cap:o.cap,
+        reason:"Island <b>"+isl.n+"</b> still needs <b>"+rem+"</b> more beam"+(rem>1?"s":"")+" and its "+open.length+" open connection"+(open.length>1?"s":"")+" can supply exactly that — the beam toward ("+NB.r+","+NB.c+") is forced to "+o.cap+"."};
+      break;
+    }
+  }
+  if(!best){ // fallback to the proven unique solution
+    let overPlaced=false;
+    for(let i=0;i<S.edges.length;i++){
+      const want=S.solution[i], have=S.beams[i]||0;
+      if(want<have){overPlaced=true;continue;}
+      if(want>have){
+        const e=S.edges[i];const A=S.islands[e.a],B=S.islands[e.b];
+        // clear any non-solution beam that crosses this edge so applying the hint can't create a crossing
+        const clear=[]; for(const x of e.cross)if((S.beams[x]||0)>0){clear.push(x);}
+        best={isl:A,ei:i,cap:want,clear,
+          reason:(clear.length?"Cleared a crossing beam — ":"No single-step deduction here — ")+"the unique solution puts <b>"+want+"</b> beam"+(want>1?"s":"")+" between ("+A.r+","+A.c+") and ("+B.r+","+B.c+")."};
+        break;
+      }
+    }
+    if(!best&&overPlaced)best={overPlaced:true};
+  }
+  return best;
+}
+
+// ---------- stats ----------
+function dateStr(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+function loadStats(){try{const s=JSON.parse(localStorage.getItem("trave.stats"));if(s&&s.streak&&s.best)return s;}catch(e){}return{solved:0,best:{},streak:{cur:0,max:0,last:null}};}
+function saveStats(s){try{localStorage.setItem("trave.stats",JSON.stringify(s));}catch(e){}}
+function fmt(t){t=Math.max(0,Math.floor(t));return Math.floor(t/60)+":"+String(t%60).padStart(2,"0");}
+function renderStats(){
+  const s=loadStats();
+  document.getElementById("s-solved").textContent=s.solved;
+  document.getElementById("s-streak").textContent=s.streak.cur;
+  document.getElementById("s-longest").textContent=s.streak.max;
+  const b=S?s.best[S.tier]:null;
+  document.getElementById("s-best-box").firstChild.textContent="Best ("+(S?cap(S.tier):"tier")+")";
+  document.getElementById("s-best").textContent=b?fmt(b):"—";
+}
+function tickTime(){if(S&&!S.solved){document.getElementById("s-time").textContent=fmt((performance.now()-S.start)/1000);}}
+setInterval(tickTime,500);
+
+function setStatus(h){document.getElementById("status").innerHTML=h;}
+function updateControls(){
+  document.getElementById("undo").disabled=!(S&&S.undo.length);
+  document.getElementById("redo").disabled=!(S&&S.redo.length);
+  const live=!!(S&&!S.solved);
+  document.getElementById("hint").disabled=!live;
+  document.getElementById("check").disabled=!S;
+}
+
+// ---------- controls ----------
+document.querySelectorAll(".tier").forEach(b=>b.addEventListener("click",()=>{
+  const seed=(Math.random()*1e6|0); startGame(b.dataset.tier,seed,false);
+}));
+document.getElementById("daily").addEventListener("click",()=>{
+  startGame("standard",dateStr(new Date()),true);
+});
+document.getElementById("random").addEventListener("click",()=>{
+  const tier=S?S.tier:"standard"; startGame(tier,(Math.random()*1e6|0),false);
+});
+document.getElementById("share").addEventListener("click",()=>{
+  if(!S){setStatus("Start a board first, then share it.");return;}
+  const base=location.href.split("#")[0];
+  const url=base+"#"+S.tier+"-"+S.seed; // concrete seed reproduces the exact board on any day
+  copy(url); setStatus("Link copied — share this exact board.");
+});
+document.getElementById("undo").addEventListener("click",()=>{if(S&&S.undo.length){S.redo.push(JSON.stringify(S.beams));S.beams=JSON.parse(S.undo.pop());S.sel=null;updateControls();}});
+document.getElementById("redo").addEventListener("click",()=>{if(S&&S.redo.length){S.undo.push(JSON.stringify(S.beams));S.beams=JSON.parse(S.redo.pop());S.sel=null;updateControls();}});
+document.getElementById("hint").addEventListener("click",()=>{
+  if(!S||S.solved)return; const h=findHint(); if(!h){setStatus("Board already solved.");return;}
+  if(h.overPlaced){setStatus("You've placed more beams than the solution needs — remove some, then ask again.");return;}
+  pushUndo();
+  if(h.clear)for(const x of h.clear)delete S.beams[x];
+  S.beams[h.ei]=h.cap; S.anim[h.ei]=performance.now(); S.pulse[h.isl.id]=performance.now();
+  S.sel=h.isl.id; tone(392,0.12,"sine",0.06); setStatus(h.reason); checkComplete(); updateControls();
+});
+document.getElementById("check").addEventListener("click",()=>{
+  if(!S)return; let over=0,done=0,rem=0;
+  for(const isl of S.islands){const s=sumFor(isl.id); if(s>isl.n)over++; else if(s===isl.n)done++; else rem++;}
+  if(over)setStatus("<b>"+over+"</b> island"+(over>1?"s are":" is")+" over-connected (orange). Ease off those.");
+  else if(rem===0){ if(connected(S.ctx,beamsToVal()))setStatus("All satisfied — nice.");else setStatus("Every island is satisfied but the network is split into separate groups.");}
+  else setStatus("<b>"+done+"</b> satisfied, <b>"+rem+"</b> to go. No over-connections or crossings.");
+});
+document.getElementById("pencil").addEventListener("click",e=>{e.target.classList.toggle("on");setStatus(pencilMode()?"Pencil mode: dashed tentative beams (don't count).":"Pen mode: real beams.");});
+document.getElementById("sound").addEventListener("click",e=>{soundOn=!soundOn;e.target.classList.toggle("on",soundOn);});
+document.getElementById("win-next").addEventListener("click",()=>{document.getElementById("overlay").classList.remove("show");document.getElementById("random").click();});
+document.getElementById("overlay").addEventListener("click",e=>{if(e.target.id==="overlay")e.currentTarget.classList.remove("show");});
+document.getElementById("win-copy").addEventListener("click",()=>{
+  const s=loadStats(); const t=document.getElementById("win-time").textContent;
+  const txt="Trave "+cap(S.tier)+" · "+t+" · "+(S.isDaily?"Daily "+dateStr(new Date()):"seed "+S.seed)+(S.isDaily?" · streak "+s.streak.cur:"")+" — solved with the unique-solution engine.";
+  copy(txt); setStatus("Result copied.");
+});
+function legacyCopy(t){const a=document.createElement("textarea");a.value=t;document.body.appendChild(a);a.select();try{document.execCommand("copy");}catch(_){}a.remove();}
+function copy(t){
+  let p=null;
+  try{p=navigator.clipboard&&navigator.clipboard.writeText(t);}catch(e){}
+  if(p&&p.catch)p.catch(()=>legacyCopy(t)); else legacyCopy(t);
+}
+
+window.addEventListener("resize",()=>{if(S)layout();});
+
+// ---------- boot ----------
+function boot(){
+  requestAnimationFrame(draw);
+  const h=location.hash.slice(1);
+  if(h==="daily"){startGame("standard",dateStr(new Date()),true);return;}
+  const m=h.match(/^(calm|standard|knotted)-(.+)$/);
+  if(m){startGame(m[1],m[2],false);return;}
+  startGame("standard",dateStr(new Date()),true); // default to Daily
+}
+boot();
+})();
+</script>
+</body>
+</html>

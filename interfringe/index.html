@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Interfringe — Living Quasicrystals</title>
+<style>
+  :root{ --panel:#12141c; --edge:#232838; --ink:#e8ecf5; --sub:#8a92a8; --acc:#ff6a3d; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:#05070d; color:var(--ink);
+    font-family:ui-sans-serif,system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; overflow:hidden; }
+  #stage{ position:fixed; inset:0; }
+  canvas{ display:block; width:100%; height:100%; cursor:grab; touch-action:none; }
+  canvas.drag{ cursor:grabbing; }
+  #panel{ position:fixed; top:14px; left:14px; width:280px; max-height:calc(100% - 28px);
+    overflow-y:auto; background:rgba(18,20,28,.82);
+    -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px);
+    border:1px solid var(--edge); border-radius:14px; padding:14px 15px 16px;
+    box-shadow:0 12px 40px rgba(0,0,0,.5); font-size:12.5px; }
+  #panel h1{ font-size:15px; margin:0 0 2px; letter-spacing:.4px; }
+  #panel h1 b{ color:var(--acc); }
+  .tag{ color:var(--sub); font-size:10.5px; margin:0 0 12px; line-height:1.35; }
+  .row{ margin:10px 0; }
+  .row label{ display:flex; justify-content:space-between; color:var(--sub);
+    font-size:10.5px; text-transform:uppercase; letter-spacing:.5px; margin-bottom:5px; }
+  .row label span{ color:var(--ink); font-variant-numeric:tabular-nums; }
+  input[type=range]{ width:100%; height:16px; -webkit-appearance:none; appearance:none;
+    background:transparent; margin:0; }
+  input[type=range]::-webkit-slider-runnable-track{ height:4px; border-radius:3px;
+    background:linear-gradient(90deg,var(--acc),#5b6bff); }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:14px; height:14px;
+    border-radius:50%; background:#fff; margin-top:-5px; box-shadow:0 0 0 2px var(--acc); cursor:pointer; }
+  input[type=range]::-moz-range-track{ height:4px; border-radius:3px;
+    background:linear-gradient(90deg,var(--acc),#5b6bff); }
+  input[type=range]::-moz-range-thumb{ width:14px; height:14px; border:none; border-radius:50%;
+    background:#fff; box-shadow:0 0 0 2px var(--acc); cursor:pointer; }
+  .btns{ display:flex; gap:6px; flex-wrap:wrap; }
+  button,select{ font:inherit; font-size:11.5px; color:var(--ink); background:#1b1f2b;
+    border:1px solid var(--edge); border-radius:8px; padding:7px 9px; cursor:pointer; transition:.12s; }
+  button:hover,select:hover{ border-color:var(--acc); }
+  button.pri{ background:var(--acc); color:#111; border-color:var(--acc); font-weight:600; }
+  button.on{ border-color:var(--acc); color:var(--acc); }
+  select{ width:100%; }
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  .grid3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; }
+  #gammas .row{ margin:6px 0; }
+  #gammas label{ font-size:9.5px; }
+  .hint{ color:var(--sub); font-size:10px; margin-top:3px; line-height:1.4; }
+  #toast{ position:fixed; bottom:20px; left:50%; transform:translateX(-50%) translateY(20px);
+    background:var(--acc); color:#111; font-size:12px; font-weight:600; padding:8px 16px;
+    border-radius:20px; opacity:0; pointer-events:none; transition:.25s; }
+  #toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  details summary{ cursor:pointer; color:var(--sub); font-size:10.5px; text-transform:uppercase;
+    letter-spacing:.5px; margin:12px 0 4px; outline:none; }
+  #count{ color:var(--sub); font-size:10px; text-align:right; margin-top:8px; }
+  #legend{ display:flex; flex-wrap:wrap; gap:5px 10px; margin-top:8px; }
+  #legend span{ display:inline-flex; align-items:center; gap:5px; color:var(--sub); font-size:10px; }
+  #legend i{ width:11px; height:11px; border-radius:3px; display:inline-block; }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c"></canvas></div>
+
+<div id="panel">
+  <h1><b>Inter</b>fringe</h1>
+  <p class="tag">Aperiodic rhombic tilings from the de Bruijn multigrid. Twist symmetry, drift the offsets, watch the quasicrystal re-tile — it never repeats.<br>Drag to pan · scroll, pinch or ± to zoom · Space plays.</p>
+
+  <div class="row">
+    <label>Symmetry order N <span id="vN">5</span></label>
+    <input type="range" id="N" min="4" max="13" step="1" value="5">
+    <div class="hint" id="Nnote">5 = Penrose P3</div>
+  </div>
+
+  <div class="btns">
+    <button id="play" class="pri" style="flex:1">▶ Play phason drift</button>
+  </div>
+  <div class="row">
+    <label>Drift speed <span id="vSpeed">0.30</span></label>
+    <input type="range" id="speed" min="0" max="1" step="0.01" value="0.3">
+  </div>
+
+  <div class="row">
+    <label>Palette</label>
+    <select id="pal"></select>
+  </div>
+
+  <div class="grid3">
+    <button id="tEdges" class="on">Edges</button>
+    <button id="tStars">Stars</button>
+    <button id="tBands">Ribbons</button>
+  </div>
+
+  <div class="row" style="margin-top:12px">
+    <label>Grid extent <span id="vExt">11</span></label>
+    <input type="range" id="ext" min="4" max="22" step="1" value="11">
+    <div class="hint">More rhombi, wider field, heavier animation.</div>
+  </div>
+
+  <details>
+    <summary>Offset vector γ (phason window)</summary>
+    <div id="gammas"></div>
+    <button id="randg" style="width:100%;margin-top:4px">Randomize offsets</button>
+  </details>
+
+  <div class="grid2" style="margin-top:12px">
+    <button id="ePng">Export PNG</button>
+    <button id="eSvg">Export SVG</button>
+  </div>
+  <div class="grid2" style="margin-top:6px">
+    <button id="zOut" title="Zoom out (−)">− Zoom out</button>
+    <button id="zIn" title="Zoom in (+)">＋ Zoom in</button>
+  </div>
+  <div class="grid2" style="margin-top:6px">
+    <button id="share">Copy share link</button>
+    <button id="reset">Reset view</button>
+  </div>
+  <div id="count"></div>
+  <div id="legend"></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+(function(){
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let W=0, H=0, DPR=1;
+
+// ---- palettes (bg, edge, star, up to 6 rhombus-type colors) ----
+const PALS = [
+  {name:"Aurora", bg:"#05070d", edge:"rgba(255,255,255,.14)", star:"#7dffea",
+   cols:["#2de2c4","#4f7bff","#a24bff","#ff4fa3","#ffd24f","#63ff8f"]},
+  {name:"Ember",  bg:"#0d0603", edge:"rgba(255,220,190,.16)", star:"#ffd27a",
+   cols:["#ff6a3d","#ffb03d","#ff3d6e","#c73dff","#ffe08a","#ff8f5a"]},
+  {name:"Ink",    bg:"#0a0a0c", edge:"rgba(255,255,255,.22)", star:"#ffffff",
+   cols:["#e9e9ef","#b9bcc9","#8b8fa3","#61667d","#3c4157","#252a3c"]},
+  {name:"Candy",  bg:"#0f0c17", edge:"rgba(255,255,255,.15)", star:"#fff3a8",
+   cols:["#ff9ecb","#9ad0ff","#c8a8ff","#a8ffd6","#ffd6a8","#ffb3b3"]}
+];
+
+// ---- state ----
+const S = { N:5, ext:11, pal:0, speed:0.3, play:false,
+  zoom:22, panX:0, panY:0, gamma:[],
+  edges:true, stars:false, bands:false };
+
+let E=[];            // unit normals per family
+let rate=[];         // per-family drift rate
+let rhombi=[];       // computed tiles {v:[4 pts], type, r, s, cx, cy}
+let verts=new Map(); // vertex coordination for stars
+let usedTypes=new Set(); // distinct rhombus types actually produced
+
+function pal(){ return PALS[S.pal]; }
+function initGamma(N){ const g=[]; for(let j=0;j<N;j++) g.push((0.2+0.0137*j)%1); return g; }
+function initRate(N){ const r=[]; for(let j=0;j<N;j++) r.push((j%2?1:-1)*(0.35+0.11*j)); return r; }
+
+// ---- de Bruijn multigrid dualization ----
+function compute(){
+  const N=S.N, g=S.gamma, R=S.ext;
+  E=[]; for(let j=0;j<N;j++){ const a=2*Math.PI*j/N; E.push([Math.cos(a),Math.sin(a)]); }
+  rhombi=[]; verts=new Map(); usedTypes=new Set();
+  for(let r=0;r<N;r++){
+    const er=E[r];
+    for(let s=r+1;s<N;s++){
+      const es=E[s];
+      const det=er[0]*es[1]-er[1]*es[0];
+      if(Math.abs(det)<1e-9) continue;           // antiparallel families: no crossings
+      const d=s-r, type=Math.min(d, N-d);
+      usedTypes.add(type);
+      const col=pal().cols[(type-1)%pal().cols.length];
+      for(let a=-R;a<=R;a++){
+        const Ar=a-g[r];
+        for(let b=-R;b<=R;b++){
+          const Bs=b-g[s];
+          // intersection of line a (family r) and line b (family s)
+          const px=(Ar*es[1]-Bs*er[1])/det;
+          const py=(er[0]*Bs-es[0]*Ar)/det;
+          // region index vector (generic γ => no triple concurrency, rounding safe)
+          let x0=0,y0=0;
+          for(let j=0;j<N;j++){
+            const K = (j===r)?a : (j===s)?b : Math.round(px*E[j][0]+py*E[j][1]+g[j]);
+            x0+=K*E[j][0]; y0+=K*E[j][1];
+          }
+          const v0=[x0,y0], v1=[x0+er[0],y0+er[1]],
+                v2=[x0+er[0]+es[0],y0+er[1]+es[1]], v3=[x0+es[0],y0+es[1]];
+          const cx=(v0[0]+v2[0])/2, cy=(v0[1]+v2[1])/2;
+          rhombi.push({v:[v0,v1,v2,v3],type,col,r,s,cx,cy});
+          addVert(v0);addVert(v1);addVert(v2);addVert(v3);
+        }
+      }
+    }
+  }
+  const nT=usedTypes.size;
+  document.getElementById('count').textContent = rhombi.length.toLocaleString()+" rhombi · "+nT+(nT===1?" type":" types");
+}
+function addVert(p){
+  const k=Math.round(p[0]*1000)+","+Math.round(p[1]*1000);
+  const e=verts.get(k);
+  if(e) e.n++; else verts.set(k,{x:p[0],y:p[1],n:1});
+}
+
+// ---- render ----
+function render(){
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.fillStyle=pal().bg; ctx.fillRect(0,0,W,H);
+  const z=S.zoom, ox=W/2+S.panX, oy=H/2+S.panY, M=60;
+  const inView=(sx,sy)=> sx>-M&&sx<W+M&&sy>-M&&sy<H+M;
+  ctx.lineJoin="round";
+  ctx.lineWidth=Math.max(0.35, z*0.028);
+  for(let i=0;i<rhombi.length;i++){
+    const r=rhombi[i], sx=ox+r.cx*z, sy=oy+r.cy*z;
+    if(!inView(sx,sy)) continue;
+    const v=r.v;
+    ctx.beginPath();
+    ctx.moveTo(ox+v[0][0]*z, oy+v[0][1]*z);
+    ctx.lineTo(ox+v[1][0]*z, oy+v[1][1]*z);
+    ctx.lineTo(ox+v[2][0]*z, oy+v[2][1]*z);
+    ctx.lineTo(ox+v[3][0]*z, oy+v[3][1]*z);
+    ctx.closePath();
+    ctx.fillStyle=r.col; ctx.fill();
+    if(S.edges){ ctx.strokeStyle=pal().edge; ctx.stroke(); }
+  }
+  if(S.bands){
+    ctx.lineWidth=Math.max(0.6, z*0.04); ctx.lineCap="round";
+    const N=S.N;
+    for(let i=0;i<rhombi.length;i++){
+      const r=rhombi[i], sx=ox+r.cx*z, sy=oy+r.cy*z;
+      if(!inView(sx,sy)) continue;
+      const v=r.v, mid=(a,b,c)=> (v[a][c]+v[b][c])/2;
+      ctx.strokeStyle="hsla("+(r.r/N*360|0)+",75%,66%,.5)";
+      ctx.beginPath();
+      ctx.moveTo(ox+mid(0,1,0)*z, oy+mid(0,1,1)*z);
+      ctx.lineTo(ox+mid(3,2,0)*z, oy+mid(3,2,1)*z); ctx.stroke();
+      ctx.strokeStyle="hsla("+(r.s/N*360|0)+",75%,66%,.5)";
+      ctx.beginPath();
+      ctx.moveTo(ox+mid(1,2,0)*z, oy+mid(1,2,1)*z);
+      ctx.lineTo(ox+mid(0,3,0)*z, oy+mid(0,3,1)*z); ctx.stroke();
+    }
+    ctx.lineCap="butt";
+  }
+  if(S.stars){
+    ctx.fillStyle=pal().star;
+    const rad=Math.max(1.5, z*0.09);
+    verts.forEach(v=>{
+      if(v.n<5) return;
+      const sx=ox+v.x*z, sy=oy+v.y*z;
+      if(!inView(sx,sy)) return;
+      ctx.beginPath(); ctx.arc(sx,sy,rad,0,7); ctx.fill();
+    });
+  }
+}
+
+// ---- animation ----
+let raf=0;
+function loop(){
+  if(S.play){
+    const spd=S.speed*0.012;
+    for(let j=0;j<S.N;j++) S.gamma[j]=((S.gamma[j]+spd*rate[j])%1+1)%1;
+    compute(); if(gammasOpen()) syncGammas();
+  }
+  render();
+  raf=requestAnimationFrame(loop);
+}
+
+// ---- fit / resize ----
+function refit(){ S.zoom=0.44*Math.min(W,H)/S.ext; S.panX=0; S.panY=0; }
+function resize(){
+  DPR=Math.min(window.devicePixelRatio||1,2);
+  W=window.innerWidth; H=window.innerHeight;
+  cv.width=W*DPR; cv.height=H*DPR; cv.style.width=W+'px'; cv.style.height=H+'px';
+  render();
+}
+
+// ---- UI wiring ----
+const $=id=>document.getElementById(id);
+function buildPalOptions(){ PALS.forEach((p,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=p.name; $('pal').appendChild(o); }); }
+function buildGammas(){
+  const box=$('gammas'); box.innerHTML='';
+  for(let j=0;j<S.N;j++){
+    const row=document.createElement('div'); row.className='row';
+    row.innerHTML='<label>γ<sub>'+j+'</sub> <span>'+S.gamma[j].toFixed(3)+'</span></label>';
+    const inp=document.createElement('input');
+    inp.type='range'; inp.min=0; inp.max=1; inp.step=0.001; inp.value=S.gamma[j];
+    inp.oninput=()=>{ S.gamma[j]=+inp.value; row.querySelector('span').textContent=S.gamma[j].toFixed(3); compute(); render(); writeHash(); };
+    row.appendChild(inp); box.appendChild(row);
+  }
+}
+function syncGammas(){
+  const rows=$('gammas').children;
+  for(let j=0;j<rows.length;j++){
+    const inp=rows[j].querySelector('input'); inp.value=S.gamma[j];
+    rows[j].querySelector('span').textContent=S.gamma[j].toFixed(3);
+  }
+}
+function gammasOpen(){ const d=$('gammas').closest('details'); return !!(d&&d.open); }
+function buildLegend(){
+  const box=$('legend'); if(!box) return; box.innerHTML='';
+  const T=[...usedTypes].sort((a,b)=>a-b), cols=pal().cols, n=T.length;
+  T.forEach((t,i)=>{
+    const lbl = n===1 ? 'rhomb' : i===0 ? 'thin' : i===n-1 ? 'fat' : 't'+t;
+    const el=document.createElement('span');
+    el.innerHTML='<i style="background:'+cols[(t-1)%cols.length]+'"></i>'+lbl;
+    box.appendChild(el);
+  });
+}
+function nNote(N){ return N===5?"5 = Penrose P3":N===8?"8 = Ammann-Beenker":N===4?"4 = square lattice":N+"-fold quasicrystal"; }
+
+$('N').oninput=e=>{
+  S.N=+e.target.value; $('vN').textContent=S.N; $('Nnote').textContent=nNote(S.N);
+  S.gamma=initGamma(S.N); rate=initRate(S.N);
+  buildGammas(); refit(); compute(); buildLegend(); render(); writeHash();
+};
+$('ext').oninput=e=>{ S.ext=+e.target.value; $('vExt').textContent=S.ext; refit(); compute(); render(); writeHash(); };
+$('speed').oninput=e=>{ S.speed=+e.target.value; $('vSpeed').textContent=S.speed.toFixed(2); writeHash(); };
+$('pal').onchange=e=>{ S.pal=+e.target.value; compute(); buildLegend(); render(); writeHash(); };
+$('play').onclick=e=>{ S.play=!S.play; e.target.textContent=S.play?"❚❚ Pause drift":"▶ Play phason drift"; e.target.classList.toggle('pri',!S.play); };
+function toggle(btn,key){ $(btn).onclick=()=>{ S[key]=!S[key]; $(btn).classList.toggle('on',S[key]); render(); writeHash(); }; }
+toggle('tEdges','edges'); toggle('tStars','stars'); toggle('tBands','bands');
+$('randg').onclick=()=>{ for(let j=0;j<S.N;j++) S.gamma[j]=Math.random(); syncGammas(); compute(); render(); writeHash(); };
+$('reset').onclick=()=>{ refit(); render(); writeHash(); };
+
+// pan + zoom (cursor/finger-anchored zoom shared by wheel, buttons, keys, pinch)
+function zoomAt(f, cx, cy){
+  const ox=W/2+S.panX, oy=H/2+S.panY;
+  const wx=(cx-ox)/S.zoom, wy=(cy-oy)/S.zoom;
+  S.zoom*=f;
+  S.panX=cx-W/2-wx*S.zoom; S.panY=cy-H/2-wy*S.zoom;
+}
+function saveHashSoon(){ clearTimeout(cv._t); cv._t=setTimeout(writeHash,250); }
+function zoomBy(f){ zoomAt(f, W/2, H/2); render(); saveHashSoon(); }
+
+const ptrs=new Map();
+let drag=null, pinch=null;
+cv.addEventListener('pointerdown',e=>{
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  cv.setPointerCapture(e.pointerId);
+  if(ptrs.size===1){ drag={x:e.clientX,y:e.clientY,px:S.panX,py:S.panY}; cv.classList.add('drag'); }
+  else if(ptrs.size===2){ drag=null; cv.classList.remove('drag'); pinch={d:ptrDist()}; }
+});
+cv.addEventListener('pointermove',e=>{
+  if(!ptrs.has(e.pointerId)) return;
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pinch && ptrs.size>=2){
+    const nd=ptrDist(), mid=ptrMid();
+    if(nd>0 && pinch.d>0){ zoomAt(nd/pinch.d, mid.x, mid.y); render(); }
+    pinch.d=nd;
+  } else if(drag){
+    S.panX=drag.px+(e.clientX-drag.x); S.panY=drag.py+(e.clientY-drag.y); render();
+  }
+});
+function endPtr(e){
+  ptrs.delete(e.pointerId);
+  if(ptrs.size<2) pinch=null;
+  if(ptrs.size===0){ if(drag){ drag=null; cv.classList.remove('drag'); } writeHash(); }
+  else if(ptrs.size===1){ const p=[...ptrs.values()][0]; drag={x:p.x,y:p.y,px:S.panX,py:S.panY}; }
+}
+cv.addEventListener('pointerup',endPtr);
+cv.addEventListener('pointercancel',endPtr);
+function ptrDist(){ const p=[...ptrs.values()]; return Math.hypot(p[0].x-p[1].x, p[0].y-p[1].y); }
+function ptrMid(){ const p=[...ptrs.values()]; return {x:(p[0].x+p[1].x)/2, y:(p[0].y+p[1].y)/2}; }
+
+cv.addEventListener('wheel',e=>{
+  e.preventDefault();
+  zoomAt(Math.exp(-e.deltaY*0.0012), e.clientX, e.clientY);
+  render(); saveHashSoon();
+},{passive:false});
+
+$('zIn').onclick=()=>zoomBy(1.2);
+$('zOut').onclick=()=>zoomBy(1/1.2);
+
+window.addEventListener('keydown',e=>{
+  const t=e.target;
+  if(t && (t.tagName==='INPUT'||t.tagName==='SELECT'||t.tagName==='TEXTAREA')) return;
+  if(e.code==='Space'){ e.preventDefault(); $('play').click(); }
+  else if(e.key==='+'||e.key==='='){ e.preventDefault(); zoomBy(1.2); }
+  else if(e.key==='-'||e.key==='_'){ e.preventDefault(); zoomBy(1/1.2); }
+  else if(e.key==='0'){ e.preventDefault(); refit(); render(); writeHash(); }
+});
+
+// ---- export ----
+function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1600); }
+$('ePng').onclick=()=>{
+  const a=document.createElement('a');
+  a.download='interfringe-N'+S.N+'.png'; a.href=cv.toDataURL('image/png'); a.click();
+  toast('PNG exported');
+};
+$('eSvg').onclick=()=>{
+  const z=S.zoom, ox=W/2+S.panX, oy=H/2+S.panY, M=60;
+  let s='<svg xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">';
+  s+='<rect width="'+W+'" height="'+H+'" fill="'+pal().bg+'"/>';
+  const sw=Math.max(0.35,z*0.028).toFixed(2);
+  for(let i=0;i<rhombi.length;i++){
+    const r=rhombi[i], sx=ox+r.cx*z, sy=oy+r.cy*z;
+    if(sx<-M||sx>W+M||sy<-M||sy>H+M) continue;
+    let d='';
+    for(let k=0;k<4;k++){ d+=(ox+r.v[k][0]*z).toFixed(2)+','+(oy+r.v[k][1]*z).toFixed(2)+' '; }
+    s+='<polygon points="'+d.trim()+'" fill="'+r.col+'"'+(S.edges?' stroke="'+pal().edge+'" stroke-width="'+sw+'"':'')+'/>';
+  }
+  s+='</svg>';
+  const a=document.createElement('a');
+  a.download='interfringe-N'+S.N+'.svg';
+  a.href='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(s); a.click();
+  toast('SVG exported');
+};
+
+// ---- URL hash (share) ----
+function writeHash(){
+  const flags=(S.edges?1:0)|(S.stars?2:0)|(S.bands?4:0); // numeric bitmask so the hash parser reads it
+  const h=['N'+S.N,'x'+S.ext,'p'+S.pal,'z'+S.zoom.toFixed(2),
+    'px'+S.panX.toFixed(1),'py'+S.panY.toFixed(1),'sp'+S.speed.toFixed(2),
+    'f'+flags,'g'+S.gamma.map(v=>v.toFixed(3)).join('_')].join('~');
+  history.replaceState(null,'','#'+h);
+}
+function legacyCopy(url){
+  try{
+    const ta=document.createElement('textarea'); ta.value=url;
+    ta.style.position='fixed'; ta.style.top='-1000px'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    const ok=document.execCommand('copy'); document.body.removeChild(ta);
+    toast(ok?'Link copied':'Link in address bar');
+  }catch(err){ toast('Link in address bar'); }
+}
+$('share').onclick=()=>{ writeHash();
+  const url=location.href;
+  // navigator.clipboard is only present in secure contexts; file:// in Chromium is not one
+  if(navigator.clipboard && window.isSecureContext)
+    navigator.clipboard.writeText(url).then(()=>toast('Link copied'),()=>legacyCopy(url));
+  else legacyCopy(url);
+};
+function readHash(){
+  const h=location.hash.slice(1); if(!h) return false;
+  try{
+    const parts=h.split('~'), m={};
+    parts.forEach(p=>{ const k=p.replace(/[-\d._].*$/,''); m[k]=p.slice(k.length); });
+    if(m.N) S.N=Math.max(4,Math.min(13,+m.N));
+    if(m.x) S.ext=Math.max(4,Math.min(22,+m.x));
+    if(m.p!=null) S.pal=Math.max(0,Math.min(PALS.length-1,+m.p));
+    if(m.z) S.zoom=+m.z; if(m.px!=null) S.panX=+m.px; if(m.py!=null) S.panY=+m.py;
+    if(m.sp!=null) S.speed=+m.sp;
+    if(m.f!=null && m.f!==''){ const fv=+m.f; if(isFinite(fv)){ S.edges=!!(fv&1); S.stars=!!(fv&2); S.bands=!!(fv&4); } }
+    if(m.g){ const g=m.g.split('_').map(Number); if(g.length===S.N && g.every(v=>isFinite(v))) S.gamma=g; }
+    return true;
+  }catch(err){ return false; }
+}
+
+// ---- boot ----
+function syncControls(){
+  $('N').value=S.N; $('vN').textContent=S.N; $('Nnote').textContent=nNote(S.N);
+  $('ext').value=S.ext; $('vExt').textContent=S.ext;
+  $('speed').value=S.speed; $('vSpeed').textContent=S.speed.toFixed(2);
+  $('pal').value=S.pal;
+  $('tEdges').classList.toggle('on',S.edges);
+  $('tStars').classList.toggle('on',S.stars);
+  $('tBands').classList.toggle('on',S.bands);
+}
+buildPalOptions();
+S.gamma=initGamma(S.N); rate=initRate(S.N);
+window.addEventListener('resize',resize);
+DPR=Math.min(window.devicePixelRatio||1,2); W=window.innerWidth; H=window.innerHeight;
+cv.width=W*DPR; cv.height=H*DPR; cv.style.width=W+'px'; cv.style.height=H+'px';
+const hadHash=readHash();
+rate=initRate(S.N);
+if(S.gamma.length!==S.N) S.gamma=initGamma(S.N);
+if(!hadHash) refit();
+syncControls(); buildGammas(); compute(); buildLegend();
+const gDetails=$('gammas').closest('details');
+if(gDetails) gDetails.addEventListener('toggle',()=>{ if(gDetails.open) syncGammas(); });
+loop();
+})();
+</script>
+</body>
+</html>

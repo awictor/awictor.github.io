@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PigLatin — English ⇄ Pig Latin Translator</title>
+<meta name="description" content="Translate English to Pig Latin with correct consonant-cluster, qu, and y-as-vowel rules, preserving capitalization and punctuation. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('piglatin-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#e11d48;
+    --bg:#fbf4f6; --card:#ffffff; --fg:#20161a; --muted:#6b5560; --line:#f0e2e7; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#150c0f; --card:#1f1319; --fg:#f5ecf0; --muted:#a88d98; --line:#2d1e25; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:680px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#9f1239);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:680px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  textarea{width:100%;min-height:120px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.1rem;resize:vertical;line-height:1.6}
+  .out{min-height:120px;background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--c);border-radius:8px;padding:12px;white-space:pre-wrap;word-break:break-word;font-size:1.1rem;line-height:1.6}
+  .copy{margin-top:10px;background:var(--c);color:#fff;border:0;border-radius:8px;padding:9px 16px;cursor:pointer;font:inherit}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:680px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🐷</div>
+    <div><h1>PigLatin</h1><div class="sub">English → Pig Latin translator</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="text">English</label>
+    <textarea id="text" spellcheck="false">Hello world, this is Pig Latin!</textarea>
+  </div>
+  <div class="card">
+    <label>Pig Latin</label>
+    <div class="out" id="out"></div>
+    <button class="copy" id="copyBtn" type="button">Copy</button>
+  </div>
+</main>
+<footer>
+  Rules: words starting with a vowel take <em>way</em>; otherwise the leading consonant cluster moves to the end and takes <em>ay</em>. <em>qu</em> stays together and <em>y</em> acts as a vowel except at the start. Capitalization and punctuation are preserved. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/pig-latin">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  // Find the index of the first vowel. 'u' after 'q' is a consonant; 'y' is a
+  // vowel only when it is not the first letter.
+  function firstVowelIndex(lower){
+    for(let i = 0; i < lower.length; i++){
+      const c = lower[i];
+      const isV = ('aeiou'.includes(c) && !(c === 'u' && lower[i - 1] === 'q')) || (c === 'y' && i > 0);
+      if(isV) return i;
+    }
+    return -1;
+  }
+
+  // Translate a single alphabetic word to Pig Latin, preserving capitalization.
+  function translateWord(word){
+    if(!word) return word;
+    const lower = word.toLowerCase();
+    const idx = firstVowelIndex(lower);
+    let out;
+    if(idx === 0) out = lower + 'way';
+    else if(idx === -1) out = lower + 'ay';               // no vowel at all
+    else out = lower.slice(idx) + lower.slice(0, idx) + 'ay';
+    // restore case
+    if(word.length > 1 && word === word.toUpperCase() && /[A-Z]/.test(word)) return out.toUpperCase();
+    if(/[A-Z]/.test(word[0])) return out[0].toUpperCase() + out.slice(1);
+    return out;
+  }
+
+  // Translate text, leaving non-letters (spaces, punctuation, digits) in place.
+  function translate(text){
+    return String(text).replace(/[A-Za-z]+/g, w => translateWord(w));
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('out')){
+    const $ = id => document.getElementById(id);
+    const esc = s => s.replace(/[&<>]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]));
+
+    function render(){ $('out').innerHTML = esc(translate($('text').value)); }
+    $('text').addEventListener('input', render);
+    $('copyBtn').addEventListener('click', () => {
+      navigator.clipboard?.writeText(translate($('text').value));
+      $('copyBtn').textContent = 'Copied!'; setTimeout(() => $('copyBtn').textContent = 'Copy', 1200);
+    });
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('piglatin-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { firstVowelIndex, translateWord, translate };
+</script>
+</body>
+</html>

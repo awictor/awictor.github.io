@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gossamer — a hanging cloth you can grab, billow &amp; tear</title>
+<style>
+  :root{ --bg:#0a0c10; --panel:rgba(16,20,28,.82); --ink:#c9d4e2; --dim:#8794a6; --accent:#59e0ff; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; overflow:hidden; background:var(--bg);
+    font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace; color:var(--ink);
+    -webkit-user-select:none; user-select:none; }
+  #stage{ position:fixed; inset:0; display:block; cursor:crosshair;
+    background:radial-gradient(120% 120% at 50% -10%, #141b26 0%, #0a0c10 55%, #05070a 100%); }
+  #panel{ position:fixed; top:14px; left:14px; width:246px; padding:14px 15px 12px;
+    background:var(--panel); border:1px solid #1e2833; border-radius:12px;
+    -webkit-backdrop-filter:blur(9px); backdrop-filter:blur(9px); box-shadow:0 12px 40px rgba(0,0,0,.5); z-index:10; }
+  #panel h1{ margin:0 0 2px; font-size:15px; letter-spacing:.14em; font-weight:600;
+    background:linear-gradient(90deg,#59e0ff,#ffcf4d,#ff5b52); -webkit-background-clip:text;
+    background-clip:text; color:transparent; }
+  #panel .sub{ margin:0 0 11px; font-size:11px; color:var(--dim); line-height:1.45; letter-spacing:.02em; }
+  .cap{ font-size:10px; color:var(--dim); letter-spacing:.05em; text-transform:uppercase; margin:2px 0 4px; }
+  .row{ margin:9px 0; }
+  .row label{ display:flex; justify-content:space-between; font-size:10px; color:var(--dim);
+    margin-bottom:3px; letter-spacing:.05em; text-transform:uppercase; }
+  .row label b{ color:var(--accent); font-weight:600; }
+  input[type=range]{ -webkit-appearance:none; appearance:none; width:100%; height:3px; border-radius:3px;
+    background:#25313f; outline:none; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:13px; height:13px; border-radius:50%;
+    background:var(--accent); cursor:pointer; box-shadow:0 0 8px rgba(89,224,255,.7); }
+  input[type=range]::-moz-range-thumb{ width:13px; height:13px; border:none; border-radius:50%;
+    background:var(--accent); cursor:pointer; box-shadow:0 0 8px rgba(89,224,255,.7); }
+  .presets{ display:flex; flex-wrap:wrap; gap:5px; margin:4px 0 10px; }
+  .btn{ flex:1 1 auto; padding:5px 4px; font-size:9.5px; font-family:inherit; letter-spacing:.03em;
+    color:var(--ink); background:#16202b; border:1px solid #263340; border-radius:7px; cursor:pointer;
+    transition:.14s; text-align:center; }
+  .btn:hover{ background:#1f2c3a; border-color:var(--accent); color:#fff; }
+  .btn.on{ background:#123; border-color:var(--accent); color:var(--accent); box-shadow:0 0 10px rgba(89,224,255,.35) inset; }
+  .toggles{ display:flex; gap:5px; margin-top:8px; }
+  #hint{ position:fixed; bottom:12px; left:50%; transform:translateX(-50%); z-index:10;
+    font-size:10.5px; color:var(--dim); letter-spacing:.05em; background:rgba(10,12,16,.55);
+    padding:6px 14px; border-radius:20px; border:1px solid #1a222c; pointer-events:none;
+    transition:opacity .6s; }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div id="panel">
+  <h1>GOSSAMER</h1>
+  <p class="sub">Drag to grab &amp; swing. Sweep fast to slice. Click the top-edge dots to pin/unpin. Threads glow hotter the closer they are to snapping.</p>
+  <div class="cap">Presets</div>
+  <div class="presets" id="presets"></div>
+  <div class="row"><label>Gravity <b id="vGrav"></b></label><input type="range" id="grav" min="0" max="1400" step="20"></div>
+  <div class="row"><label>Stiffness <b id="vStiff"></b></label><input type="range" id="stiff" min="1" max="12" step="1"></div>
+  <div class="row"><label>Wind <b id="vWind"></b></label><input type="range" id="wind" min="0" max="1200" step="20"></div>
+  <div class="row"><label>Tear threshold <b id="vTear"></b></label><input type="range" id="tear" min="1.08" max="2.6" step="0.02"></div>
+  <div class="row"><label>Mesh resolution <b id="vRes"></b></label><input type="range" id="res" min="10" max="42" step="1"></div>
+  <div class="toggles">
+    <button class="btn" id="repair">Repair: off</button>
+    <button class="btn" id="mute">Sound: on</button>
+    <button class="btn" id="reset">Reset</button>
+  </div>
+</div>
+<div id="hint">drag&nbsp;=&nbsp;grab&nbsp;·&nbsp;fast&nbsp;sweep&nbsp;=&nbsp;slice&nbsp;·&nbsp;click&nbsp;top&nbsp;dots&nbsp;=&nbsp;pin/unpin</div>
+<script>
+"use strict";
+(function(){
+  const cv = document.getElementById("stage"), ctx = cv.getContext("2d");
+  let W=0, H=0, DPR=Math.min(2, window.devicePixelRatio||1);
+  function resize(){ W=cv.clientWidth; H=cv.clientHeight; cv.width=W*DPR; cv.height=H*DPR; ctx.setTransform(DPR,0,0,DPR,0,0); }
+  let resizeT=0;
+  window.addEventListener("resize", ()=>{
+    clearTimeout(resizeT);
+    resizeT=setTimeout(()=>{ resize(); reflow(); }, 120);
+  });
+
+  // ---- config (round-trips through URL hash) ----
+  // ranges mirror the slider min/max so hash-shared links can't push the sim out of bounds
+  const RANGE = { grav:[0,1400], stiff:[1,12], wind:[0,1200], tear:[1.08,2.6], res:[10,42], mute:[0,1] };
+  const PIN_MODES = { top:1, topcorners:1, corners:1 };
+  const DEFAULTS = { grav:900, stiff:4, wind:260, tear:1.55, res:26, mute:0, pin:"top" };
+  const P = { grav:900, stiff:4, wind:260, tear:1.55, res:26, mute:0 };
+  const PRESETS = {
+    curtain:{ grav:900, stiff:4,  wind:260, tear:1.55, res:26, pin:"top" },
+    banner: { grav:1100,stiff:6,  wind:520, tear:1.7,  res:18, pin:"topcorners" },
+    net:    { grav:520, stiff:2,  wind:180, tear:2.2,  res:34, pin:"top" },
+    canvas: { grav:1300,stiff:9,  wind:90,  tear:1.28, res:22, pin:"corners" }
+  };
+  let pinMode = "top";
+
+  const clamp=(n,lo,hi)=> n<lo?lo : n>hi?hi : n;
+
+  function readHash(){
+    const h = location.hash.slice(1); if(!h) return;
+    h.split("&").forEach(kv=>{ const [k,v]=kv.split("="); if(v===undefined) return;
+      if(k==="pin"){ if(v in PIN_MODES) pinMode=v; }
+      else if(k in RANGE){ const n=parseFloat(v);
+        if(Number.isFinite(n)) P[k]=clamp(n, RANGE[k][0], RANGE[k][1]); } });
+    P.mute = P.mute ? 1 : 0;
+  }
+  let hashT=0;
+  function writeHash(){
+    clearTimeout(hashT);
+    hashT=setTimeout(()=>{
+      const s=`grav=${P.grav}&stiff=${P.stiff}&wind=${P.wind}&tear=${P.tear.toFixed(2)}&res=${P.res}&mute=${P.mute}&pin=${pinMode}`;
+      try{ history.replaceState(null,"",location.pathname+location.search+'#'+s); }
+      catch(e){ try{ location.hash=s; }catch(_){} }
+    },220);
+  }
+
+  // ---- cloth state ----
+  let pts=[], cons=[];
+  let cols, rows, spacing, ox, oy;
+
+  function build(){
+    pts=[]; cons=[];
+    cols = Math.max(4, Math.round(P.res) || 26);
+    const aspect = Math.min(1.5, Math.max(0.55, (W*0.62)/(H*0.7)));
+    rows = Math.max(6, Math.round(cols/aspect*0.72));
+    spacing = Math.min((W*0.7)/cols, (H*0.66)/rows);
+    ox = (W - spacing*(cols-1))/2;
+    oy = Math.max(60, H*0.11);
+    for(let y=0;y<=rows;y++) for(let x=0;x<=cols;x++){
+      const px=ox+x*spacing, py=oy+y*spacing;
+      pts.push({ x:px, y:py, ox:px, oy:py, pinned:pinFor(x,y), hx:x, hy:y });
+    }
+    const idx=(x,y)=> y*(cols+1)+x;
+    for(let y=0;y<=rows;y++) for(let x=0;x<=cols;x++){
+      if(x<cols) addCon(idx(x,y), idx(x+1,y));
+      if(y<rows) addCon(idx(x,y), idx(x,y+1));
+    }
+  }
+  function pinFor(x,y){
+    if(pinMode==="corners") return (y===0||y===rows) && (x===0||x===cols);
+    if(y!==0) return false;
+    if(pinMode==="top") return true;
+    if(pinMode==="topcorners") return x===0 || x===cols;
+    return false;
+  }
+  function addCon(a,b){
+    const p=pts[a], q=pts[b];
+    cons.push({ a, b, rest:Math.hypot(p.x-q.x,p.y-q.y), dead:false });
+  }
+
+  // Rescale the existing mesh to a new viewport instead of rebuilding, so tears,
+  // manual pins, and in-progress state survive a resize.
+  function reflow(){
+    if(!pts.length || !spacing){ build(); return; }
+    const oldSpacing=spacing, oldOx=ox, oldOy=oy;
+    spacing = Math.min((W*0.7)/cols, (H*0.66)/rows);
+    ox = (W - spacing*(cols-1))/2;
+    oy = Math.max(60, H*0.11);
+    const sc = spacing/oldSpacing;
+    if(!Number.isFinite(sc) || sc<=0){ build(); return; }
+    for(const p of pts){
+      p.x = ox + (p.x-oldOx)*sc;  p.y = oy + (p.y-oldOy)*sc;
+      if(p.px2!==undefined){ p.px2 = ox + (p.px2-oldOx)*sc; p.py2 = oy + (p.py2-oldOy)*sc; }
+      p.ox = ox + p.hx*spacing;   p.oy = oy + p.hy*spacing;
+    }
+    for(const c of cons) c.rest *= sc;
+  }
+
+  // ---- scars (fading torn edges) ----
+  const scars=[]; // {ax,ay,bx,by,life}
+
+  // ---- audio: twang on snap ----
+  let AC=null;
+  function twang(rest, energy){
+    if(P.mute) return;
+    try{
+      if(!AC) AC=new (window.AudioContext||window.webkitAudioContext)();
+      if(AC.state==="suspended") AC.resume();
+      const t=AC.currentTime;
+      const freq = 900 - Math.min(760, rest*11) + Math.random()*40; // shorter thread => higher pitch
+      const gain = Math.min(0.5, 0.12 + energy*0.5);
+      const o=AC.createOscillator(), g=AC.createGain();
+      o.type = Math.random()<0.5?"triangle":"sine";
+      o.frequency.setValueAtTime(freq, t);
+      o.frequency.exponentialRampToValueAtTime(Math.max(80,freq*0.5), t+0.18);
+      g.gain.setValueAtTime(gain, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t+0.22);
+      o.connect(g).connect(AC.destination); o.start(t); o.stop(t+0.24);
+    }catch(e){}
+  }
+
+  // ---- input ----
+  const mouse={ x:0, y:0, px:0, py:0, down:false, moved:0 };
+  let grabbed=[]; // {i, dx, dy}
+  const GRAB_R = 46;
+
+  function pos(e){ const r=cv.getBoundingClientRect();
+    const t=e.touches?e.touches[0]:e; return { x:t.clientX-r.left, y:t.clientY-r.top }; }
+
+  function down(e){
+    const m=pos(e); mouse.x=mouse.px=m.x; mouse.y=mouse.py=m.y; mouse.down=true; mouse.moved=0;
+    // toggle a pin if clicking near a pinnable node on the top row
+    let best=-1, bd=18*18;
+    for(let i=0;i<pts.length;i++){ const p=pts[i]; if(p.hy!==0) continue;
+      const d=(p.x-m.x)**2+(p.y-m.y)**2; if(d<bd){ bd=d; best=i; } }
+    if(best>=0){ pts[best].pinned=!pts[best].pinned; if(pts[best].pinned){ pts[best].x=pts[best].ox; pts[best].y=pts[best].oy; } mouse.down=false; return; }
+    // grab nearest points within radius
+    grabbed=[];
+    for(let i=0;i<pts.length;i++){ const p=pts[i];
+      const d=Math.hypot(p.x-m.x,p.y-m.y);
+      if(d<GRAB_R && !p.pinned) grabbed.push({ i, dx:p.x-m.x, dy:p.y-m.y }); }
+    if(AC && AC.state==="suspended") AC.resume();
+  }
+  function move(e){
+    const m=pos(e); mouse.px=mouse.x; mouse.py=mouse.y; mouse.x=m.x; mouse.y=m.y;
+    mouse.moved=Math.hypot(mouse.x-mouse.px, mouse.y-mouse.py);
+    if(mouse.down && (grabbed.length || P.repair)) e.preventDefault && e.preventDefault();
+  }
+  function up(){ mouse.down=false; grabbed=[]; }
+
+  cv.addEventListener("mousedown",down); window.addEventListener("mousemove",move); window.addEventListener("mouseup",up);
+  cv.addEventListener("touchstart",e=>{down(e); e.preventDefault();},{passive:false});
+  cv.addEventListener("touchmove",e=>{move(e); e.preventDefault();},{passive:false});
+  window.addEventListener("touchend",up);
+
+  // segment intersection for slicing
+  function segCross(ax,ay,bx,by,cx,cy,dx,dy){
+    const d1=(bx-ax)*(cy-ay)-(by-ay)*(cx-ax);
+    const d2=(bx-ax)*(dy-ay)-(by-ay)*(dx-ax);
+    const d3=(dx-cx)*(ay-cy)-(dy-cy)*(ax-cx);
+    const d4=(dx-cx)*(by-cy)-(dy-cy)*(bx-cx);
+    return ((d1>0)!==(d2>0)) && ((d3>0)!==(d4>0));
+  }
+
+  // ---- simulation ----
+  let tsec=0;
+  function simulate(dt){
+    tsec+=dt;
+    const g=P.grav*dt*dt;
+    // wind: layered sine + drifting gust, pushes along cloth (mostly x with vertical ripple)
+    const gust = P.wind*(0.6+0.4*Math.sin(tsec*0.7));
+    for(const p of pts){
+      if(p.pinned){ p.x=p.ox; p.y=p.oy; continue; }
+      const w = gust*(Math.sin(p.y*0.03 + tsec*3.1) + 0.5*Math.sin(p.x*0.05 - tsec*2.0))*dt*dt;
+      const vx=(p.x-p.px2)*0.99, vy=(p.y-p.py2)*0.99;
+      p.px2=p.x; p.py2=p.y;
+      p.x+=vx+w; p.y+=vy+g;
+    }
+    // grab: spring grabbed points toward mouse (respecting original offset)
+    if(mouse.down && grabbed.length){
+      for(const gp of grabbed){ const p=pts[gp.i]; if(p.pinned) continue;
+        p.x += (mouse.x+gp.dx - p.x)*0.5; p.y += (mouse.y+gp.dy - p.y)*0.5; }
+    }
+    // constraint relaxation
+    const iters=Math.round(P.stiff);
+    for(let k=0;k<iters;k++){
+      for(const c of cons){ if(c.dead) continue;
+        const p=pts[c.a], q=pts[c.b];
+        let dx=q.x-p.x, dy=q.y-p.y; let d=Math.hypot(dx,dy)||0.0001;
+        const diff=(d-c.rest)/d*0.5;
+        const ox2=dx*diff, oy2=dy*diff;
+        if(!p.pinned){ p.x+=ox2; p.y+=oy2; }
+        if(!q.pinned){ q.x-=ox2; q.y-=oy2; }
+      }
+    }
+    // tear check + slice test (only on final positions)
+    const slicing = mouse.down && !grabbed.length && !P.repair && mouse.moved>7;
+    const minx=Math.min(mouse.x,mouse.px)-2, maxx=Math.max(mouse.x,mouse.px)+2;
+    const miny=Math.min(mouse.y,mouse.py)-2, maxy=Math.max(mouse.y,mouse.py)+2;
+    for(const c of cons){ if(c.dead) continue;
+      const p=pts[c.a], q=pts[c.b];
+      const d=Math.hypot(q.x-p.x,q.y-p.y);
+      const strain=d/c.rest;
+      c.strain=strain;
+      let cut=false;
+      if(strain>P.tear) cut=true;
+      else if(slicing){
+        if(!(Math.max(p.x,q.x)<minx || Math.min(p.x,q.x)>maxx || Math.max(p.y,q.y)<miny || Math.min(p.y,q.y)>maxy)){
+          if(segCross(p.x,p.y,q.x,q.y, mouse.px,mouse.py, mouse.x,mouse.y)) cut=true;
+        }
+      }
+      if(cut){
+        c.dead=true;
+        scars.push({ ax:p.x, ay:p.y, bx:q.x, by:q.y, life:1 });
+        twang(c.rest, Math.min(1,(strain-1)));
+      }
+    }
+    // repair: re-link dead constraints whose midpoint is under the cursor
+    if(P.repair && mouse.down){
+      for(const c of cons){ if(!c.dead) continue;
+        const p=pts[c.a], q=pts[c.b];
+        const mx=(p.x+q.x)/2, my=(p.y+q.y)/2;
+        if(Math.hypot(mx-mouse.x,my-mouse.y)<GRAB_R*0.8){ c.dead=false; }
+      }
+    }
+    // scars fade
+    for(let i=scars.length-1;i>=0;i--){ scars[i].life-=dt*0.9; if(scars[i].life<=0) scars.splice(i,1); }
+  }
+
+  // ---- rendering ----
+  // strain -> [r,g,b]  cyan(slack) -> teal -> gold -> incandescent red(near snap)
+  function strainColor(s){
+    // normalize: 1.0 rest .. P.tear snap
+    let t=(s-1)/(Math.max(0.001,P.tear-1)); t=Math.max(0,Math.min(1,t));
+    let r,g,b;
+    if(t<0.5){ const u=t/0.5; r=Math.round(60+u*195); g=Math.round(210+u*45); b=Math.round(220-u*140); } // cyan->gold
+    else { const u=(t-0.5)/0.5; r=255; g=Math.round(255-u*205); b=Math.round(80-u*70); } // gold->red
+    return [r,g,b,t];
+  }
+
+  function render(){
+    ctx.clearRect(0,0,W,H);
+    // buckets by strain tier for batched strokes (few color changes)
+    const B=14; const buckets=Array.from({length:B},()=>[]);
+    const hot=[];
+    for(const c of cons){ if(c.dead) continue;
+      const t=Math.max(0,Math.min(0.999,((c.strain||1)-1)/Math.max(0.001,P.tear-1)));
+      buckets[Math.floor(t*B)].push(c);
+      if(t>0.6) hot.push(c);
+    }
+    // base threads
+    ctx.lineWidth=1.35; ctx.lineCap="round";
+    for(let bi=0;bi<B;bi++){ const arr=buckets[bi]; if(!arr.length) continue;
+      const [r,g,b]=strainColor(1+(bi+0.5)/B*(P.tear-1));
+      ctx.strokeStyle=`rgba(${r},${g},${b},0.92)`;
+      ctx.beginPath();
+      for(const c of arr){ const p=pts[c.a], q=pts[c.b]; ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); }
+      ctx.stroke();
+    }
+    // additive bloom on hot (near-snapping) threads — the money shot
+    ctx.globalCompositeOperation="lighter";
+    for(const c of hot){ const p=pts[c.a], q=pts[c.b];
+      const [r,g,b,t]=strainColor(c.strain||1);
+      const a=(t-0.6)/0.4;
+      ctx.strokeStyle=`rgba(${r},${g},${b},${0.10+0.12*a})`;
+      ctx.lineWidth=5+9*a; ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
+      ctx.strokeStyle=`rgba(255,${Math.round(230-140*a)},${Math.round(180-160*a)},${0.35+0.4*a})`;
+      ctx.lineWidth=1.6+1.4*a; ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
+    }
+    // scar trails: white-hot fading rips
+    for(const s of scars){ const a=s.life;
+      ctx.strokeStyle=`rgba(255,${Math.round(200+55*a)},${Math.round(140+90*a)},${a*0.9})`;
+      ctx.lineWidth=1+3*a; ctx.beginPath(); ctx.moveTo(s.ax,s.ay); ctx.lineTo(s.bx,s.by); ctx.stroke();
+    }
+    ctx.globalCompositeOperation="source-over";
+    // pin anchors on top row
+    for(const p of pts){ if(p.hy!==0) continue;
+      ctx.beginPath(); ctx.arc(p.x,p.y,p.pinned?3.8:3.0,0,7);
+      ctx.fillStyle=p.pinned?"#59e0ff":"#6b8199"; ctx.fill();
+      if(p.pinned){ ctx.beginPath(); ctx.arc(p.x,p.y,6,0,7); ctx.strokeStyle="rgba(89,224,255,.25)"; ctx.lineWidth=1; ctx.stroke(); }
+    }
+    // grab / repair cursor ring
+    if(mouse.down && (grabbed.length || P.repair)){
+      ctx.beginPath(); ctx.arc(mouse.x,mouse.y, P.repair?GRAB_R*0.8:GRAB_R, 0,7);
+      ctx.strokeStyle=P.repair?"rgba(120,255,170,.5)":"rgba(89,224,255,.4)"; ctx.lineWidth=1.5; ctx.stroke();
+    }
+  }
+
+  // ---- fixed-timestep loop ----
+  let last=performance.now(), acc=0; const STEP=1/60;
+  function frame(now){
+    let d=(now-last)/1000; last=now; if(d>0.1) d=0.1; acc+=d;
+    let n=0; while(acc>=STEP && n<4){ simulate(STEP); acc-=STEP; n++; }
+    render();
+    requestAnimationFrame(frame);
+  }
+  // seed previous positions for verlet after build
+  function seedVerlet(){ for(const p of pts){ p.px2=p.x; p.py2=p.y; } }
+  const _build=build; build=function(){ _build(); seedVerlet(); };
+
+  // ---- UI wiring ----
+  const els={ grav:g("grav"),stiff:g("stiff"),wind:g("wind"),tear:g("tear"),res:g("res") };
+  const vals={ grav:g("vGrav"),stiff:g("vStiff"),wind:g("vWind"),tear:g("vTear"),res:g("vRes") };
+  function g(id){ return document.getElementById(id); }
+  function syncUI(){
+    els.grav.value=P.grav; els.stiff.value=P.stiff; els.wind.value=P.wind; els.tear.value=P.tear; els.res.value=P.res;
+    vals.grav.textContent=P.grav; vals.stiff.textContent=P.stiff+" it";
+    vals.wind.textContent=P.wind; vals.tear.textContent=P.tear.toFixed(2)+"×";
+    vals.res.textContent=P.res;
+    g("mute").textContent="Sound: "+(P.mute?"off":"on");
+    g("mute").classList.toggle("on",!P.mute);
+    g("repair").textContent="Repair: "+(P.repair?"on":"off");
+    g("repair").classList.toggle("on",!!P.repair);
+  }
+  const pc=g("presets");
+  function clearPresetHighlight(){ [...pc.children].forEach(c=>c.classList.remove("on")); }
+  function highlightMatchingPreset(){
+    clearPresetHighlight();
+    for(const c of pc.children){ const s=PRESETS[c.dataset.preset];
+      if(s && s.grav===P.grav && s.stiff===P.stiff && s.wind===P.wind
+        && s.tear===P.tear && s.res===P.res && s.pin===pinMode){ c.classList.add("on"); break; } }
+  }
+  function bind(id,key,rebuild){
+    els[id].addEventListener("input",()=>{ P[key]=parseFloat(els[id].value); syncUI(); writeHash(); clearPresetHighlight(); if(rebuild) build(); });
+  }
+  bind("grav","grav",false); bind("stiff","stiff",false); bind("wind","wind",false);
+  bind("tear","tear",false); bind("res","res",true);
+  g("reset").addEventListener("click",()=>{
+    P.grav=DEFAULTS.grav; P.stiff=DEFAULTS.stiff; P.wind=DEFAULTS.wind;
+    P.tear=DEFAULTS.tear; P.res=DEFAULTS.res; P.mute=DEFAULTS.mute; pinMode=DEFAULTS.pin;
+    syncUI(); writeHash(); build(); scars.length=0; highlightMatchingPreset();
+  });
+  g("mute").addEventListener("click",()=>{ P.mute=P.mute?0:1; syncUI(); writeHash(); });
+  g("repair").addEventListener("click",()=>{ P.repair=!P.repair; syncUI(); });
+
+  // presets
+  Object.keys(PRESETS).forEach(name=>{
+    const b=document.createElement("button"); b.className="btn"; b.textContent=name; b.dataset.preset=name;
+    b.addEventListener("click",()=>{ const s=PRESETS[name];
+      P.grav=s.grav; P.stiff=s.stiff; P.wind=s.wind; P.tear=s.tear; P.res=s.res; pinMode=s.pin;
+      syncUI(); writeHash(); build(); scars.length=0;
+      clearPresetHighlight(); b.classList.add("on");
+    });
+    pc.appendChild(b);
+  });
+
+  // ---- boot ----
+  readHash();
+  resize(); build();
+  syncUI();
+  highlightMatchingPreset();
+  const hint=g("hint"); setTimeout(()=>{ hint.style.opacity=0; },6000);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

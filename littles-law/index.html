@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Little's Law — WIP, throughput &amp; lead-time calculator</title>
+<meta name="description" content="Solve L = λ · W for work-in-progress, throughput, and lead time. Includes M/M/1 queue utilization and expected wait time. Useful for kanban, Ops, and capacity planning. Offline, no tracking.">
+<style>
+  :root{
+    --c:#2563eb;
+    --bg:#edf2fc; --card:#ffffff; --fg:#0b1220; --muted:#4b5675;
+    --line:#d8dff2; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#080c18; --card:#111827; --fg:#e5eaf6; --muted:#9aa5c4;
+    --line:#1c2540; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto;font-weight:700}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  input,select{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.1rem;font-weight:600;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus,select:focus{outline:2px solid var(--c);border-color:var(--c)}
+  input:disabled{opacity:.55}
+  .row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+  .big{margin-top:18px;text-align:center;font-size:2.1rem;font-weight:800;color:var(--c);word-break:break-all;min-height:1.1em}
+  .tag{text-align:center;color:var(--muted);font-size:.9rem}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
+  .stat{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:16px;text-align:center}
+  .stat .v{font-size:1.5rem;font-weight:800;color:var(--c);word-break:break-all}
+  .stat .k{font-size:.78rem;color:var(--muted);margin-top:4px}
+  .err{color:#dc2626;font-size:.86rem;margin-top:10px;text-align:center;min-height:1em}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Λ</div>
+  <div>
+    <h1>Little's Law</h1>
+    <p>WIP, throughput &amp; lead time</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <label>Solve for</label>
+    <select id="solve">
+      <option value="L">Work-in-progress (L)</option>
+      <option value="lam">Throughput (λ, items per unit time)</option>
+      <option value="W">Lead time (W)</option>
+    </select>
+    <div class="row" style="margin-top:14px">
+      <div><label>WIP (L)</label><input id="L" type="number" value="20" min="0" step="1"></div>
+      <div><label>Throughput (λ)</label><input id="lam" type="number" value="5" min="0" step="0.1"></div>
+      <div><label>Lead time (W)</label><input id="W" type="number" value="4" min="0" step="0.1"></div>
+    </div>
+    <div class="big" id="big">—</div>
+    <div class="tag" id="tag"></div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>M/M/1 queue sidecar</h2>
+    <p class="note" style="margin-top:0">Given an arrival rate λ and a service rate μ, the M/M/1 queue gives you utilization, expected system size, and wait time. Stable when λ &lt; μ.</p>
+    <div class="row">
+      <div><label>Arrival rate (λ)</label><input id="mlam" type="number" value="4" min="0" step="0.1"></div>
+      <div><label>Service rate (μ)</label><input id="mu" type="number" value="5" min="0" step="0.1"></div>
+      <div></div>
+    </div>
+    <div class="grid2">
+      <div class="stat"><div class="v" id="rho">—</div><div class="k">Utilization (ρ = λ/μ)</div></div>
+      <div class="stat"><div class="v" id="Lq">—</div><div class="k">Expected in system (L)</div></div>
+    </div>
+    <div class="grid2">
+      <div class="stat"><div class="v" id="Wq">—</div><div class="k">Expected wait time (W)</div></div>
+      <div class="stat"><div class="v" id="stable">—</div><div class="k">Stability</div></div>
+    </div>
+    <div class="err" id="merr"></div>
+  </div>
+
+  <div class="card">
+    <h2>About Little's Law</h2>
+    <p class="note"><b>Little's Law</b> is <code>L = λ · W</code>: the average work-in-progress equals throughput times lead time. It holds for any stable system regardless of arrival distribution, service time, or scheduling — which is why kanban teams, factories, and networks all use it. Reduce WIP or increase throughput to cut lead time. The <b>M/M/1</b> sidecar assumes Poisson arrivals and exponential service on a single server; utilization <code>ρ = λ/μ</code>, expected in-system count <code>L = ρ/(1−ρ)</code>, and expected time <code>W = 1/(μ−λ)</code>. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function checkPos(x, name){ if(typeof x !== 'number' || !isFinite(x) || x <= 0) throw new Error(name + ' must be positive'); return x; }
+  // Little's Law solvers. L = throughput * leadTime.
+  function wip(throughput, leadTime){ checkPos(throughput, 'throughput'); checkPos(leadTime, 'lead time'); return throughput * leadTime; }
+  function throughput(wip, leadTime){ checkPos(wip, 'WIP'); checkPos(leadTime, 'lead time'); return wip / leadTime; }
+  function leadTime(wip, throughput){ checkPos(wip, 'WIP'); checkPos(throughput, 'throughput'); return wip / throughput; }
+  // M/M/1: utilization and expected size/wait. Throws when queue is unstable (lam >= mu).
+  function mm1Utilization(lam, mu){ checkPos(lam, 'arrival rate'); checkPos(mu, 'service rate'); return lam / mu; }
+  function mm1SystemSize(lam, mu){ var r = mm1Utilization(lam, mu); if(r >= 1) throw new Error('queue is unstable — arrival rate must be less than service rate'); return r / (1 - r); }
+  function mm1WaitTime(lam, mu){ if(lam >= mu) throw new Error('queue is unstable — arrival rate must be less than service rate'); return 1 / (mu - lam); }
+
+  if(typeof module !== 'undefined') module.exports = { wip:wip, throughput:throughput, leadTime:leadTime, mm1Utilization:mm1Utilization, mm1SystemSize:mm1SystemSize, mm1WaitTime:mm1WaitTime };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var $ = function(id){ return document.getElementById(id); };
+    var fmt = function(x){ return Number(x.toPrecision(6)).toLocaleString('en-US', { maximumFractionDigits: 4 }); };
+
+    function render(){
+      $('err').textContent = '';
+      var mode = $('solve').value;
+      ['L','lam','W'].forEach(function(id){ $(id).disabled = false; });
+      $(mode).disabled = true;
+      try{
+        var L = Number($('L').value), lam = Number($('lam').value), W = Number($('W').value);
+        var out, kind;
+        if(mode === 'L'){ out = wip(lam, W); kind = 'WIP = λ · W'; $('L').value = fmt(out); }
+        else if(mode === 'lam'){ out = throughput(L, W); kind = 'λ = L / W'; $('lam').value = fmt(out); }
+        else { out = leadTime(L, lam); kind = 'W = L / λ'; $('W').value = fmt(out); }
+        $('big').textContent = fmt(out);
+        $('tag').textContent = kind;
+      }catch(e){ $('big').textContent = '—'; $('tag').textContent = ''; $('err').textContent = e.message; }
+    }
+    function renderMM1(){
+      $('merr').textContent = '';
+      try{
+        var lam = Number($('mlam').value), mu = Number($('mu').value);
+        var r = mm1Utilization(lam, mu);
+        $('rho').textContent = (r * 100).toFixed(2) + '%';
+        if(r >= 1){ $('Lq').textContent = '—'; $('Wq').textContent = '—'; $('stable').textContent = 'unstable'; return; }
+        $('Lq').textContent = fmt(mm1SystemSize(lam, mu));
+        $('Wq').textContent = fmt(mm1WaitTime(lam, mu));
+        $('stable').textContent = 'stable';
+      }catch(e){ ['rho','Lq','Wq','stable'].forEach(function(id){ $(id).textContent = '—'; }); $('merr').textContent = e.message; }
+    }
+    ['solve','L','lam','W'].forEach(function(id){ $(id).addEventListener('input', render); $(id).addEventListener('change', render); });
+    ['mlam','mu'].forEach(function(id){ $(id).addEventListener('input', renderMM1); });
+    render(); renderMM1();
+
+    var root = document.documentElement, tb = $('theme');
+    function setTheme(t){ root.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? '☀️' : '🌙'; try{ localStorage.setItem('little-theme', t); }catch(e){} }
+    var saved; try{ saved = localStorage.getItem('little-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); });
+  }
+</script>
+</body>
+</html>

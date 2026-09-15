@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Governor · Feel a PID Controller</title>
+<style>
+  :root{
+    --bg:#0c1018; --panel:#141b28; --panel2:#1b2434; --line:#26324a;
+    --ink:#e6edf7; --dim:#8797b0; --accent:#ff8a3d; --cyan:#38e1c4;
+    --sp:#ffb454; --p:#4aa8ff; --i:#b56cff; --d:#38e1c4; --bad:#ff5c72; --good:#4ade80;
+    --mono:'SF Mono',ui-monospace,'Cascadia Code',Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:radial-gradient(1200px 700px at 70% -10%,#182338,var(--bg));color:var(--ink);
+    font-family:var(--sans);font-size:14px;line-height:1.45;overflow:hidden}
+  #app{display:grid;grid-template-columns:210px 1fr 300px;grid-template-rows:auto 1fr;
+    height:100vh;gap:14px;padding:14px}
+  header{grid-column:1/-1;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  header h1{font-size:20px;letter-spacing:.5px;font-weight:700}
+  header h1 b{color:var(--accent)}
+  header .tag{color:var(--dim);font-size:12.5px}
+  header .kbd{margin-left:auto;color:var(--dim);font-size:11px}
+  header .kbd span{background:var(--panel2);border:1px solid var(--line);border-radius:4px;
+    padding:1px 6px;color:var(--ink);font-family:var(--mono)}
+  .col{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;
+    display:flex;flex-direction:column;min-height:0}
+  #columnWrap{align-items:center}
+  #column{border-radius:10px;cursor:ns-resize;touch-action:none;flex:1;width:100%}
+  #center{gap:10px;min-height:0}
+  #chart{width:100%;flex:1;border-radius:8px;background:#0a0e16;border:1px solid var(--line)}
+  .bars{display:flex;gap:10px;align-items:flex-end;height:74px;padding:6px 4px 0;
+    background:#0a0e16;border:1px solid var(--line);border-radius:8px}
+  .barcol{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%}
+  .bartrack{position:relative;width:100%;height:100%;display:flex;flex-direction:column-reverse}
+  .bar{width:100%;border-radius:3px 3px 0 0;transition:height .06s linear}
+  .midline{position:absolute;left:0;right:0;top:50%;border-top:1px dashed #33405c}
+  .barlab{font-size:10.5px;color:var(--dim);margin-top:3px;font-family:var(--mono)}
+  .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .metric{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 9px}
+  .metric .v{font-family:var(--mono);font-size:16px;font-weight:600}
+  .metric .l{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.4px}
+  #ctl{overflow-y:auto;gap:2px}
+  #ctl::-webkit-scrollbar{width:7px}#ctl::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+  .grp{padding:6px 0 9px;border-bottom:1px solid var(--line);margin-bottom:8px}
+  .grp:last-child{border:0}
+  .grp h3{font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--dim);margin-bottom:8px}
+  .sld{margin-bottom:9px}
+  .sld .row{display:flex;justify-content:space-between;font-family:var(--mono);font-size:12px;margin-bottom:3px}
+  .sld .row .name{color:var(--ink)}
+  .sld .row .name.kp{color:var(--p)}.sld .row .name.ki{color:var(--i)}.sld .row .name.kd{color:var(--d)}
+  .sld .row .val{color:var(--dim)}
+  input[type=range]{-webkit-appearance:none;width:100%;height:5px;border-radius:3px;
+    background:#26324a;outline:none;cursor:pointer}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;
+    border-radius:50%;background:var(--accent);border:2px solid #0c1018;cursor:pointer}
+  input[type=range]::-moz-range-thumb{width:15px;height:15px;border-radius:50%;
+    background:var(--accent);border:2px solid #0c1018;cursor:pointer}
+  .btns{display:flex;flex-wrap:wrap;gap:6px}
+  button{font-family:var(--sans);font-size:12px;color:var(--ink);background:var(--panel2);
+    border:1px solid var(--line);border-radius:7px;padding:6px 9px;cursor:pointer;transition:.12s}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button.on{background:var(--accent);color:#0c1018;border-color:var(--accent);font-weight:600}
+  button.wide{flex:1}
+  .tog{display:flex;align-items:center;justify-content:space-between;font-size:12px;
+    padding:5px 0;color:var(--dim)}
+  .tog span.lab{color:var(--ink)}
+  .sw{width:34px;height:19px;background:#26324a;border-radius:11px;position:relative;
+    cursor:pointer;transition:.15s;flex:none;padding:0;border:0;-webkit-appearance:none;appearance:none}
+  .sw:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .sw::after{content:'';position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;
+    background:var(--dim);transition:.15s}
+  .sw.on{background:var(--cyan)}.sw.on::after{left:17px;background:#0c1018}
+  #chBox{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px;font-size:12px}
+  #chBox .r{display:flex;justify-content:space-between;font-family:var(--mono);margin:2px 0}
+  #chBox .best{color:var(--sp)}
+  .legend{display:flex;gap:12px;font-size:11px;color:var(--dim);flex-wrap:wrap}
+  .legend i{display:inline-block;width:11px;height:3px;border-radius:2px;vertical-align:middle;margin-right:4px}
+  @media(max-width:900px){#app{grid-template-columns:1fr;grid-template-rows:auto auto auto auto;overflow:auto}
+    #column{height:200px}}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1><b>Governor</b></h1>
+    <span class="tag">Tune a PID controller by hand and watch a ball levitate — or wobble, or crash.</span>
+    <span class="kbd"><span>F</span> flick · <span>C</span> challenge · <span>R</span> reset · drag the column to set target</span>
+  </header>
+
+  <div class="col" id="columnWrap">
+    <canvas id="column"></canvas>
+  </div>
+
+  <div class="col" id="center">
+    <div class="legend">
+      <span><i style="background:var(--cyan)"></i>height</span>
+      <span><i style="background:var(--sp)"></i>setpoint ±band</span>
+      <span><i style="background:var(--good)"></i>fan output (0–100%)</span>
+      <span><i style="background:#5566aa"></i>ghost (before)</span>
+    </div>
+    <canvas id="chart"></canvas>
+    <div class="bars" id="bars">
+      <div class="barcol"><div class="bartrack"><div class="midline"></div><div class="bar" id="bP" style="background:var(--p)"></div></div><div class="barlab" id="lP">P</div></div>
+      <div class="barcol"><div class="bartrack"><div class="midline"></div><div class="bar" id="bI" style="background:var(--i)"></div></div><div class="barlab" id="lI">I</div></div>
+      <div class="barcol"><div class="bartrack"><div class="midline"></div><div class="bar" id="bD" style="background:var(--d)"></div></div><div class="barlab" id="lD">D</div></div>
+      <div class="barcol"><div class="bartrack"><div class="bar" id="bO" style="background:var(--good)"></div></div><div class="barlab" id="lO">Fan</div></div>
+    </div>
+    <div class="metrics">
+      <div class="metric"><div class="v" id="mOs">–</div><div class="l">Overshoot</div></div>
+      <div class="metric"><div class="v" id="mSs">–</div><div class="l">Steady err</div></div>
+      <div class="metric"><div class="v" id="mSet">–</div><div class="l">Settling</div></div>
+      <div class="metric" title="Integral of Absolute Error — running sum of how far the ball sits from target over time. Lower is better."><div class="v" id="mIae">0</div><div class="l" id="mIaeL">IAE (live)</div></div>
+    </div>
+  </div>
+
+  <div class="col" id="ctl">
+    <div class="grp">
+      <h3>Gains</h3>
+      <div class="sld" title="Proportional — pushes harder the farther the ball is from target. Too high makes it ring and oscillate."><div class="row"><span class="name kp">Kp — proportional</span><span class="val" id="vKp"></span></div><input type="range" id="Kp" min="0" max="10" step="0.05"></div>
+      <div class="sld" title="Integral — accumulates past error to erase the steady-state gap. Too high overshoots and winds up."><div class="row"><span class="name ki">Ki — integral</span><span class="val" id="vKi"></span></div><input type="range" id="Ki" min="0" max="15" step="0.05"></div>
+      <div class="sld" title="Derivative — reacts to how fast the ball is moving, damping oscillation. Too high amplifies noise."><div class="row"><span class="name kd">Kd — derivative</span><span class="val" id="vKd"></span></div><input type="range" id="Kd" min="0" max="15" step="0.05"></div>
+    </div>
+    <div class="grp">
+      <h3>Presets</h3>
+      <div class="btns">
+        <button data-pre="sluggish">Sluggish</button>
+        <button data-pre="aggressive">Aggressive</button>
+        <button data-pre="ringing">Ringing</button>
+        <button data-pre="critical">Critically damped</button>
+      </div>
+    </div>
+    <div class="grp">
+      <h3>Disturbance</h3>
+      <div class="btns" style="margin-bottom:8px"><button class="wide" id="flick">Flick the ball ↯</button></div>
+      <div class="sld"><div class="row"><span class="name">Turbulence</span><span class="val" id="vTurb"></span></div><input type="range" id="turb" min="0" max="20" step="0.5"></div>
+    </div>
+    <div class="grp">
+      <h3>Sensor realism</h3>
+      <div class="sld" title="Adds random jitter to the height the controller sees, so you can watch how gains cope with a noisy sensor."><div class="row"><span class="name">Measurement noise</span><span class="val" id="vNoise"></span></div><input type="range" id="noise" min="0" max="6" step="0.1"></div>
+      <div class="tog" title="Stops the integral term from piling up while the fan is maxed out (saturated). Turn it off to watch the integrator wind up and slam the ceiling."><span class="lab">Anti-windup</span><button class="sw on" id="aw" role="switch" aria-checked="true" aria-label="Anti-windup"></button></div>
+      <div class="tog" title="Computes the D term from the measured height rather than the error, so moving the target doesn't cause a derivative kick."><span class="lab">Derivative on measurement</span><button class="sw on" id="dom" role="switch" aria-checked="true" aria-label="Derivative on measurement"></button></div>
+      <div class="tog" title="Low-pass filters the derivative term so sensor noise doesn't make the fan jitter."><span class="lab">Derivative filter</span><button class="sw on" id="dfilt" role="switch" aria-checked="true" aria-label="Derivative filter"></button></div>
+    </div>
+    <div class="grp">
+      <h3>Challenge</h3>
+      <div class="btns" style="margin-bottom:8px">
+        <button class="wide" id="chBtn">Start challenge</button>
+        <button id="share">Share link</button>
+      </div>
+      <div id="chBox">
+        <div class="r"><span id="chStatus">Idle</span><span id="chTime"></span></div>
+        <div class="r"><span>Score (IAE)</span><span id="chScore">–</span></div>
+        <div class="r best"><span>Best</span><span id="chBest">–</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+(function(){
+// ---------- constants ----------
+const G=30, MAX_THRUST=64, TOL=2.5, HMAX=100;
+const DT=0.01, MAXFRAME=0.1, WIN=560, DFILT_TAU=0.06;
+const PRESETS={
+  sluggish:{Kp:1.1,Ki:0.7,Kd:0.4},
+  aggressive:{Kp:6.5,Ki:7.5,Kd:1.0},
+  ringing:{Kp:5.5,Ki:2.2,Kd:0.0},
+  critical:{Kp:3.4,Ki:2.6,Kd:3.2}
+};
+const CH_SCRIPT=[
+  {t:0,sp:65},{t:7,sp:25},{t:13,sp:50,kick:-46},
+  {t:20,sp:85},{t:27,kick:72},{t:33,end:true}
+];
+
+// ---------- state ----------
+const S={
+  Kp:3.4,Ki:2.6,Kd:3.2, sp:60, turb:2, noise:0,
+  aw:true, dom:true, dfilt:true,
+  y:60, v:0, I:0, out:47, prevErr:0, prevMeas:60, dState:0,
+  P:0, Iterm:0, Dterm:0, simT:0,
+  samples:[], ghost:null,
+  step:null,
+  challenge:null, best:null, iaeLive:0
+};
+
+// ---------- dom ----------
+const $=id=>document.getElementById(id);
+const colC=$('column'), coCtx=colC.getContext('2d');
+const chC=$('chart'), chCtx=chC.getContext('2d');
+const parts=[]; for(let i=0;i<26;i++) parts.push({x:Math.random(),y:Math.random(),s:.4+Math.random()});
+
+// measure() reallocates the backing store (expensive: clears + reflows) only when the
+// CSS size or devicePixelRatio actually changes; fit() just returns the cached size each frame.
+const _sz=new Map();
+function measure(cv){const r=cv.getBoundingClientRect(),d=window.devicePixelRatio||1;
+  cv.width=Math.max(1,r.width*d);cv.height=Math.max(1,r.height*d);
+  cv.getContext('2d').setTransform(d,0,0,d,0,0);
+  const dim={w:r.width,h:r.height};_sz.set(cv,dim);return dim;}
+function fit(cv){return _sz.get(cv)||measure(cv);}
+if(typeof ResizeObserver!=='undefined'){
+  const ro=new ResizeObserver(es=>{for(const e of es)measure(e.target);});
+  ro.observe(colC);ro.observe(chC);
+}
+window.addEventListener('resize',()=>{measure(colC);measure(chC);});
+measure(colC);measure(chC);
+
+// ---------- controls wiring ----------
+function bindSlider(id,key,fmt){const el=$(id),lab=$('v'+id[0].toUpperCase()+id.slice(1));
+  el.value=S[key];lab.textContent=fmt(S[key]);
+  el.addEventListener('input',()=>{ if((key==='Kp'||key==='Ki'||key==='Kd')) freezeGhost();
+    S[key]=parseFloat(el.value);lab.textContent=fmt(S[key]);syncHash();});}
+const f2=v=>v.toFixed(2), f1=v=>v.toFixed(1);
+bindSlider('Kp','Kp',f2);bindSlider('Ki','Ki',f2);bindSlider('Kd','Kd',f2);
+bindSlider('turb','turb',v=>f1(v));bindSlider('noise','noise',v=>f1(v));
+
+function setGains(g){S.Kp=g.Kp;S.Ki=g.Ki;S.Kd=g.Kd;
+  $('Kp').value=g.Kp;$('vKp').textContent=f2(g.Kp);
+  $('Ki').value=g.Ki;$('vKi').textContent=f2(g.Ki);
+  $('Kd').value=g.Kd;$('vKd').textContent=f2(g.Kd);}
+
+document.querySelectorAll('[data-pre]').forEach(b=>b.addEventListener('click',()=>{
+  freezeGhost();setGains(PRESETS[b.dataset.pre]);syncHash();}));
+
+function setSwitch(el,v){el.classList.toggle('on',v);el.setAttribute('aria-checked',v?'true':'false');}
+function tog(id,key){const el=$(id);setSwitch(el,S[key]);
+  // <button role="switch"> fires click on Space/Enter natively, so keyboard works with no extra handler.
+  el.addEventListener('click',()=>{S[key]=!S[key];setSwitch(el,S[key]);syncHash();});}
+tog('aw','aw');tog('dom','dom');tog('dfilt','dfilt');
+
+$('flick').addEventListener('click',flick);
+$('chBtn').addEventListener('click',()=>(S.challenge&&!S.challenge.done)?stopChallenge():startChallenge());
+$('share').addEventListener('click',async()=>{syncHash();
+  const b=$('share');let ok=false;
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    ok=await navigator.clipboard.writeText(location.href).then(()=>true,()=>false);}
+  if(!ok){ // file:// and other non-secure contexts have no async clipboard; fall back
+    try{const ta=document.createElement('textarea');ta.value=location.href;
+      ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);
+      ta.select();ok=document.execCommand('copy');document.body.removeChild(ta);}catch(e){ok=false;}}
+  b.textContent=ok?'Copied!':'Copy from URL bar';
+  setTimeout(()=>b.textContent='Share link',1500);});
+
+// setpoint drag
+let dragging=false;
+function ptTo(e){const r=colC.getBoundingClientRect();
+  const yv=(1-(e.clientY-r.top)/r.height)*HMAX;return Math.max(2,Math.min(HMAX-2,yv));}
+colC.addEventListener('pointerdown',e=>{if(S.challenge)return;dragging=true;colC.setPointerCapture(e.pointerId);
+  startStep(ptTo(e));syncHash();});
+colC.addEventListener('pointermove',e=>{if(dragging){S.step&&(S.step.to=ptTo(e));S.sp=ptTo(e);}});
+colC.addEventListener('pointerup',()=>{dragging=false;syncHash();});
+
+window.addEventListener('keydown',e=>{const k=e.key.toLowerCase();
+  if(e.target.tagName==='INPUT')return;
+  if(k==='f')flick(); else if(k==='c')(S.challenge&&!S.challenge.done)?stopChallenge():startChallenge();
+  else if(k==='r'){if(S.challenge)startChallenge();else resetSim();}});
+
+// ---------- ghost / step ----------
+function freezeGhost(){ if(S.samples.length>40)
+  S.ghost=S.samples.map(s=>s.meas); }
+function startStep(target){S.sp=target;
+  S.step={t0:S.simT,from:S.y,to:target,peak:S.y,lastOut:S.simT};}
+
+// ---------- disturbance ----------
+function flick(){S.v+=(Math.random()<.5?-1:1)*(34+Math.random()*22);}
+
+// ---------- challenge ----------
+try{S.best=parseFloat(localStorage.getItem('governor_best'))||null;}catch(e){}
+function fmtBest(v){return v==null?'–':v.toFixed(1);}
+$('chBest').textContent=fmtBest(S.best);
+function startChallenge(){resetSim();S.challenge={t:0,idx:0,done:false};S.iaeLive=0;
+  applyChEvents();$('chBtn').textContent='Stop challenge';$('chBtn').classList.add('on');
+  $('mIaeL').textContent='IAE (challenge)';$('chScore').textContent='–';}
+function stopChallenge(){S.challenge=null;$('chBtn').textContent='Start challenge';
+  $('chBtn').classList.remove('on');$('mIaeL').textContent='IAE (live)';$('chStatus').textContent='Idle';$('chTime').textContent='';}
+function applyChEvents(){const c=S.challenge;if(!c)return;
+  while(c.idx<CH_SCRIPT.length&&CH_SCRIPT[c.idx].t<=c.t){
+    const e=CH_SCRIPT[c.idx];
+    if(e.end){finishChallenge();return;}
+    if(e.sp!=null)startStep(e.sp);
+    if(e.kick)S.v+=e.kick;
+    c.idx++;}}
+function finishChallenge(){const sc=S.iaeLive;$('chScore').textContent=sc.toFixed(1);
+  $('chStatus').textContent='Done';
+  if(S.best==null||sc<S.best){S.best=sc;try{localStorage.setItem('governor_best',sc);}catch(e){}
+    $('chBest').textContent=fmtBest(S.best);$('chStatus').textContent='New best!';}
+  const c=S.challenge;if(c)c.done=true;
+  $('chBtn').textContent='Restart (R)';}
+
+function resetSim(){S.y=S.sp;S.v=0;S.I=0;S.out=47;S.prevErr=0;S.prevMeas=S.sp;S.dState=0;
+  S.samples=[];S.ghost=null;S.step=null;S.iaeLive=0;S.simT=0;}
+
+// ---------- URL hash ----------
+function syncHash(){const p=new URLSearchParams();
+  p.set('kp',S.Kp);p.set('ki',S.Ki);p.set('kd',S.Kd);p.set('sp',S.sp.toFixed(1));
+  p.set('tb',S.turb);p.set('nz',S.noise);
+  p.set('o',(S.aw?1:0)+''+(S.dom?1:0)+''+(S.dfilt?1:0));
+  history.replaceState(null,'','#'+p.toString());}
+function loadHash(){const h=location.hash.slice(1);if(!h)return;
+  const p=new URLSearchParams(h),num=(k,d)=>p.has(k)?parseFloat(p.get(k)):d;
+  setGains({Kp:num('kp',S.Kp),Ki:num('ki',S.Ki),Kd:num('kd',S.Kd)});
+  S.sp=num('sp',S.sp);S.y=S.sp;S.prevMeas=S.sp;
+  S.turb=num('tb',S.turb);$('turb').value=S.turb;$('vTurb').textContent=f1(S.turb);
+  S.noise=num('nz',S.noise);$('noise').value=S.noise;$('vNoise').textContent=f1(S.noise);
+  if(p.has('o')){const o=p.get('o');S.aw=o[0]==='1';S.dom=o[1]==='1';S.dfilt=o[2]==='1';
+    setSwitch($('aw'),S.aw);setSwitch($('dom'),S.dom);setSwitch($('dfilt'),S.dfilt);}}
+loadHash();syncHash();
+
+// ---------- noise ----------
+function gauss(){return((Math.random()+Math.random()+Math.random())/1.5-1);}
+
+// ---------- control + physics ----------
+function control(dt){
+  const meas=S.y+S.noise*gauss();
+  const err=S.sp-meas;
+  const P=S.Kp*err;
+  let newI=S.I+err*dt;
+  // derivative
+  let raw;
+  if(S.dom) raw=-(meas-S.prevMeas)/dt; else raw=(err-S.prevErr)/dt;
+  if(S.dfilt){const a=dt/(DFILT_TAU+dt);S.dState+=a*(raw-S.dState);} else S.dState=raw;
+  const Dterm=S.Kd*S.dState;
+  let Iterm=S.Ki*newI;
+  let u=P+Iterm+Dterm;
+  const uC=Math.max(0,Math.min(100,u));
+  // anti-windup: conditional integration when saturated
+  if(S.aw && uC!==u && Math.sign(err)===Math.sign(u-uC)) newI=S.I;
+  newI=Math.max(-2000,Math.min(2000,newI)); // integrator anti-runaway clamp (bounds magnitude even when anti-windup is off)
+  S.I=newI;S.Iterm=S.Ki*newI;S.P=P;S.Dterm=Dterm;S.out=uC;
+  S.prevErr=err;S.prevMeas=meas;
+}
+function physics(dt){
+  const fan=S.out/100*MAX_THRUST;
+  const drag=1.25*S.v;
+  const turb=(Math.random()*2-1)*S.turb*2;
+  const a=fan-G-drag+turb;
+  S.v+=a*dt;S.y+=S.v*dt;
+  if(S.y<0){S.y=0;S.v=Math.abs(S.v)*0.25;}
+  if(S.y>HMAX){S.y=HMAX;S.v=-Math.abs(S.v)*0.25;}
+}
+function updateMetrics(dt){
+  const st=S.step;
+  if(st){
+    if(st.to>=st.from){if(S.y>st.peak)st.peak=S.y;} else {if(S.y<st.peak)st.peak=S.y;}
+    if(Math.abs(S.y-st.to)>TOL)st.lastOut=S.simT;
+  }
+}
+
+// ---------- main loop ----------
+let last=performance.now(),acc=0;
+function loop(now){
+  requestAnimationFrame(loop);
+  let dt=(now-last)/1000;last=now;
+  if(dt>MAXFRAME)dt=MAXFRAME;
+  acc+=dt;
+  while(acc>=DT){
+    control(DT);physics(DT);updateMetrics(DT);
+    S.simT+=DT;
+    if(S.challenge&&!S.challenge.done){
+      S.challenge.t+=DT;applyChEvents();
+      S.iaeLive+=Math.abs(S.sp-S.y)*DT;
+    } else if(!S.challenge){
+      S.iaeLive=S.iaeLive*0.995+Math.abs(S.sp-S.y)*DT;
+    }
+    S.samples.push({meas:S.y,sp:S.sp,out:S.out});
+    if(S.samples.length>WIN)S.samples.shift();
+    acc-=DT;
+  }
+  render();
+}
+
+// ---------- render: column ----------
+function render(){
+  const cw=fit(colC),w=cw.w,h=cw.h;
+  coCtx.clearRect(0,0,w,h);
+  const tubeX=w*0.32,tubeW=w*0.36;
+  // tube
+  const g=coCtx.createLinearGradient(tubeX,0,tubeX+tubeW,0);
+  g.addColorStop(0,'#0b111c');g.addColorStop(.5,'#16202f');g.addColorStop(1,'#0b111c');
+  coCtx.fillStyle=g;coCtx.fillRect(tubeX,0,tubeW,h);
+  coCtx.strokeStyle='#2a3a55';coCtx.lineWidth=1.5;coCtx.strokeRect(tubeX,0,tubeW,h);
+  const yPix=v=>h-(v/HMAX)*h;
+  // ticks
+  coCtx.fillStyle='#3a4a66';coCtx.font='9px '+"monospace";coCtx.textAlign='right';
+  for(let t=0;t<=100;t+=20){coCtx.fillRect(tubeX-4,yPix(t),4,1);coCtx.fillText(t,tubeX-6,yPix(t)+3);}
+  // airflow particles
+  const intensity=S.out/100;
+  coCtx.fillStyle='rgba(72,200,255,0.35)';
+  for(const p of parts){p.y-=(0.004+intensity*0.03)*p.s;if(p.y<0)p.y=1;
+    const px=tubeX+6+p.x*(tubeW-12),py=p.y*h;
+    coCtx.globalAlpha=0.15+intensity*0.5*p.s;coCtx.fillRect(px,py,2.5,10*(0.5+intensity));}
+  coCtx.globalAlpha=1;
+  // tolerance band + setpoint
+  const spY=yPix(S.sp),bandT=yPix(S.sp+TOL),bandB=yPix(S.sp-TOL);
+  coCtx.fillStyle='rgba(255,180,84,0.10)';coCtx.fillRect(tubeX,bandT,tubeW,bandB-bandT);
+  coCtx.strokeStyle='#ffb454';coCtx.lineWidth=2;coCtx.setLineDash([7,5]);
+  coCtx.beginPath();coCtx.moveTo(tubeX,spY);coCtx.lineTo(tubeX+tubeW,spY);coCtx.stroke();
+  coCtx.setLineDash([]);
+  coCtx.fillStyle='#ffb454';coCtx.textAlign='left';coCtx.font='11px monospace';
+  coCtx.fillText('target '+S.sp.toFixed(0),tubeX+tubeW+7,spY+4);
+  // ball
+  const bx=tubeX+tubeW/2,by=yPix(S.y),rad=Math.min(tubeW*0.30,20);
+  const err=Math.abs(S.sp-S.y);
+  const glow=coCtx.createRadialGradient(bx,by,0,bx,by,rad*2.4);
+  const col=err<TOL?'56,225,196':(err<12?'255,180,84':'255,92,114');
+  glow.addColorStop(0,'rgba('+col+',0.55)');glow.addColorStop(1,'rgba('+col+',0)');
+  coCtx.fillStyle=glow;coCtx.beginPath();coCtx.arc(bx,by,rad*2.4,0,7);coCtx.fill();
+  const bg=coCtx.createRadialGradient(bx-rad*.3,by-rad*.4,rad*.1,bx,by,rad);
+  bg.addColorStop(0,'#ffffff');bg.addColorStop(1,'rgb('+col+')');
+  coCtx.fillStyle=bg;coCtx.beginPath();coCtx.arc(bx,by,rad,0,7);coCtx.fill();
+  coCtx.strokeStyle='rgba(255,255,255,0.4)';coCtx.lineWidth=1;coCtx.stroke();
+
+  renderChart();renderBars();renderMetrics();renderChallenge();
+}
+
+// ---------- render: chart ----------
+function renderChart(){
+  const c=fit(chC),w=c.w,h=c.h;
+  chCtx.clearRect(0,0,w,h);
+  const yP=v=>h-(v/HMAX)*(h-8)-4;
+  // grid + axis tick labels (0–100 scale, shared by measured height and fan %)
+  chCtx.strokeStyle='#141d2c';chCtx.lineWidth=1;
+  chCtx.fillStyle='#3a4a66';chCtx.font='9px monospace';chCtx.textAlign='left';
+  for(let t=0;t<=100;t+=25){const gy=yP(t);
+    chCtx.beginPath();chCtx.moveTo(0,gy);chCtx.lineTo(w,gy);chCtx.stroke();
+    chCtx.fillText(t,3,Math.min(h-3,gy+10));}
+  const sm=S.samples;if(sm.length<2){return;}
+  const xP=i=>i/(WIN-1)*w;
+  const off=WIN-sm.length;
+  // band around sp
+  chCtx.fillStyle='rgba(255,180,84,0.09)';chCtx.beginPath();
+  for(let i=0;i<sm.length;i++){const x=xP(i+off);i?chCtx.lineTo(x,yP(sm[i].sp+TOL)):chCtx.moveTo(x,yP(sm[i].sp+TOL));}
+  for(let i=sm.length-1;i>=0;i--){chCtx.lineTo(xP(i+off),yP(sm[i].sp-TOL));}
+  chCtx.closePath();chCtx.fill();
+  // fan output (bottom, scaled)
+  line(sm,s=>s.out,'rgba(74,222,128,0.55)',1.2,yP,off,xP);
+  // ghost
+  if(S.ghost&&S.ghost.length>1){const goff=WIN-S.ghost.length;
+    chCtx.strokeStyle='rgba(90,110,180,0.55)';chCtx.lineWidth=1.5;chCtx.setLineDash([4,4]);chCtx.beginPath();
+    for(let i=0;i<S.ghost.length;i++){const x=xP(i+goff),y=yP(S.ghost[i]);i?chCtx.lineTo(x,y):chCtx.moveTo(x,y);}
+    chCtx.stroke();chCtx.setLineDash([]);}
+  // setpoint
+  chCtx.strokeStyle='#ffb454';chCtx.lineWidth=1.5;chCtx.setLineDash([6,4]);chCtx.beginPath();
+  for(let i=0;i<sm.length;i++){const x=xP(i+off),y=yP(sm[i].sp);i?chCtx.lineTo(x,y):chCtx.moveTo(x,y);}
+  chCtx.stroke();chCtx.setLineDash([]);
+  // measured height
+  line(sm,s=>s.meas,'#38e1c4',2,yP,off,xP);
+}
+function line(sm,f,color,lw,yP,off,xP){chCtx.strokeStyle=color;chCtx.lineWidth=lw;chCtx.beginPath();
+  for(let i=0;i<sm.length;i++){const x=xP(i+off),y=yP(f(sm[i]));i?chCtx.lineTo(x,y):chCtx.moveTo(x,y);}
+  chCtx.stroke();}
+
+// ---------- render: bars ----------
+function renderBars(){
+  setBar('bP',S.P);setBar('bI',S.Iterm);setBar('bD',S.Dterm);
+  const bo=$('bO');bo.style.height=Math.max(2,S.out/100*100)+'%';
+  $('lP').textContent='P '+S.P.toFixed(0);
+  $('lI').textContent='I '+S.Iterm.toFixed(0);
+  $('lD').textContent='D '+S.Dterm.toFixed(0);
+  $('lO').textContent='Fan '+S.out.toFixed(0)+'%';
+  function setBar(id,val){const el=$(id);const half=50;
+    const px=Math.max(1.5,Math.min(half,Math.abs(val)/100*half));
+    el.style.height=(half+(val>=0?px:-px))+'%';el.style.opacity=Math.abs(val)<0.5?0.3:1;}
+}
+
+// ---------- render: metrics ----------
+function renderMetrics(){
+  const st=S.step;
+  if(st&&Math.abs(st.to-st.from)>3){
+    const os=(st.peak-st.to)/(st.to-st.from)*100;
+    $('mOs').textContent=(os>0?os.toFixed(0):'0')+'%';
+    $('mOs').style.color=os>25?'var(--bad)':os>8?'var(--sp)':'var(--good)';
+    const within=Math.abs(S.y-st.to)<=TOL;
+    const setl=st.lastOut-st.t0;
+    $('mSet').textContent=within?setl.toFixed(1)+'s':'…';
+    $('mSet').style.color=within?'var(--good)':'var(--dim)';
+  } else {$('mOs').textContent='–';$('mOs').style.color='var(--ink)';
+    $('mSet').textContent='–';$('mSet').style.color='var(--ink)';}
+  const ss=S.sp-S.y;
+  $('mSs').textContent=(ss>=0?'+':'')+ss.toFixed(1);
+  $('mSs').style.color=Math.abs(ss)<TOL?'var(--good)':Math.abs(ss)<8?'var(--sp)':'var(--bad)';
+  $('mIae').textContent=S.iaeLive.toFixed(1);
+}
+
+// ---------- render: challenge ----------
+function renderChallenge(){
+  if(S.challenge){const c=S.challenge;
+    $('chTime').textContent=Math.min(33,c.t).toFixed(1)+'s / 33s';
+    if(!c.done)$('chStatus').textContent='Running · step '+Math.min(c.idx,CH_SCRIPT.length-1);}
+}
+
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

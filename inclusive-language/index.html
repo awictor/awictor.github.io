@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inclusive Language Checker — flag & fix biased terms</title>
+<meta name="description" content="Find non-inclusive words in your writing or code (whitelist, chairman, guys, ableist terms) and get inclusive alternatives. Highlight, count, and suggestions. Offline, no tracking.">
+<style>
+  :root{
+    --c:#16a34a;
+    --bg:#f2f8f4; --card:#ffffff; --fg:#12201a; --muted:#586d63;
+    --line:#dcebe2; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#0c140f; --card:#141d17; --fg:#e8f3ec; --muted:#8ea398;
+    --line:#233029; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:860px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.35rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:860px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.82rem;font-weight:600;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+  textarea{width:100%;font:inherit;padding:12px;border:1px solid var(--line);border-radius:10px;
+    background:var(--bg);color:var(--fg);min-height:140px;resize:vertical}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .status{margin-top:14px;font-weight:700}
+  .status.clean{color:var(--c)}.status.dirty{color:#b45309}
+  .preview{margin-top:12px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--bg);white-space:pre-wrap;line-height:1.8}
+  .hl{background:rgba(180,83,9,.18);border-radius:3px;padding:0 3px;font-weight:600}
+  table{width:100%;border-collapse:collapse;margin-top:10px;font-size:.92rem}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.04em}
+  td.term{text-decoration:line-through;color:var(--muted)}
+  td.sug{color:var(--c);font-weight:600}
+  td.n{text-align:right;font-variant-numeric:tabular-nums}
+  h2{font-size:1rem;margin:0}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🤝</div>
+  <div>
+    <h1>Inclusive Language</h1>
+    <p>Flag biased terms, suggest alternatives</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <label for="in">Your text or code</label>
+    <textarea id="in" spellcheck="false">Add the server to the whitelist and tell the chairman. Hey guys, this crazy bug is on the master branch.</textarea>
+    <div class="status" id="status"></div>
+    <div class="preview" id="preview" style="display:none"></div>
+  </div>
+
+  <div class="card" id="report" style="display:none">
+    <h2>Suggestions</h2>
+    <table>
+      <thead><tr><th>Term</th><th>Consider</th><th style="text-align:right">Count</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>About</h2>
+    <p class="note">Small word choices can exclude people. This flags common non-inclusive terms — tech metaphors (whitelist/blacklist, master/slave), gendered job words (chairman, manpower), casual ableist words (crazy, lame, dummy), and "guys" for mixed groups — and suggests neutral alternatives. Context matters, so treat these as prompts to reconsider, not hard rules.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var TERMS = [
+    ['whitelist', 'allowlist'], ['blacklist', 'denylist'], ['whitelisted', 'allowed'], ['blacklisted', 'blocked'],
+    ['master', 'main / primary'], ['slave', 'replica / secondary'], ['grandfathered', 'legacy / exempt'],
+    ['sanity check', 'quick check / confidence check'], ['dummy', 'placeholder / sample'],
+    ['guys', 'everyone / folks / team'], ['manpower', 'workforce / staffing'], ['man-hours', 'person-hours'],
+    ['manned', 'staffed / crewed'], ['mankind', 'humanity / humankind'], ['manmade', 'artificial / synthetic'],
+    ['chairman', 'chair / chairperson'], ['policeman', 'police officer'], ['fireman', 'firefighter'],
+    ['mailman', 'mail carrier'], ['salesman', 'salesperson'], ['middleman', 'intermediary'],
+    ['stewardess', 'flight attendant'], ['manhole', 'maintenance hole'],
+    ['crazy', 'surprising / wild'], ['insane', 'unbelievable / intense'], ['lame', 'disappointing / weak'],
+    ['crippled', 'degraded / impaired'], ['gypped', 'cheated / ripped off'], ['dumb', 'unclear / silent'],
+    ['blind spot', 'gap / oversight'], ['tone-deaf', 'insensitive'], ['first-class citizen', 'fully supported']
+  ];
+  function escapeRe(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+  var SORTED = TERMS.slice().sort(function(a, b){ return b[0].length - a[0].length; });
+
+  function findTerms(text){
+    var out = [], claimed = [];
+    SORTED.forEach(function(pair){
+      var re = new RegExp('\\b' + escapeRe(pair[0]).replace(/[\s-]+/g, '[\\s-]+') + '\\b', 'gi');
+      var m;
+      while((m = re.exec(text)) !== null){
+        var s = m.index, e = s + m[0].length;
+        if(!claimed.some(function(c){ return s < c[1] && e > c[0]; })){
+          out.push({ term: pair[0], suggestion: pair[1], index: s, matched: m[0] });
+          claimed.push([s, e]);
+        }
+        if(m.index === re.lastIndex) re.lastIndex++;
+      }
+    });
+    return out.sort(function(a, b){ return a.index - b.index; });
+  }
+  function summarize(text){
+    var found = findTerms(text), by = {};
+    found.forEach(function(f){ by[f.term] = by[f.term] || { term: f.term, suggestion: f.suggestion, count: 0 }; by[f.term].count++; });
+    return { total: found.length, items: Object.keys(by).map(function(k){ return by[k]; }), list: found };
+  }
+
+  if(typeof module !== 'undefined') module.exports = { TERMS:TERMS, findTerms:findTerms, summarize:summarize };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var inp=document.getElementById('in'), status=document.getElementById('status'), preview=document.getElementById('preview');
+    var report=document.getElementById('report'), rows=document.getElementById('rows');
+    function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    function render(){
+      var text=inp.value, s=summarize(text);
+      if(!text){ status.textContent=''; status.className='status'; preview.style.display='none'; report.style.display='none'; return; }
+      if(s.total===0){ status.textContent='✓ No flagged terms found.'; status.className='status clean'; preview.style.display='none'; report.style.display='none'; return; }
+      status.textContent='⚑ ' + s.total + ' term' + (s.total>1?'s':'') + ' to reconsider (' + s.items.length + ' unique).';
+      status.className='status dirty';
+      var html='', last=0;
+      s.list.forEach(function(f){
+        html += esc(text.slice(last, f.index)) + '<span class="hl" title="→ ' + esc(f.suggestion) + '">' + esc(f.matched) + '</span>';
+        last = f.index + f.matched.length;
+      });
+      html += esc(text.slice(last));
+      preview.innerHTML=html; preview.style.display='block';
+      rows.innerHTML = s.items.map(function(it){
+        return '<tr><td class="term">' + esc(it.term) + '</td><td class="sug">' + esc(it.suggestion) + '</td><td class="n">' + it.count + '</td></tr>';
+      }).join('');
+      report.style.display='block';
+    }
+    inp.addEventListener('input', render);
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('incl-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('incl-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+
+    render();
+  }
+</script>
+</body>
+</html>

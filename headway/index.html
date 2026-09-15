@@ -1,0 +1,1515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Headway — procedural metro maps for cities that never existed</title>
+<style>
+  :root{
+    --bg:#eef0f3; --panel:#ffffff; --ink:#1c2530; --muted:#5c6773;
+    --line:#d7dce3; --accent:#0a6cff; --accent-ink:#fff;
+    --shadow:0 1px 2px rgba(20,30,45,.06),0 8px 30px rgba(20,30,45,.10);
+    --radius:14px; --map-bg:#f7f6f2; --map-water:#cfe6f2; --map-river:#bcdcee;
+    --map-land:#f7f6f2; --map-label:#26313d; --map-halo:#f7f6f2;
+    --map-station-stroke:#26313d;
+  }
+  body.dark, body.night{
+    --bg:#0e1116; --panel:#161b22; --ink:#e6edf3; --muted:#9aa7b4;
+    --line:#2a323c; --accent:#5b9dff; --accent-ink:#0b1017;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 34px rgba(0,0,0,.5);
+    --map-bg:#1b2029; --map-water:#20303e; --map-river:#243646;
+    --map-land:#1b2029; --map-label:#dfe7ef; --map-halo:#1b2029;
+    --map-station-stroke:#0c0f14;
+  }
+  body.night{
+    --map-bg:#0a0d13; --map-water:#0e1a26; --map-river:#122436;
+    --map-land:#0a0d13; --map-label:#eef4ff; --map-halo:#0a0d13;
+    --map-station-stroke:#05070b;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;font-family:'Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--ink);overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  #app{display:grid;grid-template-columns:300px 1fr 288px;height:100vh;gap:0}
+  aside{background:var(--panel);overflow-y:auto;height:100vh}
+  #panel{border-right:1px solid var(--line)}
+  #side{border-left:1px solid var(--line)}
+  .brand{padding:18px 18px 12px}
+  .brand h1{margin:0;font-size:20px;letter-spacing:-.02em;display:flex;align-items:center;gap:9px}
+  .brand .dot{width:13px;height:13px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 22%,transparent)}
+  .brand p{margin:6px 0 0;font-size:12px;color:var(--muted);line-height:1.45}
+  .group{padding:14px 18px;border-top:1px solid var(--line)}
+  .group h2{margin:0 0 10px;font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
+  label.f{display:block;font-size:12.5px;margin:11px 0 5px;color:var(--ink)}
+  label.f .v{float:right;color:var(--muted);font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:var(--accent);margin:0}
+  input[type=text],select{
+    width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:9px;
+    background:var(--bg);color:var(--ink);font-size:13px;font-family:inherit;
+  }
+  input[type=text]:focus,select:focus{outline:2px solid color-mix(in srgb,var(--accent) 45%,transparent);border-color:var(--accent)}
+  .seedrow{display:flex;gap:6px}
+  .seedrow input{flex:1}
+  .btnrow{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+  button{
+    font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer;
+    border:1px solid var(--line);background:var(--panel);color:var(--ink);
+    padding:8px 11px;border-radius:9px;transition:transform .05s ease,background .15s,border-color .15s;
+    display:inline-flex;align-items:center;gap:6px;
+  }
+  button:hover{border-color:var(--accent)}
+  button:active{transform:translateY(1px)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+  button.primary:hover{filter:brightness(1.06)}
+  button.grow{flex:1;justify-content:center}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{padding:6px 9px;font-size:11.5px;border-radius:999px;border:1px solid var(--line);background:var(--panel);cursor:pointer;color:var(--muted)}
+  .chip.active{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+  .chip:focus-visible,#legend .li:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  #stage{position:relative;overflow:hidden;background:var(--map-bg);height:100vh}
+  #maptop{position:absolute;top:12px;left:12px;right:12px;z-index:5;display:flex;justify-content:space-between;gap:10px;pointer-events:none}
+  #maptop .cluster{display:flex;gap:7px;pointer-events:auto;background:var(--panel);
+    background:color-mix(in srgb,var(--panel) 86%,transparent);
+    -webkit-backdrop-filter:blur(7px);backdrop-filter:blur(7px);
+    padding:6px;border-radius:12px;border:1px solid var(--line);box-shadow:var(--shadow)}
+  #map{width:100%;height:100%;display:block;cursor:grab;touch-action:none}
+  #map.grabbing{cursor:grabbing}
+  #tooltip{
+    position:absolute;z-index:8;pointer-events:none;opacity:0;transform:translateY(4px);
+    transition:opacity .12s,transform .12s;background:var(--panel);color:var(--ink);
+    border:1px solid var(--line);border-radius:10px;padding:9px 11px;box-shadow:var(--shadow);
+    font-size:12px;max-width:230px;
+  }
+  #tooltip.on{opacity:1;transform:translateY(0)}
+  #tooltip .tn{font-weight:700;font-size:13px;margin-bottom:3px}
+  #tooltip .td{color:var(--muted);font-size:11px;margin-bottom:5px}
+  #tooltip .tl{display:flex;align-items:center;gap:6px;margin-top:3px}
+  #tooltip .sw{width:11px;height:11px;border-radius:3px;flex:none}
+  .titlecard{padding:16px 18px}
+  .titlecard .city{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.05}
+  .titlecard .sub{font-size:11.5px;color:var(--muted);margin-top:3px}
+  #legend .li{display:flex;align-items:center;gap:9px;padding:6px 6px;border-radius:8px;cursor:pointer;transition:background .12s}
+  #legend .li:hover{background:var(--bg)}
+  #legend .li.dim{opacity:.32}
+  #legend .li.sel{background:var(--bg);background:color-mix(in srgb,var(--accent) 14%,transparent)}
+  #legend .bar{width:16px;height:16px;border-radius:5px;flex:none;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)}
+  #legend .nm{font-size:12.5px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #legend .ct{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:4px 6px 10px}
+  .stat{background:var(--bg);border-radius:10px;padding:9px 10px}
+  .stat .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+  .stat .val{font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+  .foot{padding:12px 18px;font-size:11px;color:var(--muted);border-top:1px solid var(--line)}
+  .foot a{color:var(--accent);text-decoration:none}
+  .iconbtn{padding:8px;width:34px;justify-content:center}
+  .toast{position:absolute;bottom:16px;left:50%;transform:translateX(-50%) translateY(20px);opacity:0;
+    background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:999px;font-size:12.5px;font-weight:600;
+    z-index:20;transition:opacity .2s,transform .2s;pointer-events:none}
+  .toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+  .hint{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.4}
+  /* off-canvas control drawer (mobile only) */
+  .menutoggle{display:none}
+  #panelBackdrop{display:none}
+  @media (max-width:1080px){#app{grid-template-columns:260px 1fr}#side{display:none}}
+  @media (max-width:720px){
+    #app{grid-template-columns:1fr}
+    #panel{position:absolute;top:0;left:0;z-index:30;width:280px;max-width:86vw;height:100vh;
+      box-shadow:var(--shadow);transform:translateX(-100%);transition:transform .28s ease}
+    #app.panel-open #panel{transform:translateX(0)}
+    .menutoggle{display:inline-flex}
+    #panelBackdrop{display:block;position:absolute;inset:0;z-index:25;background:rgba(0,0,0,.38);
+      opacity:0;pointer-events:none;transition:opacity .22s}
+    #app.panel-open #panelBackdrop{opacity:1;pointer-events:auto}
+  }
+  @media (prefers-reduced-motion: reduce){#panel{transition:none}#panelBackdrop{transition:none}}
+  .sr{position:absolute;left:-9999px}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="panel">
+    <div class="brand">
+      <h1><span class="dot"></span>Headway</h1>
+      <p>A procedural transit-map generator. Feed it a seed; it invents a city that never existed and draws its metro.</p>
+    </div>
+
+    <div class="group">
+      <h2>Seed</h2>
+      <div class="seedrow">
+        <input type="text" id="seed" spellcheck="false" aria-label="Seed">
+      </div>
+      <div class="btnrow">
+        <button class="primary grow" id="btnRandom" title="New random city">🎲 Randomize</button>
+        <button id="btnStep" title="Next seed" class="grow">Step ▸</button>
+      </div>
+      <p class="hint">Same seed + preset always draws the identical city. Everything lives in the URL.</p>
+    </div>
+
+    <div class="group">
+      <h2>Civic style</h2>
+      <div class="chips" id="presets" role="group" aria-label="Civic style preset"></div>
+      <label class="f">Map theme</label>
+      <div class="chips" id="themes" role="group" aria-label="Map theme">
+        <div class="chip" data-theme="light" role="button" tabindex="0" aria-pressed="false">Light</div>
+        <div class="chip" data-theme="dark" role="button" tabindex="0" aria-pressed="false">Dark</div>
+        <div class="chip" data-theme="night" role="button" tabindex="0" aria-pressed="false">Night</div>
+      </div>
+    </div>
+
+    <div class="group">
+      <h2>Network</h2>
+      <label class="f">Lines <span class="v" id="vLines"></span></label>
+      <input type="range" id="lines" min="3" max="12" step="1">
+      <label class="f">Density <span class="v" id="vDensity"></span></label>
+      <input type="range" id="density" min="0" max="100" step="1">
+      <label class="f">City size <span class="v" id="vSize"></span></label>
+      <input type="range" id="size" min="0" max="100" step="1">
+      <label class="f">Water <span class="v" id="vWater"></span></label>
+      <input type="range" id="water" min="0" max="100" step="1">
+    </div>
+
+    <div class="group">
+      <h2>Rendering</h2>
+      <label class="f">Corner radius <span class="v" id="vCorner"></span></label>
+      <input type="range" id="corner" min="0" max="100" step="1">
+      <label class="f">Label density <span class="v" id="vLabels"></span></label>
+      <input type="range" id="labels" min="0" max="100" step="1">
+    </div>
+
+    <div class="group">
+      <h2>Export &amp; share</h2>
+      <div class="btnrow">
+        <button id="btnSvg" class="grow">SVG</button>
+        <button id="btnPng" class="grow">PNG</button>
+      </div>
+      <div class="btnrow">
+        <button id="btnPoster" class="primary grow">🖼 Framed poster PNG</button>
+      </div>
+      <div class="btnrow">
+        <button id="btnPosterSvg" class="grow">Poster SVG</button>
+        <button id="btnLink" class="grow">🔗 Copy link</button>
+      </div>
+    </div>
+    <div class="foot">
+      Zero dependencies · zero network · deterministic.<br>
+      Drag to pan, scroll to zoom, double-click to reset.
+    </div>
+  </aside>
+
+  <main id="stage">
+    <div id="maptop">
+      <div class="cluster" id="revealHost">
+        <button id="btnMenu" class="iconbtn menutoggle" title="Show controls" aria-label="Toggle controls" aria-expanded="false" aria-controls="panel">☰</button>
+        <button id="btnReplay" class="iconbtn" title="Replay build animation" aria-label="Replay animation">↻</button>
+        <button id="btnFit" class="iconbtn" title="Fit to view" aria-label="Fit">⤢</button>
+      </div>
+      <div class="cluster">
+        <button id="btnZoomOut" class="iconbtn" aria-label="Zoom out">−</button>
+        <button id="btnZoomIn" class="iconbtn" aria-label="Zoom in">+</button>
+      </div>
+    </div>
+    <svg id="map" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div id="panelBackdrop" aria-hidden="true"></div>
+    <div id="tooltip" role="status"></div>
+    <div class="toast" id="toast"></div>
+  </main>
+
+  <aside id="side">
+    <div class="titlecard">
+      <div class="city" id="cityName">—</div>
+      <div class="sub" id="citySub">—</div>
+    </div>
+    <div class="group" style="border-top:1px solid var(--line)">
+      <h2>Network</h2>
+      <div class="stats" id="stats"></div>
+    </div>
+    <div class="group">
+      <h2>Lines <span style="font-weight:400;text-transform:none;letter-spacing:0">· click to isolate</span></h2>
+      <div id="legend"></div>
+    </div>
+  </aside>
+</div>
+
+<script>
+"use strict";
+(function(){
+const SVGNS="http://www.w3.org/2000/svg";
+const CELL=48;            // world px per grid cell
+const MARGIN=1.4;         // grid cells of padding around the network
+const KM_PER_CELL=0.72;   // schematic scale
+const LINE_W=6;           // line stroke width (world px)
+const BUNDLE_GAP=7.2;     // perpendicular gap between co-running lines
+
+/* ---------------------------------------------------------------------------
+   Deterministic PRNG (mulberry32) + string hashing
+--------------------------------------------------------------------------- */
+function mulberry32(a){
+  return function(){
+    a|=0;a=a+0x6D2B79F5|0;
+    let t=Math.imul(a^a>>>15,1|a);
+    t=t+Math.imul(t^t>>>7,61|t)^t;
+    return((t^t>>>14)>>>0)/4294967296;
+  };
+}
+function hashStr(str){
+  let h=2166136261>>>0;
+  for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619);}
+  return h>>>0;
+}
+function makeRng(seed){return mulberry32(hashStr(String(seed)));}
+const pick=(rng,arr)=>arr[Math.floor(rng()*arr.length)];
+const range=(rng,a,b)=>a+rng()*(b-a);
+const irange=(rng,a,b)=>a+Math.floor(rng()*(b-a+1));
+const cap=s=>s.charAt(0).toUpperCase()+s.slice(1);
+
+/* ---------------------------------------------------------------------------
+   Naming grammar — coherent invented place names with per-district drift.
+   Each preset ships onset/nucleus/coda pools + a suffix set + line-name flavor.
+--------------------------------------------------------------------------- */
+const PRESETS={
+  london:{
+    label:"London", lines:8, ring:1, diag:.55, branch:.55, orthogonal:.15,
+    palette:["#E32017","#003688","#00782D","#F3A9BB","#9B0056","#0098D4","#EE7C0E","#84B817","#00A4A7","#95CDBA","#A0A5A9","#B36305"],
+    onsets:["b","br","c","cl","d","f","gr","h","k","l","m","n","p","r","s","st","t","w","wh","ch","sh","th"],
+    nuclei:["a","e","i","o","u","ea","ai","ou","ay","ee","o"],
+    codas:["ng","nd","rn","ld","st","sh","ck","th","ll","dge","mb"],
+    suffixes:["gate","ham","wick","bury","cross","ford","ton","field","mere","stead","wich","borough","don","ley","combe"],
+    twoSyll:.62, suffixProb:.72,
+    lineWords:["Northern","Central","Victoria","Jubilee","Bakerloo","District","Circle","Metropolitan","Piccadilly","Waterloo","Overground","Elizabeth"]
+  },
+  nyc:{
+    label:"NYC MTA", lines:9, ring:0, diag:.28, branch:.35, orthogonal:.5,
+    palette:["#EE352E","#00933C","#0039A6","#FF6319","#6CBE45","#996633","#A7A9AC","#FCCC0A","#B933AD","#00ADD0","#808183","#EE352E"],
+    onsets:["b","br","c","cl","fl","gr","h","kn","m","n","pr","r","s","str","v","w","dr","bl"],
+    nuclei:["a","o","e","i","oo","ai","ou","aw","ea"],
+    codas:["nt","rk","ll","x","ns","ght","tz","ck","son","by"],
+    suffixes:["ville","port","heights","wood","hurst","kill","boro","town","side","point","gansett","haven"],
+    twoSyll:.5, suffixProb:.55,
+    lineNames:true, // letters + numbers
+  },
+  moscow:{
+    label:"Moscow Metro", lines:8, ring:1, diag:.35, branch:.3, orthogonal:.2,
+    palette:["#D9232E","#48B85E","#0078BE","#19C1F3","#894E35","#F58220","#8E479C","#FFCB05","#79CDCD","#A1A2A3","#B4A269","#ED9121"],
+    onsets:["b","br","ch","d","g","k","kr","l","m","n","p","pr","s","sv","t","tr","v","z","zh"],
+    nuclei:["a","o","e","i","u","ya","yo","o","a"],
+    codas:["v","sk","tsk","n","r","ny","ov","ev","in"],
+    suffixes:["grad","skaya","vo","sky","gorsk","polye","tsevo","kino","dar","insk","naya"],
+    twoSyll:.7, suffixProb:.82,
+    lineWords:["Sokolnicheskaya","Zamoskvoretskaya","Koltsevaya","Kalininskaya","Tagansko","Serpukhovsko","Lyublinskaya","Kalinin","Filyovskaya","Butovskaya"]
+  },
+  tokyo:{
+    label:"Tokyo", lines:11, ring:1, diag:.4, branch:.5, orthogonal:.25,
+    palette:["#F62E36","#009BBF","#00A650","#F39700","#9C5E31","#B0008E","#00BB85","#8FBC8F","#EE86A7","#1BA7E1","#C1A470","#E85298"],
+    onsets:["k","s","sh","t","ch","n","h","m","y","r","w","g","z","d","b","p","ts"],
+    nuclei:["a","i","u","e","o","ya","yu","yo","ai","ou"],
+    codas:["n"],
+    suffixes:["cho","bashi","gawa","yama","dai","zaka","mori","numa","hara","saki","bara","oka","eki","guchi"],
+    twoSyll:.85, suffixProb:.8,
+    lineWords:["Yamanote","Chuo","Ginza","Marunouchi","Hibiya","Tozai","Chiyoda","Hanzomon","Namboku","Oedo","Asakusa","Mita"]
+  },
+  paris:{
+    label:"Paris", lines:8, ring:1, diag:.5, branch:.45, orthogonal:.2,
+    palette:["#FFCD00","#0064B0","#9F9825","#C04191","#F28E42","#83C491","#F3A4BA","#CEADD2","#D5C900","#00814F","#98D4E2","#662483"],
+    onsets:["b","bl","ch","cl","d","f","gr","l","m","n","p","pr","r","s","t","v","ch","fr"],
+    nuclei:["a","e","i","o","u","ai","eu","ou","oi","é"],
+    codas:["nt","lle","gne","rt","ux","cy","nne","ille","on"],
+    suffixes:["sur","ville","court","gny","euil","court","lieu","mont","bourg","chapelle","lys"],
+    twoSyll:.65, suffixProb:.7,
+    lineWords:["Nation","Étoile","Balard","Nord","Créteil","Bastille","Bercy","Auteuil","Levallois","Gallieni","Villejuif"]
+  }
+};
+const PRESET_KEYS=Object.keys(PRESETS);
+
+// Build a per-district "dialect" that drifts from the preset base.
+function makeDialect(preset,drng){
+  const sub=(arr,minKeep)=>{
+    const n=Math.max(minKeep,Math.floor(arr.length*range(drng,.55,.95)));
+    const copy=arr.slice();
+    for(let i=copy.length-1;i>0;i--){const j=Math.floor(drng()*(i+1));[copy[i],copy[j]]=[copy[j],copy[i]];}
+    return copy.slice(0,n);
+  };
+  return {
+    onsets:sub(preset.onsets,4),
+    nuclei:sub(preset.nuclei,3),
+    codas:sub(preset.codas,2),
+    suffixes:sub(preset.suffixes,3),
+    twoSyll:Math.min(.95,Math.max(.2,preset.twoSyll+range(drng,-.18,.18))),
+    suffixProb:Math.min(.95,Math.max(.1,preset.suffixProb+range(drng,-.2,.2)))
+  };
+}
+function coinName(rng,dialect){
+  const syll=rng()<dialect.twoSyll?2:1;
+  let w="";
+  for(let i=0;i<syll;i++){
+    w+=pick(rng,dialect.onsets)+pick(rng,dialect.nuclei);
+    if(rng()<0.45) w+=pick(rng,dialect.codas);
+  }
+  w=cap(w);
+  if(rng()<dialect.suffixProb){
+    const suf=pick(rng,dialect.suffixes);
+    // some suffixes read as a separate word, most fuse
+    if(["sur","cross"].includes(suf)) w+=" "+cap(suf);
+    else w+=suf;
+  }
+  return w.replace(/(.)\1\1+/g,"$1$1"); // trim runaway triples
+}
+
+/* ---------------------------------------------------------------------------
+   Octilinear geometry helpers — routing happens on a grid, so every step is
+   already 0/45/90°. Paths are dense (unit steps) so bundling works per edge.
+--------------------------------------------------------------------------- */
+function octiPath(a,b,rng,orthogonal){
+  const path=[{x:a.x,y:a.y}];
+  let x=a.x,y=a.y;
+  const dx=b.x-x, dy=b.y-y;
+  const adx=Math.abs(dx), ady=Math.abs(dy);
+  const sx=Math.sign(dx), sy=Math.sign(dy);
+  let diag=Math.min(adx,ady);
+  // "orthogonal" presets prefer L-shaped (no diagonal) routes some of the time
+  const forceOrtho = rng()<orthogonal;
+  if(forceOrtho) diag=0;
+  const straight=Math.max(adx,ady)-diag;
+  const ssx=adx>=ady?sx:0, ssy=adx>=ady?0:sy;
+  const diagFirst=rng()<0.5;
+  const stepDiag=()=>{for(let k=0;k<diag;k++){x+=sx;y+=sy;path.push({x,y});}};
+  const stepStraight=()=>{
+    if(forceOrtho){
+      for(let k=0;k<adx;k++){x+=sx;path.push({x,y});}
+      for(let k=0;k<ady;k++){y+=sy;path.push({x,y});}
+    } else {
+      for(let k=0;k<straight;k++){x+=ssx;y+=ssy;path.push({x,y});}
+    }
+  };
+  if(forceOrtho){ stepStraight(); }
+  else if(diagFirst){ stepDiag(); stepStraight(); }
+  else { stepStraight(); stepDiag(); }
+  return path;
+}
+function joinPaths(...paths){
+  const out=[];
+  for(const p of paths){
+    for(const n of p){
+      const last=out[out.length-1];
+      if(!last||last.x!==n.x||last.y!==n.y) out.push(n);
+    }
+  }
+  return out;
+}
+const nkey=n=>n.x+","+n.y;
+const edgeKey=(a,b)=>{
+  const ka=nkey(a),kb=nkey(b);
+  return ka<kb?ka+"|"+kb:kb+"|"+ka;
+};
+
+/* ---------------------------------------------------------------------------
+   City / network synthesis
+--------------------------------------------------------------------------- */
+function generateCity(P){
+  const rng=makeRng(P.seed+"::"+P.preset);
+  const preset=PRESETS[P.preset]||PRESETS.london;
+
+  const size=0.42+P.size/100*0.9;           // scale factor for grid
+  const cols=Math.round((16+P.size/100*16)*1);
+  const rows=Math.round(cols*0.78);
+  const cx=Math.round(cols/2), cy=Math.round(rows/2);
+  const center={x:cx,y:cy};
+  const maxR=Math.min(cols,cy*2,rows)/2-1;
+
+  const density=P.density/100;      // 0..1 branch/wiggle richness
+  const nLines=P.lines;
+  const wantRing=preset.ring && nLines>=4;
+
+  // --- districts (for name drift): scatter seeds, nearest-wins ---
+  const nDistricts=irange(rng,5,8);
+  const districts=[];
+  const distNames=[];
+  for(let i=0;i<nDistricts;i++){
+    const dseed=Math.floor(rng()*1e9);
+    const drng=mulberry32(dseed>>>0);
+    const dialect=makeDialect(preset,drng);
+    districts.push({
+      x:range(rng,1,cols-1), y:range(rng,1,rows-1),
+      dialect, name:coinName(mulberry32((dseed*2654435761)>>>0),dialect)
+    });
+  }
+  const districtAt=(x,y)=>{
+    let best=0,bd=Infinity;
+    for(let i=0;i<districts.length;i++){
+      const d=(districts[i].x-x)**2+(districts[i].y-y)**2;
+      if(d<bd){bd=d;best=i;}
+    }
+    return best;
+  };
+
+  // --- geography: sea corner + a meandering river ---
+  const waterAmt=P.water/100;
+  const geo={sea:null,river:null};
+  if(waterAmt>0.03){
+    const corner=irange(rng,0,3); // 0 TL,1 TR,2 BR,3 BL
+    const depth=0.24+waterAmt*0.5;
+    geo.sea={corner,depth,wob:range(rng,0.06,0.14),phase:range(rng,0,6.28)};
+  }
+  if(waterAmt>0.12){
+    // river from a mid-edge, meandering toward the sea corner / opposite edge
+    const startEdge=irange(rng,0,3);
+    const pts=[];
+    let sp;
+    if(startEdge===0) sp={x:range(rng,.2,.8)*cols,y:0};
+    else if(startEdge===1) sp={x:cols,y:range(rng,.2,.8)*rows};
+    else if(startEdge===2) sp={x:range(rng,.2,.8)*cols,y:rows};
+    else sp={x:0,y:range(rng,.2,.8)*rows};
+    let ep;
+    if(geo.sea){
+      const c=geo.sea.corner;
+      ep={x:(c===1||c===2)?cols:0,y:(c===2||c===3)?rows:0};
+    } else {
+      ep={x:cols-sp.x, y:rows-sp.y};
+    }
+    const steps=5;
+    for(let i=0;i<=steps;i++){
+      const t=i/steps;
+      const nrmx=-(ep.y-sp.y), nrmy=(ep.x-sp.x);
+      const nl=Math.hypot(nrmx,nrmy)||1;
+      const amp=Math.sin(t*Math.PI)*range(rng,1.6,3.2);
+      const wob=Math.sin(t*range(rng,4,7)+range(rng,0,6))*amp;
+      pts.push({
+        x:sp.x+(ep.x-sp.x)*t+nrmx/nl*wob,
+        y:sp.y+(ep.y-sp.y)*t+nrmy/nl*wob
+      });
+    }
+    geo.river={pts,width:0.5+waterAmt*0.9};
+  }
+
+  // --- lines ---
+  const lines=[];
+  const ringCount=wantRing?1:0;
+  const radialCount=Math.max(1,nLines-ringCount);
+
+  // colors
+  const colorFor=(i)=>{
+    if(i<preset.palette.length) return preset.palette[i];
+    const h=(i*47)%360; return `hsl(${h} 68% 46%)`;
+  };
+
+  // line names
+  const usedLineNames=new Set();
+  function lineName(i){
+    if(preset.lineNames){ // NYC letters/numbers
+      const letters="ACEBDFGJLMNQRWZ".split("");
+      const nums=["1","2","3","4","5","6","7"];
+      const pool=rng()<0.5?letters:nums;
+      for(let t=0;t<40;t++){const c=pick(rng,pool);if(!usedLineNames.has(c)){usedLineNames.add(c);return c+" Line";}}
+      return (i+1)+" Line";
+    }
+    if(preset.lineWords){
+      for(let t=0;t<preset.lineWords.length;t++){
+        const w=pick(rng,preset.lineWords);
+        if(!usedLineNames.has(w)){usedLineNames.add(w);return w+" Line";}
+      }
+    }
+    // fall back to invented place name
+    const d=districts[irange(rng,0,districts.length-1)];
+    let nm=coinName(rng,d.dialect);
+    while(usedLineNames.has(nm)) nm=coinName(rng,d.dialect);
+    usedLineNames.add(nm);
+    return nm+" Line";
+  }
+
+  // radial trunk lines: two roughly-opposite endpoints routed through/near core
+  const baseAngle=range(rng,0,Math.PI*2);
+  for(let i=0;i<radialCount;i++){
+    const ang=baseAngle+ (i/radialCount)*Math.PI*2 + range(rng,-0.18,0.18);
+    const r1=maxR*range(rng,0.72,1.0);
+    const r2=maxR*range(rng,0.72,1.0);
+    const ea=snap(center,ang,r1,cols,rows);
+    const eb=snap(center,ang+Math.PI+range(rng,-0.35,0.35),r2,cols,rows);
+    // core offset (line need not hit exact center — realistic)
+    const coff={x:cx+irange(rng,-2,2),y:cy+irange(rng,-1,1)};
+    // optional waypoint for wiggle
+    let paths;
+    if(density>0.35 && rng()<0.6){
+      const wp={x:clamp(Math.round(lerp(ea.x,coff.x,0.5)+irange(rng,-3,3)),1,cols-1),
+                y:clamp(Math.round(lerp(ea.y,coff.y,0.5)+irange(rng,-2,2)),1,rows-1)};
+      paths=[joinPaths(octiPath(ea,wp,rng,preset.orthogonal),octiPath(wp,coff,rng,preset.orthogonal),octiPath(coff,eb,rng,preset.orthogonal))];
+    } else {
+      paths=[joinPaths(octiPath(ea,coff,rng,preset.orthogonal),octiPath(coff,eb,rng,preset.orthogonal))];
+    }
+    // suburban branch tail
+    if(rng()<preset.branch*(0.5+density)){
+      const trunk=paths[0];
+      const jIdx=irange(rng,Math.floor(trunk.length*0.62),trunk.length-2);
+      const jn=trunk[Math.max(1,jIdx)];
+      const bang=ang+range(rng,-0.9,0.9);
+      const be=snap(jn,bang,maxR*range(rng,0.3,0.55),cols,rows);
+      paths.push(octiPath(jn,be,rng,preset.orthogonal));
+    }
+    lines.push({id:i,name:lineName(i),color:colorFor(i),paths});
+  }
+
+  // orbital / ring line — an octagon around the core
+  if(ringCount){
+    const i=lines.length;
+    const rr=maxR*range(rng,0.42,0.6);
+    const start=range(rng,0,Math.PI*2);
+    const corners=[];
+    const sides=8;
+    for(let k=0;k<sides;k++){
+      const a=start+k/sides*Math.PI*2;
+      corners.push(snap(center,a,rr,cols,rows));
+    }
+    let ring=[];
+    for(let k=0;k<sides;k++){
+      ring=joinPaths(ring,octiPath(corners[k],corners[(k+1)%sides],rng,0));
+    }
+    lines.push({id:i,name:preset.lineWords&&!preset.lineNames?(pick(rng,["Circle","Ring","Orbital","Koltsevaya","Loop"])+" Line"):"Ring Line",
+      color:colorFor(i),paths:[ring]});
+  }
+
+  // --- build edge bundle map (for parallel offsets) ---
+  const edges=new Map(); // edgeKey -> [{lineId}]
+  for(const ln of lines){
+    for(const path of ln.paths){
+      for(let k=0;k<path.length-1;k++){
+        const key=edgeKey(path[k],path[k+1]);
+        if(!edges.has(key)) edges.set(key,[]);
+        const arr=edges.get(key);
+        if(!arr.includes(ln.id)) arr.push(ln.id);
+      }
+    }
+  }
+  for(const arr of edges.values()) arr.sort((a,b)=>a-b);
+
+  // --- node registry & stations ---
+  const nodeLines=new Map();  // nkey -> Set(lineId)
+  const nodeDir=new Map();    // nkey -> {dx,dy} of a representative segment
+  const endpointKeys=new Set();
+  for(const ln of lines){
+    for(const path of ln.paths){
+      endpointKeys.add(nkey(path[0]));
+      endpointKeys.add(nkey(path[path.length-1]));
+      for(let k=0;k<path.length;k++){
+        const n=path[k], key=nkey(n);
+        if(!nodeLines.has(key)) nodeLines.set(key,new Set());
+        nodeLines.get(key).add(ln.id);
+        if(!nodeDir.has(key)){
+          const a=path[Math.max(0,k-1)], b=path[Math.min(path.length-1,k+1)];
+          nodeDir.set(key,{dx:b.x-a.x,dy:b.y-a.y});
+        }
+      }
+    }
+  }
+
+  // choose stations: all interchanges + termini + turns + spaced samples
+  const stationSpacing=Math.max(1,Math.round(3.4-P.labels/100*2.2)); // higher label density -> more stations
+  const stationMap=new Map();
+  const usedNames=new Set();
+  function ensureStation(n,path,idx){
+    const key=nkey(n);
+    if(stationMap.has(key)) return stationMap.get(key);
+    const lset=nodeLines.get(key);
+    const isInter=lset.size>1;
+    const isEnd=endpointKeys.has(key);
+    // turn detection
+    let isTurn=false;
+    if(idx>0&&idx<path.length-1){
+      const a=path[idx-1],b=path[idx+1],c=n;
+      isTurn=(Math.sign(c.x-a.x)!==Math.sign(b.x-c.x))||(Math.sign(c.y-a.y)!==Math.sign(b.y-c.y));
+    }
+    const di=districtAt(n.x,n.y);
+    const srng=makeRng(P.seed+":"+key);
+    let name;
+    if(isInter){ // interchange names read grander
+      name=coinName(srng,districts[di].dialect);
+      if(srng()<0.5) name+=" "+pick(srng,["Central","Junction","Interchange","Cross","Union","Central","Park"]);
+    } else if(isEnd){
+      name=coinName(srng,districts[di].dialect);
+      if(srng()<0.35) name+=" "+pick(srng,["End","Gardens","Fields","Docks","Hill","Wood","Bay"]);
+    } else {
+      name=coinName(srng,districts[di].dialect);
+    }
+    let unique=name,t=2;
+    while(usedNames.has(unique)){unique=name+" "+["North","South","East","West","Upper","Lower"][(t-2)%6];t++;if(t>12){unique=name+" "+t;}}
+    usedNames.add(unique);
+    const st={key,x:n.x,y:n.y,name:unique,lines:[...lset],type:isInter?"interchange":(isEnd?"terminus":"stop"),
+      district:districts[di].name,isTurn,dir:nodeDir.get(key)};
+    stationMap.set(key,st);
+    return st;
+  }
+  for(const ln of lines){
+    for(const path of ln.paths){
+      for(let k=0;k<path.length;k++){
+        const key=nkey(path[k]);
+        const lset=nodeLines.get(key);
+        const isInter=lset.size>1, isEnd=(k===0||k===path.length-1);
+        let isTurn=false;
+        if(k>0&&k<path.length-1){
+          const a=path[k-1],b=path[k+1],c=path[k];
+          isTurn=(Math.sign(c.x-a.x)!==Math.sign(b.x-c.x))||(Math.sign(c.y-a.y)!==Math.sign(b.y-c.y));
+        }
+        if(isInter||isEnd||isTurn||k%stationSpacing===0){
+          ensureStation(path[k],path,k);
+        }
+      }
+    }
+  }
+  const stations=[...stationMap.values()];
+
+  // stats
+  let totalKm=0;
+  for(const [key,arr] of edges){
+    const [a,b]=key.split("|").map(s=>{const[x,y]=s.split(",").map(Number);return{x,y};});
+    const len=Math.hypot(a.x-b.x,a.y-b.y);
+    totalKm+=len*arr.length*KM_PER_CELL;
+  }
+  const interchanges=stations.filter(s=>s.type==="interchange").length;
+
+  // city name from a couple of districts
+  const cnrng=makeRng(P.seed+"::name::"+P.preset);
+  const cd=districts[irange(cnrng,0,districts.length-1)];
+  let cityName=coinName(cnrng,cd.dialect);
+  // occasionally a two-word civic name ("X upon Y" / "New X"), always spaced & tidy
+  if(cnrng()<0.32){
+    const connector=pick(cnrng,[" ", " upon ", " on the ", " New "]);
+    const second=coinName(cnrng,districts[irange(cnrng,0,districts.length-1)].dialect);
+    if(connector===" New ") cityName="New "+cityName;
+    else cityName=cityName+connector+second;
+  }
+  cityName=cap(cityName).replace(/([A-Za-z]{3,})\1/gi,"$1").slice(0,26).trim();
+
+  return {
+    cols,rows,center,lines,stations,edges,geo,districts,
+    stats:{lines:lines.length,stations:stations.length,interchanges,km:Math.round(totalKm)},
+    cityName,preset:preset.label
+  };
+}
+function clamp(v,a,b){return v<a?a:v>b?b:v;}
+function lerp(a,b,t){return a+(b-a)*t;}
+function snap(center,ang,r,cols,rows){
+  return {
+    x:clamp(Math.round(center.x+Math.cos(ang)*r),1,cols-1),
+    y:clamp(Math.round(center.y+Math.sin(ang)*r),1,rows-1)
+  };
+}
+
+/* ---------------------------------------------------------------------------
+   Rendering — offset polylines with rounded corners, stations, labels.
+--------------------------------------------------------------------------- */
+const world=(gx,gy)=>({x:MARGIN*CELL+gx*CELL, y:MARGIN*CELL+gy*CELL});
+function worldSize(model){
+  return {w:(model.cols+MARGIN*2)*CELL, h:(model.rows+MARGIN*2)*CELL};
+}
+
+// perpendicular offset of a line's polyline within its bundles
+function offsetVertices(model,path,lineId){
+  const pts=path.map(n=>{const w=world(n.x,n.y);return w;});
+  if(pts.length<2) return pts;
+  const segs=[];
+  for(let i=0;i<pts.length-1;i++){
+    const a=pts[i],b=pts[i+1];
+    const key=edgeKey(path[i],path[i+1]);
+    const arr=model.edges.get(key)||[lineId];
+    const count=arr.length, rank=Math.max(0,arr.indexOf(lineId));
+    const off=(rank-(count-1)/2)*BUNDLE_GAP;
+    let dx=b.x-a.x, dy=b.y-a.y; const L=Math.hypot(dx,dy)||1; dx/=L; dy/=L;
+    const nx=-dy, ny=dx;
+    segs.push({A:{x:a.x+nx*off,y:a.y+ny*off}, B:{x:b.x+nx*off,y:b.y+ny*off}, dx,dy});
+  }
+  const V=[segs[0].A];
+  for(let i=1;i<segs.length;i++){
+    const p=intersect(segs[i-1].A,segs[i-1].B,segs[i].A,segs[i].B);
+    V.push(p||segs[i].A);
+  }
+  V.push(segs[segs.length-1].B);
+  return V;
+}
+function intersect(p1,p2,p3,p4){
+  const d=(p1.x-p2.x)*(p3.y-p4.y)-(p1.y-p2.y)*(p3.x-p4.x);
+  if(Math.abs(d)<1e-6) return null;
+  const t=((p1.x-p3.x)*(p3.y-p4.y)-(p1.y-p3.y)*(p3.x-p4.x))/d;
+  return {x:p1.x+t*(p2.x-p1.x), y:p1.y+t*(p2.y-p1.y)};
+}
+function roundedPath(V,radius){
+  if(V.length<2) return "";
+  if(V.length===2) return `M${f(V[0].x)} ${f(V[0].y)} L${f(V[1].x)} ${f(V[1].y)}`;
+  let d=`M${f(V[0].x)} ${f(V[0].y)}`;
+  for(let i=1;i<V.length-1;i++){
+    const p0=V[i-1],p1=V[i],p2=V[i+1];
+    const l1=Math.hypot(p1.x-p0.x,p1.y-p0.y), l2=Math.hypot(p2.x-p1.x,p2.y-p1.y);
+    const r=Math.min(radius,l1/2,l2/2);
+    if(r<0.5){ d+=` L${f(p1.x)} ${f(p1.y)}`; continue; }
+    const v1={x:(p0.x-p1.x)/l1,y:(p0.y-p1.y)/l1};
+    const v2={x:(p2.x-p1.x)/l2,y:(p2.y-p1.y)/l2};
+    const c1={x:p1.x+v1.x*r,y:p1.y+v1.y*r};
+    const c2={x:p1.x+v2.x*r,y:p1.y+v2.y*r};
+    d+=` L${f(c1.x)} ${f(c1.y)} Q${f(p1.x)} ${f(p1.y)} ${f(c2.x)} ${f(c2.y)}`;
+  }
+  const last=V[V.length-1];
+  d+=` L${f(last.x)} ${f(last.y)}`;
+  return d;
+}
+const f=n=>Math.round(n*100)/100;
+function el(tag,attrs){
+  const e=document.createElementNS(SVGNS,tag);
+  if(attrs)for(const k in attrs)e.setAttribute(k,attrs[k]);
+  return e;
+}
+
+// path length approx for animation
+function polyLen(V){let L=0;for(let i=1;i<V.length;i++)L+=Math.hypot(V[i].x-V[i-1].x,V[i].y-V[i-1].y);return L;}
+
+/* ---------------------------------------------------------------------------
+   App state + UI wiring
+--------------------------------------------------------------------------- */
+const DEFAULTS={seed:"",preset:"london",lines:8,density:55,size:52,water:45,corner:60,labels:55,theme:"light"};
+let state={params:{...DEFAULTS},model:null,view:{x:0,y:0,scale:1},highlight:null};
+let pathEls=[];   // {el,line,len}
+let stationEls=[];
+
+const $=id=>document.getElementById(id);
+const svg=$("map");
+const tooltip=$("tooltip");
+
+// Make a non-native control (a role="button" div) respond to Enter/Space like a click.
+function keyActivate(node,fn){
+  node.addEventListener("keydown",e=>{
+    if(e.key==="Enter"||e.key===" "||e.key==="Spacebar"){e.preventDefault();fn();}
+  });
+}
+
+function corner(){ return state.params.corner/100 * (CELL*0.5); }
+
+function buildParamsFromUI(){
+  const p=state.params;
+  p.seed=$("seed").value.trim()||"headway";
+  p.lines=+$("lines").value;
+  p.density=+$("density").value;
+  p.size=+$("size").value;
+  p.water=+$("water").value;
+  p.corner=+$("corner").value;
+  p.labels=+$("labels").value;
+}
+function syncUI(){
+  const p=state.params;
+  $("seed").value=p.seed;
+  $("lines").value=p.lines; $("vLines").textContent=p.lines;
+  $("density").value=p.density; $("vDensity").textContent=p.density+"%";
+  $("size").value=p.size; $("vSize").textContent=p.size+"%";
+  $("water").value=p.water; $("vWater").textContent=p.water+"%";
+  $("corner").value=p.corner; $("vCorner").textContent=p.corner+"%";
+  $("labels").value=p.labels; $("vLabels").textContent=p.labels+"%";
+  document.querySelectorAll("#presets .chip").forEach(c=>{
+    const on=c.dataset.preset===p.preset;
+    c.classList.toggle("active",on);c.setAttribute("aria-pressed",on?"true":"false");
+  });
+  document.querySelectorAll("#themes .chip").forEach(c=>{
+    const on=c.dataset.theme===p.theme;
+    c.classList.toggle("active",on);c.setAttribute("aria-pressed",on?"true":"false");
+  });
+  document.body.classList.remove("light","dark","night");
+  document.body.classList.add(p.theme);
+}
+
+/* ---- hash serialization ---- */
+let suppressHash=false;
+function writeHash(){
+  const json=JSON.stringify(state.params);
+  const b64=btoa(unescape(encodeURIComponent(json)));
+  suppressHash=true;
+  history.replaceState(null,"","#"+b64);
+  setTimeout(()=>suppressHash=false,0);
+}
+function readHash(){
+  const h=location.hash.replace(/^#/,"");
+  if(!h) return false;
+  try{
+    const json=decodeURIComponent(escape(atob(h)));
+    const obj=JSON.parse(json);
+    state.params={...DEFAULTS,...obj};
+    return true;
+  }catch(e){
+    // The hash was present but unreadable (truncated/edited shared link): tell the
+    // user why they're not seeing the city they followed a link to.
+    toast("Couldn't read that link — showing a random city");
+    return false;
+  }
+}
+
+/* ---- render ---- */
+function render(animate){
+  const model=state.model=generateCity(state.params);
+  const {w,h}=worldSize(model);
+  svg.setAttribute("viewBox",`0 0 ${f(w)} ${f(h)}`);
+  svg.style.background="var(--map-bg)";
+  while(svg.firstChild) svg.removeChild(svg.firstChild);
+  pathEls=[]; stationEls=[];
+
+  const rootWrap=el("g");
+  applyView(rootWrap);
+  const rootId=el("g"); rootWrap.appendChild(rootId);
+  svg.appendChild(rootWrap);
+  state._root=rootWrap;
+
+  const cs=getComputedStyle(document.body);
+  const cWater=cs.getPropertyValue("--map-water").trim();
+  const cRiver=cs.getPropertyValue("--map-river").trim();
+  const cLabel=cs.getPropertyValue("--map-label").trim();
+  const cHalo=cs.getPropertyValue("--map-bg").trim();
+  const cStroke=cs.getPropertyValue("--map-station-stroke").trim();
+
+  // --- geography ---
+  const gGeo=el("g"); rootId.appendChild(gGeo);
+  if(model.geo.sea){
+    const s=model.geo.sea, c=s.corner, depth=s.depth;
+    // a wavy coast filling one corner of the sheet
+    const dpx=depth*Math.min(w,h)*1.4;
+    const coast=[];
+    const N=10;
+    for(let i=0;i<=N;i++){
+      const t=i/N;
+      const wb=Math.sin(t*Math.PI*2.4+s.phase)*s.wob*Math.min(w,h);
+      coast.push({t,wb});
+    }
+    let pts=[];
+    if(c===0){ // top-left
+      for(const {t,wb} of coast) pts.push([lerp(dpx+wb,0,t), lerp(0,dpx+wb,t)]);
+      pts.unshift([0,0]);
+    } else if(c===1){ // top-right
+      for(const {t,wb} of coast) pts.push([lerp(w-dpx-wb,w,t), lerp(0,dpx+wb,t)]);
+      pts.unshift([w,0]);
+    } else if(c===2){ // bottom-right
+      for(const {t,wb} of coast) pts.push([lerp(w,w-dpx-wb,t), lerp(h-dpx-wb,h,t)]);
+      pts.unshift([w,h]);
+    } else { // bottom-left
+      for(const {t,wb} of coast) pts.push([lerp(0,dpx+wb,t), lerp(h-dpx-wb,h,t)]);
+      pts.unshift([0,h]);
+    }
+    const poly=pts.map(p=>`${f(p[0])},${f(p[1])}`).join(" ");
+    gGeo.appendChild(el("polygon",{points:poly,fill:cWater}));
+  }
+  if(model.geo.river){
+    const r=model.geo.river;
+    const pts=r.pts.map(p=>world(p.x,p.y));
+    let d=`M${f(pts[0].x)} ${f(pts[0].y)}`;
+    for(let i=1;i<pts.length;i++){
+      const prev=pts[i-1],cur=pts[i];
+      const mx=(prev.x+cur.x)/2, my=(prev.y+cur.y)/2;
+      d+=` Q${f(prev.x)} ${f(prev.y)} ${f(mx)} ${f(my)}`;
+    }
+    d+=` T${f(pts[pts.length-1].x)} ${f(pts[pts.length-1].y)}`;
+    gGeo.appendChild(el("path",{d,fill:"none",stroke:cRiver,"stroke-width":r.width*CELL,"stroke-linecap":"round","stroke-linejoin":"round"}));
+  }
+
+  // --- lines ---
+  const gLines=el("g"); rootId.appendChild(gLines);
+  gLines.setAttribute("fill","none");
+  gLines.setAttribute("stroke-linecap","round");
+  gLines.setAttribute("stroke-linejoin","round");
+  const rad=corner();
+  for(const ln of model.lines){
+    const g=el("g"); g.dataset.line=ln.id; gLines.appendChild(g);
+    for(const path of ln.paths){
+      const V=offsetVertices(model,path,ln.id);
+      const d=roundedPath(V,rad);
+      // subtle casing for depth
+      const casing=el("path",{d,stroke:cHalo,"stroke-width":LINE_W+3,opacity:.9});
+      const p=el("path",{d,stroke:ln.color,"stroke-width":LINE_W});
+      g.appendChild(casing); g.appendChild(p);
+      pathEls.push({el:p,casing,line:ln.id,color:ln.color,len:polyLen(V)});
+    }
+  }
+
+  // --- stations ---
+  const gSt=el("g"); rootId.appendChild(gSt);
+  for(const st of model.stations){
+    const w0=world(st.x,st.y);
+    let node;
+    if(st.type==="interchange"){
+      const r=6+Math.min(st.lines.length,4)*0.9;
+      node=el("circle",{cx:f(w0.x),cy:f(w0.y),r:f(r),fill:cHalo,stroke:cStroke,"stroke-width":2.4});
+    } else if(st.type==="terminus"){
+      const col=model.lines[st.lines[0]]?.color||cStroke;
+      node=el("circle",{cx:f(w0.x),cy:f(w0.y),r:5.2,fill:col,stroke:cHalo,"stroke-width":2.2});
+    } else {
+      // tick perpendicular to the line
+      const dir=st.dir||{dx:1,dy:0};
+      const L=Math.hypot(dir.dx,dir.dy)||1;
+      const nx=-dir.dy/L, ny=dir.dx/L;
+      const t=CELL*0.15;
+      const col=model.lines[st.lines[0]]?.color||cStroke;
+      node=el("line",{x1:f(w0.x-nx*t),y1:f(w0.y-ny*t),x2:f(w0.x+nx*t),y2:f(w0.y+ny*t),
+        stroke:cStroke,"stroke-width":2.6,"stroke-linecap":"round"});
+      node.dataset.tickcolor=col;
+    }
+    node.dataset.stkey=st.key;
+    node.style.cursor="pointer";
+    // hit area (invisible, larger) for easy hover/tap
+    const hit=el("circle",{cx:f(w0.x),cy:f(w0.y),r:11,fill:"transparent"});
+    hit.style.cursor="pointer";
+    const bind=e=>{e.preventDefault();showTip(st,w0);};
+    hit.addEventListener("mouseenter",()=>showTip(st,w0));
+    hit.addEventListener("mousemove",()=>showTip(st,w0));
+    hit.addEventListener("mouseleave",hideTip);
+    hit.addEventListener("click",bind);
+    gSt.appendChild(node); gSt.appendChild(hit);
+    stationEls.push({node,st,w0});
+  }
+
+  // --- labels (greedy 8-anchor collision avoidance) ---
+  const gLbl=el("g"); rootId.appendChild(gLbl);
+  placeLabels(model,gLbl,cLabel,cHalo);
+
+  applyHighlight();
+  updateSidebar(model);
+  if(animate) runReveal(); else showAll();
+}
+
+function showAll(){
+  for(const p of pathEls){p.el.style.strokeDasharray="none";p.el.style.strokeDashoffset="0";p.el.style.opacity="1";p.casing.style.opacity="0.9";}
+  stationEls.forEach(s=>s.node.style.opacity="1");
+  document.querySelectorAll("#map text").forEach(t=>t.style.opacity="1");
+}
+
+const reduceMotion=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+function runReveal(){
+  if(reduceMotion){showAll();return;}
+  // hide everything
+  stationEls.forEach(s=>s.node.style.opacity="0");
+  document.querySelectorAll("#map text").forEach(t=>{t.style.opacity="0";t.style.transition="opacity .3s";});
+  const total=1200;
+  pathEls.forEach((p,i)=>{
+    const L=p.len;
+    p.el.style.strokeDasharray=L+" "+L;
+    p.el.style.strokeDashoffset=L;
+    p.casing.style.strokeDasharray=L+" "+L;
+    p.casing.style.strokeDashoffset=L;
+    const delay=(i/pathEls.length)*380;
+    const dur=520;
+    p.el.style.transition=`stroke-dashoffset ${dur}ms cubic-bezier(.5,.1,.3,1) ${delay}ms`;
+    p.casing.style.transition=`stroke-dashoffset ${dur}ms cubic-bezier(.5,.1,.3,1) ${delay}ms`;
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{p.el.style.strokeDashoffset="0";p.casing.style.strokeDashoffset="0";}));
+  });
+  // drop stations
+  const order=stationEls.map((s,i)=>i).sort((a,b)=>{
+    // reveal from center outward
+    const ma=state.model.center;
+    const da=(stationEls[a].st.x-ma.x)**2+(stationEls[a].st.y-ma.y)**2;
+    const db=(stationEls[b].st.x-ma.x)**2+(stationEls[b].st.y-ma.y)**2;
+    return da-db;
+  });
+  order.forEach((idx,rank)=>{
+    const s=stationEls[idx];
+    const t=500+rank/order.length*700;
+    setTimeout(()=>{
+      s.node.style.transition="opacity .25s, transform .25s";
+      s.node.style.opacity="1";
+    },t);
+  });
+  setTimeout(()=>{document.querySelectorAll("#map text").forEach(t=>t.style.opacity="1");},total);
+}
+
+function placeLabels(model,g,cLabel,cHalo){
+  const fs=12.5;
+  // priority: interchange > terminus > others
+  const sts=model.stations.slice().sort((a,b)=>rankType(b)-rankType(a));
+  const placed=[]; // rects {x,y,w,h}
+  const anchors=[
+    {dx: 9,dy:-2,a:"start"},{dx:-9,dy:-2,a:"end"},
+    {dx: 9,dy:11,a:"start"},{dx:-9,dy:11,a:"end"},
+    {dx: 0,dy:-11,a:"middle"},{dx:0,dy:20,a:"middle"},
+    {dx: 12,dy:5,a:"start"},{dx:-12,dy:5,a:"end"}
+  ];
+  const maxLabels = model.stations.length; // all eligible; density already gated station count
+  let count=0;
+  for(const st of sts){
+    const w0=world(st.x,st.y);
+    const tw=st.name.length*fs*0.54;
+    const th=fs+2;
+    let done=false;
+    for(const an of anchors){
+      let bx=w0.x+an.dx, by=w0.y+an.dy;
+      let rx = an.a==="start"?bx : an.a==="end"?bx-tw : bx-tw/2;
+      const rect={x:rx-2,y:by-th+2,w:tw+4,h:th+2};
+      if(!collides(rect,placed)){
+        const t=el("text",{x:f(bx),y:f(by),"text-anchor":an.a,
+          "font-family":"'Segoe UI',system-ui,sans-serif","font-size":fs,
+          "font-weight":st.type==="interchange"?"700":"500",
+          fill:cLabel,"paint-order":"stroke",stroke:cHalo,"stroke-width":3.4,"stroke-linejoin":"round"});
+        t.textContent=st.name;
+        t.dataset.stkey=st.key;
+        g.appendChild(t);
+        placed.push(rect);
+        done=true;count++;
+        break;
+      }
+    }
+    // if no anchor fits, skip label (station still drawn)
+  }
+}
+function rankType(s){return s.type==="interchange"?2:s.type==="terminus"?1:0;}
+function collides(r,list){
+  for(const o of list){
+    if(r.x<o.x+o.w&&r.x+r.w>o.x&&r.y<o.y+o.h&&r.y+r.h>o.y) return true;
+  }
+  return false;
+}
+
+/* ---- tooltip ---- */
+function showTip(st,w0){
+  const m=state.model;
+  const lines=st.lines.map(id=>m.lines[id]).filter(Boolean);
+  let html=`<div class="tn">${esc(st.name)}</div>`;
+  html+=`<div class="td">${esc(st.district)} district · ${st.type}</div>`;
+  for(const ln of lines){
+    html+=`<div class="tl"><span class="sw" style="background:${ln.color}"></span>${esc(ln.name)}</div>`;
+  }
+  tooltip.innerHTML=html;
+  tooltip.classList.add("on");
+  // position near the screen coords
+  const pt=worldToScreen(w0);
+  const stage=$("stage").getBoundingClientRect();
+  let left=pt.x+14, top=pt.y-10;
+  const tw=tooltip.offsetWidth, thh=tooltip.offsetHeight;
+  if(left+tw>stage.width-8) left=pt.x-tw-14;
+  if(top+thh>stage.height-8) top=stage.height-thh-8;
+  if(top<8) top=8;
+  tooltip.style.left=left+"px";
+  tooltip.style.top=top+"px";
+}
+function hideTip(){tooltip.classList.remove("on");}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+
+/* ---- view transform ---- */
+function applyView(g){
+  const v=state.view;
+  g.setAttribute("transform",`translate(${f(v.x)} ${f(v.y)}) scale(${f(v.scale)})`);
+}
+function updateView(){ if(state._root) applyView(state._root); }
+function worldToScreen(w0){
+  const v=state.view;
+  const box=svg.viewBox.baseVal;
+  const rect=svg.getBoundingClientRect();
+  const stage=$("stage").getBoundingClientRect();
+  const scaleX=rect.width/box.width, scaleY=rect.height/box.height;
+  const sx=(w0.x*v.scale+v.x)*scaleX;
+  const sy=(w0.y*v.scale+v.y)*scaleY;
+  return {x:sx+(rect.left-stage.left), y:sy+(rect.top-stage.top)};
+}
+function fitView(){
+  state.view={x:0,y:0,scale:1};
+  updateView();
+}
+
+/* ---- highlight ---- */
+function applyHighlight(){
+  const hl=state.highlight;
+  for(const p of pathEls){
+    const on = hl===null || p.line===hl;
+    p.el.style.opacity=on?"1":"0.13";
+    p.casing.style.opacity=on?"0.9":"0.08";
+  }
+  for(const s of stationEls){
+    const on = hl===null || s.st.lines.includes(hl);
+    s.node.style.opacity=on?"1":"0.16";
+  }
+  document.querySelectorAll("#map text").forEach(t=>{
+    const key=t.dataset.stkey;
+    const st=state.model.stations.find(s=>s.key===key);
+    const on = hl===null || (st&&st.lines.includes(hl));
+    t.style.opacity=on?"1":"0.12";
+  });
+  document.querySelectorAll("#legend .li").forEach(li=>{
+    const id=+li.dataset.line;
+    li.classList.toggle("dim",hl!==null&&id!==hl);
+    li.classList.toggle("sel",hl===id);
+    li.setAttribute("aria-pressed",hl===id?"true":"false");
+  });
+}
+
+/* ---- sidebar ---- */
+function updateSidebar(model){
+  $("cityName").textContent=model.cityName;
+  $("citySub").textContent=`${model.preset} style · seed “${state.params.seed}”`;
+  const s=model.stats;
+  $("stats").innerHTML=`
+    <div class="stat"><div class="k">Lines</div><div class="val">${s.lines}</div></div>
+    <div class="stat"><div class="k">Stations</div><div class="val">${s.stations}</div></div>
+    <div class="stat"><div class="k">Interchanges</div><div class="val">${s.interchanges}</div></div>
+    <div class="stat"><div class="k">Route km</div><div class="val">${s.km}</div></div>`;
+  const leg=$("legend"); leg.innerHTML="";
+  model.lines.forEach(ln=>{
+    const stCount=model.stations.filter(st=>st.lines.includes(ln.id)).length;
+    const li=document.createElement("div");
+    li.className="li"; li.dataset.line=ln.id;
+    li.setAttribute("role","button");li.tabIndex=0;li.setAttribute("aria-pressed","false");
+    li.setAttribute("aria-label",`Isolate ${ln.name} (${stCount} stations)`);
+    li.innerHTML=`<span class="bar" style="background:${ln.color}"></span>
+      <span class="nm">${esc(ln.name)}</span><span class="ct">${stCount}</span>`;
+    const toggle=()=>{
+      state.highlight = state.highlight===ln.id ? null : ln.id;
+      applyHighlight();
+    };
+    li.addEventListener("click",toggle);
+    keyActivate(li,toggle);
+    li.addEventListener("mouseenter",()=>{if(state.highlight===null){state.highlight=ln.id;applyHighlight();state._hoverHL=true;}});
+    li.addEventListener("mouseleave",()=>{if(state._hoverHL){state.highlight=null;applyHighlight();state._hoverHL=false;}});
+    leg.appendChild(li);
+  });
+}
+
+/* ---------------------------------------------------------------------------
+   Export: SVG / PNG / framed poster
+--------------------------------------------------------------------------- */
+function serializeSVG(node){
+  const clone=node.cloneNode(true);
+  clone.setAttribute("xmlns",SVGNS);
+  return '<?xml version="1.0" encoding="UTF-8"?>\n'+new XMLSerializer().serializeToString(clone);
+}
+function download(name,blob){
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;a.download=name;document.body.appendChild(a);a.click();
+  a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
+// A clean, view-reset copy of the map SVG for export (no zoom/pan transform).
+function exportMapSVG(){
+  const model=state.model;
+  const {w,h}=worldSize(model);
+  // temporarily reset transform on a clone
+  const clone=svg.cloneNode(true);
+  clone.setAttribute("width",w); clone.setAttribute("height",h);
+  const bg=getComputedStyle(document.body).getPropertyValue("--map-bg").trim();
+  clone.setAttribute("style",`background:${bg}`);
+  // strip the pan/zoom transform + reset opacities/dash from animation
+  const g=clone.querySelector("g");
+  if(g) g.removeAttribute("transform");
+  clone.querySelectorAll("*").forEach(e=>{
+    e.style.strokeDasharray="";e.style.strokeDashoffset="";e.style.opacity="";e.style.transition="";
+    if(e.tagName==="circle"&&e.getAttribute("fill")==="transparent") e.remove();
+  });
+  // add a background rect so exported PNG isn't transparent
+  const rect=document.createElementNS(SVGNS,"rect");
+  rect.setAttribute("x",0);rect.setAttribute("y",0);rect.setAttribute("width",w);rect.setAttribute("height",h);
+  rect.setAttribute("fill",bg);
+  clone.insertBefore(rect,clone.firstChild);
+  return {node:clone,w,h};
+}
+function exportSVGFile(){
+  const {node}=exportMapSVG();
+  download(fileBase()+".svg",new Blob([serializeSVG(node)],{type:"image/svg+xml"}));
+  toast("Saved SVG");
+}
+function rasterize(svgNode,w,h,scale,cb){
+  const data=serializeSVG(svgNode);
+  const blob=new Blob([data],{type:"image/svg+xml;charset=utf-8"});
+  const url=URL.createObjectURL(blob);
+  const img=new Image();
+  img.onload=()=>{
+    const canvas=document.createElement("canvas");
+    canvas.width=Math.round(w*scale); canvas.height=Math.round(h*scale);
+    const ctx=canvas.getContext("2d");
+    ctx.drawImage(img,0,0,canvas.width,canvas.height);
+    URL.revokeObjectURL(url);
+    canvas.toBlob(cb,"image/png");
+  };
+  img.onerror=()=>{URL.revokeObjectURL(url);toast("Export failed");};
+  img.src=url;
+}
+function exportPNGFile(){
+  const {node,w,h}=exportMapSVG();
+  const scale=Math.min(3, 2600/Math.max(w,h)*2 || 2);
+  rasterize(node,w,h,Math.max(2,scale),blob=>{download(fileBase()+".png",blob);toast("Saved PNG");});
+}
+function fileBase(){
+  return "headway-"+(state.model?.cityName||"city").toLowerCase().replace(/[^a-z0-9]+/g,"-")+"-"+String(state.params.seed).replace(/[^a-z0-9]+/gi,"-");
+}
+
+// Framed poster: wraps the map in a paper mat with a title cartouche, legend,
+// north arrow and a subtle vignette. Returns an SVG node.
+function buildPoster(){
+  const model=state.model;
+  const {node:mapNode,w:mw,h:mh}=exportMapSVG();
+  const cs=getComputedStyle(document.body);
+  const dark = state.params.theme!=="light";
+  const paper = dark ? "#12161d" : "#f3efe6";
+  const mat   = dark ? "#0b0e13" : "#e9e3d6";
+  const ink   = cs.getPropertyValue("--map-label").trim();
+  const sub   = dark ? "#9fb0c0" : "#6b6256";
+
+  const pad=90;                       // outer mat
+  const titleH=210;                   // bottom cartouche
+  const W=mw+pad*2;
+  const H=mh+pad*2+titleH;
+  const NS=SVGNS;
+  const root=document.createElementNS(NS,"svg");
+  root.setAttribute("xmlns",NS);
+  root.setAttribute("viewBox",`0 0 ${W} ${H}`);
+  root.setAttribute("width",W); root.setAttribute("height",H);
+
+  const mk=(t,a,txt)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);if(txt!=null)e.textContent=txt;return e;};
+
+  // defs: paper texture (noise dots) + vignette
+  const defs=document.createElementNS(NS,"defs");
+  defs.innerHTML=`
+    <radialGradient id="vig" cx="50%" cy="46%" r="72%">
+      <stop offset="60%" stop-color="#000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="${dark?0.5:0.16}"/>
+    </radialGradient>
+    <pattern id="paperTex" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(18)">
+      <rect width="6" height="6" fill="none"/>
+      <circle cx="1" cy="1" r="0.5" fill="${dark?'#ffffff':'#000000'}" opacity="${dark?0.02:0.03}"/>
+      <circle cx="4" cy="3.5" r="0.5" fill="${dark?'#ffffff':'#000000'}" opacity="${dark?0.015:0.025}"/>
+    </pattern>`;
+  root.appendChild(defs);
+
+  root.appendChild(mk("rect",{x:0,y:0,width:W,height:H,fill:mat}));
+  root.appendChild(mk("rect",{x:0,y:0,width:W,height:H,fill:"url(#paperTex)"}));
+  // inner paper card
+  root.appendChild(mk("rect",{x:pad-26,y:pad-26,width:mw+52,height:mh+titleH+52,rx:10,fill:paper,
+    stroke:dark?"#000":"#d8d0bf","stroke-width":2}));
+
+  // the map, translated into place
+  const g=document.createElementNS(NS,"g");
+  g.setAttribute("transform",`translate(${pad} ${pad})`);
+  // move the map's own <g> children in (mapNode is an <svg>); embed its content
+  const inner=document.createElementNS(NS,"g");
+  // clip map to its box
+  const clipId="mapclip";
+  const clip=document.createElementNS(NS,"clipPath"); clip.setAttribute("id",clipId);
+  clip.appendChild(mk("rect",{x:0,y:0,width:mw,height:mh,rx:6}));
+  defs.appendChild(clip);
+  inner.setAttribute("clip-path",`url(#${clipId})`);
+  Array.from(mapNode.childNodes).forEach(c=>inner.appendChild(c.cloneNode(true)));
+  g.appendChild(inner);
+  root.appendChild(g);
+
+  // vignette over the map only
+  root.appendChild(mk("rect",{x:pad,y:pad,width:mw,height:mh,fill:"url(#vig)"}));
+
+  // --- title cartouche ---
+  const ty=pad+mh+40;
+  const tg=document.createElementNS(NS,"g");
+  tg.appendChild(mk("line",{x1:pad,y1:ty-8,x2:pad+mw,y2:ty-8,stroke:ink,"stroke-width":2,opacity:.25}));
+  tg.appendChild(mk("text",{x:pad,y:ty+52,"font-family":"'Segoe UI',system-ui,sans-serif","font-size":74,"font-weight":800,fill:ink,"letter-spacing":"-2"},model.cityName));
+  tg.appendChild(mk("text",{x:pad,y:ty+90,"font-family":"'Segoe UI',system-ui,sans-serif","font-size":24,"font-weight":600,fill:sub},"RAPID TRANSIT NETWORK"));
+  const date=new Date().toISOString().slice(0,10);
+  tg.appendChild(mk("text",{x:pad,y:ty+128,"font-family":"'Segoe UI',system-ui,sans-serif","font-size":19,fill:sub},
+    `${model.preset} style · seed “${state.params.seed}” · generated ${date}`));
+  tg.appendChild(mk("text",{x:pad,y:ty+156,"font-family":"'Segoe UI',system-ui,sans-serif","font-size":16,fill:sub},
+    `${model.stats.lines} lines · ${model.stats.stations} stations · ${model.stats.interchanges} interchanges · ${model.stats.km} schematic km`));
+
+  // legend (right side of cartouche)
+  const cols=2, per=Math.ceil(model.lines.length/cols);
+  const lgX=pad+mw-420, lgY=ty+16, rowH=30;
+  model.lines.forEach((ln,i)=>{
+    const c=Math.floor(i/per), r=i%per;
+    const x=lgX+c*210, y=lgY+r*rowH;
+    tg.appendChild(mk("rect",{x,y:y-13,width:18,height:18,rx:4,fill:ln.color}));
+    tg.appendChild(mk("text",{x:x+26,y:y+2,"font-family":"'Segoe UI',system-ui,sans-serif","font-size":17,fill:ink},
+      ln.name.length>20?ln.name.slice(0,19)+"…":ln.name));
+  });
+  root.appendChild(tg);
+
+  // north arrow (top-right of map area)
+  const nx=pad+mw-56, ny=pad+56;
+  const na=document.createElementNS(NS,"g");
+  na.appendChild(mk("circle",{cx:nx,cy:ny,r:30,fill:paper,stroke:ink,"stroke-width":2,opacity:.85}));
+  na.appendChild(mk("polygon",{points:`${nx},${ny-22} ${nx-9},${ny+8} ${nx},${ny} ${nx+9},${ny+8}`,fill:ink}));
+  na.appendChild(mk("text",{x:nx,y:ny+26,"text-anchor":"middle","font-family":"'Segoe UI',system-ui,sans-serif","font-size":15,"font-weight":700,fill:ink},"N"));
+  root.appendChild(na);
+
+  return {node:root,w:W,h:H};
+}
+function exportPosterPNG(){
+  const {node,w,h}=buildPoster();
+  const scale=Math.max(1.5, 3200/Math.max(w,h));
+  rasterize(node,w,h,scale,blob=>{download(fileBase()+"-poster.png",blob);toast("Saved poster PNG");});
+}
+function exportPosterSVG(){
+  const {node}=buildPoster();
+  download(fileBase()+"-poster.svg",new Blob([serializeSVG(node)],{type:"image/svg+xml"}));
+  toast("Saved poster SVG");
+}
+
+/* ---- toast ---- */
+let toastTimer;
+function toast(msg){
+  const t=$("toast");t.textContent=msg;t.classList.add("on");
+  clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove("on"),1600);
+}
+
+/* ---------------------------------------------------------------------------
+   Interactions: pan / zoom
+--------------------------------------------------------------------------- */
+function setupViewport(){
+  let dragging=false, sx=0, sy=0, ox=0, oy=0, moved=false;
+  svg.addEventListener("pointerdown",e=>{
+    dragging=true;moved=false;sx=e.clientX;sy=e.clientY;ox=state.view.x;oy=state.view.y;
+    svg.classList.add("grabbing");svg.setPointerCapture(e.pointerId);
+  });
+  svg.addEventListener("pointermove",e=>{
+    if(!dragging)return;
+    const box=svg.viewBox.baseVal, rect=svg.getBoundingClientRect();
+    const kx=box.width/rect.width, ky=box.height/rect.height;
+    state.view.x=ox+(e.clientX-sx)*kx;
+    state.view.y=oy+(e.clientY-sy)*ky;
+    if(Math.abs(e.clientX-sx)+Math.abs(e.clientY-sy)>3) moved=true;
+    updateView();
+  });
+  const end=e=>{dragging=false;svg.classList.remove("grabbing");};
+  svg.addEventListener("pointerup",end);
+  svg.addEventListener("pointercancel",end);
+  svg.addEventListener("wheel",e=>{
+    e.preventDefault();
+    const box=svg.viewBox.baseVal, rect=svg.getBoundingClientRect();
+    const kx=box.width/rect.width, ky=box.height/rect.height;
+    const mx=(e.clientX-rect.left)*kx, my=(e.clientY-rect.top)*ky;
+    const factor=e.deltaY<0?1.12:1/1.12;
+    const ns=clamp(state.view.scale*factor,0.35,6);
+    // zoom toward cursor
+    state.view.x=mx-(mx-state.view.x)*(ns/state.view.scale);
+    state.view.y=my-(my-state.view.y)*(ns/state.view.scale);
+    state.view.scale=ns;
+    updateView();
+  },{passive:false});
+  svg.addEventListener("dblclick",()=>{fitView();});
+}
+function zoomBy(factor){
+  const box=svg.viewBox.baseVal;
+  const mx=box.width/2, my=box.height/2;
+  const ns=clamp(state.view.scale*factor,0.35,6);
+  state.view.x=mx-(mx-state.view.x)*(ns/state.view.scale);
+  state.view.y=my-(my-state.view.y)*(ns/state.view.scale);
+  state.view.scale=ns;updateView();
+}
+
+/* ---------------------------------------------------------------------------
+   Wiring
+--------------------------------------------------------------------------- */
+function regenerate(animate){
+  buildParamsFromUI();
+  state.highlight=null;
+  writeHash();
+  render(animate);
+}
+function randomSeed(){
+  const rng=Math.random;
+  const parts=[];
+  const syl=["ka","lo","ver","na","mi","dor","el","sha","tu","ba","rin","os","fel","gard","um","yre"];
+  const n=2+Math.floor(rng()*2);
+  for(let i=0;i<n;i++)parts.push(syl[Math.floor(rng()*syl.length)]);
+  return cap(parts.join(""))+ Math.floor(rng()*90+10);
+}
+
+function init(){
+  // preset chips
+  const pc=$("presets");
+  PRESET_KEYS.forEach(k=>{
+    const c=document.createElement("div");
+    c.className="chip";c.dataset.preset=k;c.textContent=PRESETS[k].label;
+    c.setAttribute("role","button");c.tabIndex=0;c.setAttribute("aria-pressed","false");
+    const act=()=>{
+      state.params.preset=k;
+      // adopt preset's suggested line count for a distinct feel
+      state.params.lines=clamp(PRESETS[k].lines,3,12);
+      syncUI();regenerate(true);
+    };
+    c.addEventListener("click",act);
+    keyActivate(c,act);
+    pc.appendChild(c);
+  });
+  document.querySelectorAll("#themes .chip").forEach(c=>{
+    const act=()=>{
+      state.params.theme=c.dataset.theme;
+      syncUI();regenerate(false);
+    };
+    c.addEventListener("click",act);
+    keyActivate(c,act);
+  });
+
+  // sliders — live update
+  ["lines","density","size","water","corner","labels"].forEach(id=>{
+    $(id).addEventListener("input",()=>{
+      const map={lines:"vLines",density:"vDensity",size:"vSize",water:"vWater",corner:"vCorner",labels:"vLabels"};
+      const suffix=id==="lines"?"":"%";
+      $(map[id]).textContent=$(id).value+suffix;
+    });
+    // Slider tuning is direct-manipulation: regenerate instantly, no cinematic reveal.
+    // The reveal is reserved for Randomize, Step, preset changes and Replay.
+    $(id).addEventListener("change",()=>regenerate(false));
+  });
+  // seed
+  $("seed").addEventListener("change",()=>regenerate(true));
+  $("seed").addEventListener("keydown",e=>{if(e.key==="Enter")regenerate(true);});
+  $("btnRandom").addEventListener("click",()=>{$("seed").value=randomSeed();regenerate(true);});
+  $("btnStep").addEventListener("click",()=>{
+    const s=$("seed").value.trim();
+    const m=s.match(/^(.*?)(\d+)$/);
+    $("seed").value = m ? m[1]+(parseInt(m[2],10)+1) : s+"2";
+    regenerate(true);
+  });
+
+  // exports
+  $("btnSvg").addEventListener("click",exportSVGFile);
+  $("btnPng").addEventListener("click",exportPNGFile);
+  $("btnPoster").addEventListener("click",exportPosterPNG);
+  $("btnPosterSvg").addEventListener("click",exportPosterSVG);
+  $("btnLink").addEventListener("click",()=>{
+    writeHash();
+    const url=location.href;
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(url).then(()=>toast("Link copied")).catch(()=>toast("Copy failed"));
+    } else { toast("Link in URL bar"); }
+  });
+
+  // map tools
+  $("btnReplay").addEventListener("click",()=>render(true));
+  $("btnFit").addEventListener("click",fitView);
+  $("btnZoomIn").addEventListener("click",()=>zoomBy(1.2));
+  $("btnZoomOut").addEventListener("click",()=>zoomBy(1/1.2));
+
+  // mobile control drawer (off-canvas panel + tap-to-close backdrop)
+  const app=$("app"), menuBtn=$("btnMenu");
+  function setPanel(open){
+    app.classList.toggle("panel-open",open);
+    menuBtn.setAttribute("aria-expanded",open?"true":"false");
+    menuBtn.textContent=open?"✕":"☰";
+  }
+  menuBtn.addEventListener("click",()=>setPanel(!app.classList.contains("panel-open")));
+  $("panelBackdrop").addEventListener("click",()=>setPanel(false));
+  document.addEventListener("keydown",e=>{if(e.key==="Escape")setPanel(false);});
+
+  // clicking empty map dismisses the tooltip (needed on touch, where mouseleave
+  // never fires) and clears any isolated-line highlight
+  svg.addEventListener("click",e=>{
+    if(!e.target.dataset.stkey){
+      hideTip();
+      if(state.highlight!==null && !state._hoverHL){
+        state.highlight=null;applyHighlight();
+      }
+    }
+  });
+
+  setupViewport();
+
+  // hash on load
+  if(!readHash()){
+    state.params.seed=randomSeed();
+  }
+  if(!state.params.seed) state.params.seed=randomSeed();
+  syncUI();
+  render(true);
+
+  window.addEventListener("hashchange",()=>{
+    if(suppressHash)return;
+    if(readHash()){syncUI();state.highlight=null;render(true);}
+  });
+}
+if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",init);
+else init();
+})();
+</script>
+</body>
+</html>

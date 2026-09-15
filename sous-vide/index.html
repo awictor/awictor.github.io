@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sous Vide Time 🥩 — Heat-Up Time by Thickness</title>
+<meta name="description" content="How long sous vide takes to heat food to the core, from thickness and shape, using the square-law heating rule. Offline, private, single file.">
+<style>
+:root{
+  --c:#c2410c;
+  --bg:#f6f8fa; --card:#fff; --fg:#1a1f24; --muted:#5a6470; --line:#e2e6ea;
+}
+[data-theme="dark"]{
+  --bg:#0b1016; --card:#141b23; --fg:#e6edf3; --muted:#8b98a6; --line:#232d38;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.55;transition:background .2s,color .2s}
+.wrap{max-width:640px;margin:0 auto;padding:24px 18px 60px}
+header{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.logo{font-size:2.2rem;line-height:1}
+h1{font-size:1.5rem;margin:0}
+.tag{color:var(--muted);margin:2px 0 22px;font-size:.98rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:18px}
+label{display:block;font-weight:600;margin:14px 0 6px;font-size:.92rem}
+input,select{width:100%;padding:11px 12px;font-size:1rem;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--fg)}
+input:focus,select:focus{outline:2px solid var(--c);border-color:var(--c)}
+.out{margin-top:20px;padding:18px;border-radius:12px;background:linear-gradient(135deg,var(--c)20,transparent);border:1px solid var(--c)}
+.big{font-size:2rem;font-weight:700;color:#9a3412}
+[data-theme="dark"] .big{color:#fdba74}
+.sub{color:var(--muted);font-size:.9rem;margin-top:4px}
+table{width:100%;border-collapse:collapse;margin-top:8px;font-size:.95rem}
+th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:600}
+td:last-child{text-align:right;font-weight:700}
+.explain{font-size:.9rem;color:var(--muted)}
+.explain h2{font-size:1rem;color:var(--fg);margin:0 0 8px}
+.explain li{margin:4px 0}
+footer{text-align:center;color:var(--muted);font-size:.85rem;margin-top:30px}
+footer a{color:var(--c);text-decoration:none}
+.theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:7px 11px;cursor:pointer;font-size:1.1rem}
+.note{background:var(--bg);border:1px dashed var(--c);border-radius:9px;padding:10px 12px;font-size:.86rem;color:var(--muted);margin-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <span class="logo">🥩</span>
+  <h1>Sous Vide Time</h1>
+  <button class="theme" id="themeBtn" title="Toggle theme">🌙</button>
+</header>
+<p class="tag">Time to heat food to the core in a water bath, by thickness and shape.</p>
+
+<div class="card">
+  <label for="thick">Thickness / diameter (mm)</label>
+  <input type="number" id="thick" value="25" min="1" step="1">
+
+  <label for="shape">Shape</label>
+  <select id="shape">
+    <option value="slab" selected>Slab / steak (flat, heated both sides)</option>
+    <option value="cylinder">Cylinder (roast, tenderloin)</option>
+    <option value="sphere">Sphere (meatball, egg)</option>
+  </select>
+
+  <div class="out">
+    <div class="big" id="timeOut">—</div>
+    <div class="sub">Time to reach core temperature</div>
+    <table>
+      <tr><th>Detail</th><th>Value</th></tr>
+      <tr><td>Heat-up time (minutes)</td><td id="minOut">—</td></tr>
+      <tr><td>Double the thickness &rarr;</td><td id="dblOut">—</td></tr>
+    </table>
+    <div class="note" id="note"></div>
+  </div>
+</div>
+
+<div class="card explain">
+  <h2>How it works</h2>
+  <ul>
+    <li>Sous vide heating time depends on <strong>thickness, not weight</strong>. Heat has to diffuse to the center, and that scales with the <strong>square</strong> of thickness — double the thickness, quadruple the time.</li>
+    <li>Shape matters: a sphere heats from all sides, a slab effectively from two, so the same thickness cooks faster as a sphere than a slab.</li>
+    <li>Figures approximate Douglas Baldwin&#39;s heating-time tables, starting from refrigerator temperature (~5&deg;C / 41&deg;F).</li>
+    <li>This is <strong>time to temperature</strong>, not doneness or safety — hold longer for pasteurization or tenderizing tough cuts.</li>
+    <li>Thicker than your bath is deep, or frozen food, will take longer. When unsure, hold longer; sous vide is forgiving on the upside.</li>
+  </ul>
+</div>
+
+<footer>Part of the <a href="https://awictor.github.io/toolkit/" target="_blank" rel="noopener">Toolkit</a> · offline &amp; private · no data leaves your device</footer>
+</div>
+
+<script>
+// Approximate core-heating model: time = SLAB_CONSTANT * thickness^2 * shape factor.
+// Calibrated so a 25 mm slab from fridge temperature takes about 60 minutes.
+var SLAB_CONSTANT = 0.096; // minutes per mm^2 for a slab
+var SHAPE_FACTORS = { slab: 1.0, cylinder: 0.72, sphere: 0.5 };
+
+function shapeFactor(shape){
+  if(!(shape in SHAPE_FACTORS)) throw new Error("unknown shape");
+  return SHAPE_FACTORS[shape];
+}
+function heatingTimeMin(thicknessMm, shape){
+  if(!(thicknessMm > 0)) throw new Error("thickness must be positive");
+  return SLAB_CONSTANT * thicknessMm * thicknessMm * shapeFactor(shape);
+}
+function formatTime(minutes){
+  var m = Math.round(minutes);
+  var h = Math.floor(m / 60);
+  var r = m % 60;
+  if(h === 0) return r + " min";
+  return h + " h " + (r < 10 ? "0" + r : r) + " min";
+}
+
+function render(){
+  var t = parseFloat(document.getElementById("thick").value);
+  var shape = document.getElementById("shape").value;
+  var tO = document.getElementById("timeOut"), mO = document.getElementById("minOut"),
+      dO = document.getElementById("dblOut"), note = document.getElementById("note");
+  try{
+    var mins = heatingTimeMin(t, shape);
+    tO.textContent = formatTime(mins);
+    mO.textContent = Math.round(mins) + " min";
+    dO.textContent = formatTime(heatingTimeMin(t * 2, shape)) + " (4×)";
+    note.textContent = "Time to core temp only — hold longer for safety or tenderness.";
+  }catch(e){
+    tO.textContent = "—"; mO.textContent = "—"; dO.textContent = "—";
+    note.textContent = "Enter a thickness greater than zero.";
+  }
+}
+
+(function(){
+  if(typeof document === "undefined") return;
+  var th = localStorage.getItem("sousVideTheme") || "dark";
+  document.documentElement.setAttribute("data-theme", th);
+  var btn = document.getElementById("themeBtn");
+  btn.textContent = th === "dark" ? "☀️" : "🌙";
+  btn.addEventListener("click", function(){
+    var cur = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", cur);
+    localStorage.setItem("sousVideTheme", cur);
+    btn.textContent = cur === "dark" ? "☀️" : "🌙";
+  });
+  document.getElementById("thick").addEventListener("input", render);
+  document.getElementById("shape").addEventListener("change", render);
+  render();
+})();
+
+if(typeof module !== 'undefined') module.exports = { shapeFactor, heatingTimeMin, formatTime, SLAB_CONSTANT, SHAPE_FACTORS };
+</script>
+</body>
+</html>

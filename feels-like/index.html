@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FeelsLike — Wind Chill & Heat Index Calculator</title>
+<meta name="description" content="Calculate the 'feels like' temperature from air temperature, wind, and humidity using the NWS wind chill and heat index formulas. °F/°C. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('feels-like-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#ea580c;
+    --bg:#f8f6f3; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e8e2da; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#16120d; --card:#201a13; --fg:#f2ede6; --muted:#a39a8c; --line:#332a1e; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#c2410c);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:720px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:14px}
+  .toggle{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:14px}
+  .toggle button{padding:8px 16px;border:0;background:var(--bg);color:var(--fg);cursor:pointer;font:inherit}
+  .toggle button.on{background:var(--c);color:#fff;font-weight:700}
+  .out{text-align:center;margin-top:4px}
+  .big{font-size:3rem;font-weight:800;color:var(--c);letter-spacing:-1px}
+  .mode{color:var(--muted);font-size:.9rem}
+  .risk{display:inline-block;margin-top:10px;padding:5px 16px;border-radius:999px;font-weight:700;font-size:.85rem;background:var(--line)}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🌡️</div>
+    <div><h1>FeelsLike</h1><div class="sub">Wind chill &amp; heat index "feels like" temperature</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="toggle" id="unitToggle">
+      <button type="button" data-u="F">°F</button>
+      <button type="button" data-u="C">°C</button>
+    </div>
+    <div class="grid">
+      <div><label for="temp">Temperature</label><input type="number" id="temp" value="90" step="any"></div>
+      <div><label for="wind">Wind (mph)</label><input type="number" id="wind" value="5" min="0" step="any"></div>
+      <div><label for="humidity">Humidity (%)</label><input type="number" id="humidity" value="70" min="0" max="100" step="any"></div>
+    </div>
+  </div>
+  <div class="card out">
+    <div class="big" id="result">—</div>
+    <div class="mode" id="mode"></div>
+    <div><span class="risk" id="risk"></span></div>
+  </div>
+</main>
+<footer>
+  Uses U.S. National Weather Service formulas. Estimates only. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/feels-like">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic (formulas operate in °F) ----
+  function cToF(c){ return c * 9 / 5 + 32; }
+  function fToC(f){ return (f - 32) * 5 / 9; }
+
+  // NWS wind chill (valid for T <= 50°F and wind > 3 mph)
+  function windChill(tempF, windMph){
+    const v = Math.pow(windMph, 0.16);
+    return 35.74 + 0.6215 * tempF - 35.75 * v + 0.4275 * tempF * v;
+  }
+
+  // NWS Rothfusz heat index regression (T in °F, RH in %)
+  function heatIndex(tempF, rh){
+    const T = tempF, R = rh;
+    return -42.379 + 2.04901523 * T + 10.14333127 * R - 0.22475541 * T * R
+      - 0.00683783 * T * T - 0.05481717 * R * R + 0.00122874 * T * T * R
+      + 0.00085282 * T * R * R - 0.00000199 * T * T * R * R;
+  }
+
+  // choose the right adjustment; returns { feelsF, mode }
+  function feelsLike(tempF, opts = {}){
+    const wind = opts.wind == null ? 0 : opts.wind;
+    const rh = opts.humidity == null ? null : opts.humidity;
+    if(tempF <= 50 && wind > 3) return { feelsF: windChill(tempF, wind), mode: 'wind chill' };
+    if(tempF >= 80 && rh != null) return { feelsF: heatIndex(tempF, rh), mode: 'heat index' };
+    return { feelsF: tempF, mode: 'none' };
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('result')){
+    const $ = id => document.getElementById(id);
+    let unit = 'F';
+
+    function riskFor(feelsF, mode){
+      if(mode === 'heat index'){
+        if(feelsF >= 125) return ['Extreme danger', '#7f1d1d'];
+        if(feelsF >= 103) return ['Danger', '#b91c1c'];
+        if(feelsF >= 90) return ['Extreme caution', '#d97706'];
+        return ['Caution', '#65a30d'];
+      }
+      if(mode === 'wind chill'){
+        if(feelsF <= -60) return ['Frostbite < 5 min', '#7f1d1d'];
+        if(feelsF <= -18) return ['Frostbite risk', '#b91c1c'];
+        if(feelsF <= 0) return ['Very cold', '#d97706'];
+        return ['Cold', '#0369a1'];
+      }
+      return ['Comfortable range', '#65a30d'];
+    }
+
+    function render(){
+      const tempIn = Number($('temp').value);
+      const tempF = unit === 'C' ? cToF(tempIn) : tempIn;
+      const r = feelsLike(tempF, { wind: Number($('wind').value), humidity: Number($('humidity').value) });
+      const shown = unit === 'C' ? fToC(r.feelsF) : r.feelsF;
+      $('result').textContent = shown.toFixed(1) + '°' + unit;
+      $('mode').textContent = r.mode === 'none'
+        ? 'No adjustment — temperature is in the neutral range.'
+        : `Adjusted by ${r.mode}.`;
+      const [label, color] = riskFor(r.feelsF, r.mode);
+      $('risk').textContent = label;
+      $('risk').style.background = color;
+      $('risk').style.color = '#fff';
+    }
+
+    $('unitToggle').addEventListener('click', e => {
+      const b = e.target.closest('button'); if(!b) return;
+      unit = b.dataset.u;
+      [...$('unitToggle').children].forEach(x => x.classList.toggle('on', x === b));
+      render();
+    });
+    $('unitToggle').querySelector('[data-u="F"]').classList.add('on');
+    ['temp', 'wind', 'humidity'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('feels-like-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { cToF, fToC, windChill, heatIndex, feelsLike };
+</script>
+</body>
+</html>

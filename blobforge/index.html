@@ -1,0 +1,1233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Blobforge — draw-to-simulate soft-body sandbox</title>
+<style>
+  :root{
+    --bg0:#0b1020; --bg1:#131a30; --ink:#e8ecff; --dim:#9aa6d6;
+    --accent:#54e6c8; --accent2:#7aa2ff; --pink:#ff6bb0; --panel:rgba(18,24,44,.82);
+    --line:rgba(255,255,255,.09);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg0);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink);user-select:none;-webkit-user-select:none;touch-action:none}
+  #stage{position:fixed;inset:0;display:block;cursor:crosshair}
+  /* ---- Top bar ---- */
+  #topbar{position:fixed;top:0;left:0;right:0;display:flex;gap:8px;align-items:center;
+    padding:9px 12px;z-index:20;pointer-events:none}
+  #brand{pointer-events:auto;display:flex;align-items:center;gap:9px;font-weight:800;
+    letter-spacing:.3px;font-size:15px}
+  #brand .dot{width:15px;height:15px;border-radius:50%;
+    background:radial-gradient(circle at 35% 30%,#bafff0,var(--accent) 55%,#1f9d86);
+    box-shadow:0 0 14px rgba(84,230,200,.7)}
+  #brand small{font-weight:500;color:var(--dim);font-size:11.5px;margin-left:2px}
+  .spacer{flex:1}
+  .toolgroup{pointer-events:auto;display:flex;gap:4px;background:var(--panel);
+    border:1px solid var(--line);border-radius:12px;padding:4px;-webkit-backdrop-filter:blur(9px);backdrop-filter:blur(9px)}
+  .btn{pointer-events:auto;cursor:pointer;border:1px solid var(--line);background:rgba(255,255,255,.04);
+    color:var(--ink);padding:7px 10px;border-radius:9px;font-size:12.5px;font-weight:600;
+    display:inline-flex;align-items:center;gap:6px;white-space:nowrap;transition:.12s}
+  .btn:hover{background:rgba(255,255,255,.10);border-color:rgba(255,255,255,.2)}
+  .btn:active{transform:translateY(1px)}
+  .btn:focus-visible,.mat:focus-visible,input[type=range]:focus-visible{
+    outline:2px solid var(--accent);outline-offset:2px;border-radius:9px}
+  .btn.on{background:linear-gradient(180deg,var(--accent2),#4f7bff);border-color:transparent;
+    color:#08122e;box-shadow:0 4px 16px rgba(122,162,255,.35)}
+  .btn .k{font-size:10px;opacity:.6;font-weight:700}
+  /* ---- Side panel ---- */
+  #panel{position:fixed;top:56px;right:12px;width:250px;z-index:20;background:var(--panel);
+    border:1px solid var(--line);border-radius:14px;padding:12px 13px 14px;
+    -webkit-backdrop-filter:blur(11px);backdrop-filter:blur(11px);
+    max-height:calc(100vh - 68px);overflow-y:auto;
+    box-shadow:0 12px 40px rgba(0,0,0,.4)}
+  #panel h3{margin:2px 0 9px;font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim)}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:9px 0}
+  .row label{font-size:12px;color:var(--dim)}
+  .row .val{font-size:11px;color:var(--accent);font-variant-numeric:tabular-nums;min-width:40px;text-align:right}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:4px;
+    background:rgba(255,255,255,.14);outline:none;margin:6px 0 2px}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;
+    background:var(--accent);cursor:pointer;box-shadow:0 0 0 3px rgba(84,230,200,.2)}
+  input[type=range]::-moz-range-thumb{width:15px;height:15px;border:none;border-radius:50%;background:var(--accent);cursor:pointer}
+  .mats{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:4px}
+  .mat{cursor:pointer;border:1px solid var(--line);border-radius:9px;padding:7px 4px;font-size:11.5px;
+    font-weight:700;text-align:center;background:rgba(255,255,255,.03);transition:.12s}
+  .mat:hover{background:rgba(255,255,255,.09)}
+  .mat.on{border-color:transparent;color:#08122e}
+  .mat[data-mat=jelly].on{background:#7ce6a0}
+  .mat[data-mat=balloon].on{background:#ff8fc4}
+  .mat[data-mat=water].on{background:#78c6ff}
+  .mat[data-mat=rubber].on{background:#d9b6ff}
+  .toggle{display:flex;gap:6px}
+  .toggle .btn{flex:1;justify-content:center;padding:7px 0}
+  .hint{font-size:11px;color:var(--dim);line-height:1.5;margin-top:10px;border-top:1px solid var(--line);padding-top:9px}
+  .hint b{color:var(--accent)}
+  #hud{position:fixed;left:12px;bottom:10px;z-index:20;font-size:11px;color:var(--dim);
+    font-variant-numeric:tabular-nums;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;padding:6px 10px;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);pointer-events:none;line-height:1.5}
+  #hud b{color:var(--ink)}
+  #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(20px);z-index:40;
+    background:var(--accent);color:#08122e;font-weight:700;font-size:13px;padding:10px 18px;border-radius:11px;
+    opacity:0;transition:.25s;pointer-events:none;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  #toast.err{background:var(--pink);color:#2a0011}
+  #rec{position:fixed;top:56px;left:12px;z-index:25;display:none;align-items:center;gap:7px;
+    background:rgba(255,60,80,.16);border:1px solid rgba(255,80,100,.5);color:#ffd7de;
+    padding:6px 11px;border-radius:20px;font-size:12px;font-weight:700}
+  #rec .blink{width:9px;height:9px;border-radius:50%;background:#ff4d6a;animation:blink 1s steps(2) infinite}
+  @keyframes blink{50%{opacity:.25}}
+  @media (max-width:720px){
+    #panel{width:210px;right:8px;top:96px;max-height:calc(100vh - 108px)}
+    #topbar{flex-wrap:wrap}
+    #brand small{display:none}
+  }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+
+<div id="rec"><span class="blink"></span><span id="recTxt">REC</span></div>
+
+<div id="topbar">
+  <div id="brand"><span class="dot"></span>Blobforge<small>draw-to-simulate soft bodies</small></div>
+  <div class="spacer"></div>
+  <div class="toolgroup" id="tools">
+    <button class="btn on" data-tool="draw" title="Draw a closed loop to spawn a blob">✏️ Draw <span class="k">1</span></button>
+    <button class="btn" data-tool="grab" title="Grab &amp; sling a blob">✋ Grab <span class="k">2</span></button>
+    <button class="btn" data-tool="slice" title="Drag a cut line through a blob to split it">🔪 Slice <span class="k">3</span></button>
+    <button class="btn" data-tool="pin" title="Click membrane points to pin / unpin">📌 Pin <span class="k">4</span></button>
+    <button class="btn" data-tool="pop" title="Click a blob to pop it">💥 Pop <span class="k">5</span></button>
+  </div>
+  <div class="toolgroup">
+    <button class="btn" id="pauseBtn" title="Pause / resume">⏸ <span class="k">Space</span></button>
+    <button class="btn" id="resetBtn" title="Reset to seeded scene (R)">↺ Reset <span class="k">R</span></button>
+    <button class="btn" id="clearBtn" title="Clear all blobs (C)">🗑 Clear <span class="k">C</span></button>
+  </div>
+</div>
+
+<div id="panel">
+  <h3>Material</h3>
+  <div class="mats" id="mats">
+    <div class="mat on" data-mat="jelly">Jelly</div>
+    <div class="mat" data-mat="balloon">Balloon</div>
+    <div class="mat" data-mat="water">Water-bag</div>
+    <div class="mat" data-mat="rubber">Rubber</div>
+  </div>
+
+  <h3 style="margin-top:14px">Physics</h3>
+  <div class="row"><label>Gravity</label><span class="val" id="vGrav"></span></div>
+  <input type="range" id="sGrav" min="0" max="3000" step="20">
+  <div class="row"><label>Stiffness</label><span class="val" id="vStiff"></span></div>
+  <input type="range" id="sStiff" min="2" max="100" step="1">
+  <div class="row"><label>Pressure</label><span class="val" id="vPress"></span></div>
+  <input type="range" id="sPress" min="20" max="260" step="2">
+  <div class="row"><label>Air drag</label><span class="val" id="vDrag"></span></div>
+  <input type="range" id="sDrag" min="80" max="100" step="1">
+  <div class="row"><label>Speed</label><span class="val" id="vSlow"></span></div>
+  <input type="range" id="sSlow" min="10" max="100" step="1">
+
+  <h3 style="margin-top:14px">Toys</h3>
+  <div class="toggle">
+    <button class="btn" id="flipBtn" title="Flip gravity (G)">🙃 Flip-G <span class="k">G</span></button>
+    <button class="btn on" id="eyesBtn" title="Googly eyes">👀 Eyes</button>
+    <button class="btn" id="weldBtn" title="Fuse blobs that touch">🔗 Weld</button>
+  </div>
+
+  <h3 style="margin-top:14px">Share</h3>
+  <div class="toggle">
+    <button class="btn" id="linkBtn" style="flex:1.4" title="Copy a shareable link of this scene">🔗 Copy link</button>
+    <button class="btn" id="recBtn" title="Record a 6s WebM clip of the canvas — click again to stop early">⏺ Clip</button>
+  </div>
+
+  <div class="hint">
+    <b>Draw</b> a closed loop → it drops in as jelly.
+    <b>Grab</b> to poke &amp; sling. <b>Slice</b> to cut in half.
+    <b>Pin</b> two edges → trampoline / bridge. Right-drag pins anywhere.
+  </div>
+</div>
+
+<div id="hud"></div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* =====================================================================
+   Blobforge — a single-file, zero-dependency pressurized soft-body sandbox.
+   Sections: (1) RNG  (2) Vec2/geometry  (3) SoftBody  (4) World
+             (5) Renderer  (6) Input  (7) UI  (8) HashCodec  (9) main loop
+   ===================================================================== */
+
+/* ------------------------------------------------------------------ */
+/* (1) mulberry32 — small, fast, seedable PRNG for reproducible scenes */
+/* ------------------------------------------------------------------ */
+function mulberry32(seed){
+  let a = seed >>> 0;
+  return function(){
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* (2) Vec2 helpers + geometry                                        */
+/* ------------------------------------------------------------------ */
+const TAU = Math.PI * 2;
+const clamp = (v, lo, hi) => v < lo ? lo : (v > hi ? hi : v);
+const lerp  = (a, b, t) => a + (b - a) * t;
+const dist  = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+// Signed area of a polygon (points with .x/.y). Positive == CCW in canvas coords.
+function signedArea(pts){
+  let a = 0;
+  for (let i = 0, n = pts.length; i < n; i++){
+    const p = pts[i], q = pts[(i + 1) % n];
+    a += p.x * q.y - q.x * p.y;
+  }
+  return a * 0.5;
+}
+function centroidOf(pts){
+  let cx = 0, cy = 0;
+  for (const p of pts){ cx += p.x; cy += p.y; }
+  const n = pts.length || 1;
+  return { x: cx / n, y: cy / n };
+}
+// Segment intersection: returns {x,y,t,u} where t is param on p1->p2, u on p3->p4.
+function segIntersect(p1, p2, p3, p4){
+  const d1x = p2.x - p1.x, d1y = p2.y - p1.y;
+  const d2x = p4.x - p3.x, d2y = p4.y - p3.y;
+  const den = d1x * d2y - d1y * d2x;
+  if (Math.abs(den) < 1e-9) return null;
+  const t = ((p3.x - p1.x) * d2y - (p3.y - p1.y) * d2x) / den;
+  const u = ((p3.x - p1.x) * d1y - (p3.y - p1.y) * d1x) / den;
+  if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+  return { x: p1.x + d1x * t, y: p1.y + d1y * t, t, u };
+}
+// Andrew's monotone-chain convex hull (used by weld).
+function convexHull(pts){
+  const p = pts.slice().sort((a, b) => a.x - b.x || a.y - b.y);
+  if (p.length < 3) return p;
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower = [], upper = [];
+  for (const pt of p){
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], pt) <= 0) lower.pop();
+    lower.push(pt);
+  }
+  for (let i = p.length - 1; i >= 0; i--){
+    const pt = p[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], pt) <= 0) upper.pop();
+    upper.push(pt);
+  }
+  lower.pop(); upper.pop();
+  return lower.concat(upper);
+}
+
+/* ------------------------------------------------------------------ */
+/* Material presets                                                    */
+/* ------------------------------------------------------------------ */
+const MATERIALS = {
+  jelly:   { stiffness: 22,  pressure: 120, drag: 0.99,  hue: 150, sat: 70, light: 60, muscle: 0.05 },
+  balloon: { stiffness: 60,  pressure: 210, drag: 0.995, hue: 330, sat: 82, light: 66, muscle: 0.02 },
+  water:   { stiffness: 8,   pressure: 70,  drag: 0.975, hue: 205, sat: 78, light: 60, muscle: 0.09 },
+  rubber:  { stiffness: 78,  pressure: 150, drag: 0.99,  hue: 275, sat: 55, light: 62, muscle: 0.03 },
+};
+
+/* ------------------------------------------------------------------ */
+/* (3) SoftBody — a verlet ring of points, perimeter + bending springs */
+/*     inflated by an area-target (ideal-gas style) pressure solve.    */
+/* ------------------------------------------------------------------ */
+let BODY_ID = 1;
+class SoftBody {
+  constructor(verts, hue, rng){
+    // Ensure consistent (positive-area) winding so outward normals are correct.
+    if (signedArea(verts) < 0) verts = verts.slice().reverse();
+    this.id = BODY_ID++;
+    this.hue = hue;
+    this.points = verts.map(v => ({ x: v.x, y: v.y, px: v.x, py: v.y, pin: false }));
+    this.edges = [];
+    const n = this.points.length;
+    for (let i = 0; i < n; i++){                 // perimeter springs
+      const a = i, b = (i + 1) % n;
+      this.edges.push({ a, b, rest: dist(this.points[a], this.points[b]), k: 1 });
+    }
+    for (let i = 0; i < n; i++){                 // bending springs (skip-one) for stability
+      const a = i, b = (i + 2) % n;
+      this.edges.push({ a, b, rest: dist(this.points[a], this.points[b]), k: 0.35 });
+    }
+    this.restArea = Math.abs(signedArea(this.points));
+    const r = rng || Math.random;
+    this.phase = r() * TAU;             // muscle oscillation phase
+    this.freq  = 0.6 + r() * 0.9;       // muscle / wander frequency
+    this.wanderPhase = r() * TAU;
+    this.spawn = 0;                     // 0..1 spawn-inflate animation
+    this.pop = -1;                      // >=0 while popping
+  }
+
+  area(){ return Math.abs(signedArea(this.points)); }
+  centroid(){ return centroidOf(this.points); }
+  avgRadius(){
+    const c = this.centroid();
+    let s = 0; for (const p of this.points) s += dist(p, c);
+    return s / this.points.length;
+  }
+  avgVel(){
+    let vx = 0, vy = 0;
+    for (const p of this.points){ vx += p.x - p.px; vy += p.y - p.py; }
+    const n = this.points.length;
+    return { x: vx / n, y: vy / n };
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* (4) World — bodies, gravity, fixed-timestep substepping,            */
+/*     spatial-hash broadphase, pressure & collision solve.            */
+/* ------------------------------------------------------------------ */
+const FIXED   = 1 / 60;   // deterministic fixed timestep
+const SUBSTEPS = 8;       // physics substeps per fixed step
+const MAX_BODIES = 18;
+const POINT_R = 7;        // collision radius per membrane point
+
+class World {
+  constructor(w, h){
+    this.w = w; this.h = h;
+    this.bodies = [];
+    this.time = 0;
+    this.params = {
+      gravity: 1400, gravDir: 1,
+      stiffness: 22, pressure: 120, drag: 0.99,
+      slowmo: 1, muscle: 0.05,
+      eyes: true, weld: false,
+    };
+    this.grab = null;      // {body, idx}
+    this.mouse = { x: 0, y: 0 };
+    this.cell = POINT_R * 2.2;
+    this.hash = new Map();
+    this.springIters = 4;
+    this.weldCooldown = 0;
+  }
+
+  add(body){
+    this.bodies.push(body);
+    while (this.bodies.length > MAX_BODIES) this.bodies.shift();
+  }
+  clear(){ this.bodies.length = 0; this.grab = null; }
+
+  step(dt){
+    const h = dt / SUBSTEPS;
+    for (let s = 0; s < SUBSTEPS; s++) this.substep(h);
+    // NOTE: this.time is advanced inside substep() (+= h, summing to dt);
+    // do not add it again here or the clock would run at 2x wall-time.
+    if (this.weldCooldown > 0) this.weldCooldown -= dt;
+    // advance spawn / pop animations on the fixed clock
+    for (let i = this.bodies.length - 1; i >= 0; i--){
+      const b = this.bodies[i];
+      if (b.spawn < 1) b.spawn = Math.min(1, b.spawn + dt * 3.5);
+      if (b.pop >= 0){ b.pop += dt * 4.2; if (b.pop >= 1) this.bodies.splice(i, 1); }
+    }
+  }
+
+  substep(h){
+    const P = this.params;
+    const gx = 0, gy = P.gravity * P.gravDir;
+    this.time += h;
+    const maxStep = 18; // per-substep displacement clamp (anti-explosion)
+
+    // --- integrate (verlet) + gravity + gentle autonomous wander ---
+    for (const b of this.bodies){
+      const wander = P.muscle * 900 * Math.sin(this.time * b.freq + b.wanderPhase);
+      for (const p of b.points){
+        if (p.pin) { p.px = p.x; p.py = p.y; continue; }
+        let vx = (p.x - p.px) * P.drag;
+        let vy = (p.y - p.py) * P.drag;
+        vx = clamp(vx, -maxStep, maxStep);
+        vy = clamp(vy, -maxStep, maxStep);
+        const ax = gx + wander;
+        const ay = gy;
+        p.px = p.x; p.py = p.y;
+        p.x += vx + ax * h * h;
+        p.y += vy + ay * h * h;
+      }
+    }
+
+    // --- grab constraint (soft): pull the held point toward the cursor ---
+    if (this.grab){
+      const p = this.grab.body.points[this.grab.idx];
+      if (!p.pin){
+        p.x += (this.mouse.x - p.x) * 0.35;
+        p.y += (this.mouse.y - p.y) * 0.35;
+      }
+    }
+
+    // --- spring constraints (Gauss-Seidel PBD) ---
+    const stiff = clamp(P.stiffness / 100, 0.02, 1) ;
+    for (let it = 0; it < this.springIters; it++){
+      for (const b of this.bodies){
+        for (const e of b.edges){
+          const pa = b.points[e.a], pb = b.points[e.b];
+          let dx = pb.x - pa.x, dy = pb.y - pa.y;
+          let d = Math.hypot(dx, dy);
+          if (d < 1e-6) continue;
+          const wa = pa.pin ? 0 : 1, wb = pb.pin ? 0 : 1, ws = wa + wb;
+          if (ws === 0) continue;
+          const corr = (d - e.rest) * stiff * e.k;
+          const nx = dx / d, ny = dy / d;
+          pa.x += nx * corr * (wa / ws); pa.y += ny * corr * (wa / ws);
+          pb.x -= nx * corr * (wb / ws); pb.y -= ny * corr * (wb / ws);
+        }
+      }
+    }
+
+    // --- pressure: scale each body toward its target gas volume (area) ---
+    const pressN = clamp(P.pressure / 120, 0.15, 2.6);
+    for (const b of this.bodies){
+      const c = b.centroid();
+      const a = Math.max(b.area(), 1);
+      const muscle = 1 + this.params.muscle * Math.sin(this.time * b.freq + b.phase);
+      const target = b.restArea * pressN * muscle;
+      let f = Math.sqrt(clamp(target / a, 0.25, 4));
+      const blend = 0.22;
+      const s = 1 + (f - 1) * blend;
+      for (const p of b.points){
+        if (p.pin) continue;
+        p.x = c.x + (p.x - c.x) * s;
+        p.y = c.y + (p.y - c.y) * s;
+      }
+    }
+
+    // --- collisions: walls + blob-vs-blob point repulsion (spatial hash) ---
+    this.collideWalls(h);
+    this.broadphase();
+  }
+
+  collideWalls(){
+    const P = this.params, rest = 0.35, fric = 0.86;
+    const r = POINT_R;
+    for (const b of this.bodies){
+      for (const p of b.points){
+        if (p.pin) continue;
+        if (p.x < r){ const v = p.x - p.px; p.x = r; p.px = p.x + v * rest; applyFriction(p, 'y', fric); }
+        else if (p.x > this.w - r){ const v = p.x - p.px; p.x = this.w - r; p.px = p.x + v * rest; applyFriction(p, 'y', fric); }
+        if (p.y < r){ const v = p.y - p.py; p.y = r; p.py = p.y + v * rest; applyFriction(p, 'x', fric); }
+        else if (p.y > this.h - r){ const v = p.y - p.py; p.y = this.h - r; p.py = p.y + v * rest; applyFriction(p, 'x', fric); }
+      }
+    }
+  }
+
+  broadphase(){
+    const cell = this.cell;
+    this.hash.clear();
+    const key = (cx, cy) => cx + ',' + cy;
+    // insert every point tagged with its body index + point ref
+    for (let bi = 0; bi < this.bodies.length; bi++){
+      const b = this.bodies[bi];
+      for (const p of b.points){
+        const cx = Math.floor(p.x / cell), cy = Math.floor(p.y / cell);
+        const k = key(cx, cy);
+        let arr = this.hash.get(k);
+        if (!arr){ arr = []; this.hash.set(k, arr); }
+        arr.push({ bi, p });
+      }
+    }
+    const r2 = POINT_R * 2;
+    const contacts = new Map();  // body-pair -> count (for weld)
+    for (const [, arr] of this.hash){
+      // check this cell against itself and 4 neighbours (via re-lookup)
+      for (let i = 0; i < arr.length; i++){
+        const A = arr[i];
+        // same-cell pairs
+        for (let j = i + 1; j < arr.length; j++){
+          this.resolvePair(A, arr[j], r2, contacts);
+        }
+      }
+    }
+    // neighbour cells: iterate points and probe 4 forward neighbours
+    for (const b of this.bodies){
+      for (const p of b.points){
+        const cx = Math.floor(p.x / cell), cy = Math.floor(p.y / cell);
+        const A = { bi: this.bodies.indexOf(b), p };
+        for (const [dx, dy] of NEIGH){
+          const arr = this.hash.get(key(cx + dx, cy + dy));
+          if (!arr) continue;
+          for (const B of arr){
+            if (B.p === p) continue;
+            this.resolvePair(A, B, r2, contacts);
+          }
+        }
+      }
+    }
+    if (this.params.weld && this.weldCooldown <= 0) this.tryWeld(contacts);
+  }
+
+  resolvePair(A, B, r2, contacts){
+    if (A.bi === B.bi) return;      // never self-collide (springs handle that)
+    const p = A.p, q = B.p;
+    let dx = q.x - p.x, dy = q.y - p.y;
+    let d2 = dx * dx + dy * dy;
+    if (d2 >= r2 * r2 || d2 < 1e-9) return;
+    const d = Math.sqrt(d2);
+    const overlap = (r2 - d) * 0.5;
+    const nx = dx / d, ny = dy / d;
+    const wp = p.pin ? 0 : 1, wq = q.pin ? 0 : 1, ws = wp + wq || 1;
+    p.x -= nx * overlap * (wp / ws); p.y -= ny * overlap * (wp / ws);
+    q.x += nx * overlap * (wq / ws); q.y += ny * overlap * (wq / ws);
+    if (contacts){
+      const lo = Math.min(A.bi, B.bi), hi = Math.max(A.bi, B.bi);
+      const k = lo + '-' + hi;
+      contacts.set(k, (contacts.get(k) || 0) + 1);
+    }
+  }
+
+  tryWeld(contacts){
+    let best = null, bestN = 0;
+    for (const [k, n] of contacts){
+      if (n > bestN){ bestN = n; best = k; }
+    }
+    if (!best || bestN < 4) return;
+    const [lo, hi] = best.split('-').map(Number);
+    const A = this.bodies[lo], B = this.bodies[hi];
+    if (!A || !B) return;
+    // relative speed must be low so fast collisions bounce instead of fusing
+    const va = A.avgVel(), vb = B.avgVel();
+    if (Math.hypot(va.x - vb.x, va.y - vb.y) > 3) return;
+    const hull = convexHull(A.points.concat(B.points).map(p => ({ x: p.x, y: p.y })));
+    if (hull.length < 3) return;
+    const merged = new SoftBody(hull, (A.hue + B.hue) / 2);
+    merged.restArea = A.restArea + B.restArea;
+    merged.spawn = 1;
+    // preserve momentum: average velocity of the two parents
+    const vx = (va.x + vb.x) / 2, vy = (va.y + vb.y) / 2;
+    for (const p of merged.points){ p.px = p.x - vx; p.py = p.y - vy; }
+    this.bodies = this.bodies.filter(b => b !== A && b !== B);
+    this.bodies.push(merged);
+    this.weldCooldown = 0.4;
+  }
+
+  // Split every body the segment s0->s1 passes cleanly through.
+  slice(s0, s1){
+    let cut = 0;
+    const next = [];
+    for (const b of this.bodies){
+      const halves = sliceBody(b, s0, s1);
+      if (halves){ next.push(halves[0], halves[1]); cut++; }
+      else next.push(b);
+    }
+    this.bodies = next;
+    while (this.bodies.length > MAX_BODIES) this.bodies.shift();
+    return cut;
+  }
+
+  nearestPoint(x, y, maxD){
+    let best = null, bd = (maxD || 40) ** 2;
+    for (const b of this.bodies){
+      for (let i = 0; i < b.points.length; i++){
+        const p = b.points[i];
+        const d = (p.x - x) ** 2 + (p.y - y) ** 2;
+        if (d < bd){ bd = d; best = { body: b, idx: i }; }
+      }
+    }
+    return best;
+  }
+
+  bodyAt(x, y){
+    for (let i = this.bodies.length - 1; i >= 0; i--){
+      if (pointInPoly(x, y, this.bodies[i].points)) return this.bodies[i];
+    }
+    return null;
+  }
+}
+const NEIGH = [[1, 0], [1, 1], [0, 1], [-1, 1]];
+function applyFriction(p, axis, f){
+  if (axis === 'x'){ const v = p.x - p.px; p.px = p.x - v * f; }
+  else { const v = p.y - p.py; p.py = p.y - v * f; }
+}
+function pointInPoly(x, y, pts){
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++){
+    const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+
+/* --- slice a single body along a segment into two sealed bodies --- */
+function sliceBody(body, s0, s1){
+  const pts = body.points;
+  const n = pts.length;
+  const hits = [];
+  for (let i = 0; i < n; i++){
+    const a = pts[i], b = pts[(i + 1) % n];
+    const it = segIntersect(s0, s1, a, b);
+    if (it) hits.push({ edge: i, x: it.x, y: it.y, t: it.t });
+  }
+  if (hits.length < 2) return null;
+  hits.sort((p, q) => p.t - q.t);
+  let A = hits[0], B = hits[hits.length - 1];
+  if (A.edge === B.edge) return null;
+  let i1 = A.edge, P1 = { x: A.x, y: A.y };
+  let i2 = B.edge, P2 = { x: B.x, y: B.y };
+  if (i1 > i2){ [i1, i2] = [i2, i1]; [P1, P2] = [P2, P1]; }
+
+  const loop1 = [P1];
+  for (let k = (i1 + 1) % n; ; k = (k + 1) % n){ loop1.push({ x: pts[k].x, y: pts[k].y }); if (k === i2) break; }
+  loop1.push(P2);
+
+  const loop2 = [P2];
+  for (let k = (i2 + 1) % n; ; k = (k + 1) % n){ loop2.push({ x: pts[k].x, y: pts[k].y }); if (k === i1) break; }
+  loop2.push(P1);
+
+  if (loop1.length < 3 || loop2.length < 3) return null;
+
+  const vel = body.avgVel();
+  const dens = body.restArea / Math.max(body.area(), 1); // gas density -> re-inflate
+  const mk = (loop, hueShift) => {
+    const nb = new SoftBody(loop, (body.hue + hueShift + 360) % 360);
+    nb.restArea = Math.abs(signedArea(nb.points)) * clamp(dens, 0.6, 1.6) * 1.08;
+    nb.spawn = 0.55;
+    for (const p of nb.points){ p.px = p.x - vel.x; p.py = p.y - vel.y; }
+    return nb;
+  };
+  return [mk(loop1, -12), mk(loop2, 12)];
+}
+
+/* ------------------------------------------------------------------ */
+/* (5) Renderer — gooey membrane, translucent fill, specular, eyes     */
+/* ------------------------------------------------------------------ */
+class Renderer {
+  constructor(canvas){
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.dpr = 1;
+    this.resize();
+  }
+  resize(){
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.dpr = dpr;
+    this.canvas.width  = Math.floor(innerWidth * dpr);
+    this.canvas.height = Math.floor(innerHeight * dpr);
+    this.canvas.style.width = innerWidth + 'px';
+    this.canvas.style.height = innerHeight + 'px';
+  }
+  draw(world, input, hue){
+    const ctx = this.ctx, W = innerWidth, H = innerHeight;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    // background
+    const bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, '#0c1226'); bg.addColorStop(1, '#070a15');
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    this.grid(ctx, W, H);
+
+    // empty-state call to action — the app's core toy is "draw a closed loop"
+    if (world.bodies.length === 0 && !input.drawing) this.emptyState(ctx, W, H, hue);
+
+    for (const b of world.bodies) this.blob(ctx, b, world);
+
+    // draw-in-progress preview
+    if (input.drawing && input.raw.length > 1) this.drawPreview(ctx, input.raw);
+    // slice preview
+    if (input.slicing) this.slicePreview(ctx, input.sliceA, input.sliceB);
+    // pin markers
+    this.pins(ctx, world);
+    // grab tether
+    if (world.grab){
+      const p = world.grab.body.points[world.grab.idx];
+      ctx.strokeStyle = 'rgba(84,230,200,.6)'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(world.mouse.x, world.mouse.y); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    // vignette
+    const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.9);
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.45)');
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  }
+  emptyState(ctx, W, H, hue){
+    const cx = W / 2, cy = H / 2;
+    const col = (typeof hue === 'number') ? `hsl(${hue},80%,72%)` : 'rgba(232,236,255,.85)';
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = col;
+    ctx.font = '600 clamp(22px, 4vw, 40px) ui-sans-serif, system-ui, sans-serif';
+    ctx.fillText('✏️  Draw a closed loop to forge a blob', cx, cy - 8);
+    ctx.globalAlpha = 0.32;
+    ctx.fillStyle = 'rgba(232,236,255,1)';
+    ctx.font = '400 clamp(12px, 1.8vw, 16px) ui-sans-serif, system-ui, sans-serif';
+    ctx.fillText('then Grab to sling · Slice to cut · Pin to hang · ↺ Reset for the starter tank', cx, cy + 30);
+    ctx.restore();
+  }
+  grid(ctx, W, H){
+    ctx.strokeStyle = 'rgba(255,255,255,.03)'; ctx.lineWidth = 1;
+    const g = 44;
+    ctx.beginPath();
+    for (let x = 0; x <= W; x += g){ ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+    for (let y = 0; y <= H; y += g){ ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.stroke();
+  }
+  // quadratic-midpoint smoothing gives the gooey membrane look
+  path(ctx, pts, scale, cx, cy){
+    const n = pts.length;
+    const P = i => {
+      const p = pts[((i % n) + n) % n];
+      if (scale === 1) return p;
+      return { x: cx + (p.x - cx) * scale, y: cy + (p.y - cy) * scale };
+    };
+    ctx.beginPath();
+    let a = P(n - 1), b = P(0);
+    ctx.moveTo((a.x + b.x) / 2, (a.y + b.y) / 2);
+    for (let i = 0; i < n; i++){
+      const p0 = P(i), p1 = P(i + 1);
+      ctx.quadraticCurveTo(p0.x, p0.y, (p0.x + p1.x) / 2, (p0.y + p1.y) / 2);
+    }
+    ctx.closePath();
+  }
+  blob(ctx, b, world){
+    const c = b.centroid();
+    const r = b.avgRadius();
+    let scale = 1;
+    if (b.spawn < 1) scale = 0.15 + 0.85 * easeOut(b.spawn);
+    if (b.pop >= 0) scale = (1 + b.pop * 0.9) ; // expand while fading
+    const alphaPop = b.pop >= 0 ? (1 - b.pop) : 1;
+
+    const H = b.hue;
+    ctx.save();
+    ctx.globalAlpha = alphaPop;
+    // soft outer glow
+    ctx.shadowColor = `hsla(${H},80%,60%,.5)`;
+    ctx.shadowBlur = 22;
+    // fill
+    this.path(ctx, b.points, scale, c.x, c.y);
+    const g = ctx.createRadialGradient(c.x - r * .3, c.y - r * .4, r * .1, c.x, c.y, r * 1.25);
+    g.addColorStop(0, `hsla(${H},85%,78%,.92)`);
+    g.addColorStop(0.55, `hsla(${H},75%,60%,.72)`);
+    g.addColorStop(1, `hsla(${H},70%,42%,.62)`);
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    // membrane stroke
+    this.path(ctx, b.points, scale, c.x, c.y);
+    ctx.lineWidth = 2.2;
+    ctx.strokeStyle = `hsla(${H},90%,82%,.85)`;
+    ctx.stroke();
+    // specular highlight
+    ctx.beginPath();
+    ctx.ellipse(c.x - r * .32, c.y - r * .38, r * .3, r * .18, -0.5, 0, TAU);
+    ctx.fillStyle = 'rgba(255,255,255,.28)';
+    ctx.fill();
+    ctx.restore();
+
+    if (world.params.eyes && b.pop < 0) this.eyes(ctx, b, c, r, alphaPop, world);
+  }
+  eyes(ctx, b, c, r, alpha, world){
+    const g = { x: 0, y: world.params.gravity * world.params.gravDir };
+    const gm = Math.hypot(g.x, g.y) || 1;
+    // "up" is opposite gravity; eyes sit toward the up side
+    let ux = -g.x / gm, uy = -g.y / gm;
+    let rx = -uy, ry = ux; // right = perp
+    const ecx = c.x + ux * r * 0.22, ecy = c.y + uy * r * 0.22;
+    const er = clamp(r * 0.2, 4, 22);
+    const sep = r * 0.4;
+    const vel = b.avgVel();
+    let lx = vel.x * 0.5 + g.x / gm * 1.2;
+    let ly = vel.y * 0.5 + g.y / gm * 1.2;
+    const lm = Math.hypot(lx, ly) || 1;
+    lx /= lm; ly /= lm;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    for (const s of [-1, 1]){
+      const ex = ecx + rx * sep * s, ey = ecy + ry * sep * s;
+      ctx.beginPath(); ctx.arc(ex, ey, er, 0, TAU);
+      ctx.fillStyle = '#fff'; ctx.fill();
+      ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.stroke();
+      const pr = er * 0.5;
+      ctx.beginPath(); ctx.arc(ex + lx * (er - pr), ey + ly * (er - pr), pr, 0, TAU);
+      ctx.fillStyle = '#161a2b'; ctx.fill();
+      ctx.beginPath(); ctx.arc(ex + lx * (er - pr) - pr * .3, ey + ly * (er - pr) - pr * .3, pr * .35, 0, TAU);
+      ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.fill();
+    }
+    ctx.restore();
+  }
+  pins(ctx, world){
+    for (const b of world.bodies){
+      for (const p of b.points){
+        if (!p.pin) continue;
+        ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, TAU);
+        ctx.fillStyle = '#ff6bb0'; ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.stroke();
+      }
+    }
+  }
+  drawPreview(ctx, raw){
+    ctx.save();
+    ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(84,230,200,.9)';
+    ctx.shadowColor = 'rgba(84,230,200,.6)'; ctx.shadowBlur = 12;
+    ctx.beginPath(); ctx.moveTo(raw[0].x, raw[0].y);
+    for (let i = 1; i < raw.length; i++) ctx.lineTo(raw[i].x, raw[i].y);
+    ctx.stroke();
+    // hint closing line
+    ctx.setLineDash([5, 6]); ctx.strokeStyle = 'rgba(84,230,200,.35)';
+    ctx.beginPath(); ctx.moveTo(raw[raw.length - 1].x, raw[raw.length - 1].y);
+    ctx.lineTo(raw[0].x, raw[0].y); ctx.stroke();
+    ctx.restore();
+  }
+  slicePreview(ctx, a, b){
+    ctx.save();
+    ctx.setLineDash([8, 7]); ctx.lineWidth = 2.5;
+    ctx.strokeStyle = '#ff5470'; ctx.shadowColor = '#ff5470'; ctx.shadowBlur = 10;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    ctx.restore();
+  }
+}
+const easeOut = t => 1 - Math.pow(1 - t, 3);
+
+/* ------------------------------------------------------------------ */
+/* (6) Input — tool state machine (draw / grab / slice / pin / pop)    */
+/* ------------------------------------------------------------------ */
+class Input {
+  constructor(canvas, game){
+    this.canvas = canvas; this.game = game;
+    this.tool = 'draw';
+    this.down = false; this.rightDown = false;
+    this.drawing = false; this.raw = [];
+    this.slicing = false; this.sliceA = { x: 0, y: 0 }; this.sliceB = { x: 0, y: 0 };
+    this.lastPinToggle = null;
+    this._bind();
+  }
+  pos(e){
+    const t = e.touches ? e.touches[0] : e;
+    return { x: t.clientX, y: t.clientY };
+  }
+  _bind(){
+    const c = this.canvas;
+    c.addEventListener('mousedown', e => { if (e.button === 2) this.startRight(this.pos(e)); else this.start(this.pos(e)); });
+    window.addEventListener('mousemove', e => this.move(this.pos(e)));
+    window.addEventListener('mouseup', e => { if (e.button === 2) this.endRight(); else this.end(); });
+    c.addEventListener('contextmenu', e => e.preventDefault());
+    c.addEventListener('touchstart', e => { e.preventDefault(); this.start(this.pos(e)); }, { passive: false });
+    c.addEventListener('touchmove', e => { e.preventDefault(); this.move(this.pos(e)); }, { passive: false });
+    c.addEventListener('touchend', e => { e.preventDefault(); this.end(); }, { passive: false });
+  }
+  start(p){
+    const g = this.game;
+    g.world.mouse = p; this.down = true;
+    if (this.tool === 'draw'){ this.drawing = true; this.raw = [p]; }
+    else if (this.tool === 'grab'){ g.world.grab = g.world.nearestPoint(p.x, p.y, 60); this.canvas.style.cursor = 'grabbing'; }
+    else if (this.tool === 'slice'){ this.slicing = true; this.sliceA = p; this.sliceB = p; }
+    else if (this.tool === 'pin'){ this.togglePinAt(p); }
+    else if (this.tool === 'pop'){ const b = g.world.bodyAt(p.x, p.y); if (b && b.pop < 0){ b.pop = 0; g.toast('Pop! 💥'); } }
+  }
+  startRight(p){ this.rightDown = true; this.game.world.mouse = p; this.togglePinAt(p); }
+  move(p){
+    const g = this.game; g.world.mouse = p;
+    if (this.drawing){
+      const last = this.raw[this.raw.length - 1];
+      if (!last || Math.hypot(p.x - last.x, p.y - last.y) > 7) this.raw.push(p);
+    } else if (this.slicing){ this.sliceB = p; }
+    else if (this.rightDown){ this.togglePinAt(p, true); }
+  }
+  end(){
+    const g = this.game; this.down = false;
+    if (this.drawing){ this.drawing = false; this.finishDraw(); }
+    if (this.slicing){ this.slicing = false; this.finishSlice(); }
+    g.world.grab = null;
+    if (this.tool === 'grab') this.canvas.style.cursor = 'grab';
+  }
+  endRight(){ this.rightDown = false; this.lastPinToggle = null; }
+
+  togglePinAt(p, paint){
+    const near = this.game.world.nearestPoint(p.x, p.y, 22);
+    if (!near) return;
+    const pt = near.body.points[near.idx];
+    if (paint){
+      // when painting via right-drag, don't flip the same point repeatedly
+      if (this.lastPinToggle === pt) return;
+      this.lastPinToggle = pt;
+      pt.pin = true; pt.px = pt.x; pt.py = pt.y;
+    } else {
+      pt.pin = !pt.pin; pt.px = pt.x; pt.py = pt.y;
+    }
+  }
+
+  finishDraw(){
+    const g = this.game;
+    const loop = resampleLoop(this.raw);
+    if (!loop || loop.length < 3){ return; }
+    if (Math.abs(signedArea(loop)) < 400){ g.toast('Too small — draw a bigger loop', 'err'); return; }
+    const mat = MATERIALS[g.currentMat];
+    const b = new SoftBody(loop, mat.hue + (Math.random() * 24 - 12));
+    g.world.add(b);
+    g.toast('Blob forged ✨');
+  }
+  finishSlice(){
+    const g = this.game;
+    if (dist(this.sliceA, this.sliceB) < 12) return;
+    const n = g.world.slice(this.sliceA, this.sliceB);
+    if (n) g.toast(n > 1 ? `Sliced ${n} blobs` : 'Sliced! 🔪');
+  }
+}
+
+// Resample a raw polyline into an evenly spaced closed loop, capped in count.
+function resampleLoop(raw){
+  if (raw.length < 3) return null;
+  // simplify: drop near-duplicate points
+  const pts = [];
+  for (const p of raw){
+    const last = pts[pts.length - 1];
+    if (!last || Math.hypot(p.x - last.x, p.y - last.y) > 4) pts.push({ x: p.x, y: p.y });
+  }
+  if (pts.length < 3) return null;
+  // perimeter (closed)
+  let peri = 0;
+  for (let i = 0; i < pts.length; i++) peri += dist(pts[i], pts[(i + 1) % pts.length]);
+  if (peri < 40) return null;
+  const target = clamp(Math.round(peri / 26), 10, 40);
+  const step = peri / target;
+  const out = [];
+  let acc = 0, i = 0;
+  let cur = { ...pts[0] };
+  out.push({ ...cur });
+  while (out.length < target){
+    const nxt = pts[(i + 1) % pts.length];
+    const seg = dist(cur, nxt);
+    if (acc + seg >= step){
+      const t = (step - acc) / seg;
+      cur = { x: lerp(cur.x, nxt.x, t), y: lerp(cur.y, nxt.y, t) };
+      out.push({ ...cur });
+      acc = 0;
+    } else {
+      acc += seg; cur = { ...nxt }; i++;
+      if (i > pts.length * 3) break; // safety
+    }
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* (8) HashCodec — pack seed + params + custom bodies into location.hash */
+/* ------------------------------------------------------------------ */
+const HashCodec = {
+  encode(world, seed){
+    const P = world.params;
+    const scene = {
+      s: seed >>> 0,
+      g: [Math.round(P.gravity), P.gravDir],
+      k: [Math.round(P.stiffness), Math.round(P.pressure), Math.round(P.drag * 1000), P.eyes ? 1 : 0, P.weld ? 1 : 0],
+      b: world.bodies.map(b => ({
+        h: Math.round(b.hue),
+        r: Math.round(b.restArea),
+        v: b.points.reduce((a, p) => { a.push(Math.round(p.x), Math.round(p.y)); return a; }, []),
+        p: b.points.reduce((a, p, i) => { if (p.pin) a.push(i); return a; }, []),
+      })),
+    };
+    const json = JSON.stringify(scene);
+    return b64urlEncode(json);
+  },
+  decode(str){
+    try {
+      const json = b64urlDecode(str);
+      const s = JSON.parse(json);
+      if (!s || typeof s.s !== 'number') return null;
+      return s;
+    } catch (e){ return null; }
+  },
+  apply(scene, world){
+    const P = world.params;
+    if (scene.g){ P.gravity = scene.g[0]; P.gravDir = scene.g[1]; }
+    if (scene.k){ P.stiffness = scene.k[0]; P.pressure = scene.k[1]; P.drag = scene.k[2] / 1000; P.eyes = !!scene.k[3]; P.weld = !!scene.k[4]; }
+    world.clear();
+    if (Array.isArray(scene.b)){
+      for (const bd of scene.b){
+        if (!bd || !Array.isArray(bd.v)) continue;   // skip malformed / hand-edited bodies
+        const verts = [];
+        for (let i = 0; i < bd.v.length; i += 2) verts.push({ x: bd.v[i], y: bd.v[i + 1] });
+        if (verts.length < 3) continue;
+        const body = new SoftBody(verts, bd.h);
+        if (bd.r) body.restArea = bd.r;
+        body.spawn = 1;
+        if (bd.p) for (const idx of bd.p){ if (body.points[idx]) body.points[idx].pin = true; }
+        world.add(body);
+      }
+    }
+    return scene.s >>> 0;
+  }
+};
+function b64urlEncode(str){
+  const b = btoa(unescape(encodeURIComponent(str)));
+  return b.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64urlDecode(str){
+  let b = str.replace(/-/g, '+').replace(/_/g, '/');
+  while (b.length % 4) b += '=';
+  return decodeURIComponent(escape(atob(b)));
+}
+
+/* ------------------------------------------------------------------ */
+/* (9) Game — wires world, renderer, input, UI, recorder, main loop    */
+/* ------------------------------------------------------------------ */
+class Game {
+  constructor(){
+    this.canvas = document.getElementById('stage');
+    this.world = new World(innerWidth, innerHeight);
+    this.renderer = new Renderer(this.canvas);
+    this.input = new Input(this.canvas, this);
+    this.currentMat = 'jelly';
+    this.seed = 1337;
+    this.paused = false;
+    this.recording = false;
+    this.fps = 60; this._fpsAcc = 0; this._fpsN = 0; this._fpsT = 0;
+    this.acc = 0; this.last = performance.now();
+    this._bindUI();
+    this._bindKeys();
+    window.addEventListener('resize', () => this.onResize());
+
+    // Load from URL hash if present, else spawn the deterministic menagerie.
+    const loaded = this._loadFromHash();
+    if (!loaded){ this.applyMaterial('jelly'); this.spawnMenagerie(this.seed); }
+    this.syncUI();
+    requestAnimationFrame(t => this.frame(t));
+  }
+
+  onResize(){ this.renderer.resize(); this.world.w = innerWidth; this.world.h = innerHeight; }
+
+  spawnMenagerie(seed){
+    const rng = mulberry32(seed);
+    const W = innerWidth, H = innerHeight;
+    const mats = Object.keys(MATERIALS);
+    const count = 5;
+    for (let i = 0; i < count; i++){
+      const cx = W * (0.18 + 0.64 * rng());
+      const cy = H * (0.12 + 0.28 * rng());
+      const r = 42 + rng() * 46;
+      const mat = MATERIALS[mats[Math.floor(rng() * mats.length)]];
+      const verts = this._blobVerts(cx, cy, r, 14 + Math.floor(rng() * 6), 0.22, rng);
+      const b = new SoftBody(verts, mat.hue + (rng() * 24 - 12), rng);
+      b.spawn = 0; // let them inflate + drop in
+      this.world.add(b);
+    }
+  }
+  _blobVerts(cx, cy, r, n, jitter, rng){
+    const verts = [];
+    for (let i = 0; i < n; i++){
+      const a = (i / n) * TAU;
+      const rr = r * (1 + (rng() - 0.5) * 2 * jitter);
+      verts.push({ x: cx + Math.cos(a) * rr, y: cy + Math.sin(a) * rr });
+    }
+    return verts;
+  }
+
+  applyMaterial(name){
+    this.currentMat = name;
+    const m = MATERIALS[name];
+    const P = this.world.params;
+    P.stiffness = m.stiffness; P.pressure = m.pressure; P.drag = m.drag; P.muscle = m.muscle;
+    // recolor existing bodies toward the material hue for instant visual variety
+    for (const b of this.world.bodies) b.hue = m.hue + (b.hue % 24 - 12);
+    document.querySelectorAll('.mat').forEach(el => el.classList.toggle('on', el.dataset.mat === name));
+    this.syncUI();
+  }
+
+  _bindUI(){
+    document.querySelectorAll('#tools .btn').forEach(btn => {
+      btn.addEventListener('click', () => this.setTool(btn.dataset.tool));
+    });
+    document.querySelectorAll('.mat').forEach(el => {
+      el.addEventListener('click', () => this.applyMaterial(el.dataset.mat));
+    });
+    const bind = (id, fn) => document.getElementById(id).addEventListener('input', e => { fn(+e.target.value); this.syncUI(); });
+    bind('sGrav',  v => this.world.params.gravity = v);
+    bind('sStiff', v => this.world.params.stiffness = v);
+    bind('sPress', v => this.world.params.pressure = v);
+    bind('sDrag',  v => this.world.params.drag = v / 100);
+    bind('sSlow',  v => this.world.params.slowmo = v / 100);
+
+    document.getElementById('pauseBtn').addEventListener('click', () => this.togglePause());
+    document.getElementById('resetBtn').addEventListener('click', () => this.reset());
+    document.getElementById('clearBtn').addEventListener('click', () => { this.world.clear(); this.toast('Cleared'); });
+    document.getElementById('flipBtn').addEventListener('click', e => {
+      this.world.params.gravDir *= -1; e.currentTarget.classList.toggle('on', this.world.params.gravDir < 0);
+    });
+    document.getElementById('eyesBtn').addEventListener('click', e => {
+      this.world.params.eyes = !this.world.params.eyes; e.currentTarget.classList.toggle('on', this.world.params.eyes);
+    });
+    document.getElementById('weldBtn').addEventListener('click', e => {
+      this.world.params.weld = !this.world.params.weld; e.currentTarget.classList.toggle('on', this.world.params.weld);
+      this.toast(this.world.params.weld ? 'Weld on — touching blobs fuse' : 'Weld off');
+    });
+    document.getElementById('linkBtn').addEventListener('click', () => this.copyLink());
+    document.getElementById('recBtn').addEventListener('click', () => this.record());
+  }
+  _bindKeys(){
+    window.addEventListener('keydown', e => {
+      if (e.target.tagName === 'INPUT') return;
+      const map = { '1': 'draw', '2': 'grab', '3': 'slice', '4': 'pin', '5': 'pop' };
+      if (map[e.key]) this.setTool(map[e.key]);
+      else if (e.code === 'Space'){ e.preventDefault(); this.togglePause(); }
+      else if (e.key === 'r' || e.key === 'R') this.reset();
+      else if (e.key === 'c' || e.key === 'C') { this.world.clear(); this.toast('Cleared'); }
+      else if (e.key === 'g' || e.key === 'G') document.getElementById('flipBtn').click();
+    });
+  }
+  setTool(t){
+    this.input.tool = t;
+    document.querySelectorAll('#tools .btn').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
+    const cursor = t === 'slice' ? 'crosshair' : t === 'grab' ? 'grab' : t === 'pop' ? 'pointer' : 'crosshair';
+    this.canvas.style.cursor = cursor;
+  }
+  togglePause(){
+    this.paused = !this.paused;
+    document.getElementById('pauseBtn').classList.toggle('on', this.paused);
+    document.getElementById('pauseBtn').firstChild.textContent = this.paused ? '▶ ' : '⏸ ';
+  }
+  reset(){
+    this.world.clear();
+    this.applyMaterial('jelly');
+    this.world.params.gravDir = 1;
+    document.getElementById('flipBtn').classList.remove('on');
+    this.spawnMenagerie(this.seed);
+    history.replaceState(null, '', location.pathname);
+    this.syncUI();
+    this.toast('Reset to seed ' + this.seed);
+  }
+
+  copyLink(){
+    const hash = HashCodec.encode(this.world, this.seed);
+    const url = location.origin + location.pathname + '#' + hash;
+    const done = () => this.toast('Link copied — share your tank!');
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(url).then(done).catch(() => this._fallbackCopy(url, done));
+    } else this._fallbackCopy(url, done);
+    history.replaceState(null, '', '#' + hash);
+  }
+  _fallbackCopy(text, done){
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); done(); } catch (e){ this.toast('Copy failed — URL is in the address bar', 'err'); }
+    document.body.removeChild(ta);
+  }
+  _loadFromHash(){
+    const h = location.hash.replace(/^#/, '');
+    if (!h) return false;
+    const scene = HashCodec.decode(h);
+    if (!scene) return false;
+    try {
+      this.seed = HashCodec.apply(scene, this.world);
+    } catch (e){
+      // corrupt / hand-edited hash — fall back to the seeded scene
+      this.world.clear();
+      return false;
+    }
+    // reflect flip/eyes/weld toggles in the UI
+    document.getElementById('flipBtn').classList.toggle('on', this.world.params.gravDir < 0);
+    document.getElementById('eyesBtn').classList.toggle('on', this.world.params.eyes);
+    document.getElementById('weldBtn').classList.toggle('on', this.world.params.weld);
+    this.toast('Loaded shared scene');
+    return true;
+  }
+
+  record(){
+    // Toggle: a second click while recording stops the clip early.
+    if (this.recording){
+      if (this._activeRec && this._activeRec.state !== 'inactive') this._activeRec.stop();
+      return;
+    }
+    if (typeof MediaRecorder === 'undefined' || !this.canvas.captureStream){
+      this.toast('Recording not supported in this browser', 'err'); return;
+    }
+    const mimes = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+    const mime = mimes.find(m => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || '';
+    let rec;
+    try {
+      const stream = this.canvas.captureStream(60);
+      rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 8e6 } : undefined);
+    } catch (e){ this.toast('Recorder init failed', 'err'); return; }
+    this._activeRec = rec;
+    const chunks = [];
+    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    rec.onstop = () => {
+      const blob = new Blob(chunks, { type: chunks[0] ? chunks[0].type : 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'blobforge-' + Date.now() + (mime.includes('mp4') ? '.mp4' : '.webm');
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      this.recording = false;
+      this._activeRec = null;
+      document.getElementById('rec').style.display = 'none';
+      document.getElementById('recBtn').classList.remove('on');
+      this.toast('Clip saved 🎬');
+    };
+    this.recording = true;
+    document.getElementById('rec').style.display = 'flex';
+    document.getElementById('recBtn').classList.add('on');
+    const DURATION = 6000;
+    const started = performance.now();
+    rec.start(100);
+    const tick = () => {
+      const left = Math.max(0, DURATION - (performance.now() - started));
+      document.getElementById('recTxt').textContent = 'REC ' + (left / 1000).toFixed(1) + 's';
+      if (left > 0 && this.recording) requestAnimationFrame(tick);
+    };
+    tick();
+    setTimeout(() => { if (rec.state !== 'inactive') rec.stop(); }, DURATION);
+  }
+
+  syncUI(){
+    const P = this.world.params;
+    document.getElementById('sGrav').value = P.gravity;
+    document.getElementById('sStiff').value = P.stiffness;
+    document.getElementById('sPress').value = P.pressure;
+    document.getElementById('sDrag').value = Math.round(P.drag * 100);
+    document.getElementById('sSlow').value = Math.round(P.slowmo * 100);
+    document.getElementById('vGrav').textContent = Math.round(P.gravity);
+    document.getElementById('vStiff').textContent = Math.round(P.stiffness) + '%';
+    document.getElementById('vPress').textContent = Math.round(P.pressure);
+    document.getElementById('vDrag').textContent = Math.round((1 - P.drag) * 1000) / 10 + '%';
+    document.getElementById('vSlow').textContent = Math.round(P.slowmo * 100) + '%';
+  }
+
+  toast(msg, kind){
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.toggle('err', kind === 'err');
+    el.classList.add('show');
+    clearTimeout(this._toastT);
+    this._toastT = setTimeout(() => el.classList.remove('show'), 1500);
+  }
+
+  frame(now){
+    let dt = (now - this.last) / 1000; this.last = now;
+    if (dt > 0.1) dt = 0.1;
+    // fps meter
+    this._fpsAcc += dt; this._fpsN++;
+    if (this._fpsAcc >= 0.4){ this.fps = this._fpsN / this._fpsAcc; this._fpsAcc = 0; this._fpsN = 0; }
+
+    if (!this.paused){
+      this.acc += dt * this.world.params.slowmo;
+      let steps = 0;
+      while (this.acc >= FIXED && steps < SUBSTEPS){ this.world.step(FIXED); this.acc -= FIXED; steps++; }
+      if (steps >= SUBSTEPS) this.acc = 0; // avoid spiral of death
+    }
+
+    const mat = MATERIALS[this.currentMat];
+    this.renderer.draw(this.world, this.input, mat ? mat.hue : undefined);
+    this.hud();
+    requestAnimationFrame(t => this.frame(t));
+  }
+  hud(){
+    let pts = 0; for (const b of this.world.bodies) pts += b.points.length;
+    document.getElementById('hud').innerHTML =
+      `<b>${this.world.bodies.length}</b> blobs · <b>${pts}</b> pts · ` +
+      `<b>${this.fps.toFixed(0)}</b> fps · tool <b>${this.input.tool}</b> · seed <b>${this.seed}</b>` +
+      (this.paused ? ' · <b>PAUSED</b>' : '');
+  }
+}
+
+let game;
+window.addEventListener('DOMContentLoaded', () => { game = new Game(); });
+</script>
+</body>
+</html>

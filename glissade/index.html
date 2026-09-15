@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Glissade — Hear your arrays sort themselves</title>
+<style>
+  :root{--bg:#0c0e14;--panel:#141824;--ink:#e6e9f0;--dim:#8a92a6;--acc:#ff6100;--a:#4fb0ff;--b:#ff7ad9;--ok:#39d67e;}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:14px/1.4 system-ui,Segoe UI,Roboto,sans-serif}
+  #wrap{max-width:1060px;margin:0 auto;padding:14px 16px 40px}
+  h1{font-size:22px;margin:0;letter-spacing:.5px}
+  h1 b{color:var(--acc)}
+  .tag{color:var(--dim);font-size:13px;margin:2px 0 12px}
+  #stage{position:relative;background:var(--panel);border-radius:12px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.4)}
+  canvas{display:block;width:100%;height:auto;background:linear-gradient(180deg,#10141f,#0c0e14)}
+  #banner{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(255,97,0,.92);color:#111;
+    font-weight:700;padding:6px 16px;border-radius:20px;opacity:0;transition:opacity .3s;pointer-events:none;font-size:15px}
+  #banner.show{opacity:1}
+  .lanehdr{display:flex;justify-content:space-between;gap:10px;margin-top:10px}
+  .lane{flex:1;background:var(--panel);border-radius:10px;padding:10px 12px}
+  .lane .nm{font-weight:700;font-size:15px}
+  .lane.A .nm{color:var(--a)} .lane.B .nm{color:var(--b)}
+  .prog{height:6px;border-radius:4px;background:#222838;margin:6px 0 8px;overflow:hidden}
+  .prog i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc),var(--ok));transition:width .1s}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;font-variant-numeric:tabular-nums}
+  .stats div span{display:block;color:var(--dim);font-size:11px}
+  .stats div b{font-size:15px}
+  #controls{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:end;margin-top:14px;background:var(--panel);padding:12px 14px;border-radius:10px}
+  .ctl{display:flex;flex-direction:column;gap:3px}
+  .ctl label{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px}
+  select,input[type=number]{background:#0c0e14;color:var(--ink);border:1px solid #2a3145;border-radius:6px;padding:5px 7px;font:inherit}
+  input[type=range]{width:130px;accent-color:var(--acc)}
+  .rowval{font-variant-numeric:tabular-nums;color:var(--ink);font-size:12px}
+  button{background:#1e2536;color:var(--ink);border:1px solid #2a3145;border-radius:7px;padding:7px 12px;font:inherit;cursor:pointer}
+  button:hover{border-color:var(--acc)}
+  button.pri{background:var(--acc);color:#111;border-color:var(--acc);font-weight:700}
+  button.rec.on{background:#e23b3b;color:#fff;border-color:#e23b3b}
+  button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+  #btns{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
+  .hint{color:var(--dim);font-size:12px;margin-top:10px}
+  a{color:var(--acc)}
+  @media (prefers-reduced-motion: reduce){#banner{transition:none}.prog i{transition:none}}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1><b>Glissade</b> — hear your arrays sort themselves</h1>
+  <div class="tag">Two sorts race on identical data, hard-panned left/right. Pitch maps to value, so order becomes an audible rising sweep.</div>
+
+  <div id="stage">
+    <canvas id="cv" width="1040" height="440"></canvas>
+    <div id="banner"></div>
+  </div>
+
+  <div class="lanehdr">
+    <div class="lane A">
+      <div class="nm" id="nmA">Lane A</div>
+      <div class="prog"><i id="pgA"></i></div>
+      <div class="stats"><div><span>compares</span><b id="cA">0</b></div><div><span>swaps/writes</span><b id="sA">0</b></div><div><span>accesses</span><b id="aA">0</b></div><div><span>ms</span><b id="tA">0</b></div></div>
+    </div>
+    <div class="lane B">
+      <div class="nm" id="nmB">Lane B</div>
+      <div class="prog"><i id="pgB"></i></div>
+      <div class="stats"><div><span>compares</span><b id="cB">0</b></div><div><span>swaps/writes</span><b id="sB">0</b></div><div><span>accesses</span><b id="aB">0</b></div><div><span>ms</span><b id="tB">0</b></div></div>
+    </div>
+  </div>
+
+  <div id="controls">
+    <div class="ctl"><label>Left (A)</label><select id="algoA"></select></div>
+    <div class="ctl"><label>Right (B)</label><select id="algoB"></select></div>
+    <div class="ctl"><label>Distribution</label><select id="dist">
+      <option value="random">random</option><option value="nearly">nearly-sorted</option>
+      <option value="reversed">reversed</option><option value="fewunique">few-unique</option>
+      <option value="sawtooth">sawtooth</option></select></div>
+    <div class="ctl"><label>Size N <span class="rowval" id="nv"></span></label><input id="N" type="range" min="16" max="512" step="4"></div>
+    <div class="ctl"><label>Speed <span class="rowval" id="spv"></span> ops/s</label><input id="speed" type="range" min="4" max="1200" step="4"></div>
+    <div class="ctl"><label>Seed</label><input id="seed" type="number" min="0" step="1" style="width:92px"></div>
+    <div class="ctl"><label>Scale</label><select id="scale"><option value="chromatic">chromatic</option><option value="pentatonic">pentatonic</option></select></div>
+    <div class="ctl"><label>Timbre</label><select id="wave"><option value="sine">sine</option><option value="triangle">triangle</option><option value="square">square</option><option value="sawtooth">sawtooth</option></select></div>
+    <div class="ctl"><label>Volume</label><input id="vol" type="range" min="0" max="1" step="0.01"></div>
+  </div>
+
+  <div id="btns">
+    <button id="play" class="pri">▶ Play</button>
+    <button id="step">⏭ Step</button>
+    <button id="reset">↺ Reset</button>
+    <button id="mute">🔊 Mute</button>
+    <button id="rerand">🎲 New seed</button>
+    <button id="share">🔗 Copy link</button>
+    <button id="rec" class="rec">● Record</button>
+    <span class="hint" id="msg"></span>
+  </div>
+  <div class="hint">Compares tick softly (triangle); swaps/writes hit harder in your chosen timbre. On finish, both arrays sweep left→right in pitch and light green as they verify. State lives in the URL hash — copy the link to reproduce this exact race. Keys: <b>Space</b> play/pause, <b>→</b> or <b>.</b> step, <b>R</b> reset, <b>M</b> mute.</div>
+</div>
+
+<script>
+"use strict";
+// ---------- seeded PRNG ----------
+function mulberry32(s){return function(){s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+// ---------- sort step-generators (mutate arr, yield {t:'cmp'|'swp'|'wr', i, j?, v?}) ----------
+const ALGOS={
+  bubble:function*(a){const n=a.length;for(let i=0;i<n-1;i++)for(let j=0;j<n-1-i;j++){yield{t:'cmp',i:j,j:j+1};if(a[j]>a[j+1]){[a[j],a[j+1]]=[a[j+1],a[j]];yield{t:'swp',i:j,j:j+1};}}},
+  insertion:function*(a){const n=a.length;for(let i=1;i<n;i++){let j=i;while(j>0){yield{t:'cmp',i:j-1,j:j};if(a[j-1]>a[j]){[a[j-1],a[j]]=[a[j],a[j-1]];yield{t:'swp',i:j-1,j:j};j--;}else break;}}},
+  selection:function*(a){const n=a.length;for(let i=0;i<n-1;i++){let m=i;for(let j=i+1;j<n;j++){yield{t:'cmp',i:m,j:j};if(a[j]<a[m])m=j;}if(m!==i){[a[i],a[m]]=[a[m],a[i]];yield{t:'swp',i:i,j:m};}}},
+  quick:function*(a){const st=[[0,a.length-1]];while(st.length){const[lo,hi]=st.pop();if(lo>=hi)continue;const pv=a[hi];let i=lo;for(let j=lo;j<hi;j++){yield{t:'cmp',i:j,j:hi};if(a[j]<pv){if(i!==j){[a[i],a[j]]=[a[j],a[i]];yield{t:'swp',i:i,j:j};}i++;}}if(i!==hi){[a[i],a[hi]]=[a[hi],a[i]];yield{t:'swp',i:i,j:hi};}st.push([lo,i-1]);st.push([i+1,hi]);}},
+  merge:function*(a){const n=a.length,buf=new Array(n);for(let w=1;w<n;w*=2)for(let lo=0;lo<n;lo+=2*w){const mid=Math.min(lo+w,n),hi=Math.min(lo+2*w,n);let i=lo,j=mid,k=lo;while(i<mid&&j<hi){yield{t:'cmp',i:i,j:j};if(a[i]<=a[j])buf[k++]=a[i++];else buf[k++]=a[j++];}while(i<mid)buf[k++]=a[i++];while(j<hi)buf[k++]=a[j++];for(let x=lo;x<hi;x++){a[x]=buf[x];yield{t:'wr',i:x,v:a[x]};}}},
+  heap:function*(a){const n=a.length;function*down(i,sz){while(true){let l=2*i+1,r=2*i+2,big=i;if(l<sz){yield{t:'cmp',i:l,j:big};if(a[l]>a[big])big=l;}if(r<sz){yield{t:'cmp',i:r,j:big};if(a[r]>a[big])big=r;}if(big===i)break;[a[i],a[big]]=[a[big],a[i]];yield{t:'swp',i:i,j:big};i=big;}}for(let i=(n>>1)-1;i>=0;i--)yield*down(i,n);for(let e=n-1;e>0;e--){[a[0],a[e]]=[a[e],a[0]];yield{t:'swp',i:0,j:e};yield*down(0,e);}},
+  radix:function*(a){const n=a.length,mx=Math.max(1,...a),out=new Array(n);for(let exp=1;Math.floor(mx/exp)>0;exp*=10){const cnt=new Array(10).fill(0);for(let i=0;i<n;i++){yield{t:'cmp',i:i,j:i};cnt[Math.floor(a[i]/exp)%10]++;}for(let d=1;d<10;d++)cnt[d]+=cnt[d-1];for(let i=n-1;i>=0;i--)out[--cnt[Math.floor(a[i]/exp)%10]]=a[i];for(let i=0;i<n;i++){a[i]=out[i];yield{t:'wr',i:i,v:a[i]};}}},
+  shell:function*(a){const n=a.length;for(let g=n>>1;g>0;g>>=1)for(let i=g;i<n;i++){const tmp=a[i];let j=i;while(j>=g){yield{t:'cmp',i:j-g,j:j};if(a[j-g]>tmp){a[j]=a[j-g];yield{t:'wr',i:j,v:a[j]};j-=g;}else break;}a[j]=tmp;yield{t:'wr',i:j,v:tmp};}}
+};
+const ALGO_NAMES={bubble:'Bubble',insertion:'Insertion',selection:'Selection',quick:'Quicksort',merge:'Merge',heap:'Heap',radix:'Radix LSD',shell:'Shell'};
+const SCALES={chromatic:[0,1,2,3,4,5,6,7,8,9,10,11],pentatonic:[0,2,4,7,9]};
+const DISTS=new Set(['random','nearly','reversed','fewunique','sawtooth']);
+const WAVES=new Set(['sine','triangle','square','sawtooth']);
+
+// ---------- audio: pooled-voice, one-tone-per-lane-per-frame, ADSR, hard voice cap ----------
+let actx=null,master=null,audioDest=null,activeVoices=0;const MAXV=14;
+function initAudio(){if(actx)return;actx=new(window.AudioContext||window.webkitAudioContext)();master=actx.createGain();master.gain.value=+$('vol').value;master.connect(actx.destination);audioDest=actx.createMediaStreamDestination();master.connect(audioDest);}
+function pitch(v){const norm=Math.max(0,Math.min(1,v/maxV)),sc=SCALES[scaleName],deg=sc.length*2,idx=Math.round(norm*deg),semis=Math.floor(idx/sc.length)*12+sc[idx%sc.length];return 220*Math.pow(2,semis/12);}
+function playTone(freq,pan,type,g,dur){if(muted||!actx||activeVoices>=MAXV)return;const o=actx.createOscillator(),ge=actx.createGain(),p=actx.createStereoPanner(),now=actx.currentTime;o.type=type;o.frequency.value=freq;p.pan.value=pan;ge.gain.setValueAtTime(.0001,now);ge.gain.exponentialRampToValueAtTime(g,now+.006);ge.gain.exponentialRampToValueAtTime(.0001,now+dur);o.connect(ge);ge.connect(p);p.connect(master);o.start(now);o.stop(now+dur+.02);activeVoices++;o.onended=()=>{activeVoices--;o.disconnect();ge.disconnect();p.disconnect();};}
+
+// ---------- state ----------
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+let N,speed,dist,seed,scaleName,wave,muted=false,maxV=1;
+let state='idle',playing=false,winner=null,opAcc=0,lastT=0,finaleIdx=0,startClock=0,elapsed=0,dirty=true;
+// running race time in ms: accumulated elapsed plus the current play segment
+function runMs(){return elapsed+(playing?performance.now()-startClock:0);}
+const laneA={algo:'quick',pan:-.9,cls:'A'},laneB={algo:'bubble',pan:.9,cls:'B'},lanes=[laneA,laneB];
+const $=id=>document.getElementById(id);
+
+function genData(){const rng=mulberry32(seed>>>0),arr=[];
+  if(dist==='reversed'){for(let i=0;i<N;i++)arr[i]=N-i;}
+  else if(dist==='sawtooth'){const per=Math.max(2,Math.floor(N/4));for(let i=0;i<N;i++)arr[i]=1+Math.floor((i%per)/per*(N-1));}
+  else if(dist==='fewunique'){const lv=5,st=Math.max(1,Math.floor((N-1)/lv));for(let i=0;i<N;i++)arr[i]=1+Math.floor(rng()*lv)*st;}
+  else{for(let i=0;i<N;i++)arr[i]=i+1;for(let i=N-1;i>0;i--){const j=Math.floor(rng()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];}
+    if(dist==='nearly'){arr.sort((x,y)=>x-y);const sw=Math.max(1,Math.floor(N*.05));for(let k=0;k<sw;k++){const i=Math.floor(rng()*N),j=Math.min(N-1,i+1+Math.floor(rng()*3));[arr[i],arr[j]]=[arr[j],arr[i]];}}}
+  return arr;}
+
+function reset(){state='idle';playing=false;winner=null;opAcc=0;finaleIdx=0;elapsed=0;maxV=N;
+  const base=genData();
+  lanes.forEach(L=>{L.arr=base.slice();L.gen=ALGOS[L.algo](L.arr);L.finished=false;L.comps=L.swaps=L.writes=L.acc=0;L.ms=0;L.active=[];L.sound=null;L.verify=0;});
+  $('banner').className='';$('msg').textContent='Press Play to start — first click enables sound.';$('play').textContent='▶ Play';
+  dirty=true;render();updateStats();}
+
+function sortedFrac(a){let c=0;for(let i=1;i<a.length;i++)if(a[i-1]<=a[i])c++;return a.length<2?1:c/(a.length-1);}
+
+function stepLane(L){if(L.finished)return;const r=L.gen.next();if(r.done){L.finished=true;L.ms=runMs();if(!winner){winner=L;showBanner(ALGO_NAMES[L.algo]+' finishes first!');}return;}
+  const op=r.value;L.active=op.j!==undefined?[op.i,op.j]:[op.i];
+  if(op.t==='cmp'){L.comps++;L.acc+=2;}else if(op.t==='swp'){L.swaps++;L.acc+=4;}else{L.writes++;L.acc+=1;}
+  if(!L.sound||op.t!=='cmp')L.sound=op;}
+
+function sonify(){lanes.forEach(L=>{if(!L.sound)return;const op=L.sound,v=L.arr[op.i]||1,swp=op.t!=='cmp';playTone(pitch(v),L.pan,swp?wave:'triangle',swp?.28:.14,swp?.09:.06);L.sound=null;});}
+
+function showBanner(t){const b=$('banner');b.textContent='🏆 '+t;b.className='show';}
+
+function frame(t){requestAnimationFrame(frame);if(!lastT)lastT=t;const dt=Math.min(.05,(t-lastT)/1000);lastT=t;let active=false;
+  if(state==='sorting'&&playing){opAcc+=speed*dt;let steps=Math.floor(opAcc);opAcc-=steps;if(steps>0){for(let s=0;s<steps;s++)lanes.forEach(stepLane);const now=runMs();lanes.forEach(L=>{if(!L.finished)L.ms=now;});sonify();}
+    if(lanes.every(L=>L.finished)){state='finale';}active=true;}
+  else if(state==='finale'){opAcc+=Math.max(speed,N)*dt;let steps=Math.floor(opAcc);opAcc-=steps;let last=-1;for(let s=0;s<steps&&finaleIdx<N;s++){last=finaleIdx;finaleIdx++;}lanes.forEach(L=>L.verify=finaleIdx);
+    if(last>=0)lanes.forEach(L=>playTone(pitch(L.arr[last]),L.pan*.6,wave,.32,.12));
+    if(finaleIdx>=N){state='done';showBanner((winner?ALGO_NAMES[winner.algo]:'')+' won — sorted!');playing=false;$('play').textContent='▶ Play';}active=true;}
+  if(active||dirty){render();updateStats();dirty=false;}}
+
+function render(){ctx.clearRect(0,0,W,H);const pw=W/2;
+  drawLane(0,pw,laneA);drawLane(pw,pw,laneB);
+  ctx.strokeStyle='rgba(255,255,255,.08)';ctx.beginPath();ctx.moveTo(pw,0);ctx.lineTo(pw,H);ctx.stroke();}
+function drawLane(x0,w,L){if(!L.arr)return;const n=L.arr.length,bw=w/n,base=H-8,top=24;
+  for(let i=0;i<n;i++){const v=L.arr[i],bh=(v/maxV)*(base-top),x=x0+i*bw;
+    let col='hsl('+Math.round((v/maxV)*280)+',72%,'+(38+(v/maxV)*22)+'%)';
+    if((state==='finale'||state==='done')&&i<L.verify)col='hsl(142,80%,52%)';
+    if(L.active.includes(i))col='#ffffff';
+    ctx.fillStyle=col;ctx.fillRect(x,base-bh,Math.max(1,bw-1),bh);}
+  ctx.fillStyle=L===laneA?'#4fb0ff':'#ff7ad9';ctx.font='12px system-ui';ctx.fillText(ALGO_NAMES[L.algo]+(L.finished?' ✓':''),x0+8,16);}
+
+function updateStats(){const f=(id,val)=>{$(id).textContent=val;};
+  f('cA',laneA.comps);f('sA',laneA.swaps+laneA.writes);f('aA',laneA.acc);f('tA',Math.round(laneA.ms));
+  f('cB',laneB.comps);f('sB',laneB.swaps+laneB.writes);f('aB',laneB.acc);f('tB',Math.round(laneB.ms));
+  $('nmA').textContent='A · '+ALGO_NAMES[laneA.algo];$('nmB').textContent='B · '+ALGO_NAMES[laneB.algo];
+  $('pgA').style.width=(laneA.arr?sortedFrac(laneA.arr)*100:0)+'%';$('pgB').style.width=(laneB.arr?sortedFrac(laneB.arr)*100:0)+'%';}
+
+// ---------- controls ----------
+function fillAlgoSelect(sel){for(const k in ALGO_NAMES){const o=document.createElement('option');o.value=k;o.textContent=ALGO_NAMES[k];sel.appendChild(o);}}
+fillAlgoSelect($('algoA'));fillAlgoSelect($('algoB'));
+
+function readUI(){laneA.algo=$('algoA').value;laneB.algo=$('algoB').value;N=+$('N').value;speed=+$('speed').value;dist=$('dist').value;seed=+$('seed').value;scaleName=$('scale').value;wave=$('wave').value;$('nv').textContent=N;$('spv').textContent=speed;}
+function writeUI(){$('algoA').value=laneA.algo;$('algoB').value=laneB.algo;$('N').value=N;$('speed').value=speed;$('dist').value=dist;$('seed').value=seed;$('scale').value=scaleName;$('wave').value=wave;$('nv').textContent=N;$('spv').textContent=speed;}
+
+function writeHash(){location.hash=new URLSearchParams({a:laneA.algo,b:laneB.algo,n:N,s:speed,d:dist,seed:seed,sc:scaleName,w:wave}).toString();}
+function readHash(){const p=new URLSearchParams(location.hash.slice(1));if(![...p.keys()].length)return false;
+  if(ALGO_NAMES[p.get('a')])laneA.algo=p.get('a');if(ALGO_NAMES[p.get('b')])laneB.algo=p.get('b');
+  const nv=p.get('n');if(nv&&Number.isFinite(+nv))N=Math.max(16,Math.min(512,+nv));
+  const sv=p.get('s');if(sv&&Number.isFinite(+sv))speed=Math.max(4,Math.min(1200,+sv));
+  if(DISTS.has(p.get('d')))dist=p.get('d');
+  const sd=p.get('seed');if(sd&&Number.isFinite(+sd))seed=+sd;
+  if(SCALES[p.get('sc')])scaleName=p.get('sc');
+  if(WAVES.has(p.get('w')))wave=p.get('w');return true;}
+
+// defaults
+laneA.algo='quick';laneB.algo='bubble';N=96;speed=180;dist='random';seed=42;scaleName='pentatonic';wave='sine';
+readHash();writeUI();readUI();reset();
+
+$('play').onclick=()=>{initAudio();if(actx.state==='suspended')actx.resume();
+  if(state==='done'||state==='finale'){readUI();reset();}
+  if(state==='idle'){elapsed=0;lanes.forEach(L=>L.ms=0);}
+  playing=!playing;
+  if(playing){state='sorting';startClock=performance.now();$('msg').textContent='';$('play').textContent='⏸ Pause';}
+  else{elapsed+=performance.now()-startClock;dirty=true;$('play').textContent='▶ Play';}};
+$('step').onclick=()=>{initAudio();if(actx.state==='suspended')actx.resume();$('msg').textContent='';if(state==='idle'){state='sorting';startClock=performance.now();}if(state==='sorting'){playing=false;$('play').textContent='▶ Play';lanes.forEach(stepLane);const now=runMs();lanes.forEach(L=>{if(!L.finished)L.ms=now;});sonify();if(lanes.every(L=>L.finished))state='finale';dirty=true;render();updateStats();}};
+$('reset').onclick=()=>{readUI();reset();writeHash();};
+$('mute').onclick=()=>{muted=!muted;$('mute').textContent=muted?'🔇 Unmute':'🔊 Mute';};
+$('rerand').onclick=()=>{seed=Math.floor(Math.random()*1e6);$('seed').value=seed;readUI();reset();writeHash();};
+$('share').onclick=()=>{writeHash();const msg=t=>{$('msg').textContent=t;setTimeout(()=>{if($('msg').textContent===t)$('msg').textContent='';},3500);};
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(location.href).then(()=>msg('Link copied — reproduces this exact race.')).catch(()=>msg('Copy failed — copy the URL from your address bar.'));}
+  else{msg('Shareable URL is in your address bar — copy it to share this race.');}};
+['algoA','algoB','dist','scale','wave','seed'].forEach(id=>$(id).onchange=()=>{readUI();reset();writeHash();});
+$('N').oninput=()=>{$('nv').textContent=$('N').value;};
+$('N').onchange=()=>{readUI();reset();writeHash();};
+$('speed').oninput=()=>{speed=+$('speed').value;$('spv').textContent=speed;};
+$('vol').value=.5;$('vol').oninput=()=>{if(master)master.gain.value=+$('vol').value;};
+
+// ---------- record & share (MediaRecorder: canvas video + audio) ----------
+let rec=null,chunks=[];
+$('rec').onclick=()=>{initAudio();if(actx.state==='suspended')actx.resume();
+  if(rec&&rec.state==='recording'){rec.stop();return;}
+  try{const vs=cv.captureStream(30);const stream=new MediaStream([...vs.getVideoTracks(),...audioDest.stream.getAudioTracks()]);
+    const mime=['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].find(m=>MediaRecorder.isTypeSupported(m))||'video/webm';
+    rec=new MediaRecorder(stream,{mimeType:mime});chunks=[];
+    rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};
+    rec.onstop=()=>{const blob=new Blob(chunks,{type:'video/webm'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='glissade-'+laneA.algo+'-vs-'+laneB.algo+'-'+seed+'.webm';a.click();setTimeout(()=>URL.revokeObjectURL(url),4000);$('rec').textContent='● Record';$('rec').classList.remove('on');$('msg').textContent='Clip downloaded.';setTimeout(()=>$('msg').textContent='',2500);};
+    rec.start();$('rec').textContent='■ Stop';$('rec').classList.add('on');$('msg').textContent='Recording… hit Play to capture the race.';}
+  catch(e){$('msg').textContent='Recording unsupported in this browser.';}};
+
+// ---------- keyboard controls ----------
+document.addEventListener('keydown',e=>{
+  if(e.target&&e.target.matches&&e.target.matches('input,select,textarea'))return;
+  if(e.metaKey||e.ctrlKey||e.altKey)return;
+  if(e.key===' '||e.key==='Spacebar'){e.preventDefault();$('play').click();}
+  else if(e.key==='.'||e.key==='ArrowRight'){e.preventDefault();$('step').click();}
+  else if(e.key==='r'||e.key==='R'){$('reset').click();}
+  else if(e.key==='m'||e.key==='M'){$('mute').click();}});
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

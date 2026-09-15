@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CockcroftGault — Creatinine Clearance Calculator</title>
+<meta name="description" content="Estimate creatinine clearance (CrCl) with the Cockcroft-Gault equation from age, weight, sex and serum creatinine — the classic formula for renal drug dosing. 100% offline, informational only.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('cg-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#0891b2;
+    --bg:#f0f8fa; --card:#ffffff; --fg:#111e22; --muted:#556970; --line:#d9eaee; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#07141a; --card:#0f1e24; --fg:#e6f4f8; --muted:#82a1aa; --line:#1a2c33; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:640px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#0e7490);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:640px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.78rem;color:var(--muted);margin-bottom:5px;font-weight:600}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .field{margin-bottom:14px}
+  input{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem}
+  .row2{display:flex;gap:6px}
+  .row2 button{flex:1;padding:9px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;cursor:pointer;font:inherit}
+  .row2 button.active{background:var(--c);color:#fff;border-color:var(--c)}
+  .out{text-align:center}
+  .big{font-size:3rem;font-weight:800;color:var(--c);line-height:1}
+  .u{color:var(--muted);font-size:.85rem}
+  .cat{display:inline-block;margin-top:10px;padding:5px 16px;border-radius:999px;color:#fff;font-weight:700}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:640px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.8rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🩺</div>
+    <div><h1>CockcroftGault</h1><div class="sub">Creatinine clearance</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div class="field"><label for="age">Age (years)</label><input type="number" id="age" value="60" min="1" step="1"></div>
+      <div class="field"><label for="weight">Weight (kg)</label><input type="number" id="weight" value="70" min="1" step="0.5"></div>
+    </div>
+    <div class="field"><label for="scr">Serum creatinine (<span id="scrUnit">mg/dL</span>)</label><input type="number" id="scr" value="1.0" min="0.1" step="0.01"></div>
+    <div class="grid">
+      <div class="field"><label>Serum creatinine unit</label>
+        <div class="row2"><button id="uMg" class="active" type="button">mg/dL</button><button id="uUm" type="button">µmol/L</button></div>
+      </div>
+      <div class="field"><label>Sex</label>
+        <div class="row2"><button id="sMale" class="active" type="button">Male</button><button id="sFemale" type="button">Female</button></div>
+      </div>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card out">
+    <div class="big" id="crcl">—</div>
+    <div class="u">mL/min (Cockcroft-Gault)</div>
+    <div><span class="cat" id="cat"></span></div>
+  </div>
+</main>
+<footer>
+  Cockcroft-Gault: CrCl = ((140 − age) × weight) ÷ (72 × Scr) × (0.85 if female). It estimates clearance for renal drug dosing (uses actual body weight here). Informational only — <strong>not medical advice</strong>. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/cockcroft-gault">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  const UMOL_PER_MGDL = 88.42;
+
+  // Cockcroft-Gault CrCl in mL/min. weight kg, Scr mg/dL.
+  function cockcroftGault(age, weightKg, scrMgdl, sex){
+    const a = Number(age), w = Number(weightKg), s = Number(scrMgdl);
+    if(![a, w, s].every(Number.isFinite)) throw new Error('enter numbers');
+    if(a <= 0) throw new Error('age must be > 0');
+    if(w <= 0) throw new Error('weight must be > 0');
+    if(s <= 0) throw new Error('creatinine must be > 0');
+    if(sex !== 'male' && sex !== 'female') throw new Error('sex must be male or female');
+    const base = ((140 - a) * w) / (72 * s);
+    return sex === 'female' ? base * 0.85 : base;
+  }
+
+  function crclFrom(age, weightKg, scr, unit, sex){
+    const mgdl = unit === 'umol' ? Number(scr) / UMOL_PER_MGDL : Number(scr);
+    return cockcroftGault(age, weightKg, mgdl, sex);
+  }
+
+  const CATS = [
+    { min: 90,        name: 'Normal',                color: '#16a34a' },
+    { min: 60,        name: 'Mildly decreased',      color: '#65a30d' },
+    { min: 30,        name: 'Moderately decreased',  color: '#ca8a04' },
+    { min: 15,        name: 'Severely decreased',    color: '#ea580c' },
+    { min: -Infinity, name: 'Kidney failure',        color: '#dc2626' }
+  ];
+  function category(crcl){ return CATS.find(c => Number(crcl) >= c.min); }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('crcl')){
+    const $ = id => document.getElementById(id);
+    let unit = 'mg', sex = 'male';
+
+    function render(){
+      try{
+        const v = crclFrom($('age').value, $('weight').value, $('scr').value, unit === 'mg' ? 'mgdl' : 'umol', sex);
+        const cat = category(v);
+        $('crcl').textContent = Math.round(v);
+        $('cat').textContent = cat.name;
+        $('cat').style.background = cat.color;
+        $('err').textContent = '';
+      }catch(e){ $('crcl').textContent = '—'; $('cat').textContent = ''; $('err').textContent = e.message; }
+    }
+    function setUnit(u){ unit = u; $('uMg').classList.toggle('active', u === 'mg'); $('uUm').classList.toggle('active', u === 'um'); $('scrUnit').textContent = u === 'mg' ? 'mg/dL' : 'µmol/L'; render(); }
+    function setSex(s){ sex = s; $('sMale').classList.toggle('active', s === 'male'); $('sFemale').classList.toggle('active', s === 'female'); render(); }
+    $('uMg').addEventListener('click', () => setUnit('mg'));
+    $('uUm').addEventListener('click', () => setUnit('um'));
+    $('sMale').addEventListener('click', () => setSex('male'));
+    $('sFemale').addEventListener('click', () => setSex('female'));
+    ['age', 'weight', 'scr'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('cg-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { UMOL_PER_MGDL, cockcroftGault, crclFrom, category };
+</script>
+</body>
+</html>

@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tessera — a real, scannable QR code you can style</title>
+<style>
+  :root{
+    --bg:#f4efe7; --panel:#fffdf9; --ink:#2c2620; --muted:#8a7f70;
+    --line:#e6ddce; --accent:#c8622a; --accent2:#e28a3e; --ok:#3e8e5a; --warn:#c0392b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+  header{padding:22px 28px 8px}
+  h1{margin:0;font-size:26px;letter-spacing:-.5px}
+  h1 span{color:var(--accent)}
+  .tag{color:var(--muted);margin:4px 0 0;font-size:14px;max-width:640px}
+  main{display:grid;grid-template-columns:minmax(320px,420px) 1fr;gap:22px;padding:18px 28px 40px;align-items:start}
+  @media(max-width:820px){main{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}
+  .card+.card{margin-top:16px}
+  label{display:block;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin:12px 0 5px}
+  input[type=text],input[type=password],input[type=url],textarea,select{
+    width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--ink);font:inherit}
+  textarea{resize:vertical;min-height:70px;font-size:13px}
+  .row{display:flex;gap:10px}
+  .row>*{flex:1}
+  .tabs{display:flex;gap:6px;margin-bottom:6px}
+  .tab{flex:1;padding:8px;border:1px solid var(--line);background:#fff;border-radius:9px;cursor:pointer;font-weight:600;font-size:13px;color:var(--muted);text-align:center}
+  .tab.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .seg{display:flex;gap:0;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .seg button{flex:1;padding:8px 4px;border:0;background:#fff;cursor:pointer;font:inherit;font-size:13px;color:var(--muted);border-right:1px solid var(--line)}
+  .seg button:last-child{border-right:0}
+  .seg button.on{background:var(--accent);color:#fff}
+  .hint{font-size:12px;color:var(--muted);margin-top:6px}
+  .swatches{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  .sw{width:26px;height:26px;border-radius:7px;border:2px solid #fff;box-shadow:0 0 0 1px var(--line);cursor:pointer}
+  input[type=color]{width:100%;height:38px;padding:2px;border:1px solid var(--line);border-radius:9px;background:#fff;cursor:pointer}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .emoji-row{display:flex;gap:5px;flex-wrap:wrap}
+  .emoji-row button{font-size:20px;width:38px;height:38px;border:1px solid var(--line);background:#fff;border-radius:9px;cursor:pointer}
+  .emoji-row button.on{border-color:var(--accent);background:#fdf1e8}
+  .preview{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;display:flex;flex-direction:column;align-items:center;position:sticky;top:18px}
+  #stage{max-width:100%;border-radius:12px;background:#fff}
+  .badge{display:inline-flex;align-items:center;gap:8px;font-weight:700;font-size:13px;padding:7px 14px;border-radius:999px;margin-top:16px}
+  .badge.ok{background:#e7f4ec;color:var(--ok)}
+  .badge.bad{background:#fbeae8;color:var(--warn)}
+  .badge.caution{background:#fdf1e3;color:#a35b1e}
+  .badge.neutral{background:#f0ebe2;color:var(--muted);font-weight:600}
+  .meta{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;margin-top:12px;font-size:12px;color:var(--muted)}
+  .meta b{color:var(--ink)}
+  .gauge{width:100%;max-width:360px;margin-top:14px}
+  .gauge .bar{height:9px;background:#efe7da;border-radius:999px;overflow:hidden}
+  .gauge .fill{height:100%;background:var(--ok);border-radius:999px;transition:width .2s,background .2s}
+  .gauge .lab{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:5px}
+  .btns{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap;justify-content:center}
+  .btn{padding:10px 16px;border-radius:10px;border:1px solid var(--accent);background:var(--accent);color:#fff;font-weight:600;cursor:pointer;font-size:14px}
+  .btn.alt{background:#fff;color:var(--accent)}
+  .btn.ghost{background:#fff;color:var(--muted);border-color:var(--line)}
+  .err{color:var(--warn);font-weight:600;font-size:13px;text-align:center;margin-top:12px}
+  details summary{cursor:pointer;font-weight:600;color:var(--accent);font-size:14px}
+  footer{color:var(--muted);font-size:12px;padding:0 28px 30px;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <h1><span>Tessera</span> — a QR code you can actually style</h1>
+  <p class="tag">A from-scratch QR encoder (byte / numeric / alphanumeric modes, Reed–Solomon error correction, mask optimization) in one file, zero dependencies. Every code is round-trip verified so you know it scans.</p>
+</header>
+
+<main>
+  <!-- LEFT: CONTROLS -->
+  <div>
+    <div class="card">
+      <div class="tabs" id="tabs" role="tablist" aria-label="Content type">
+        <div class="tab on" data-tab="url" role="tab" tabindex="0" aria-selected="true">Text / URL</div>
+        <div class="tab" data-tab="wifi" role="tab" tabindex="0" aria-selected="false">Wi-Fi</div>
+        <div class="tab" data-tab="vcard" role="tab" tabindex="0" aria-selected="false">Contact</div>
+      </div>
+
+      <div class="pane" data-pane="url">
+        <label>Text or URL</label>
+        <textarea id="i-url" placeholder="https://example.com or any text">https://tessera.qr</textarea>
+      </div>
+
+      <div class="pane" data-pane="wifi" hidden>
+        <label>Network name (SSID)</label>
+        <input type="text" id="i-ssid" placeholder="MyNetwork" value="CoffeeShop">
+        <label>Password</label>
+        <input type="text" id="i-pass" placeholder="password" value="latte1234">
+        <div class="row">
+          <div><label>Security</label>
+            <select id="i-enc"><option>WPA</option><option>WEP</option><option value="nopass">None</option></select>
+          </div>
+          <div><label>Hidden</label>
+            <select id="i-hidden"><option value="false">No</option><option value="true">Yes</option></select>
+          </div>
+        </div>
+      </div>
+
+      <div class="pane" data-pane="vcard" hidden>
+        <div class="row">
+          <div><label>First name</label><input type="text" id="i-fn" value="Ada"></div>
+          <div><label>Last name</label><input type="text" id="i-ln" value="Lovelace"></div>
+        </div>
+        <label>Phone</label><input type="text" id="i-tel" value="+15551234567">
+        <label>Email</label><input type="text" id="i-email" value="ada@example.com">
+        <label>Organization</label><input type="text" id="i-org" value="Analytical Engines">
+      </div>
+    </div>
+
+    <div class="card">
+      <label>Module shape</label>
+      <div class="seg" id="shape">
+        <button data-v="square" class="on">Square</button>
+        <button data-v="rounded">Rounded</button>
+        <button data-v="dots">Dots</button>
+      </div>
+      <div class="row">
+        <div><label>Foreground</label><input type="color" id="fg" value="#2c2620"></div>
+        <div><label>Background</label><input type="color" id="bg" value="#fffdf9"></div>
+      </div>
+      <div class="swatches" id="swatches"></div>
+      <label style="display:flex;gap:8px;align-items:center;text-transform:none;font-weight:500;color:var(--ink);margin-top:14px">
+        <input type="checkbox" id="grad" style="width:auto"> Subtle gradient fill
+      </label>
+      <label>Quiet zone (<span id="qzv">4</span> modules)</label>
+      <input type="range" id="qz" min="0" max="8" value="4">
+    </div>
+
+    <div class="card">
+      <label>Error correction level</label>
+      <div class="seg" id="ecl">
+        <button data-v="L">L · 7%</button>
+        <button data-v="M" class="on">M · 15%</button>
+        <button data-v="Q">Q · 25%</button>
+        <button data-v="H">H · 30%</button>
+      </div>
+      <p class="hint" id="ecl-hint"></p>
+
+      <label>Center logo</label>
+      <div class="emoji-row" id="emoji">
+        <button data-e="" class="on">✕</button>
+        <button data-e="😀">😀</button><button data-e="⚡">⚡</button>
+        <button data-e="☕">☕</button><button data-e="❤️">❤️</button>
+        <button data-e="🎵">🎵</button><button data-e="🚀">🚀</button>
+      </div>
+      <input type="file" id="logofile" accept="image/*" style="margin-top:8px;font-size:12px">
+      <div id="logostatus" hidden style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12px;color:var(--ink)">
+        <span id="logostatus-name">Image logo active</span>
+        <button type="button" id="logo-clear" class="btn ghost" style="padding:4px 10px;font-size:12px">Remove logo</button>
+      </div>
+      <p class="hint">Add an image or emoji — Tessera clears a padded area and relies on error correction to keep it scannable. It auto-bumps to level Q when a logo is present.</p>
+    </div>
+
+    <div class="card">
+      <details>
+        <summary>Batch mode &amp; print sheet</summary>
+        <p class="hint" style="margin-top:8px">One entry per line. Uses the current tab's format &amp; current styling. Opens a print-ready sheet with labeled codes (vector SVG, sharp at any size).</p>
+        <textarea id="batch" placeholder="https://example.com/a&#10;https://example.com/b&#10;WIFI:T:WPA;S:Guest;P:hello123;;"></textarea>
+        <button class="btn alt" id="batch-go" style="margin-top:10px">Open print sheet →</button>
+      </details>
+    </div>
+  </div>
+
+  <!-- RIGHT: PREVIEW -->
+  <div class="preview">
+    <canvas id="stage" width="360" height="360"></canvas>
+    <div id="badge" class="badge ok">Verified scannable</div>
+    <div class="err" id="err" hidden></div>
+    <div class="meta" id="meta">
+      <span>Version <b id="m-ver">1</b></span>
+      <span>Mode <b id="m-mode">byte</b></span>
+      <span>Mask <b id="m-mask">0</b></span>
+      <span>ECC <b id="m-ecl">M</b></span>
+    </div>
+    <div class="gauge" id="gauge" hidden>
+      <div class="lab"><span>Logo vs. correction budget</span><span id="g-pct">0%</span></div>
+      <div class="bar"><div class="fill" id="g-fill" style="width:0%"></div></div>
+    </div>
+    <div class="btns">
+      <button class="btn" id="dl-png">Download PNG</button>
+      <button class="btn alt" id="dl-svg">Download SVG</button>
+      <button class="btn ghost" id="share">Copy share link</button>
+    </div>
+  </div>
+</main>
+<footer>Tessera implements ISO/IEC 18004 QR encoding from scratch — no libraries, no network calls. Style options and payload live in the URL, so a styled code is a shareable link.</footer>
+
+<script>
+"use strict";
+/* ============================================================
+   Tessera QR core — from-scratch encoder + round-trip verifier
+   ============================================================ */
+
+// EC block table [ecPerBlock, g1blocks, g1data, g2blocks, g2data] indexed [version][L,M,Q,H]
+const EC=[null,
+ [[7,1,19,0,0],[10,1,16,0,0],[13,1,13,0,0],[17,1,9,0,0]],
+ [[10,1,34,0,0],[16,1,28,0,0],[22,1,22,0,0],[28,1,16,0,0]],
+ [[15,1,55,0,0],[26,1,44,0,0],[18,2,17,0,0],[22,2,13,0,0]],
+ [[20,1,80,0,0],[18,2,32,0,0],[26,2,24,0,0],[16,4,9,0,0]],
+ [[26,1,108,0,0],[24,2,43,0,0],[18,2,15,2,16],[22,2,11,2,12]],
+ [[18,2,68,0,0],[16,4,27,0,0],[24,4,19,0,0],[28,4,15,0,0]],
+ [[20,2,78,0,0],[18,4,31,0,0],[18,2,14,4,15],[26,4,13,1,14]],
+ [[24,2,97,0,0],[22,2,38,2,39],[22,4,18,2,19],[26,4,14,2,15]],
+ [[30,2,116,0,0],[22,3,36,2,37],[20,4,16,4,17],[24,4,12,4,13]],
+ [[18,2,68,2,69],[26,4,43,1,44],[24,6,19,2,20],[28,6,15,2,16]]
+];
+const ALIGN=[null,[],[6,18],[6,22],[6,26],[6,30],[6,34],[6,22,38],[6,24,42],[6,26,46],[6,28,50]];
+const ECL={L:{i:0,fmt:1},M:{i:1,fmt:0},Q:{i:2,fmt:3},H:{i:3,fmt:2}};
+const ALNUM="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:";
+
+// ---- GF(256) arithmetic (primitive poly 0x11D) ----
+function gfMul(x,y){let z=0;for(let i=7;i>=0;i--){z=(z<<1)^((z>>>7)*0x11D);z^=((y>>>i)&1)*x;}return z&0xFF;}
+function gfPow(b,e){let r=1;for(let i=0;i<e;i++)r=gfMul(r,b);return r;}
+function rsDivisor(deg){const r=new Uint8Array(deg);r[deg-1]=1;let root=1;
+  for(let i=0;i<deg;i++){for(let j=0;j<deg;j++){r[j]=gfMul(r[j],root);if(j+1<deg)r[j]^=r[j+1];}root=gfMul(root,2);}return r;}
+function rsRemainder(data,deg){const div=rsDivisor(deg),res=new Uint8Array(deg);
+  for(const b of data){const f=(b^res[0])&0xFF;for(let i=0;i<deg-1;i++)res[i]=res[i+1];res[deg-1]=0;
+    for(let i=0;i<deg;i++)res[i]^=gfMul(div[i],f);}return res;}
+
+// ---- mode detection ----
+function detectMode(t){
+  if(/^[0-9]+$/.test(t))return"numeric";
+  if([...t].every(c=>ALNUM.indexOf(c)>=0))return"alphanumeric";
+  return"byte";
+}
+const utf8=t=>new TextEncoder().encode(t);
+function ccBits(mode,ver){const small=ver<=9;
+  if(mode==="numeric")return small?10:12;
+  if(mode==="alphanumeric")return small?9:11;
+  return small?8:16;}
+function dataBitLen(mode,t){
+  if(mode==="numeric"){const n=t.length,r=n%3;return Math.floor(n/3)*10+(r===2?7:r===1?4:0);}
+  if(mode==="alphanumeric")return Math.floor(t.length/2)*11+(t.length%2)*6;
+  return utf8(t).length*8;}
+function dataCodewords(ver,e){const[ec,g1,g1d,g2,g2d]=EC[ver][e.i];return g1*g1d+g2*g2d;}
+
+// ---- build the padded data-codeword byte stream ----
+function buildBytes(text,mode,ver,e){
+  const bits=[],push=(v,n)=>{for(let i=n-1;i>=0;i--)bits.push((v>>i)&1);};
+  push(mode==="numeric"?1:mode==="alphanumeric"?2:4,4);
+  const len=mode==="byte"?utf8(text).length:text.length;
+  push(len,ccBits(mode,ver));
+  if(mode==="numeric"){for(let i=0;i<text.length;i+=3){const c=text.substr(i,3);push(parseInt(c,10),c.length*3+1);}}
+  else if(mode==="alphanumeric"){for(let i=0;i<text.length;i+=2){
+    if(i+1<text.length)push(ALNUM.indexOf(text[i])*45+ALNUM.indexOf(text[i+1]),11);
+    else push(ALNUM.indexOf(text[i]),6);}}
+  else{for(const b of utf8(text))push(b,8);}
+  const cap=dataCodewords(ver,e)*8;
+  for(let i=0;i<4&&bits.length<cap;i++)bits.push(0);
+  while(bits.length%8)bits.push(0);
+  const bytes=[];for(let i=0;i<bits.length;i+=8){let v=0;for(let j=0;j<8;j++)v=(v<<1)|bits[i+j];bytes.push(v);}
+  const pad=[0xEC,0x11];let k=0;while(bytes.length<dataCodewords(ver,e))bytes.push(pad[k++%2]);
+  return bytes;
+}
+
+// ---- interleave data+EC across blocks ----
+function makeCodewords(dataCW,ver,e){
+  const[ec,g1,g1d,g2,g2d]=EC[ver][e.i],blocks=[];let off=0;
+  for(let k=0;k<g1;k++){blocks.push(dataCW.slice(off,off+g1d));off+=g1d;}
+  for(let k=0;k<g2;k++){blocks.push(dataCW.slice(off,off+g2d));off+=g2d;}
+  const ecB=blocks.map(b=>rsRemainder(b,ec)),out=[],maxD=Math.max(g1d,g2d);
+  for(let i=0;i<maxD;i++)for(const b of blocks)if(i<b.length)out.push(b[i]);
+  for(let i=0;i<ec;i++)for(const eb of ecB)out.push(eb[i]);
+  return{stream:out,blocks,ec};
+}
+function deinterleave(bytes,blocks,ec){
+  const counts=blocks.map(b=>b.length),maxD=Math.max(...counts),data=blocks.map(()=>[]);let idx=0;
+  for(let i=0;i<maxD;i++)for(let b=0;b<blocks.length;b++)if(i<counts[b])data[b].push(bytes[idx++]);
+  const ecOut=blocks.map(()=>[]);
+  for(let i=0;i<ec;i++)for(let b=0;b<blocks.length;b++)ecOut[b].push(bytes[idx++]);
+  return data.map((d,b)=>d.concat(ecOut[b]));
+}
+// RS syndrome check: valid codeword evaluates to 0 at a^0..a^(ec-1)
+function syndromesZero(block,ec){
+  for(let i=0;i<ec;i++){const x=gfPow(2,i);let y=0;for(const b of block)y=gfMul(y,x)^b;if(y!==0)return false;}
+  return true;
+}
+
+// ---- matrix construction ----
+function newGrid(sz,val){return Array.from({length:sz},()=>new Array(sz).fill(val));}
+function maskFn(m,r,c){switch(m){
+  case 0:return(r+c)%2===0;case 1:return r%2===0;case 2:return c%3===0;case 3:return(r+c)%3===0;
+  case 4:return(Math.floor(r/3)+Math.floor(c/2))%2===0;case 5:return(r*c)%2+(r*c)%3===0;
+  case 6:return((r*c)%2+(r*c)%3)%2===0;default:return((r+c)%2+(r*c)%3)%2===0;}}
+
+function buildBase(ver,e,stream){
+  const sz=ver*4+17,mod=newGrid(sz,false),fn=newGrid(sz,false);
+  const setF=(c,r,d)=>{if(r>=0&&r<sz&&c>=0&&c<sz){mod[r][c]=d;fn[r][c]=true;}};
+  for(let i=0;i<sz;i++){setF(6,i,i%2===0);setF(i,6,i%2===0);}
+  const finder=(cx,cy)=>{for(let dy=-4;dy<=4;dy++)for(let dx=-4;dx<=4;dx++){
+    const d=Math.max(Math.abs(dx),Math.abs(dy));setF(cx+dx,cy+dy,d!==2&&d!==4);}};
+  finder(3,3);finder(sz-4,3);finder(3,sz-4);
+  const pos=ALIGN[ver],n=pos.length;
+  for(let i=0;i<n;i++)for(let j=0;j<n;j++){
+    if((i===0&&j===0)||(i===0&&j===n-1)||(i===n-1&&j===0))continue;
+    for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++)setF(pos[i]+dx,pos[j]+dy,Math.max(Math.abs(dx),Math.abs(dy))!==1);}
+  setF(8,sz-8,true);
+  reserveFormat(mod,fn,sz);reserveVersion(mod,fn,sz,ver);
+  // place data via zigzag
+  const cells=dataCells(fn,sz);
+  for(let k=0;k<cells.length;k++){const[r,c]=cells[k];const bit=k<stream.length*8?(stream[k>>3]>>(7-(k&7)))&1:0;mod[r][c]=!!bit;}
+  return{mod,fn,sz,cells};
+}
+function reserveFormat(mod,fn,sz){
+  for(let i=0;i<=5;i++)fn[i][8]=true;fn[7][8]=true;fn[8][8]=true;fn[8][7]=true;
+  for(let i=9;i<15;i++)fn[8][14-i]=true;
+  for(let i=0;i<8;i++)fn[8][sz-1-i]=true;
+  for(let i=8;i<15;i++)fn[sz-15+i][8]=true;
+  fn[sz-8][8]=true;mod[sz-8][8]=true;}
+function reserveVersion(mod,fn,sz,ver){if(ver<7)return;
+  for(let i=0;i<18;i++){const a=sz-11+i%3,b=Math.floor(i/3);fn[b][a]=true;fn[a][b]=true;}}
+function dataCells(fn,sz){const cells=[];
+  for(let right=sz-1;right>=1;right-=2){if(right===6)right=5;
+    for(let v=0;v<sz;v++)for(let j=0;j<2;j++){const c=right-j,up=((right+1)&2)===0,r=up?sz-1-v:v;
+      if(!fn[r][c])cells.push([r,c]);}}
+  return cells;}
+function writeFormat(mod,e,msk,sz){
+  const data=(e.fmt<<3)|msk;let rem=data;for(let i=0;i<10;i++)rem=(rem<<1)^(((rem>>>9)&1)*0x537);
+  const bits=((data<<10)|rem)^0x5412,b=i=>(bits>>i)&1;
+  for(let i=0;i<=5;i++)mod[i][8]=!!b(i);mod[7][8]=!!b(6);mod[8][8]=!!b(7);mod[8][7]=!!b(8);
+  for(let i=9;i<15;i++)mod[8][14-i]=!!b(i);
+  for(let i=0;i<8;i++)mod[8][sz-1-i]=!!b(i);
+  for(let i=8;i<15;i++)mod[sz-15+i][8]=!!b(i);}
+function writeVersion(mod,ver,sz){if(ver<7)return;
+  let rem=ver;for(let i=0;i<12;i++)rem=(rem<<1)^(((rem>>>11)&1)*0x1F25);
+  const bits=(ver<<12)|rem;
+  for(let i=0;i<18;i++){const bit=!!((bits>>i)&1),a=sz-11+i%3,d=Math.floor(i/3);mod[d][a]=bit;mod[a][d]=bit;}}
+
+function applyMask(src,fn,msk,sz){const g=src.map(row=>row.slice());
+  for(let r=0;r<sz;r++)for(let c=0;c<sz;c++)if(!fn[r][c]&&maskFn(msk,r,c))g[r][c]=!g[r][c];return g;}
+
+function penalty(m,sz){let p=0;
+  for(let y=0;y<sz;y++){let run=1;for(let x=1;x<sz;x++){if(m[y][x]===m[y][x-1])run++;else{if(run>=5)p+=run-2;run=1;}}if(run>=5)p+=run-2;}
+  for(let x=0;x<sz;x++){let run=1;for(let y=1;y<sz;y++){if(m[y][x]===m[y-1][x])run++;else{if(run>=5)p+=run-2;run=1;}}if(run>=5)p+=run-2;}
+  for(let y=0;y<sz-1;y++)for(let x=0;x<sz-1;x++){const v=m[y][x];if(m[y][x+1]===v&&m[y+1][x]===v&&m[y+1][x+1]===v)p+=3;}
+  const pa=[true,false,true,true,true,false,true,false,false,false,false],pb=[false,false,false,false,true,false,true,true,true,false,true];
+  const chk=(get)=>{let hit=0;for(let a=0;a<11;a++){if(get(a)!==pa[a]){hit=1;break;}}if(!hit)return true;
+    for(let a=0;a<11;a++)if(get(a)!==pb[a])return false;return true;};
+  for(let y=0;y<sz;y++)for(let x=0;x<sz-10;x++)if(chk(a=>m[y][x+a]))p+=40;
+  for(let x=0;x<sz;x++)for(let y=0;y<sz-10;y++)if(chk(a=>m[y+a][x]))p+=40;
+  let dark=0;for(let y=0;y<sz;y++)for(let x=0;x<sz;x++)if(m[y][x])dark++;
+  p+=Math.floor(Math.abs(dark*100/(sz*sz)-50)/5)*10;
+  return p;}
+
+// ---- top-level: text -> full styled matrix + verification ----
+function generate(text,eclKey){
+  const e=ECL[eclKey],mode=detectMode(text),bitLen=dataBitLen(mode,text);
+  let ver=0;
+  for(let v=1;v<=10;v++){if(4+ccBits(mode,v)+bitLen<=dataCodewords(v,e)*8){ver=v;break;}}
+  if(!ver)throw new Error("Content too long for QR versions 1–10. Shorten it or lower the ECC level.");
+  const dataCW=buildBytes(text,mode,ver,e),{stream,blocks,ec}=makeCodewords(dataCW,ver,e);
+  const base=buildBase(ver,e,stream),sz=base.sz;
+  let best=-1,bestMsk=0,bestGrid=null;
+  for(let msk=0;msk<8;msk++){const g=applyMask(base.mod,base.fn,msk,sz);
+    writeFormat(g,e,msk,sz);writeVersion(g,ver,sz);const pen=penalty(g,sz);
+    if(best<0||pen<best){best=pen;bestMsk=msk;bestGrid=g;}}
+  // verify: read back the rendered matrix, de-interleave, RS syndrome check
+  const unmasked=applyMask(bestGrid,base.fn,bestMsk,sz);
+  const read=[];for(let k=0;k<stream.length;k++){let v=0;
+    for(let j=0;j<8;j++){const[r,c]=base.cells[k*8+j];v=(v<<1)|(unmasked[r][c]?1:0);}read.push(v);}
+  const fullBlocks=deinterleave(read,blocks,ec);
+  let verified=read.length===stream.length;
+  for(let i=0;i<read.length;i++)if(read[i]!==stream[i])verified=false;
+  for(const b of fullBlocks)if(!syndromesZero(b,ec))verified=false;
+  const correctable=blocks.length*Math.floor(ec/2);
+  return{modules:bestGrid,size:sz,version:ver,mode,mask:bestMsk,ecl:eclKey,verified,correctable,totalCW:stream.length};
+}
+
+/* ============================================================
+   Rendering, export, UI wiring
+   ============================================================ */
+const state={tab:"url",shape:"square",fg:"#2c2620",bg:"#fffdf9",grad:false,qz:4,ecl:"M",emoji:"",img:null};
+let current=null;
+const $=id=>document.getElementById(id);
+
+function payload(){
+  if(state.tab==="wifi"){
+    const esc=s=>String(s).replace(/([\\;,":])/g,"\\$1");
+    const enc=$("i-enc").value,ssid=esc($("i-ssid").value),pass=esc($("i-pass").value),h=$("i-hidden").value;
+    if(enc==="nopass")return`WIFI:T:nopass;S:${ssid};;`;
+    return`WIFI:T:${enc};S:${ssid};P:${pass};${h==="true"?"H:true;":""};`;
+  }
+  if(state.tab==="vcard"){
+    const fn=$("i-fn").value,ln=$("i-ln").value;
+    return["BEGIN:VCARD","VERSION:3.0",`N:${ln};${fn}`,`FN:${(fn+" "+ln).trim()}`,
+      $("i-org").value&&`ORG:${$("i-org").value}`,$("i-tel").value&&`TEL:${$("i-tel").value}`,
+      $("i-email").value&&`EMAIL:${$("i-email").value}`,"END:VCARD"].filter(Boolean).join("\n");
+  }
+  return $("i-url").value;
+}
+function effectiveEcl(){const hasLogo=state.emoji||state.img;
+  if(hasLogo&&(state.ecl==="L"||state.ecl==="M"))return"Q";return state.ecl;}
+
+function lighten(hex,amt){const n=parseInt(hex.slice(1),16);
+  let r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+  r=Math.round(r+(255-r)*amt);g=Math.round(g+(255-g)*amt);b=Math.round(b+(255-b)*amt);
+  return`#${((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1)}`;}
+
+// WCAG relative luminance + contrast ratio, used to sanity-check real-world scannability
+function relLum(hex){const n=parseInt(hex.slice(1),16);
+  const lin=v=>{v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);};
+  return 0.2126*lin((n>>16)&255)+0.7152*lin((n>>8)&255)+0.0722*lin(n&255);}
+function contrastRatio(a,b){const la=relLum(a),lb=relLum(b),hi=Math.max(la,lb),lo=Math.min(la,lb);return(hi+0.05)/(lo+0.05);}
+
+function logoBox(qr){if(!(state.emoji||state.img))return null;
+  const span=Math.max(5,Math.round(qr.size*0.20));const box=span%2?span:span+1; // odd, centered
+  const start=Math.floor((qr.size-box)/2);
+  return{start,box,pad:box+2};}
+
+function render(){
+  const err=$("err");
+  const raw=payload();
+  if(!raw.trim()){
+    // Empty input: show a neutral prompt instead of a meaningless "verified" code
+    current=null;
+    const cv=$("stage");cv.width=360;cv.height=360;
+    const ctx=cv.getContext("2d");ctx.fillStyle=state.bg;ctx.fillRect(0,0,360,360);
+    err.hidden=true;$("meta").style.visibility="hidden";$("gauge").hidden=true;
+    const b=$("badge");b.className="badge neutral";
+    b.textContent="Enter text, a URL, or Wi-Fi details to generate a code";
+    saveHash();return;
+  }
+  $("meta").style.visibility="";
+  try{
+    current=generate(raw,effectiveEcl());
+    err.hidden=true;
+  }catch(ex){err.hidden=false;err.textContent=ex.message;
+    $("badge").className="badge bad";$("badge").textContent="✕ "+ex.message;return;}
+  const qr=current,sz=qr.size,qz=state.qz,scale=8,dim=(sz+2*qz)*scale;
+  const cv=$("stage");cv.width=dim;cv.height=dim;const ctx=cv.getContext("2d");
+  ctx.fillStyle=state.bg;ctx.fillRect(0,0,dim,dim);
+  let fill=state.fg;
+  if(state.grad){const g=ctx.createLinearGradient(0,0,dim,dim);g.addColorStop(0,state.fg);g.addColorStop(1,lighten(state.fg,0.45));fill=g;}
+  ctx.fillStyle=fill;
+  const lb=logoBox(qr);
+  const inLogo=(r,c)=>lb&&r>=lb.start-1&&r<lb.start+lb.box+1&&c>=lb.start-1&&c<lb.start+lb.box+1;
+  for(let r=0;r<sz;r++)for(let c=0;c<sz;c++){
+    if(!qr.modules[r][c])continue;if(inLogo(r,c))continue;
+    const x=(c+qz)*scale,y=(r+qz)*scale;
+    if(state.shape==="square")ctx.fillRect(x,y,scale,scale);
+    else if(state.shape==="rounded")roundRect(ctx,x+.5,y+.5,scale-1,scale-1,scale*0.35);
+    else{ctx.beginPath();ctx.arc(x+scale/2,y+scale/2,scale*0.44,0,7);ctx.fill();}
+  }
+  if(lb)drawLogo(ctx,qr,qz,scale,lb);
+  // meta + badge
+  $("m-ver").textContent=qr.version;$("m-mode").textContent=qr.mode;
+  $("m-mask").textContent=qr.mask;$("m-ecl").textContent=qr.ecl;
+  const b=$("badge");
+  if(!qr.verified){b.className="badge bad";b.textContent="⚠ Verification failed";}
+  else{
+    // Data round-trips; now check the render choices a real scanner actually sees.
+    const cr=contrastRatio(state.fg,state.bg),inverted=relLum(state.bg)<relLum(state.fg);
+    const risks=[];
+    if(cr<3)risks.push("low contrast ("+cr.toFixed(1)+":1)");
+    if(inverted)risks.push("inverted (light modules on dark)");
+    if(state.qz<2)risks.push("quiet zone too small");
+    if(risks.length){b.className="badge caution";
+      b.textContent="⚠ Data valid, but "+risks.join(", ")+" may stop real scanners";}
+    else{b.className="badge ok";
+      b.textContent=(lb?"✓ Verified scannable — logo kept within the correction budget"
+        :"✓ Verified scannable — round-trip decoded, Reed–Solomon syndromes clean");}
+  }
+  // logo gauge
+  if(lb){const damaged=Math.ceil((lb.pad*lb.pad)/8);const pct=Math.round(damaged/qr.correctable*100);
+    $("gauge").hidden=false;$("g-pct").textContent=pct+"% of budget";
+    const f=$("g-fill");f.style.width=Math.min(100,pct)+"%";
+    f.style.background=pct>85?"var(--warn)":pct>60?"var(--accent2)":"var(--ok)";
+  }else $("gauge").hidden=true;
+  updateEclHint(qr);
+  saveHash();
+}
+function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();ctx.fill();}
+function drawLogo(ctx,qr,qz,scale,lb){
+  const px=(lb.start-1+qz)*scale,py=px,ps=(lb.box+2)*scale;
+  ctx.save();ctx.fillStyle=state.bg;roundRect(ctx,px,py,ps,ps,ps*0.22);
+  const cx=px+ps/2,cy=py+ps/2;
+  if(state.img){const s=(lb.box)*scale;ctx.drawImage(state.img,cx-s/2,cy-s/2,s,s);}
+  else{ctx.fillStyle=state.fg;ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.font=`${lb.box*scale*0.8}px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif`;
+    ctx.fillText(state.emoji,cx,cy+scale*0.4);}
+  ctx.restore();}
+
+function updateEclHint(qr){
+  const cap={L:"~7%",M:"~15%",Q:"~25%",H:"~30%"}[qr.ecl];
+  const bumped=effectiveEcl()!==state.ecl?" (auto-bumped from "+state.ecl+" for your logo)":"";
+  $("ecl-hint").textContent=`Level ${qr.ecl} corrects ${cap} of the code — logo safe up to about that much coverage.${bumped}`;
+}
+
+/* ---- SVG serializer (vector, sharp at any size) ---- */
+function toSVG(qr){
+  const sz=qr.size,qz=state.qz,s=10,dim=(sz+2*qz)*s,lb=logoBox(qr);
+  const inLogo=(r,c)=>lb&&r>=lb.start-1&&r<lb.start+lb.box+1&&c>=lb.start-1&&c<lb.start+lb.box+1;
+  let defs="",fillRef=state.fg;
+  if(state.grad){defs=`<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${state.fg}"/><stop offset="1" stop-color="${lighten(state.fg,0.45)}"/></linearGradient></defs>`;fillRef="url(#g)";}
+  let out=`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${dim}" height="${dim}" viewBox="0 0 ${dim} ${dim}">${defs}<rect width="${dim}" height="${dim}" fill="${state.bg}"/><g fill="${fillRef}">`;
+  for(let r=0;r<sz;r++)for(let c=0;c<sz;c++){if(!qr.modules[r][c]||inLogo(r,c))continue;
+    const x=(c+qz)*s,y=(r+qz)*s;
+    if(state.shape==="dots")out+=`<circle cx="${x+s/2}" cy="${y+s/2}" r="${s*0.44}"/>`;
+    else if(state.shape==="rounded")out+=`<rect x="${x}" y="${y}" width="${s}" height="${s}" rx="${s*0.35}"/>`;
+    else out+=`<rect x="${x}" y="${y}" width="${s}" height="${s}"/>`;}
+  out+="</g>";
+  if(lb){const px=(lb.start-1+qz)*s,ps=(lb.box+2)*s,cx=px+ps/2;
+    out+=`<rect x="${px}" y="${px}" width="${ps}" height="${ps}" rx="${ps*0.22}" fill="${state.bg}"/>`;
+    if(state.img&&state.imgData){const is=lb.box*s;out+=`<image href="${state.imgData}" xlink:href="${state.imgData}" x="${cx-is/2}" y="${cx-is/2}" width="${is}" height="${is}"/>`;}
+    else if(state.emoji)out+=`<text x="${cx}" y="${cx}" font-size="${lb.box*s*0.8}" text-anchor="middle" dominant-baseline="central" font-family='"Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif'>${state.emoji}</text>`;}
+  return out+"</svg>";
+}
+
+/* ---- exports ---- */
+function download(name,url){const a=document.createElement("a");a.href=url;a.download=name;a.click();}
+$("dl-png").onclick=()=>{const cv=$("stage");
+  // render at higher scale for crisp export
+  const tmp=document.createElement("canvas"),f=3;tmp.width=cv.width*f;tmp.height=cv.height*f;
+  const c=tmp.getContext("2d");c.imageSmoothingEnabled=false;c.drawImage(cv,0,0,tmp.width,tmp.height);
+  download("tessera.png",tmp.toDataURL("image/png"));};
+$("dl-svg").onclick=()=>{if(!current)return;
+  download("tessera.svg","data:image/svg+xml;charset=utf-8,"+encodeURIComponent(toSVG(current)));};
+$("share").onclick=()=>{
+  const b=$("share"),flash=(msg)=>{b.textContent=msg;setTimeout(()=>b.textContent="Copy share link",1400);};
+  const fallback=()=>{ // clipboard API unavailable (e.g. some file:// / insecure contexts)
+    try{const ta=document.createElement("textarea");ta.value=location.href;
+      ta.style.position="fixed";ta.style.opacity="0";document.body.appendChild(ta);ta.select();
+      const ok=document.execCommand("copy");document.body.removeChild(ta);
+      flash(ok?"Copied!":"Press Ctrl+C to copy");}
+    catch(e){flash("Press Ctrl+C to copy");}};
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(location.href).then(()=>flash("Copied!"),fallback).catch(fallback);
+  }else fallback();
+};
+
+/* ---- batch print sheet ---- */
+$("batch-go").onclick=()=>{
+  const lines=$("batch").value.split("\n").map(s=>s.trim()).filter(Boolean);
+  if(!lines.length){alert("Add one entry per line first.");return;}
+  const savedTab=state.tab;let cards="";
+  for(const line of lines){
+    let text=line;
+    if(savedTab==="wifi"&&!/^WIFI:/i.test(line)){const p=line.split(/\s*[|,]\s*/);
+      text=`WIFI:T:WPA;S:${p[0]};P:${p[1]||""};;`;}
+    let qr;try{qr=generate(text,effectiveEcl());}catch(e){continue;}
+    cards+=`<div class="c">${toSVG(qr)}<div class="l">${line.replace(/[<>&]/g,x=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[x]))}</div></div>`;
+  }
+  const w=window.open("","_blank");
+  if(!w){alert("Please allow pop-ups for this page to open the print sheet.");return;}
+  w.document.write(`<html><head><title>Tessera batch — ${lines.length} codes</title><style>
+    body{font-family:sans-serif;margin:24px;background:#fff}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:20px}
+    .c{border:1px solid #ddd;border-radius:10px;padding:12px;text-align:center;break-inside:avoid}
+    .c svg{width:100%;height:auto;max-width:180px}
+    .l{font-size:12px;color:#333;margin-top:8px;word-break:break-all}
+    button{margin-bottom:16px;padding:8px 16px;font-size:14px;cursor:pointer}
+    @media print{button{display:none}}
+    </style></head><body><button onclick="print()">Print sheet</button><div class="grid">${cards}</div></body></html>`);
+  w.document.close();
+};
+
+/* ---- URL hash serialize / restore ---- */
+function saveHash(){
+  const s={t:state.tab,sh:state.shape,fg:state.fg,bg:state.bg,gr:state.grad,qz:state.qz,ec:state.ecl,em:state.emoji,
+    u:$("i-url").value,ss:$("i-ssid").value,pw:$("i-pass").value,en:$("i-enc").value,hd:$("i-hidden").value,
+    fn:$("i-fn").value,ln:$("i-ln").value,tel:$("i-tel").value,mail:$("i-email").value,org:$("i-org").value};
+  try{history.replaceState(null,"","#"+btoa(unescape(encodeURIComponent(JSON.stringify(s)))));}catch(e){}
+}
+function loadHash(){
+  if(location.hash.length<=1)return false;
+  try{const s=JSON.parse(decodeURIComponent(escape(atob(location.hash.slice(1)))));
+    state.tab=s.t||"url";state.shape=s.sh||"square";state.fg=s.fg||state.fg;state.bg=s.bg||state.bg;
+    state.grad=!!s.gr;state.qz=s.qz??4;state.ecl=s.ec||"M";state.emoji=s.em||"";
+    $("i-url").value=s.u??$("i-url").value;$("i-ssid").value=s.ss??$("i-ssid").value;$("i-pass").value=s.pw??$("i-pass").value;
+    if(s.en)$("i-enc").value=s.en;if(s.hd)$("i-hidden").value=s.hd;
+    $("i-fn").value=s.fn??$("i-fn").value;$("i-ln").value=s.ln??$("i-ln").value;$("i-tel").value=s.tel??$("i-tel").value;
+    $("i-email").value=s.mail??$("i-email").value;$("i-org").value=s.org??$("i-org").value;
+    return true;
+  }catch(e){return false;}
+}
+
+/* ---- UI wiring ---- */
+function selectTab(t){state.tab=t;
+  document.querySelectorAll(".tab").forEach(el=>{const on=el.dataset.tab===t;
+    el.classList.toggle("on",on);el.setAttribute("aria-selected",on?"true":"false");});
+  document.querySelectorAll(".pane").forEach(el=>el.hidden=el.dataset.pane!==t);render();}
+document.querySelectorAll(".tab").forEach(el=>{
+  el.onclick=()=>selectTab(el.dataset.tab);
+  el.addEventListener("keydown",ev=>{
+    if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();selectTab(el.dataset.tab);return;}
+    if(ev.key==="ArrowRight"||ev.key==="ArrowLeft"){ev.preventDefault();
+      const tabs=[...document.querySelectorAll(".tab")],i=tabs.indexOf(el);
+      const next=tabs[(i+(ev.key==="ArrowRight"?1:tabs.length-1))%tabs.length];
+      next.focus();selectTab(next.dataset.tab);}
+  });});
+function segWire(id,key,cast){document.querySelectorAll("#"+id+" button").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll("#"+id+" button").forEach(x=>x.classList.remove("on"));b.classList.add("on");
+  state[key]=cast?cast(b.dataset.v):b.dataset.v;render();});}
+segWire("shape","shape");segWire("ecl","ecl");
+$("fg").oninput=e=>{state.fg=e.target.value;render();};
+$("bg").oninput=e=>{state.bg=e.target.value;render();};
+$("grad").onchange=e=>{state.grad=e.target.checked;render();};
+$("qz").oninput=e=>{state.qz=+e.target.value;$("qzv").textContent=e.target.value;render();};
+function setLogoStatus(name){const el=$("logostatus");
+  if(name){$("logostatus-name").textContent=name;el.hidden=false;}else el.hidden=true;}
+document.querySelectorAll("#emoji button").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll("#emoji button").forEach(x=>x.classList.remove("on"));b.classList.add("on");
+  state.emoji=b.dataset.e;state.img=null;state.imgData=null;$("logofile").value="";setLogoStatus(null);syncEclSeg();render();});
+$("logofile").onchange=e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();
+  rd.onload=()=>{const img=new Image();img.onload=()=>{state.img=img;state.imgData=rd.result;state.emoji="";
+    document.querySelectorAll("#emoji button").forEach(x=>x.classList.remove("on"));
+    setLogoStatus("Image logo: "+f.name);syncEclSeg();render();};img.src=rd.result;};
+  rd.readAsDataURL(f);};
+$("logo-clear").onclick=()=>{state.img=null;state.imgData=null;state.emoji="";$("logofile").value="";
+  document.querySelectorAll("#emoji button").forEach(x=>x.classList.toggle("on",x.dataset.e===""));
+  setLogoStatus(null);syncEclSeg();render();};
+["i-url","i-ssid","i-pass","i-enc","i-hidden","i-fn","i-ln","i-tel","i-email","i-org"].forEach(id=>{
+  const el=$(id);el.addEventListener("input",render);el.addEventListener("change",render);});
+function syncEclSeg(){document.querySelectorAll("#ecl button").forEach(b=>b.classList.toggle("on",b.dataset.v===state.ecl));}
+
+// init from hash then reflect into controls
+function syncControls(){
+  document.querySelectorAll("#shape button").forEach(b=>b.classList.toggle("on",b.dataset.v===state.shape));
+  syncEclSeg();$("fg").value=state.fg;$("bg").value=state.bg;$("grad").checked=state.grad;
+  $("qz").value=state.qz;$("qzv").textContent=state.qz;
+  document.querySelectorAll("#emoji button").forEach(b=>b.classList.toggle("on",b.dataset.e===state.emoji));
+  document.querySelectorAll(".tab").forEach(el=>el.classList.toggle("on",el.dataset.tab===state.tab));
+  document.querySelectorAll(".pane").forEach(el=>el.hidden=el.dataset.pane!==state.tab);
+}
+loadHash();syncControls();render();
+</script>
+</body>
+</html>

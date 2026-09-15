@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Undersong — find the poem hiding inside any text</title>
+<style>
+  :root{
+    --paper:#f2ead6; --paper2:#e7dcbf; --ink:#151210; --dim:#6b6152;
+    --accent:#7a1f12; --river:#1a1512; --box:#3a2f1e;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    font-family:Georgia,'Iowan Old Style',serif; color:var(--ink);
+    background:#241f1a;
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+  header{
+    display:flex; align-items:baseline; gap:14px; flex-wrap:wrap;
+    padding:10px 16px; background:#1c1813; color:var(--paper);
+    border-bottom:2px solid #000;
+  }
+  header h1{font-size:20px;margin:0;letter-spacing:.02em}
+  header .tag{font-size:12.5px;color:#c9b89a;font-style:italic;flex:1;min-width:180px}
+  header .brand{color:#d9a441}
+  .toolbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  button, select{
+    font-family:inherit; font-size:12.5px; cursor:pointer;
+    background:#2c261e; color:var(--paper); border:1px solid #4a4132;
+    padding:5px 9px; border-radius:5px; transition:background .15s,transform .05s;
+  }
+  button:hover{background:#3a3327}
+  button:active{transform:translateY(1px)}
+  button.primary{background:var(--accent);border-color:#5a190f}
+  button.primary:hover{background:#93261a}
+  select{padding:5px 6px}
+  main{flex:1;display:flex;min-height:0}
+  #stage{
+    flex:1; min-width:0; padding:26px 34px; overflow:auto; position:relative;
+    background:
+      repeating-linear-gradient(0deg, transparent 0 27px, rgba(120,90,50,.05) 27px 28px),
+      radial-gradient(120% 120% at 50% 0%, var(--paper) 0%, var(--paper2) 100%);
+  }
+  #page{
+    max-width:760px; margin:0 auto; position:relative;
+    font-size:20px; line-height:1.75; text-align:justify;
+    color:#2a2420;
+  }
+  #river{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:3}
+  #riverPath{fill:none;stroke:var(--river);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;
+    filter:url(#ink); opacity:.9;}
+  body.noriver #riverPath{display:none}
+  .w{
+    position:relative; cursor:pointer; border-radius:3px; padding:0 1px;
+    transition:color .25s, background .25s; outline:none;
+  }
+  .w::after{
+    content:""; position:absolute; left:-1px; right:-1px; top:6%; bottom:6%;
+    background:var(--box); border-radius:2px; opacity:0;
+    transform:scaleX(.2); transform-origin:left center;
+    transition:opacity .28s, transform .3s cubic-bezier(.2,.8,.2,1);
+    filter:url(#ink); z-index:1;
+  }
+  /* redacted (not kept) */
+  .w.red{color:rgba(40,34,28,.30)}
+  .w.red::after{opacity:.72;transform:scaleX(1)}
+  body.hatch .w.red::after{background:
+    repeating-linear-gradient(45deg,var(--box) 0 3px, rgba(58,47,30,.35) 3px 6px)}
+  body.fade .w.red{color:rgba(40,34,28,.12)}
+  body.fade .w.red::after{opacity:0}
+  body.baked .w.red::after{opacity:1}
+  body.baked .w.red{color:transparent}
+  /* kept */
+  .w.kept{color:var(--ink);font-weight:700;z-index:4}
+  .w span.t{position:relative;z-index:2}
+  .w:focus-visible{box-shadow:0 0 0 2px #d9a441, 0 0 0 4px #000; z-index:6}
+  .w.kept::before{
+    content:"";position:absolute;inset:-3px -2px;border-radius:6px;z-index:0;
+    box-shadow:0 1px 0 rgba(0,0,0,.06);
+  }
+  /* reveal spotlight */
+  body.reveal .w.kept{color:rgba(30,24,20,.25);font-weight:700}
+  body.reveal .w.kept.lit{color:var(--ink);text-shadow:0 0 14px rgba(217,164,65,.85)}
+  body.reveal #riverPath{stroke-dasharray:var(--len);stroke-dashoffset:var(--len);
+    transition:stroke-dashoffset var(--dur,4s) linear; opacity:.95}
+  body.reveal.rolling #riverPath{stroke-dashoffset:0}
+
+  /* poem panel */
+  #panel{
+    width:302px; flex-shrink:0; background:#201c17; color:var(--paper);
+    border-left:2px solid #000; display:flex; flex-direction:column; min-height:0;
+  }
+  #panel h2{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#c9a54a;
+    margin:0;padding:12px 16px 6px}
+  #poem{flex:1;overflow:auto;padding:4px 18px 16px;font-size:19px;line-height:1.5;
+    white-space:pre-wrap;color:#efe6cf;min-height:60px}
+  #poem .ph{color:#8a7f68;font-style:italic;font-size:14px;line-height:1.5}
+  #panel .prow{display:flex;gap:6px;padding:8px 12px;border-top:1px solid #342d22;flex-wrap:wrap}
+  #gallery{padding:8px 14px 12px;border-top:1px solid #342d22}
+  #gallery h2{padding:0 0 6px}
+  #gallery a{display:block;color:#d9c79a;text-decoration:none;font-size:13.5px;
+    padding:4px 8px;border-radius:5px;font-style:italic;cursor:pointer}
+  #gallery a:hover{background:#2c2619;color:#fff}
+  #gallery a b{font-style:normal;color:#c9a54a;font-weight:400}
+  #hint{position:absolute;bottom:10px;left:0;right:0;text-align:center;font-size:12px;
+    color:var(--dim);pointer-events:none}
+  #srcwrap{display:none;position:absolute;inset:0;background:rgba(20,16,12,.75);z-index:20;
+    align-items:center;justify-content:center}
+  #srcwrap.on{display:flex}
+  #srcbox{background:var(--paper);color:var(--ink);width:min(640px,90%);padding:18px;border-radius:8px;
+    box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  #srcbox textarea{width:100%;height:180px;font-family:Georgia,serif;font-size:15px;padding:10px;
+    border:1px solid #b8aa86;border-radius:5px;background:#fbf6ea;color:var(--ink);resize:vertical}
+  #srcbox .r{display:flex;justify-content:space-between;align-items:center;margin-top:10px;gap:8px}
+  #srcbox .note{font-size:12px;color:var(--dim)}
+  #reveal.playing{background:var(--accent);border-color:#5a190f}
+  #toast{position:fixed;bottom:48px;left:50%;transform:translateX(-50%) translateY(20px);
+    background:#000;color:#fff;padding:9px 16px;border-radius:20px;font-size:13px;opacity:0;
+    transition:.3s;pointer-events:none;z-index:40}
+  #toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+  @media(max-width:760px){#panel{width:220px}#page{font-size:17px}}
+  /* narrow viewport: stack panel below stage and allow the page to scroll */
+  @media(max-width:640px){
+    html,body{height:auto}
+    body{overflow:auto}
+    main{flex-direction:column}
+    #stage{min-height:58vh;padding:18px 16px}
+    #panel{width:100%;flex-shrink:1;border-left:none;border-top:2px solid #000}
+    #poem{max-height:38vh}
+    header .toolbar{width:100%}
+    #toast{bottom:16px}
+  }
+  /* honor reduced-motion: skip the sweep/river draw, jump to the lit end-state */
+  @media (prefers-reduced-motion: reduce){
+    *{transition:none!important;animation:none!important}
+    .w::after{transition:none!important}
+    body.reveal .w.kept{color:var(--ink)!important;text-shadow:none!important}
+    body.reveal #riverPath{transition:none!important;stroke-dashoffset:0!important}
+  }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs>
+  <filter id="ink" x="-20%" y="-20%" width="140%" height="140%">
+    <feTurbulence type="fractalNoise" baseFrequency="0.018 0.06" numOctaves="2" seed="7" result="n"/>
+    <feDisplacementMap in="SourceGraphic" in2="n" scale="3.2" xChannelSelector="R" yChannelSelector="G"/>
+  </filter>
+</defs></svg>
+
+<header>
+  <h1><span class="brand">Under</span>song</h1>
+  <span class="tag">Find the poem hiding inside any text — click to keep words, redact the rest.</span>
+  <div class="toolbar">
+    <select id="sample" title="Load a bundled passage"></select>
+    <button id="paste">Paste text…</button>
+    <button id="seance" class="primary" title="Auto-erase a plausible poem">✦ Séance</button>
+    <button id="reveal" title="Cinematic reveal reading">▷ Reveal</button>
+    <button id="clear" title="Clear all kept words">Clear</button>
+    <select id="style" title="Redaction style">
+      <option value="">Marker bar</option>
+      <option value="hatch">Scribble hatch</option>
+      <option value="fade">Soft fade</option>
+    </select>
+    <button id="river" title="Toggle ink river">River: on</button>
+    <button id="share" title="Copy shareable link">🔗 Share</button>
+    <button id="png" title="Download page as PNG">⬇ PNG</button>
+    <button id="svg" title="Download page as SVG">SVG</button>
+  </div>
+</header>
+
+<main>
+  <section id="stage">
+    <div id="page"><svg id="river"><path id="riverPath"/></svg></div>
+    <div id="hint">Click words to keep them · arrow keys to move · space to toggle</div>
+  </section>
+  <aside id="panel">
+    <h2>Found poem</h2>
+    <div id="poem"></div>
+    <div class="prow"><button id="copy">Copy poem</button><span id="count" class="note" style="color:#8a7f68;align-self:center;font-size:12px"></span></div>
+    <div id="gallery"><h2>Gallery</h2></div>
+  </aside>
+</main>
+
+<div id="srcwrap"><div id="srcbox">
+  <textarea id="srctext" placeholder="Paste any block of prose or verse…"></textarea>
+  <div class="r"><span class="note" id="srcnote"></span>
+    <span><button id="srccancel">Cancel</button> <button id="srcok" class="primary">Erase this</button></span></div>
+</div></div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* ---------- bundled public-domain passages ---------- */
+const SAMPLES = {
+  walden:{title:"Thoreau · Walden", text:
+"I went to the woods because I wished to live deliberately, to front only the essential facts of life, and see if I could not learn what it had to teach, and not, when I came to die, discover that I had not lived."},
+  ishmael:{title:"Melville · Moby-Dick", text:
+"Call me Ishmael. Some years ago, never mind how long precisely, having little or no money in my purse, and nothing particular to interest me on shore, I thought I would sail about a little and see the watery part of the world."},
+  hope:{title:"Dickinson · Hope", text:
+"Hope is the thing with feathers\nThat perches in the soul,\nAnd sings the tune without the words,\nAnd never stops at all."}
+};
+/* curated gallery erasures: word sequences resolved to indices at runtime */
+const GALLERY = [
+  {t:"woods, to live deliberately", s:"walden", keep:["woods","to","live","deliberately","learn","what","life"]},
+  {t:"nothing to interest me", s:"ishmael", keep:["me","little","money","nothing","to","interest","sail","watery","world"]},
+  {t:"the soul sings without words", s:"hope", keep:["Hope","feathers","soul","sings","tune","without","words","never","stops"]}
+];
+
+/* ---------- state ---------- */
+let TOKENS=[];        // {word:bool, text, nl:bool} in source order
+let WORDIDX=[];       // maps word-number -> token index
+let KEEP=[];          // bool per word-number
+let SRC="";           // current source text
+let SID=null;         // sample id if loaded from bundle
+const $=s=>document.querySelector(s);
+const page=$("#page"), riverSvg=$("#river"), riverPath=$("#riverPath");
+
+/* ---------- deterministic tokenizer ---------- */
+function tokenize(text){
+  TOKENS=[]; WORDIDX=[];
+  const re=/[\p{L}\p{N}’']+/gu; let last=0, m;
+  const push=(t,word)=>{ if(word){WORDIDX.push(TOKENS.length);} TOKENS.push({word,text:t,nl:false}); };
+  while((m=re.exec(text))){
+    if(m.index>last) push(text.slice(last,m.index),false);
+    push(m[0],true); last=re.lastIndex;
+  }
+  if(last<text.length) push(text.slice(last),false);
+  // mark word tokens that are followed by a newline in source (for line breaks)
+  for(let i=0;i<TOKENS.length;i++){
+    if(TOKENS[i].word){
+      for(let j=i+1;j<TOKENS.length && !TOKENS[j].word;j++)
+        if(TOKENS[j].text.includes("\n")) TOKENS[i].nl=true;
+    }
+  }
+}
+
+/* ---------- render ---------- */
+function render(){
+  // rebuild page DOM (keep the river svg element)
+  [...page.querySelectorAll(".w, .gap")].forEach(n=>n.remove());
+  const frag=document.createDocumentFragment(); let wn=-1;
+  TOKENS.forEach((tok)=>{
+    if(tok.word){
+      wn++; const i=wn;
+      const el=document.createElement("span");
+      el.className="w"; el.tabIndex=0; el.dataset.i=i;
+      el.innerHTML='<span class="t"></span>'; el.firstChild.textContent=tok.text;
+      el.setAttribute("aria-pressed","false"); el.setAttribute("role","button");
+      el.onclick=()=>toggle(i);
+      frag.appendChild(el);
+    } else {
+      const g=document.createElement("span"); g.className="gap";
+      g.textContent=tok.text.replace(/\n/g," "); frag.appendChild(g);
+    }
+  });
+  page.appendChild(frag);
+  paint(); layoutRiver(); renderPoem();
+}
+function paint(){
+  page.querySelectorAll(".w").forEach(el=>{
+    const i=+el.dataset.i, k=KEEP[i];
+    el.classList.toggle("kept",k); el.classList.toggle("red",!k);
+    el.setAttribute("aria-pressed",k?"true":"false");
+  });
+}
+function toggle(i){ KEEP[i]=!KEEP[i]; paint(); layoutRiver(); renderPoem(); writeHash(); }
+
+/* ---------- ink river ---------- */
+function hash2(n){ let x=Math.sin(n*127.1+0.7)*43758.5453; return x-Math.floor(x); }
+function keptCenters(){
+  const pr=page.getBoundingClientRect(); const pts=[];
+  page.querySelectorAll(".w.kept").forEach(el=>{
+    const r=el.getBoundingClientRect(); const i=+el.dataset.i;
+    const jx=(hash2(i)-.5)*7, jy=(hash2(i*3.3)-.5)*6;
+    pts.push({x:r.left-pr.left+r.width/2+jx, y:r.top-pr.top+r.height/2+jy+r.height*0.1});
+  });
+  return pts;
+}
+function pathD(pts){
+  if(pts.length<2) return "";
+  let d=`M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+  for(let i=0;i<pts.length-1;i++){
+    const p0=pts[i-1]||pts[i], p1=pts[i], p2=pts[i+1], p3=pts[i+2]||p2;
+    const c1x=p1.x+(p2.x-p0.x)/6, c1y=p1.y+(p2.y-p0.y)/6;
+    const c2x=p2.x-(p3.x-p1.x)/6, c2y=p2.y-(p3.y-p1.y)/6;
+    d+=` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+  }
+  return d;
+}
+function layoutRiver(){
+  riverSvg.setAttribute("width",page.scrollWidth);
+  riverSvg.setAttribute("height",page.scrollHeight);
+  const d=pathD(keptCenters()); riverPath.setAttribute("d",d);
+  const len=riverPath.getTotalLength?riverPath.getTotalLength():0;
+  page.style.setProperty("--len",len);
+  return len;
+}
+
+/* ---------- poem panel ---------- */
+function keptWordsInOrder(){
+  const out=[]; let wn=-1;
+  TOKENS.forEach(tok=>{ if(tok.word){wn++; if(KEEP[wn]) out.push({text:tok.text,nl:tok.nl});} });
+  return out;
+}
+function poemText(){
+  const ks=keptWordsInOrder(); if(!ks.length) return "";
+  let line=[], lines=[];
+  ks.forEach(k=>{ line.push(k.text); if(k.nl){lines.push(line.join(" "));line=[];} });
+  if(line.length) lines.push(line.join(" "));
+  return lines.join("\n");
+}
+function renderPoem(){
+  const t=poemText(); const p=$("#poem");
+  const n=KEEP.filter(Boolean).length;
+  $("#count").textContent=n?`${n} word${n>1?"s":""} kept`:"";
+  if(!t){ p.innerHTML='<span class="ph">Click words on the page to keep them. The words you keep, in order, become your found poem — and an ink river threads them together.</span>'; }
+  else p.textContent=t;
+}
+
+/* ---------- hash encode / decode ---------- */
+function b64e(bytes){ let s=""; for(const b of bytes) s+=String.fromCharCode(b);
+  return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
+function b64d(str){ str=str.replace(/-/g,"+").replace(/_/g,"/"); const s=atob(str);
+  const out=new Uint8Array(s.length); for(let i=0;i<s.length;i++) out[i]=s.charCodeAt(i); return out; }
+function packBits(){ const n=WORDIDX.length, bytes=new Uint8Array(Math.ceil(n/8));
+  for(let i=0;i<n;i++) if(KEEP[i]) bytes[i>>3]|=1<<(i&7); return bytes; }
+function unpackBits(bytes,n){ const k=new Array(n).fill(false);
+  for(let i=0;i<n;i++) k[i]=!!(bytes[i>>3]&(1<<(i&7))); return k; }
+function encHash(){ const bits="k="+b64e(packBits());
+  if(SID) return "#s="+SID+"&"+bits;
+  return "#t="+b64e(new TextEncoder().encode(SRC))+"&"+bits; }
+let hashLock=false;
+function writeHash(){ hashLock=true; location.hash=encHash(); setTimeout(()=>hashLock=false,30); }
+function loadFrom(text,sid,bits){
+  SRC=text; SID=sid||null; tokenize(text);
+  KEEP = bits ? unpackBits(bits,WORDIDX.length) : new Array(WORDIDX.length).fill(false);
+  if(KEEP.length<WORDIDX.length) KEEP=KEEP.concat(new Array(WORDIDX.length-KEEP.length).fill(false));
+  if(sid && $("#sample").value!==sid) $("#sample").value=sid;
+  render();
+}
+function readHash(){
+  const h=location.hash.slice(1); if(!h) return false;
+  const p=new URLSearchParams(h);
+  // a malformed/hand-edited k= must not blank the page — fall back to null bits (unredacted source)
+  let bits=null; try{ if(p.get("k")) bits=b64d(p.get("k")); }catch(e){ bits=null; }
+  if(p.get("s") && SAMPLES[p.get("s")]){ loadFrom(SAMPLES[p.get("s")].text,p.get("s"),bits); return true; }
+  if(p.get("t")){ try{ loadFrom(new TextDecoder().decode(b64d(p.get("t"))),null,bits); return true;}catch(e){} }
+  return false;
+}
+
+/* ---------- Séance auto-erase heuristic ---------- */
+const STOP=new Set("the a an and or but of to in on at for with is are was were be been am i it its this that these those as by from he she they we you my your his her their our not no if so do did had has have will would can could s t".split(" "));
+function seance(){
+  KEEP=new Array(WORDIDX.length).fill(false);
+  let scored=[];
+  WORDIDX.forEach((ti,i)=>{
+    const w=TOKENS[ti].text.toLowerCase(), L=w.length;
+    if(STOP.has(w)||L<3) return;
+    let sc=0;
+    if(L>=4&&L<=8) sc+=3; else if(L>8) sc+=1; else sc+=1;
+    if(/[aeiou]{2}|ght|ll|ss|ee|oo/.test(w)) sc+=1;      // texture
+    sc += hash2(i*5.7);                                    // gentle variety
+    scored.push({i,sc,ti});
+  });
+  scored.sort((a,b)=>b.sc-a.sc);
+  const target=Math.max(4,Math.min(12,Math.round(WORDIDX.length*0.28)));
+  const chosen=[];
+  for(const c of scored){ if(chosen.length>=target) break;
+    if(chosen.every(o=>Math.abs(o-c.i)>=2)){ chosen.push(c.i); } }
+  chosen.forEach(i=>KEEP[i]=true);
+  paint(); layoutRiver(); renderPoem(); writeHash();
+  toast("Séance: a draft emerged — refine by clicking words");
+}
+
+/* ---------- gallery ---------- */
+function resolveKeep(text,words){
+  const t=[]; const re=/[\p{L}\p{N}’']+/gu; let m; while((m=re.exec(text))) t.push(m[0]);
+  const idx=[]; let p=0;
+  for(const w of words){ for(let j=p;j<t.length;j++){ if(t[j].toLowerCase()===w.toLowerCase()){ idx.push(j); p=j+1; break; } } }
+  const bytes=new Uint8Array(Math.ceil(t.length/8));
+  idx.forEach(i=>bytes[i>>3]|=1<<(i&7)); return bytes;
+}
+function buildGallery(){
+  const g=$("#gallery");
+  GALLERY.forEach(item=>{
+    const bytes=resolveKeep(SAMPLES[item.s].text,item.keep);
+    const href="#s="+item.s+"&k="+b64e(bytes);
+    const a=document.createElement("a"); a.href=href;
+    a.innerHTML='“'+item.t+'” <b>· '+SAMPLES[item.s].title.split(" · ")[0]+'</b>';
+    a.onclick=e=>{ e.preventDefault(); location.hash=href; readHash(); toast("Loaded gallery poem"); };
+    g.appendChild(a);
+  });
+}
+
+/* ---------- reveal reading ---------- */
+let revealing=false, revealTimers=[];
+function stopReveal(){
+  revealTimers.forEach(clearTimeout); revealTimers=[];
+  document.body.classList.remove("reveal","rolling");
+  page.querySelectorAll(".w.kept.lit").forEach(el=>el.classList.remove("lit"));
+  const b=$("#reveal"); b.classList.remove("playing"); b.textContent="▷ Reveal"; revealing=false;
+}
+function reveal(){
+  if(revealing){ stopReveal(); return; }               // second click stops playback early
+  const kept=[...page.querySelectorAll(".w.kept")];
+  if(!kept.length){ toast("Keep some words first"); return; }
+  revealing=true;
+  const b=$("#reveal"); b.classList.add("playing"); b.textContent="■ Stop";
+  document.body.classList.add("reveal");
+  const len=layoutRiver(); const dur=Math.max(2.5,Math.min(7,kept.length*0.5));
+  page.style.setProperty("--dur",dur+"s");
+  void riverPath.getBoundingClientRect(); // reflow
+  requestAnimationFrame(()=>document.body.classList.add("rolling"));
+  kept.forEach((el,k)=>revealTimers.push(setTimeout(()=>el.classList.add("lit"), (dur*1000)*(k/Math.max(1,kept.length)))));
+  revealTimers.push(setTimeout(stopReveal, dur*1000+900));
+}
+
+/* ---------- export SVG / PNG ---------- */
+function buildSVG(scale){
+  const pr=page.getBoundingClientRect(); const W=Math.round(pr.width), H=Math.round(page.scrollHeight);
+  // honor the on-screen redaction style so the export is WYSIWYG
+  const mode = document.body.classList.contains("fade")?"fade":
+               document.body.classList.contains("hatch")?"hatch":"bar";
+  let body=`<rect width="${W}" height="${H}" fill="#f2ead6"/>`;
+  page.querySelectorAll(".w").forEach(el=>{
+    const r=el.getBoundingClientRect(); const cs=getComputedStyle(el);
+    const x=r.left-pr.left, y=r.top-pr.top, fs=parseFloat(cs.fontSize);
+    const kept=el.classList.contains("kept");
+    if(kept){
+      body+=`<text x="${(x+1).toFixed(1)}" y="${(y+fs*0.82).toFixed(1)}" font-family="Georgia,serif" font-weight="700" font-size="${fs}" fill="#151210">${esc(el.textContent)}</text>`;
+    } else if(mode==="fade"){
+      // soft fade → faint legible text, no bar
+      body+=`<text x="${(x+1).toFixed(1)}" y="${(y+fs*0.82).toFixed(1)}" font-family="Georgia,serif" font-size="${fs}" fill="#28221c" fill-opacity="0.14">${esc(el.textContent)}</text>`;
+    } else {
+      const fill = mode==="hatch" ? "url(#hatch)" : "#3a2f1e";
+      body+=`<rect x="${(x-1).toFixed(1)}" y="${(y+r.height*0.12).toFixed(1)}" width="${(r.width+2).toFixed(1)}" height="${(r.height*0.76).toFixed(1)}" rx="2" fill="${fill}" filter="url(#ink)"/>`;
+    }
+  });
+  const d=riverPath.getAttribute("d")||"";
+  if(d && !document.body.classList.contains("noriver"))
+    body+=`<path d="${d}" fill="none" stroke="#1a1512" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" filter="url(#ink)" opacity="0.9"/>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W*(scale||1)}" height="${H*(scale||1)}" viewBox="0 0 ${W} ${H}">`+
+    `<defs><filter id="ink" x="-20%" y="-20%" width="140%" height="140%"><feTurbulence type="fractalNoise" baseFrequency="0.018 0.06" numOctaves="2" seed="7" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="3.2" xChannelSelector="R" yChannelSelector="G"/></filter>`+
+    `<pattern id="hatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)"><rect width="6" height="6" fill="#4a3d28"/><rect width="3" height="6" fill="#3a2f1e"/></pattern></defs>`+
+    body+`</svg>`;
+}
+function esc(s){return s.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
+function download(name,blob){ const u=URL.createObjectURL(blob); const a=document.createElement("a");
+  a.href=u; a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(u),2000); }
+function exportSVG(){ download("undersong-poem.svg", new Blob([buildSVG(1)],{type:"image/svg+xml"})); toast("SVG saved"); }
+function exportPNG(){
+  const svg=buildSVG(2); const img=new Image();
+  img.onload=()=>{ const c=document.createElement("canvas"); c.width=img.width; c.height=img.height;
+    c.getContext("2d").drawImage(img,0,0); c.toBlob(b=>{download("undersong-poem.png",b);toast("PNG saved");},"image/png"); };
+  img.onerror=()=>toast("PNG export failed");
+  img.src="data:image/svg+xml;base64,"+btoa(unescape(encodeURIComponent(svg)));
+}
+
+/* ---------- keyboard navigation ---------- */
+document.addEventListener("keydown",e=>{
+  const el=document.activeElement;
+  if(!el||!el.classList||!el.classList.contains("w")) return;
+  const ws=[...page.querySelectorAll(".w")]; const i=ws.indexOf(el);
+  if(e.key===" "||e.key==="Enter"){ e.preventDefault(); toggle(+el.dataset.i); }
+  else if(e.key==="ArrowRight"){ e.preventDefault(); (ws[i+1]||ws[0]).focus(); }
+  else if(e.key==="ArrowLeft"){ e.preventDefault(); (ws[i-1]||ws[ws.length-1]).focus(); }
+  else if(e.key==="ArrowDown"||e.key==="ArrowUp"){ e.preventDefault();
+    const r=el.getBoundingClientRect(); const dir=e.key==="ArrowDown"?1:-1;
+    let best=null,bd=1e9;
+    ws.forEach(w=>{ const wr=w.getBoundingClientRect();
+      if(dir>0?wr.top>r.top+4:wr.top<r.top-4){ const d=Math.abs(wr.left-r.left)+Math.abs(wr.top-r.top)*0.4;
+        if(d<bd){bd=d;best=w;} } });
+    if(best) best.focus();
+  }
+});
+
+/* ---------- toast ---------- */
+let tt; function toast(msg){ const t=$("#toast"); t.textContent=msg; t.classList.add("on");
+  clearTimeout(tt); tt=setTimeout(()=>t.classList.remove("on"),2200); }
+
+/* ---------- clipboard (guarded: Clipboard API is undefined on non-secure origins) ---------- */
+function copyText(text){
+  if(navigator.clipboard&&navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
+  return new Promise((res,rej)=>{                        // execCommand fallback for http:// / older browsers
+    try{ const ta=document.createElement("textarea"); ta.value=text;
+      ta.style.position="fixed"; ta.style.top="-1000px"; ta.style.opacity="0";
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      const ok=document.execCommand("copy"); document.body.removeChild(ta);
+      ok?res():rej();
+    }catch(e){ rej(e); }
+  });
+}
+
+/* ---------- wiring ---------- */
+function fillSampleSelect(){
+  const s=$("#sample"); s.innerHTML="";
+  for(const id in SAMPLES){ const o=document.createElement("option"); o.value=id; o.textContent=SAMPLES[id].title; s.appendChild(o); }
+}
+$("#sample").onchange=e=>{ const id=e.target.value; location.hash=""; loadFrom(SAMPLES[id].text,id,null); writeHash(); };
+$("#seance").onclick=seance;
+$("#reveal").onclick=reveal;
+$("#clear").onclick=()=>{ KEEP=new Array(WORDIDX.length).fill(false); paint(); layoutRiver(); renderPoem(); writeHash(); };
+$("#style").onchange=e=>{ document.body.classList.remove("hatch","fade");
+  if(e.target.value) document.body.classList.add(e.target.value); };
+$("#river").onclick=e=>{ document.body.classList.toggle("noriver");
+  e.target.textContent="River: "+(document.body.classList.contains("noriver")?"off":"on"); };
+$("#share").onclick=()=>{ writeHash(); const url=location.href;
+  copyText(url).then(()=>toast("Shareable link copied"),()=>toast(url)); };
+$("#png").onclick=exportPNG; $("#svg").onclick=exportSVG;
+$("#copy").onclick=()=>{ const t=poemText(); if(!t){toast("No poem yet — keep some words");return;}
+  copyText(t).then(()=>toast("Poem copied"),()=>toast("Copy failed")); };
+$("#paste").onclick=()=>{ $("#srctext").value=SID?"":SRC; $("#srcwrap").classList.add("on"); $("#srctext").focus(); updateNote(); };
+$("#srccancel").onclick=()=>$("#srcwrap").classList.remove("on");
+$("#srctext").oninput=updateNote;
+function updateNote(){ const n=$("#srctext").value.length;
+  $("#srcnote").textContent=n>1200?"Long text → large share link":(n+" chars"); }
+$("#srcok").onclick=()=>{ const t=$("#srctext").value.trim(); if(!t){toast("Enter some text");return;}
+  $("#srcwrap").classList.remove("on"); location.hash=""; loadFrom(t,null,null); writeHash();
+  if(t.length>1400) toast("Loaded — note: long text makes a big share link"); };
+
+window.addEventListener("resize",()=>layoutRiver());
+window.addEventListener("hashchange",()=>{ if(hashLock) return; readHash(); });
+if(document.fonts&&document.fonts.ready) document.fonts.ready.then(()=>layoutRiver());
+
+/* ---------- boot ---------- */
+fillSampleSelect(); buildGallery();
+if(!readHash()){ const first=Object.keys(SAMPLES)[0]; loadFrom(SAMPLES[first].text,first,null);
+  // load the first gallery poem as an instant delightful default
+  const g=GALLERY[0]; const bytes=resolveKeep(SAMPLES[g.s].text,g.keep);
+  location.hash="#s="+g.s+"&k="+b64e(bytes); readHash();
+}
+</script>
+</body>
+</html>

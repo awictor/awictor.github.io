@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dice Roller — roll dice notation like 3d6+2</title>
+<meta name="description" content="Parse tabletop dice notation (3d6+2, d20, 2d8-1) and roll it — with min, max, and average. Offline, no tracking.">
+<style>
+  :root{
+    --c:#7e22ce;
+    --bg:#f7f0fc; --card:#ffffff; --fg:#1a0f28; --muted:#5f5079;
+    --line:#e8dcf6; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#0f0819; --card:#180f2a; --fg:#ede6f8; --muted:#aa9cc6;
+    --line:#2a2044; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:800px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:800px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  .in{display:flex;gap:10px}
+  .in input{flex:1;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.4rem;font-weight:600;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);width:100%}
+  .in input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .btn{background:var(--c);color:#fff;border:0;border-radius:10px;padding:0 18px;font-weight:700;cursor:pointer;font-size:1rem}
+  .err{color:#dc2626;font-size:.86rem;margin-top:10px;min-height:1em}
+  .total{margin-top:18px;text-align:center;font-size:3rem;font-weight:800;color:var(--c);line-height:1;min-height:1.1em}
+  .breakdown{text-align:center;color:var(--muted);font-size:.92rem;margin-top:4px;min-height:1.2em}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px}
+  .stat{background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:12px;text-align:center}
+  .stat .n{font-size:1.3rem;font-weight:700;font-variant-numeric:tabular-nums}
+  .stat .k{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🎲</div>
+  <div>
+    <h1>Dice Roller</h1>
+    <p>Roll standard dice notation</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <label>Dice notation (e.g. 3d6+2, d20, 2d8-1, 2d6+1d4)</label>
+    <div class="in">
+      <input id="in" spellcheck="false" value="3d6+2">
+      <button class="btn" id="roll">Roll</button>
+    </div>
+    <div class="err" id="err"></div>
+    <div class="total" id="total">—</div>
+    <div class="breakdown" id="breakdown"></div>
+    <div class="stats">
+      <div class="stat"><div class="n" id="min">—</div><div class="k">min</div></div>
+      <div class="stat"><div class="n" id="avg">—</div><div class="k">average</div></div>
+      <div class="stat"><div class="n" id="max">—</div><div class="k">max</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Dice notation</h2>
+    <p class="note">Tabletop dice use the form <b>NdM</b> — roll N dice with M sides — optionally with a flat modifier: <code>3d6+2</code> rolls three six-sided dice and adds 2. Leave N off for a single die (<code>d20</code>), and combine terms with + and − (<code>2d6+1d4-1</code>). The <b>min</b>, <b>average</b>, and <b>max</b> are computed from the notation without rolling; the <b>Roll</b> button generates an actual random result with the per-die breakdown. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  // Parse dice notation into signed terms: {sign, count, sides} or {sign, constant}.
+  function parseTerms(notation){
+    if(typeof notation !== 'string') throw new Error('notation must be a string');
+    var s = notation.replace(/\s+/g, '').toLowerCase();
+    if(s === '') throw new Error('enter dice notation like 3d6+2');
+    if(s[0] !== '+' && s[0] !== '-') s = '+' + s;
+    var tokens = s.match(/[+-][^+-]+/g);
+    if(!tokens || tokens.join('') !== s) throw new Error('could not parse: ' + notation);
+    return tokens.map(function(tok){
+      var sign = tok[0] === '-' ? -1 : 1, body = tok.slice(1);
+      var m = body.match(/^(\d*)d(\d+)$/);
+      if(m){
+        var count = m[1] === '' ? 1 : parseInt(m[1], 10), sides = parseInt(m[2], 10);
+        if(count < 1 || sides < 1) throw new Error('dice need positive count and sides');
+        return { sign: sign, count: count, sides: sides };
+      }
+      if(/^\d+$/.test(body)) return { sign: sign, constant: parseInt(body, 10) };
+      throw new Error('bad term: ' + body);
+    });
+  }
+  // Min, max, and average total for a notation (no rolling).
+  function parseDice(notation){
+    var terms = parseTerms(notation), min = 0, max = 0, average = 0;
+    terms.forEach(function(t){
+      if(t.constant != null){ min += t.sign * t.constant; max += t.sign * t.constant; average += t.sign * t.constant; }
+      else {
+        var lo = t.count, hi = t.count * t.sides;
+        if(t.sign > 0){ min += lo; max += hi; } else { min -= hi; max -= lo; }
+        average += t.sign * t.count * (t.sides + 1) / 2;
+      }
+    });
+    return { min: min, max: max, average: average };
+  }
+  // Roll the notation. Pass a deterministic rng (0<=x<1) for testing.
+  function roll(notation, rng){
+    rng = rng || Math.random;
+    var terms = parseTerms(notation), total = 0, rolls = [];
+    terms.forEach(function(t){
+      if(t.constant != null){ total += t.sign * t.constant; }
+      else for(var i = 0; i < t.count; i++){ var v = Math.floor(rng() * t.sides) + 1; rolls.push(v); total += t.sign * v; }
+    });
+    return { total: total, rolls: rolls };
+  }
+
+  if(typeof module !== 'undefined') module.exports = { parseTerms:parseTerms, parseDice:parseDice, roll:roll };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    function stats(){
+      var err = document.getElementById('err');
+      err.textContent = '';
+      try{
+        var r = parseDice(document.getElementById('in').value);
+        document.getElementById('min').textContent = r.min;
+        document.getElementById('max').textContent = r.max;
+        document.getElementById('avg').textContent = r.average.toLocaleString(undefined, { maximumFractionDigits: 1 });
+        return true;
+      }catch(e){ document.getElementById('min').textContent='—'; document.getElementById('max').textContent='—'; document.getElementById('avg').textContent='—'; err.textContent = e.message; return false; }
+    }
+    function doRoll(){
+      if(!stats()) return;
+      var r = roll(document.getElementById('in').value);
+      document.getElementById('total').textContent = r.total;
+      document.getElementById('breakdown').textContent = r.rolls.length ? 'dice: [' + r.rolls.join(', ') + ']' : '';
+    }
+    document.getElementById('in').addEventListener('input', function(){ stats(); document.getElementById('total').textContent='—'; document.getElementById('breakdown').textContent=''; });
+    document.getElementById('roll').addEventListener('click', doRoll);
+    stats();
+
+    var root=document.documentElement, tb=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); tb.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('dice-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('dice-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

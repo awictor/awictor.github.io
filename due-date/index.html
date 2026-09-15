@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DueDate — pregnancy due date calculator</title>
+<meta name="description" content="Free offline pregnancy due date calculator (Naegele's rule). Enter the last menstrual period to get the estimated due date, gestational age, trimester, and conception estimate. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/due-date/">
+<style>
+  :root{
+    --c:#500724; --bg:#fdf6f9; --fg:#210812; --muted:#7a4f60;
+    --card:#ffffff; --border:#efdae2; --code:#fbecf1;
+  }
+  [data-theme="dark"]{
+    --bg:#17090f; --fg:#f2e2ea; --muted:#b58b9c; --card:#230c16;
+    --border:#3a1e29; --code:#2c111c;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:700px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#db2777);display:grid;place-items:center;color:#fff;font-size:20px}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:700px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  input{width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:1.05rem;font-family:ui-monospace,monospace}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .err{color:#dc2626;font-size:.86rem;margin:12px 0 0;min-height:1.1em}
+  .due{margin-top:18px;text-align:center}
+  .due .d{font-family:ui-monospace,monospace;font-size:2rem;font-weight:700;color:var(--c)}
+  .due .lbl{color:var(--muted);font-size:.85rem}
+  .grid{margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:1px;
+    background:var(--border);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .cell{background:var(--card);padding:13px 15px}
+  .cell .k{font-size:.74rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .cell .v{font-family:ui-monospace,monospace;font-weight:700;margin-top:2px}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:700px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+  @media(max-width:520px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('due.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">🍼</div>
+  <div>
+    <h1>DueDate</h1>
+    <p class="sub">Pregnancy due date calculator</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <label for="lmp">First day of last menstrual period (LMP)</label>
+    <input type="date" id="lmp">
+    <p class="err" id="err"></p>
+    <div class="due" id="due"></div>
+    <div class="grid" id="grid"></div>
+    <p class="hint">Uses Naegele's rule (LMP + 280 days), assuming a 28-day cycle. Gestational age and
+      trimester are computed from today. This is an estimate, not medical advice. Runs locally.</p>
+  </div>
+</main>
+<footer>
+  DueDate is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/due-date">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function parseDate(iso){
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso));
+  if(!m) return null;
+  var d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return isNaN(d.getTime()) ? null : d;
+}
+function isoDate(d){ return d.toISOString().slice(0, 10); }
+function addDays(iso, n){
+  var d = parseDate(iso);
+  if(!d) return null;
+  return isoDate(new Date(d.getTime() + n * 86400000));
+}
+function daysBetween(aISO, bISO){
+  var a = parseDate(aISO), b = parseDate(bISO);
+  if(!a || !b) return null;
+  return Math.round((b.getTime() - a.getTime()) / 86400000);
+}
+function dueDate(lmpISO){ return addDays(lmpISO, 280); }
+function conceptionDate(lmpISO){ return addDays(lmpISO, 14); }
+function gestationalAge(lmpISO, todayISO){
+  var days = daysBetween(lmpISO, todayISO);
+  if(days === null) return null;
+  if(days < 0) return { weeks: 0, days: 0, totalDays: days };
+  return { weeks: Math.floor(days / 7), days: days % 7, totalDays: days };
+}
+function trimester(totalDays){
+  if(totalDays == null || totalDays < 0) return null;
+  if(totalDays < 98) return 1;    // < 14 weeks
+  if(totalDays < 196) return 2;   // < 28 weeks
+  return 3;
+}
+
+if(typeof module !== 'undefined') module.exports = {
+  parseDate, isoDate, addDays, daysBetween, dueDate, conceptionDate, gestationalAge, trimester
+};
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var lmpEl = document.getElementById('lmp');
+  var errEl = document.getElementById('err');
+  var dueEl = document.getElementById('due');
+  var gridEl = document.getElementById('grid');
+  function today(){ return new Date().toISOString().slice(0, 10); }
+  function fmt(iso){
+    var d = parseDate(iso);
+    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+  }
+  function render(){
+    var lmp = lmpEl.value;
+    if(!parseDate(lmp)){
+      errEl.textContent = 'Pick the first day of your last period.';
+      dueEl.innerHTML = ''; gridEl.innerHTML = '';
+      return;
+    }
+    errEl.textContent = '';
+    var due = dueDate(lmp);
+    var ga = gestationalAge(lmp, today());
+    var tri = trimester(ga.totalDays);
+    var remaining = daysBetween(today(), due);
+    dueEl.innerHTML = '<div class="lbl">Estimated due date</div><div class="d">' + fmt(due) + '</div>';
+    gridEl.innerHTML =
+      '<div class="cell"><div class="k">Gestational age</div><div class="v">' +
+        (ga.totalDays < 0 ? 'not started' : ga.weeks + 'w ' + ga.days + 'd') + '</div></div>' +
+      '<div class="cell"><div class="k">Trimester</div><div class="v">' + (tri || '—') + '</div></div>' +
+      '<div class="cell"><div class="k">Est. conception</div><div class="v">' + fmt(conceptionDate(lmp)) + '</div></div>' +
+      '<div class="cell"><div class="k">Days remaining</div><div class="v">' +
+        (remaining > 0 ? remaining : (remaining === 0 ? 'today!' : 'past due')) + '</div></div>';
+    try{ localStorage.setItem('due.lmp', lmp); }catch(e){}
+  }
+  lmpEl.addEventListener('input', render);
+  try{ var s = localStorage.getItem('due.lmp'); if(s) lmpEl.value = s;
+    else { var d = new Date(Date.now() - 60 * 86400000); lmpEl.value = d.toISOString().slice(0,10); } }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('due.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('due.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

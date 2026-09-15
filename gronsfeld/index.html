@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gronsfeld Cipher — numeric-key Vigenère</title>
+<meta name="description" content="Encrypt and decrypt with the Gronsfeld cipher — a Vigenère variant that uses a numeric key, each digit shifting a letter. Offline, no tracking. Great for puzzles and CTFs.">
+<style>
+  :root{
+    --c:#4338ca;
+    --bg:#f5f5fb; --card:#ffffff; --fg:#161628; --muted:#63637e;
+    --line:#e4e3f1; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#0f0f1a; --card:#181827; --fg:#ececf7; --muted:#9797b6;
+    --line:#282840; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:800px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:15px;font-weight:800;color:#fff;flex:0 0 auto;font-family:ui-monospace,monospace}
+  h1{font-size:1.4rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:800px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .mode{display:flex;gap:8px;margin-bottom:16px}
+  .mode button{flex:1;padding:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);
+    border-radius:10px;cursor:pointer;font-weight:600}
+  .mode button.on{background:var(--c);color:#fff;border-color:var(--c)}
+  label{display:block;font-size:.82rem;font-weight:600;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+  input[type=text],textarea{width:100%;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input[type=text]{font-family:ui-monospace,monospace}
+  textarea{min-height:80px;resize:vertical;font-family:ui-monospace,Menlo,Consolas,monospace}
+  input:focus,textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .out .txt{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:1.1rem;word-break:break-word;
+    background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px;min-height:24px;margin-top:6px}
+  .copy{margin-top:10px;background:var(--c);color:#fff;border:0;border-radius:10px;padding:9px 16px;cursor:pointer;font-weight:600}
+  .err{color:#dc2626;font-size:.85rem;margin-top:8px;min-height:16px}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.9rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">123</div>
+  <div>
+    <h1>Gronsfeld Cipher</h1>
+    <p>Vigenère with a numeric key</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="mode">
+      <button id="mEnc" class="on">Encrypt</button>
+      <button id="mDec">Decrypt</button>
+    </div>
+    <label for="key">Numeric key (digits)</label>
+    <input type="text" id="key" value="31415" spellcheck="false">
+    <label for="msg" style="margin-top:14px">Message</label>
+    <textarea id="msg" spellcheck="false">HELLO WORLD</textarea>
+    <div class="out">
+      <label>Result</label>
+      <div class="txt" id="out"></div>
+      <button class="copy" id="copy">Copy</button>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>How it works</h2>
+    <p class="note">The Gronsfeld cipher is a Vigenère cipher whose key is a number instead of a word. Each successive letter is Caesar-shifted by the next digit of the key (0–9), cycling through the digits. Letter <b>C = (P + digit) mod 26</b>; decryption subtracts. Case is preserved and non-letters pass through unchanged (they don't consume a key digit). Because digits only shift 0–9, it's weaker than full Vigenère — good for puzzles, not secrets.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function transform(text, key, dir){
+    var digits = String(key).replace(/[^0-9]/g, '');
+    if(digits.length === 0) throw new Error('key must contain at least one digit');
+    var ki = 0, out = '';
+    for(var i = 0; i < text.length; i++){
+      var ch = text[i], code = ch.charCodeAt(0), base;
+      if(code >= 65 && code <= 90) base = 65;
+      else if(code >= 97 && code <= 122) base = 97;
+      else { out += ch; continue; }
+      var shift = (+digits[ki % digits.length]) * dir;
+      var x = (code - base + shift) % 26;
+      if(x < 0) x += 26;
+      out += String.fromCharCode(base + x);
+      ki++;
+    }
+    return out;
+  }
+  function encrypt(text, key){ return transform(String(text), key, 1); }
+  function decrypt(text, key){ return transform(String(text), key, -1); }
+
+  if(typeof module !== 'undefined') module.exports = { encrypt:encrypt, decrypt:decrypt };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var key=document.getElementById('key'), msg=document.getElementById('msg'), out=document.getElementById('out'), err=document.getElementById('err');
+    var mEnc=document.getElementById('mEnc'), mDec=document.getElementById('mDec');
+    var mode='enc';
+    function render(){
+      err.textContent='';
+      try{ out.textContent = (mode==='enc'?encrypt:decrypt)(msg.value, key.value); }
+      catch(e){ out.textContent=''; err.textContent=e.message; }
+    }
+    [key,msg].forEach(function(el){ el.addEventListener('input', render); });
+    mEnc.addEventListener('click', function(){ mode='enc'; mEnc.classList.add('on'); mDec.classList.remove('on'); render(); });
+    mDec.addEventListener('click', function(){ mode='dec'; mDec.classList.add('on'); mEnc.classList.remove('on'); render(); });
+    document.getElementById('copy').addEventListener('click', function(){ if(navigator.clipboard) navigator.clipboard.writeText(out.textContent); });
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('gronsfeld-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('gronsfeld-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+
+    render();
+  }
+</script>
+</body>
+</html>

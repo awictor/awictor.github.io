@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SplitUp — Group Expense Settle-Up Calculator</title>
+<meta name="description" content="Enter who paid what on a trip or shared house and get each person's net balance plus the minimal set of who-pays-whom settlements. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('split-up-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#14b8a6;
+    --bg:#f4f7f7; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e2e6e6; --shadow:0 1px 3px rgba(0,0,0,.08); --up:#16a34a; --down:#dc2626;
+  }
+  [data-theme="dark"]{
+    --bg:#0e1414; --card:#171f1f; --fg:#eef4f4; --muted:#93a1a1; --line:#253030; --shadow:0 1px 3px rgba(0,0,0,.5); --up:#4ade80; --down:#f87171;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:760px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#0f766e);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:760px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  h2{font-size:1rem;margin:0 0 12px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input,select{padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;width:100%}
+  .exp{display:grid;grid-template-columns:1fr 90px 1fr auto;gap:8px;margin-bottom:8px;align-items:center}
+  .exp button{border:1px solid var(--line);background:var(--bg);color:var(--muted);border-radius:8px;padding:8px 11px;cursor:pointer;font:inherit}
+  .add{background:var(--c);color:#fff;border:0;border-radius:8px;padding:9px 15px;cursor:pointer;font:inherit;font-weight:600;margin-top:6px}
+  .bal{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line)}
+  .bal .amt{font-variant-numeric:tabular-nums;font-weight:700}
+  .tx{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--line)}
+  .tx .who{flex:1}
+  .tx .amt{font-weight:700;font-variant-numeric:tabular-nums;color:var(--c)}
+  .none{color:var(--muted);text-align:center;padding:10px}
+  .hint{color:var(--muted);font-size:.8rem;margin-top:4px}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:760px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🧾</div>
+    <div><h1>SplitUp</h1><div class="sub">Settle shared expenses with the fewest payments</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <h2>People</h2>
+    <input id="people" value="Alex, Bailey, Casey" placeholder="comma-separated names">
+    <div class="hint">Each expense splits equally among the listed participants (blank = everyone).</div>
+  </div>
+
+  <div class="card">
+    <h2>Expenses</h2>
+    <div id="exps"></div>
+    <button class="add" id="add" type="button">+ Add expense</button>
+  </div>
+
+  <div class="card">
+    <h2>Balances</h2>
+    <div id="balances"></div>
+  </div>
+
+  <div class="card">
+    <h2>Settle up</h2>
+    <div id="settle"></div>
+  </div>
+</main>
+<footer>
+  100% offline. Nothing leaves your browser. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/split-up">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  // expenses: [{ payer, amount, participants: [names] }]  →  { name: netBalance }
+  function balances(expenses){
+    const net = {};
+    const add = (p, v) => { net[p] = (net[p] || 0) + v; };
+    for(const e of expenses){
+      const amt = Number(e.amount);
+      if(!(amt >= 0)) throw new Error('amount must be non-negative');
+      const parts = e.participants && e.participants.length ? e.participants : null;
+      if(!parts) throw new Error('expense needs participants');
+      add(e.payer, amt);
+      const share = amt / parts.length;
+      for(const p of parts) add(p, -share);
+    }
+    for(const k in net) net[k] = Math.round(net[k] * 100) / 100;
+    return net;
+  }
+
+  // greedy minimal-ish settlement: biggest debtor pays biggest creditor
+  function settle(net){
+    const creditors = [], debtors = [];
+    for(const [p, v] of Object.entries(net)){
+      if(v > 0.005) creditors.push({ p, v });
+      else if(v < -0.005) debtors.push({ p, v: -v });
+    }
+    creditors.sort((a, b) => b.v - a.v);
+    debtors.sort((a, b) => b.v - a.v);
+    const tx = [];
+    let i = 0, j = 0;
+    while(i < debtors.length && j < creditors.length){
+      const pay = Math.min(debtors[i].v, creditors[j].v);
+      const amount = Math.round(pay * 100) / 100;
+      if(amount > 0) tx.push({ from: debtors[i].p, to: creditors[j].p, amount });
+      debtors[i].v -= pay;
+      creditors[j].v -= pay;
+      if(debtors[i].v <= 0.005) i++;
+      if(creditors[j].v <= 0.005) j++;
+    }
+    return tx;
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('exps')){
+    const $ = id => document.getElementById(id);
+    const money = n => n.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+    const peopleList = () => $('people').value.split(',').map(s => s.trim()).filter(Boolean);
+
+    function addExp(payer, amount, parts){
+      const people = peopleList();
+      const row = document.createElement('div');
+      row.className = 'exp';
+      const opts = people.map(p => `<option${p === payer ? ' selected' : ''}>${p}</option>`).join('');
+      row.innerHTML =
+        `<select class="payer">${opts}</select>` +
+        `<input class="amt" type="number" step="any" placeholder="amount" value="${amount || ''}">` +
+        `<input class="parts" placeholder="split among (blank=all)" value="${parts || ''}">` +
+        `<button type="button" class="rm">✕</button>`;
+      row.querySelector('.rm').addEventListener('click', () => { row.remove(); render(); });
+      row.querySelectorAll('input,select').forEach(el => el.addEventListener('input', render));
+      $('exps').appendChild(row);
+    }
+
+    function currentExpenses(){
+      const all = peopleList();
+      return [...$('exps').querySelectorAll('.exp')].map(r => {
+        const partsRaw = r.querySelector('.parts').value.trim();
+        const participants = partsRaw ? partsRaw.split(',').map(s => s.trim()).filter(Boolean) : all;
+        return { payer: r.querySelector('.payer').value, amount: r.querySelector('.amt').value || 0, participants };
+      }).filter(e => Number(e.amount) > 0);
+    }
+
+    function render(){
+      let net, tx;
+      try{ net = balances(currentExpenses()); tx = settle(net); }
+      catch(err){ return; }
+      const entries = Object.entries(net).sort((a, b) => b[1] - a[1]);
+      $('balances').innerHTML = entries.length ? entries.map(([p, v]) =>
+        `<div class="bal"><span>${p}</span><span class="amt" style="color:${v >= 0 ? 'var(--up)' : 'var(--down)'}">${v >= 0 ? '+' : ''}${money(v)}</span></div>`
+      ).join('') : '<div class="none">Add expenses to see balances.</div>';
+      $('settle').innerHTML = tx.length ? tx.map(t =>
+        `<div class="tx"><span class="who">${t.from} → ${t.to}</span><span class="amt">${money(t.amount)}</span></div>`
+      ).join('') : '<div class="none">All settled up 🎉</div>';
+    }
+
+    $('add').addEventListener('click', () => { addExp(); render(); });
+    $('people').addEventListener('input', () => {
+      // rebuild payer dropdowns to reflect the new roster
+      const data = currentExpenses();
+      $('exps').innerHTML = '';
+      data.forEach(e => addExp(e.payer, e.amount, e.participants.join(', ')));
+      render();
+    });
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('split-up-theme', cur); }catch(e){}
+    });
+
+    addExp('Alex', 90, '');
+    addExp('Bailey', 30, '');
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { balances, settle };
+</script>
+</body>
+</html>

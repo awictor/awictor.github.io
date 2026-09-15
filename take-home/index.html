@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Take-Home Pay Calculator — net paycheck estimate</title>
+<meta name="description" content="Estimate take-home pay from gross salary — pre-tax deductions, your effective income-tax rate, and FICA (Social Security + Medicare) — per year, month or paycheck. Offline, no tracking.">
+<style>
+  :root{
+    --c:#15803d;
+    --bg:#f0f7f2; --card:#ffffff; --fg:#0f1e15; --muted:#54685c;
+    --line:#d5e7dc; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#08130c; --card:#0f1d14; --fg:#e7f3ec; --muted:#8ba597;
+    --line:#1e3327; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:800px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:800px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:560px){.grid{grid-template-columns:1fr}}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  .unit{font-weight:400;text-transform:none}
+  input[type=number],select{width:100%;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus,select:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .result{text-align:center;margin:22px 0 4px}
+  .result .n{font-size:2.8rem;font-weight:800;color:var(--c);font-variant-numeric:tabular-nums;line-height:1}
+  .result .k{color:var(--muted);font-size:.9rem;margin-top:4px}
+  .breakdown{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:16px}
+  @media(max-width:520px){.breakdown{grid-template-columns:1fr}}
+  .bd{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+  .bd b{display:block;font-size:1.1rem;font-variant-numeric:tabular-nums}
+  .bd span{font-size:.76rem;color:var(--muted)}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+  .err{color:#dc2626;font-size:.85rem;margin-top:8px;min-height:1em;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">💵</div>
+  <div>
+    <h1>Take-Home Pay</h1>
+    <p>What actually lands in your paycheck</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div><label>Gross annual salary ($)</label><input type="number" id="gross" value="90000" min="0" step="any"></div>
+      <div><label>Pre-tax deductions <span class="unit">($/yr: 401k, health…)</span></label><input type="number" id="pretax" value="6000" min="0" step="any"></div>
+      <div><label>Effective income-tax rate <span class="unit">(%)</span></label><input type="number" id="rate" value="15" min="0" max="100" step="any"></div>
+      <div><label>Show per</label>
+        <select id="period">
+          <option value="1">Year</option>
+          <option value="12" selected>Month</option>
+          <option value="26">Biweekly (26/yr)</option>
+          <option value="24">Semi-monthly (24/yr)</option>
+          <option value="52">Weekly</option>
+        </select>
+      </div>
+    </div>
+    <div class="result">
+      <div class="n" id="net">—</div>
+      <div class="k" id="netK">take-home per month</div>
+    </div>
+    <div class="breakdown">
+      <div class="bd"><b id="tax">—</b><span>income tax</span></div>
+      <div class="bd"><b id="fica">—</b><span>FICA (SS + Medicare)</span></div>
+      <div class="bd"><b id="annualNet">—</b><span>annual take-home</span></div>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>How it's estimated</h2>
+    <p class="note">Take-home = gross − pre-tax deductions − income tax − FICA. <b>FICA</b> is 6.2% Social Security (up to the annual wage base, $168,600 for 2024) + 1.45% Medicare on all wages. Because everyone's brackets and state taxes differ, you supply your own <b>effective income-tax rate</b> (total income tax ÷ taxable pay) and it's applied to pay after pre-tax deductions. A simplified US estimate — not tax advice; use your pay stub or a full withholding calculator for exact figures. Everything runs locally.</p>
+  </div>
+
+  <p class="foot">100% offline · not tax advice · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function toNum(x){ var n = Number(x); if(!isFinite(n)) throw new Error('inputs must be numbers'); return n; }
+  // FICA: 6.2% Social Security up to the wage base + 1.45% Medicare on all wages.
+  function ficaTax(gross, ssWageBase){
+    gross = toNum(gross);
+    ssWageBase = ssWageBase == null ? 168600 : toNum(ssWageBase);
+    if(gross < 0) throw new Error('gross must be non-negative');
+    return Math.min(gross, ssWageBase) * 0.062 + gross * 0.0145;
+  }
+  // Annual take-home breakdown.
+  function takeHome(gross, opts){
+    opts = opts || {};
+    gross = toNum(gross);
+    var preTax = toNum(opts.preTaxDeductions == null ? 0 : opts.preTaxDeductions);
+    var rate = toNum(opts.effectiveTaxRatePct == null ? 0 : opts.effectiveTaxRatePct);
+    if(gross < 0) throw new Error('gross must be non-negative');
+    if(preTax < 0 || preTax > gross) throw new Error('pre-tax deductions must be between 0 and gross');
+    if(rate < 0 || rate > 100) throw new Error('tax rate must be 0-100');
+    var taxable = gross - preTax;
+    var incomeTax = taxable * rate / 100;
+    var fica = ficaTax(gross, opts.ssWageBase);
+    var net = gross - preTax - incomeTax - fica;
+    return { taxable: taxable, incomeTax: incomeTax, fica: fica, net: net };
+  }
+  function perPeriod(annual, periodsPerYear){
+    periodsPerYear = toNum(periodsPerYear);
+    if(periodsPerYear <= 0) throw new Error('periods must be positive');
+    return toNum(annual) / periodsPerYear;
+  }
+
+  if(typeof module !== 'undefined') module.exports = { ficaTax:ficaTax, takeHome:takeHome, perPeriod:perPeriod };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    function money(n){ return '$' + Math.round(n).toLocaleString(); }
+    function val(id){ return Number(document.getElementById(id).value); }
+    var PLABEL = { '1': 'year', '12': 'month', '26': 'biweekly paycheck', '24': 'semi-monthly paycheck', '52': 'week' };
+    function render(){
+      document.getElementById('err').textContent = '';
+      try{
+        var th = takeHome(val('gross'), { preTaxDeductions: val('pretax'), effectiveTaxRatePct: val('rate') });
+        var periods = val('period');
+        document.getElementById('net').textContent = money(perPeriod(th.net, periods));
+        document.getElementById('netK').textContent = 'take-home per ' + PLABEL[String(periods)];
+        document.getElementById('tax').textContent = money(th.incomeTax) + '/yr';
+        document.getElementById('fica').textContent = money(th.fica) + '/yr';
+        document.getElementById('annualNet').textContent = money(th.net);
+      }catch(e){
+        ['net','tax','fica','annualNet'].forEach(function(id){ document.getElementById(id).textContent = '—'; });
+        document.getElementById('err').textContent = e.message;
+      }
+    }
+    ['gross','pretax','rate','period'].forEach(function(id){ document.getElementById(id).addEventListener('input', render); });
+    document.getElementById('period').addEventListener('change', render);
+    render();
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('takehome-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('takehome-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

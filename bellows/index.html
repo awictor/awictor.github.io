@@ -1,0 +1,1554 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bellows — a live, scrubbable DEFLATE visualizer</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --bg-elev: #161b22;
+    --bg-elev2: #1c2230;
+    --border: #2b3444;
+    --border-soft: #232b38;
+    --text: #e6edf3;
+    --text-dim: #93a1b0;
+    --text-faint: #7d8b9a;
+    --accent: #ff7a45;
+    --accent-2: #4cc2ff;
+    --lit: #4cc2ff;
+    --len: #ff9f43;
+    --dist: #b980ff;
+    --end: #6f7d8c;
+    --good: #3fd07f;
+    --bad: #ff5c6c;
+    --floor: #ffd93d;
+    --shadow: 0 8px 30px rgba(0,0,0,0.35);
+    --mono: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  html[data-theme="light"] {
+    --bg: #f4f1ec;
+    --bg-elev: #ffffff;
+    --bg-elev2: #f0ece4;
+    --border: #d9d2c6;
+    --border-soft: #e6e0d5;
+    --text: #232f3e;
+    --text-dim: #5b6675;
+    --text-faint: #737e8c;
+    --accent: #ff6100;
+    --accent-2: #1273c9;
+    --lit: #1273c9;
+    --len: #d97706;
+    --dist: #8b3ff0;
+    --end: #8a95a3;
+    --good: #159a55;
+    --bad: #d13b47;
+    --floor: #c99a00;
+    --shadow: 0 8px 30px rgba(60,50,40,0.12);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent-2); }
+  .wrap { max-width: 1400px; margin: 0 auto; padding: 18px 20px 80px; }
+
+  header.app {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding-bottom: 14px; margin-bottom: 8px; border-bottom: 1px solid var(--border-soft);
+  }
+  .logo { display: flex; align-items: baseline; gap: 10px; }
+  .logo h1 { font-size: 22px; margin: 0; letter-spacing: -0.5px; }
+  .logo .b { color: var(--accent); }
+  .logo .tag { color: var(--text-dim); font-size: 12.5px; }
+  header.app .spacer { flex: 1; }
+  .btn {
+    background: var(--bg-elev); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 12px; font-size: 13px; cursor: pointer;
+    font-family: inherit; transition: background .12s, border-color .12s, transform .05s;
+    display: inline-flex; align-items: center; gap: 6px; user-select: none;
+  }
+  .btn:hover { background: var(--bg-elev2); border-color: var(--accent); }
+  .btn:active { transform: translateY(1px); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #1a1206; font-weight: 600; }
+  html[data-theme="light"] .btn.primary { color: #fff; }
+  .btn.primary:hover { filter: brightness(1.06); }
+  .btn.icon { padding: 7px 10px; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 1080px) { .grid { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--bg-elev); border: 1px solid var(--border-soft); border-radius: 12px;
+    padding: 14px; box-shadow: var(--shadow); min-width: 0;
+  }
+  .panel h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-dim);
+    margin: 0 0 10px; display: flex; align-items: center; gap: 8px;
+  }
+  .panel h2 .hint { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--text-faint); font-size: 11.5px; }
+
+  /* Input */
+  .input-row { display: flex; gap: 12px; align-items: stretch; flex-wrap: wrap; }
+  .input-col { flex: 1; min-width: 280px; display: flex; flex-direction: column; gap: 8px; }
+  textarea#input {
+    width: 100%; min-height: 96px; resize: vertical; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-family: var(--mono);
+    font-size: 13px; line-height: 1.5;
+  }
+  textarea#input:focus { outline: none; border-color: var(--accent); }
+  .controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .ctrl { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--text-dim); }
+  .ctrl label { font-weight: 600; letter-spacing: .3px; }
+  .ctrl .val { color: var(--accent); font-family: var(--mono); }
+  input[type=range] { accent-color: var(--accent); width: 130px; }
+  select, input[type=number] {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 7px; font-family: var(--sans); font-size: 12.5px;
+  }
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; }
+  .preset-btn { font-size: 12px; padding: 5px 9px; }
+  .notice { color: var(--floor); font-size: 12px; margin-top: 6px; display: none; }
+  .notice.show { display: block; }
+  .dropzone {
+    border: 1.5px dashed var(--border); border-radius: 8px; padding: 10px; text-align: center;
+    color: var(--text-faint); font-size: 12px; transition: border-color .12s, background .12s; cursor: pointer;
+  }
+  .dropzone.drag { border-color: var(--accent); background: var(--bg-elev2); color: var(--text); }
+
+  /* Source view */
+  #source {
+    font-family: var(--mono); font-size: 13px; line-height: 1.9; word-break: break-all;
+    max-height: 210px; overflow: auto; padding: 6px; background: var(--bg); border-radius: 8px; border: 1px solid var(--border-soft);
+  }
+  .ch {
+    display: inline-block; padding: 1px 0; border-radius: 3px; position: relative; white-space: pre;
+    transition: background .1s, color .1s, box-shadow .1s;
+  }
+  .ch.hexpair { padding: 1px 4px; margin: 1px; background: var(--bg-elev2); border-radius: 4px; }
+  .ch.win { background: rgba(255,122,69,0.14); box-shadow: inset 0 -2px 0 var(--accent); }
+  .ch.look { background: rgba(76,194,255,0.14); }
+  .ch.matchsrc { background: rgba(255,159,67,0.30); color: var(--text); }
+  .ch.cursor { box-shadow: inset 0 0 0 2px var(--accent); border-radius: 3px; }
+  .ch.hl { background: var(--accent); color: #1a1206; box-shadow: 0 0 0 2px var(--accent); z-index: 2; }
+  html[data-theme="light"] .ch.hl { color: #fff; }
+  .ch.hl-lit { background: var(--lit); color: #fff; }
+  .ch.hl-match { background: var(--len); color: #241500; }
+  .ch.done { color: var(--text-dim); }
+  .ch.pending { color: var(--text-faint); }
+
+  /* Tokens */
+  #tokens {
+    display: flex; flex-wrap: wrap; gap: 5px; max-height: 150px; overflow: auto; padding: 4px 2px;
+  }
+  .tok {
+    font-family: var(--mono); font-size: 11.5px; padding: 3px 7px; border-radius: 6px; cursor: default;
+    border: 1px solid transparent; transition: transform .08s, box-shadow .08s; white-space: nowrap;
+  }
+  .tok.lit { background: rgba(76,194,255,0.14); color: var(--lit); border-color: rgba(76,194,255,0.3); }
+  .tok.match { background: rgba(255,159,67,0.16); color: var(--len); border-color: rgba(255,159,67,0.35); }
+  .tok.hl { box-shadow: 0 0 0 2px var(--accent); transform: translateY(-1px); }
+
+  /* Tree */
+  #treewrap { width: 100%; height: 300px; overflow: auto; background: var(--bg); border-radius: 8px; border: 1px solid var(--border-soft); position: relative; }
+  #tree { display: block; }
+  #tree .edge { stroke: var(--border); stroke-width: 1.2; fill: none; transition: stroke .1s, stroke-width .1s, opacity .2s; }
+  #tree .edge.hl { stroke: var(--accent); stroke-width: 2.6; }
+  #tree .elabel { fill: var(--text-faint); font-family: var(--mono); font-size: 10px; }
+  #tree .elabel.hl { fill: var(--accent); font-weight: 700; }
+  #tree circle.node { fill: var(--bg-elev2); stroke: var(--border); stroke-width: 1.2; transition: opacity .2s, stroke .1s; }
+  #tree circle.leaf { stroke-width: 1.5; }
+  #tree circle.leaf.lit { fill: var(--lit); stroke: var(--lit); }
+  #tree circle.leaf.len { fill: var(--len); stroke: var(--len); }
+  #tree circle.leaf.dist { fill: var(--dist); stroke: var(--dist); }
+  #tree circle.leaf.end { fill: var(--end); stroke: var(--end); }
+  #tree circle.hl { stroke: var(--accent); stroke-width: 3; }
+  #tree text.lbl { fill: var(--text); font-family: var(--mono); font-size: 10px; text-anchor: middle; pointer-events: none; }
+  #tree text.code { fill: var(--text-faint); font-family: var(--mono); font-size: 9px; text-anchor: middle; pointer-events: none; }
+  #tree .hidden { opacity: 0; }
+  #tree .leafhit { fill: transparent; cursor: pointer; }
+  .treebadge { position: absolute; top: 8px; right: 10px; font-size: 11px; color: var(--text-faint); font-family: var(--mono); }
+
+  /* Bit ribbon */
+  #ribbon {
+    display: flex; flex-wrap: wrap; gap: 2px; max-height: 190px; overflow: auto; padding: 6px; background: var(--bg);
+    border-radius: 8px; border: 1px solid var(--border-soft); align-content: flex-start;
+  }
+  .seg {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .5px; padding: 3px 4px; border-radius: 4px; cursor: default;
+    line-height: 1.25; border: 1px solid transparent; transition: box-shadow .08s, transform .08s, opacity .15s;
+  }
+  .seg.lit { background: rgba(76,194,255,0.16); color: var(--lit); }
+  .seg.len { background: rgba(255,159,67,0.18); color: var(--len); }
+  .seg.dist { background: rgba(185,128,255,0.18); color: var(--dist); }
+  .seg.end { background: rgba(111,125,140,0.20); color: var(--text-dim); }
+  .seg.hl { box-shadow: 0 0 0 2px var(--accent); transform: translateY(-1px); z-index:2; }
+  .seg.pending { opacity: .12; }
+  .seg .cap { display: block; font-size: 10px; opacity: .9; letter-spacing: 0; }
+
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11.5px; color: var(--text-dim); margin-top: 8px; }
+  .legend .sw { display: inline-flex; align-items: center; gap: 5px; }
+  .legend .dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+  /* Stats */
+  .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .stat { background: var(--bg); border: 1px solid var(--border-soft); border-radius: 9px; padding: 10px 12px; }
+  .stat .k { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .6px; }
+  .stat .v { font-size: 20px; font-family: var(--mono); font-weight: 600; margin-top: 2px; }
+  .stat .v small { font-size: 12px; color: var(--text-dim); font-weight: 400; }
+  .bar-wrap { margin-top: 12px; }
+  .bar-track { position: relative; height: 30px; background: var(--bg); border-radius: 8px; border: 1px solid var(--border-soft); overflow: hidden; }
+  .bar-fill { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, var(--accent), var(--len)); transition: width .25s ease; border-radius: 8px 0 0 8px; }
+  .bar-floor { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--floor); }
+  .bar-floor::after { content: "entropy floor"; position: absolute; top: -15px; left: 4px; font-size: 9px; color: var(--floor); white-space: nowrap; }
+  .bar-label { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-family: var(--mono); font-size: 12px; color: var(--text); text-shadow: 0 1px 2px var(--bg); }
+
+  /* Timeline */
+  .timeline { position: sticky; bottom: 0; z-index: 20; margin-top: 14px; }
+  .tl-inner { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; box-shadow: var(--shadow); }
+  .tl-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .phase-pills { display: flex; gap: 4px; margin-left: 4px; }
+  .pill { font-size: 10.5px; padding: 3px 8px; border-radius: 20px; background: var(--bg-elev2); color: var(--text-faint); border: 1px solid var(--border-soft); }
+  .pill.active { background: var(--accent); color: #1a1206; border-color: var(--accent); font-weight: 600; }
+  html[data-theme="light"] .pill.active { color: #fff; }
+  #scrub { flex: 1; min-width: 180px; accent-color: var(--accent); }
+  .tl-step { font-family: var(--mono); font-size: 12px; color: var(--text-dim); white-space: nowrap; }
+  .annotation {
+    margin-top: 10px; background: var(--bg); border: 1px solid var(--border-soft); border-left: 3px solid var(--accent);
+    border-radius: 6px; padding: 9px 12px; font-size: 13px; color: var(--text); min-height: 20px;
+  }
+  .annotation .why { color: var(--text-dim); }
+  .annotation b { color: var(--accent); }
+
+  /* A/B race */
+  .race-row { display: grid; grid-template-columns: 120px 1fr 92px; align-items: center; gap: 10px; margin-bottom: 9px; }
+  .race-name { font-size: 12.5px; }
+  .race-name small { display: block; color: var(--text-faint); font-size: 10.5px; }
+  .race-track { position: relative; height: 22px; background: var(--bg); border-radius: 6px; border: 1px solid var(--border-soft); overflow: hidden; }
+  .race-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px 0 0 6px; transition: width 1.1s cubic-bezier(.2,.7,.2,1); }
+  .race-floor { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--floor); }
+  .race-val { font-family: var(--mono); font-size: 12.5px; text-align: right; }
+  .race-legend { font-size: 11px; color: var(--text-faint); margin-top: 6px; }
+
+  /* Scoreboard */
+  .score-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  #board { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; max-height: 220px; overflow: auto; }
+  #board li { display: grid; grid-template-columns: 24px 1fr auto; gap: 8px; align-items: center; background: var(--bg); border: 1px solid var(--border-soft); border-radius: 7px; padding: 6px 9px; font-size: 12.5px; }
+  #board li .rank { font-family: var(--mono); color: var(--text-faint); }
+  #board li .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board li .r { font-family: var(--mono); font-weight: 600; }
+  #board li.best .r { color: var(--good); }
+  #board li.worst .r { color: var(--bad); }
+  #board li.current { border-color: var(--accent); }
+  .empty { color: var(--text-faint); font-size: 12.5px; padding: 8px 0; }
+  .kbd { font-family: var(--mono); font-size: 11px; background: var(--bg-elev2); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 1px 5px; color: var(--text-dim); }
+  .footnote { color: var(--text-faint); font-size: 11.5px; margin-top: 10px; }
+  .verify { font-family: var(--mono); font-size: 12.5px; padding: 3px 9px; border-radius: 20px; }
+  .verify.ok { background: rgba(63,208,127,.16); color: var(--good); }
+  .verify.fail { background: rgba(255,92,108,.16); color: var(--bad); }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--bg-elev2); color: var(--text); border: 1px solid var(--accent); padding: 9px 16px; border-radius: 10px; box-shadow: var(--shadow); opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; z-index: 100; font-size: 13px; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition-duration: 0.001ms !important;
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+    }
+    .race-fill { transition: none !important; }
+    .bar-fill { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="app">
+    <div class="logo">
+      <h1><span class="b">Bellows</span></h1>
+      <span class="tag">watch your text get squeezed — a live DEFLATE (LZ77 + Huffman) visualizer</span>
+    </div>
+    <div class="spacer"></div>
+    <button class="btn icon" id="themeBtn" title="Toggle light/dark theme">🌗 Theme</button>
+    <!-- label set on boot to reflect the current theme -->
+
+    <button class="btn icon" id="shareBtn" title="Copy a shareable URL">🔗 Share</button>
+  </header>
+
+  <!-- INPUT -->
+  <section class="panel" style="margin-bottom:14px;">
+    <h2>Input <span class="hint">paste up to 3,000 chars, or drop a small file — everything runs locally</span></h2>
+    <div class="input-row">
+      <div class="input-col">
+        <textarea id="input" spellcheck="false" placeholder="Type or paste text here…"></textarea>
+        <div class="presets">
+          <span style="align-self:center;color:var(--text-dim);font-size:11.5px;">Presets:</span>
+          <button class="btn preset-btn" data-preset="repetitive">Repetitive</button>
+          <button class="btn preset-btn" data-preset="prose">English prose</button>
+          <button class="btn preset-btn" data-preset="code">Source code</button>
+          <button class="btn preset-btn" data-preset="random">Random bytes</button>
+        </div>
+        <div class="notice" id="notice"></div>
+      </div>
+      <div class="input-col" style="max-width:340px;">
+        <div class="controls">
+          <div class="ctrl">
+            <label>Window size <span class="val" id="winVal">256</span></label>
+            <input type="range" id="winRange" min="16" max="1024" step="16" value="256">
+          </div>
+          <div class="ctrl">
+            <label>Max match <span class="val" id="matVal">32</span></label>
+            <input type="range" id="matRange" min="4" max="128" step="4" value="32">
+          </div>
+          <div class="ctrl">
+            <label>View</label>
+            <select id="viewMode">
+              <option value="text">Text</option>
+              <option value="bytes">Hex / bytes</option>
+            </select>
+          </div>
+        </div>
+        <div class="dropzone" id="dropzone">📄 Drag &amp; drop a small text file here (or click to pick) — <span style="opacity:.85">text only (.txt, .md, .csv, .json…)</span></div>
+        <input type="file" id="fileInput" accept=".txt,.md,.csv,.json,.js,.ts,.html,.css,.xml,.log,text/*" style="display:none">
+        <div style="font-size:11.5px;color:var(--text-faint);">
+          Auto window-size on paste picks a sensible search buffer for your input length.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MAIN GRID -->
+  <div class="grid">
+    <!-- Source + tokens -->
+    <section class="panel">
+      <h2>1 · LZ77 sliding window <span class="hint">the search buffer hunts the longest back-reference</span></h2>
+      <div id="source"></div>
+      <div style="margin-top:12px;">
+        <h2 style="margin-bottom:6px;">Emitted tokens <span class="hint">(distance, length) &nbsp;·&nbsp; literals</span></h2>
+        <div id="tokens"></div>
+      </div>
+      <div class="legend">
+        <span class="sw"><span class="dot" style="background:var(--accent)"></span>search window</span>
+        <span class="sw"><span class="dot" style="background:var(--lit)"></span>literal</span>
+        <span class="sw"><span class="dot" style="background:var(--len)"></span>back-reference match</span>
+      </div>
+    </section>
+
+    <!-- Huffman tree -->
+    <section class="panel">
+      <h2>2 · Huffman tree <span class="hint">prefix code assembling from lowest-frequency symbols up</span></h2>
+      <div id="treewrap">
+        <svg id="tree" preserveAspectRatio="xMidYMid meet"></svg>
+        <div class="treebadge" id="treebadge"></div>
+      </div>
+      <div class="legend">
+        <span class="sw"><span class="dot" style="background:var(--lit)"></span>literal byte</span>
+        <span class="sw"><span class="dot" style="background:var(--len)"></span>match length</span>
+        <span class="sw"><span class="dot" style="background:var(--dist)"></span>match distance</span>
+        <span class="sw"><span class="dot" style="background:var(--end)"></span>end-of-block</span>
+      </div>
+    </section>
+
+    <!-- Bit ribbon -->
+    <section class="panel">
+      <h2>3 · Compressed bit-ribbon <span class="hint">each token becomes a colored prefix code</span></h2>
+      <div id="ribbon"></div>
+      <div class="legend">
+        <span class="sw"><span class="dot" style="background:var(--lit)"></span>literal code</span>
+        <span class="sw"><span class="dot" style="background:var(--len)"></span>length code</span>
+        <span class="sw"><span class="dot" style="background:var(--dist)"></span>distance code</span>
+        <span class="sw"><span class="dot" style="background:var(--end)"></span>end marker</span>
+      </div>
+      <div class="footnote">Hover any bit segment to trace it back to the exact source characters and the root-to-leaf path in the tree — and vice-versa.</div>
+    </section>
+
+    <!-- Stats -->
+    <section class="panel">
+      <h2>4 · Stats &amp; the entropy floor <span class="hint" id="verifyBadge"></span></h2>
+      <div class="stats">
+        <div class="stat"><div class="k">Original</div><div class="v" id="stOrig">0 <small>bits</small></div></div>
+        <div class="stat"><div class="k">Compressed</div><div class="v" id="stComp">0 <small>bits</small></div></div>
+        <div class="stat"><div class="k">Compression ratio</div><div class="v" id="stRatio">—</div></div>
+        <div class="stat"><div class="k">Tokens</div><div class="v" id="stTok">0</div></div>
+      </div>
+      <div class="bar-wrap">
+        <div style="font-size:11.5px;color:var(--text-dim);margin-bottom:5px;">Compressed size vs. original (order-0 Shannon entropy floor marked)</div>
+        <div class="bar-track">
+          <div class="bar-fill" id="barFill" style="width:0%"></div>
+          <div class="bar-floor" id="barFloor" style="left:0%"></div>
+          <div class="bar-label" id="barLabel"></div>
+        </div>
+      </div>
+      <div class="footnote" id="entropyNote"></div>
+    </section>
+  </div>
+
+  <!-- TIMELINE -->
+  <div class="timeline">
+    <div class="tl-inner">
+      <div class="tl-controls">
+        <button class="btn icon" id="toStart" title="Jump to start (Home)">⏮</button>
+        <button class="btn icon" id="stepBack" title="Step back (←)">⏴</button>
+        <button class="btn primary icon" id="playBtn" title="Play / Pause (Space)" style="min-width:44px;justify-content:center;">▶</button>
+        <button class="btn icon" id="stepFwd" title="Step forward (→)">⏵</button>
+        <button class="btn icon" id="toEnd" title="Jump to end (End)">⏭</button>
+        <div class="ctrl" style="margin-left:6px;">
+          <label>Speed <span class="val" id="spdVal">1.50×</span></label>
+          <input type="range" id="speed" min="0.25" max="6" step="0.25" value="1.5">
+        </div>
+        <div class="phase-pills" id="phasePills">
+          <span class="pill" data-phase="lz77">LZ77</span>
+          <span class="pill" data-phase="build">Build tree</span>
+          <span class="pill" data-phase="encode">Encode</span>
+          <span class="pill" data-phase="decode">Decompress</span>
+        </div>
+        <input type="range" id="scrub" min="0" max="0" value="0">
+        <span class="tl-step" id="stepLabel">0 / 0</span>
+      </div>
+      <div class="annotation" id="annotation">Paste some text above to begin. The timeline scrubs through every decision the algorithm makes.</div>
+    </div>
+  </div>
+
+  <!-- A/B RACE + SCOREBOARD -->
+  <div class="grid" style="margin-top:14px;">
+    <section class="panel">
+      <h2>A/B race <span class="hint">why structure compresses and randomness doesn't</span></h2>
+      <div id="race"></div>
+      <div class="race-legend">Bars show compressed size as a % of the original (shorter = better). The yellow line is each input's order-0 Shannon entropy floor. Random data barely moves; repetition collapses.</div>
+      <button class="btn" id="raceBtn" style="margin-top:10px;">↻ Re-run the race</button>
+    </section>
+
+    <section class="panel">
+      <h2>Challenge board <span class="hint">craft the most- (and least-) compressible input</span></h2>
+      <div class="score-head">
+        <button class="btn primary" id="logRun">＋ Log this run</button>
+        <button class="btn" id="clearBoard">Clear board</button>
+        <span class="verify" id="challengeHint" style="background:var(--bg-elev2);color:var(--text-dim);">Lower % = more compressible</span>
+      </div>
+      <ol id="board"></ol>
+      <div class="footnote">Your best run so far tries to beat the order-0 entropy floor by exploiting repetition (LZ77's superpower). Random bytes can't be squeezed — that's information theory in action.</div>
+    </section>
+  </div>
+
+  <section class="panel" style="margin-top:14px;">
+    <h2>How to read this</h2>
+    <p style="margin:6px 0;color:var(--text-dim);font-size:13px;">
+      Bellows implements a faithful, simplified <b style="color:var(--text)">DEFLATE</b> — the exact algorithm inside every
+      <span class="kbd">.zip</span>, <span class="kbd">.gz</span>, and <span class="kbd">.png</span>.
+      Stage&nbsp;1 (<b style="color:var(--len)">LZ77</b>) replaces repeated spans with <em>(distance, length)</em> back-references.
+      Stage&nbsp;2 (<b style="color:var(--dist)">Huffman</b>) builds an optimal prefix code so frequent symbols get short bit-strings.
+      The bellows then <em>expands</em>: the bit-stream is decoded back to your exact input and verified byte-for-byte.
+    </p>
+    <p style="margin:6px 0;color:var(--text-dim);font-size:13px;">
+      <b style="color:var(--text)">Keyboard:</b>
+      <span class="kbd">Space</span> play/pause ·
+      <span class="kbd">←</span>/<span class="kbd">→</span> step ·
+      <span class="kbd">Home</span>/<span class="kbd">End</span> jump ·
+      <span class="kbd">T</span> theme.
+      Full run state lives in the URL hash — just copy the address bar to share.
+    </p>
+  </section>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+(function () {
+  /* ==================================================================
+     BELLOWS — single-file DEFLATE (LZ77 + Huffman) visualizer
+     ================================================================== */
+
+  const MAX_INPUT = 3000;
+  const KIND_CLASS = { lit: "lit", len: "len", dist: "dist", end: "end" };
+
+  // ---- DOM refs ----
+  const $ = (id) => document.getElementById(id);
+  const el = {
+    input: $("input"), notice: $("notice"), winRange: $("winRange"), matRange: $("matRange"),
+    winVal: $("winVal"), matVal: $("matVal"), viewMode: $("viewMode"),
+    source: $("source"), tokens: $("tokens"), tree: $("tree"), treewrap: $("treewrap"), treebadge: $("treebadge"),
+    ribbon: $("ribbon"),
+    stOrig: $("stOrig"), stComp: $("stComp"), stRatio: $("stRatio"), stTok: $("stTok"),
+    barFill: $("barFill"), barFloor: $("barFloor"), barLabel: $("barLabel"), entropyNote: $("entropyNote"),
+    verifyBadge: $("verifyBadge"),
+    scrub: $("scrub"), stepLabel: $("stepLabel"), annotation: $("annotation"), phasePills: $("phasePills"),
+    playBtn: $("playBtn"), stepFwd: $("stepFwd"), stepBack: $("stepBack"), toStart: $("toStart"), toEnd: $("toEnd"),
+    speed: $("speed"), spdVal: $("spdVal"),
+    race: $("race"), raceBtn: $("raceBtn"),
+    board: $("board"), logRun: $("logRun"), clearBoard: $("clearBoard"),
+    themeBtn: $("themeBtn"), shareBtn: $("shareBtn"), fileInput: $("fileInput"), dropzone: $("dropzone"),
+    toast: $("toast"),
+  };
+
+  const PRESETS = {
+    repetitive: "abcabcabcabcabcabcabc abcabcabcabcabcabcabc na na na na na na hey hey hey goodbye " +
+                "the quick the quick the quick the quick brown fox brown fox brown fox jumps jumps jumps",
+    prose: "It was the best of times, it was the worst of times, it was the age of wisdom, it was the " +
+           "age of foolishness, it was the epoch of belief, it was the epoch of incredulity, it was the " +
+           "season of Light, it was the season of Darkness, it was the spring of hope, it was the winter of despair.",
+    code: "function compress(input) {\n  const tokens = [];\n  let pos = 0;\n  while (pos < input.length) {\n" +
+          "    const match = findLongestMatch(input, pos);\n    if (match) {\n      tokens.push(match);\n" +
+          "      pos += match.length;\n    } else {\n      tokens.push(input[pos]);\n      pos += 1;\n    }\n  }\n" +
+          "  return tokens;\n}\n",
+    random: (function () {
+      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,!?";
+      let s = "", seed = 1337;
+      const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+      for (let i = 0; i < 240; i++) s += chars[Math.floor(rnd() * chars.length)];
+      return s;
+    })(),
+  };
+
+  // ---- state ----
+  const state = {
+    text: "", windowSize: 256, maxMatch: 32, viewMode: "text",
+    model: null, step: 0, playing: false, speed: 1.5, highlightTok: null,
+  };
+  let hashLoading = false;
+  let raf = null, lastTick = 0;
+
+  const _rmQuery = typeof matchMedia !== "undefined" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
+  function prefersReducedMotion() { return !!(_rmQuery && _rmQuery.matches); }
+
+  /* ==================================================================
+     ENGINE
+     ================================================================== */
+
+  const _utf8Encoder = typeof TextEncoder !== "undefined" ? new TextEncoder() : null;
+  function toBytes(str) {
+    // faithful UTF-8 byte view; keeps round-trip exact for any text.
+    // TextEncoder handles surrogate pairs and lone/mismatched surrogates
+    // per spec (lone surrogates become U+FFFD) — never dropping or
+    // mangling input the way a hand-rolled encoder can.
+    if (_utf8Encoder) return Array.from(_utf8Encoder.encode(str));
+    // Fallback for ancient engines without TextEncoder.
+    const arr = [];
+    for (let i = 0; i < str.length; i++) {
+      let c = str.charCodeAt(i);
+      if (c < 0x80) { arr.push(c); continue; }
+      if (c < 0x800) { arr.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f)); continue; }
+      if (c >= 0xd800 && c <= 0xdbff) {
+        // high surrogate — only consume the next unit if it's a valid low surrogate
+        const c2 = i + 1 < str.length ? str.charCodeAt(i + 1) : 0;
+        if (c2 >= 0xdc00 && c2 <= 0xdfff) {
+          const cp = 0x10000 + ((c - 0xd800) << 10) + (c2 - 0xdc00); i++;
+          arr.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3f), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
+          continue;
+        }
+        arr.push(0xef, 0xbf, 0xbd); continue; // lone high surrogate -> U+FFFD
+      }
+      if (c >= 0xdc00 && c <= 0xdfff) { arr.push(0xef, 0xbf, 0xbd); continue; } // lone low surrogate -> U+FFFD
+      arr.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+    }
+    return arr;
+  }
+
+  function lz77(bytes, windowSize, maxMatch, minMatch) {
+    const tokens = [];
+    const n = bytes.length;
+    let pos = 0;
+    while (pos < n) {
+      const searchStart = Math.max(0, pos - windowSize);
+      const lookaheadMax = Math.min(maxMatch, n - pos);
+      let bestLen = 0, bestDist = 0;
+      // iterate nearest-first so ties prefer the smaller distance
+      for (let s = pos - 1; s >= searchStart; s--) {
+        let len = 0;
+        while (len < lookaheadMax && bytes[s + len] === bytes[pos + len]) len++;
+        if (len > bestLen) { bestLen = len; bestDist = pos - s; }
+      }
+      if (bestLen >= minMatch) {
+        tokens.push({ type: "match", dist: bestDist, len: bestLen,
+          srcStart: pos, srcEnd: pos + bestLen, matchStart: pos - bestDist });
+        pos += bestLen;
+      } else {
+        tokens.push({ type: "lit", ch: bytes[pos], srcStart: pos, srcEnd: pos + 1 });
+        pos += 1;
+      }
+    }
+    return tokens;
+  }
+
+  function buildHuffman(tokens) {
+    // symbol frequencies over a combined literal/length/distance/end alphabet
+    const freq = new Map();
+    const bump = (key, kind, value) => {
+      let e = freq.get(key);
+      if (!e) { e = { key, kind, value, freq: 0 }; freq.set(key, e); }
+      e.freq++;
+    };
+    for (const t of tokens) {
+      if (t.type === "lit") bump("L" + t.ch, "lit", t.ch);
+      else { bump("N" + t.len, "len", t.len); bump("D" + t.dist, "dist", t.dist); }
+    }
+    bump("END", "end", null);
+
+    const symbols = [...freq.values()];
+    // deterministic order for stable tie-breaks
+    symbols.sort((a, b) => a.freq - b.freq || (a.key < b.key ? -1 : 1));
+
+    let idCounter = 0;
+    let nodes = symbols.map((s) => ({ id: idCounter++, freq: s.freq, sym: s, left: null, right: null, birth: 0 }));
+    const merges = [];
+
+    if (nodes.length === 1) {
+      // single-symbol input: give it a 1-bit code via a synthetic root
+      const only = nodes[0];
+      const root = { id: idCounter++, freq: only.freq, sym: null, left: only, right: null, birth: 1 };
+      merges.push({ a: only.id, b: null, parent: root.id });
+      return finalizeTree(root, symbols, merges, freq);
+    }
+
+    // priority selection by (freq, birth, id): a simple stable min-heap via array
+    const live = nodes.slice();
+    const pick = () => {
+      let bi = 0;
+      for (let i = 1; i < live.length; i++) {
+        const a = live[i], b = live[bi];
+        if (a.freq < b.freq || (a.freq === b.freq && (a.birth < b.birth || (a.birth === b.birth && a.id < b.id)))) bi = i;
+      }
+      return live.splice(bi, 1)[0];
+    };
+    let mergeNo = 0;
+    let root = null;
+    while (live.length > 1) {
+      const a = pick(), b = pick();
+      mergeNo++;
+      const parent = { id: idCounter++, freq: a.freq + b.freq, sym: null, left: a, right: b, birth: mergeNo };
+      merges.push({ a: a.id, b: b.id, parent: parent.id });
+      live.push(parent);
+    }
+    root = live[0];
+    return finalizeTree(root, symbols, merges, freq);
+  }
+
+  function finalizeTree(root, symbols, merges, freq) {
+    // assign codes + collect layout metadata via DFS
+    const codes = new Map();       // symKey -> { code, kind, value, pathIds }
+    const nodeList = [];
+    const leaves = [];
+    (function walk(node, code, pathIds) {
+      nodeList.push(node);
+      const path = pathIds.concat(node.id);
+      if (node.sym) {
+        const c = code === "" ? "0" : code; // lone-symbol edge case
+        codes.set(node.sym.key, { code: c, kind: node.sym.kind, value: node.sym.value, pathIds: path, leafId: node.id });
+        node.code = c; node.pathIds = path;
+        leaves.push(node);
+        return;
+      }
+      if (node.left) walk(node.left, code + "0", path);
+      if (node.right) walk(node.right, code + "1", path);
+    })(root, "", []);
+
+    return { root, codes, nodeList, leaves, merges, freq };
+  }
+
+  function encode(tokens, codes) {
+    const segments = [];
+    let bits = "";
+    for (let ti = 0; ti < tokens.length; ti++) {
+      const t = tokens[ti];
+      if (t.type === "lit") {
+        const c = codes.get("L" + t.ch).code;
+        segments.push({ tokenIndex: ti, kind: "lit", bits: c, symKey: "L" + t.ch, caption: "'" + prettyByte(t.ch) + "'" });
+        bits += c;
+      } else {
+        const cl = codes.get("N" + t.len).code, cd = codes.get("D" + t.dist).code;
+        segments.push({ tokenIndex: ti, kind: "len", bits: cl, symKey: "N" + t.len, caption: "len " + t.len });
+        segments.push({ tokenIndex: ti, kind: "dist", bits: cd, symKey: "D" + t.dist, caption: "dist " + t.dist });
+        bits += cl + cd;
+      }
+    }
+    const ce = codes.get("END").code;
+    segments.push({ tokenIndex: tokens.length, kind: "end", bits: ce, symKey: "END", caption: "EOB" });
+    bits += ce;
+    return { segments, bits, bitCount: bits.length };
+  }
+
+  function decodeBits(bits, root, tokens) {
+    // walk the tree bit-by-bit → symbols → reconstruct bytes; verify
+    const out = [];
+    let node = root, pendingLen = null;
+    for (let i = 0; i < bits.length; i++) {
+      node = bits[i] === "0" ? (node.left || node.right) : (node.right || node.left);
+      if (!node) return { ok: false, out };
+      if (node.sym) {
+        const s = node.sym;
+        if (s.kind === "end") { node = root; break; }
+        else if (s.kind === "lit") { out.push(s.value); node = root; }
+        else if (s.kind === "len") { pendingLen = s.value; node = root; }
+        else if (s.kind === "dist") {
+          const start = out.length - s.value;
+          for (let k = 0; k < pendingLen; k++) out.push(out[start + k]);
+          pendingLen = null; node = root;
+        }
+      }
+    }
+    return { out };
+  }
+
+  function entropyBits(bytes) {
+    // order-0 Shannon entropy of the raw byte stream (theoretical floor)
+    if (bytes.length === 0) return 0;
+    const f = new Map();
+    for (const b of bytes) f.set(b, (f.get(b) || 0) + 1);
+    let h = 0;
+    for (const c of f.values()) { const p = c / bytes.length; h -= p * Math.log2(p); }
+    return h * bytes.length;
+  }
+
+  function buildModel(text, windowSize, maxMatch) {
+    const bytes = toBytes(text);
+    const tokens = lz77(bytes, windowSize, maxMatch, 3);
+    const huff = buildHuffman(tokens);
+    const enc = encode(tokens, huff.codes);
+    const dec = decodeBits(enc.bits, huff.root, tokens);
+    const roundtrip = dec.out.length === bytes.length && dec.out.every((v, i) => v === bytes[i]);
+
+    // char -> token index map for hover linking
+    const charToken = new Int32Array(bytes.length).fill(-1);
+    for (let ti = 0; ti < tokens.length; ti++) {
+      const t = tokens[ti];
+      for (let i = t.srcStart; i < t.srcEnd; i++) charToken[i] = ti;
+    }
+    // token -> segment indices
+    const tokenSegs = tokens.map(() => []);
+    enc.segments.forEach((s, si) => { if (s.tokenIndex < tokens.length) tokenSegs[s.tokenIndex].push(si); });
+
+    const originalBits = bytes.length * 8;
+    const floorBits = entropyBits(bytes);
+    const litCount = tokens.filter((t) => t.type === "lit").length;
+    const matchCount = tokens.length - litCount;
+
+    return {
+      text, bytes, tokens, huff, segments: enc.segments, bits: enc.bits,
+      compressedBits: enc.bitCount, originalBits, floorBits, roundtrip,
+      charToken, tokenSegs, litCount, matchCount, windowSize, maxMatch,
+    };
+  }
+
+  function ratioSummary(m) {
+    if (m.originalBits === 0) return { pct: 0, factor: 1 };
+    const pct = (m.compressedBits / m.originalBits) * 100;
+    return { pct, factor: m.originalBits / m.compressedBits };
+  }
+
+  /* ==================================================================
+     RENDERING — static structures (rebuilt when the model changes)
+     ================================================================== */
+
+  let refs = { chars: [], toks: [], segs: [], leafHit: new Map(), leafGroups: new Map(), edges: new Map() };
+
+  function prettyByte(b) {
+    if (b === 10) return "\\n";
+    if (b === 13) return "\\r";
+    if (b === 9) return "\\t";
+    if (b === 32) return "␣";
+    if (b >= 33 && b <= 126) return String.fromCharCode(b);
+    return "·" + b.toString(16).padStart(2, "0");
+  }
+  function displayByte(b, mode) {
+    if (mode === "bytes") return b.toString(16).padStart(2, "0").toUpperCase();
+    if (b === 10) return "↵\n";
+    if (b === 32) return " ";
+    if (b === 9) return "  ";
+    if (b >= 32 && b <= 126) return String.fromCharCode(b);
+    return prettyByte(b);
+  }
+
+  function buildStatic() {
+    const m = state.model;
+    // ---- source chars ----
+    el.source.innerHTML = "";
+    refs.chars = [];
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < m.bytes.length; i++) {
+      const span = document.createElement("span");
+      span.className = "ch" + (state.viewMode === "bytes" ? " hexpair" : "");
+      const disp = displayByte(m.bytes[i], state.viewMode);
+      span.textContent = disp;
+      span.dataset.i = i;
+      span.addEventListener("mouseenter", () => setHighlight(m.charToken[i]));
+      span.addEventListener("mouseleave", clearHighlight);
+      refs.chars.push(span);
+      frag.appendChild(span);
+    }
+    el.source.appendChild(frag);
+
+    // ---- tokens ----
+    el.tokens.innerHTML = "";
+    refs.toks = [];
+    const tf = document.createDocumentFragment();
+    m.tokens.forEach((t, ti) => {
+      const span = document.createElement("span");
+      span.className = "tok " + t.type;
+      span.textContent = t.type === "lit" ? prettyByte(t.ch) : "(" + t.dist + "," + t.len + ")";
+      span.title = t.type === "lit" ? "literal byte" : "copy " + t.len + " bytes from " + t.dist + " back";
+      span.addEventListener("mouseenter", () => setHighlight(ti));
+      span.addEventListener("mouseleave", clearHighlight);
+      refs.toks.push(span);
+      tf.appendChild(span);
+    });
+    el.tokens.appendChild(tf);
+
+    // ---- bit ribbon ----
+    el.ribbon.innerHTML = "";
+    refs.segs = [];
+    const rf = document.createDocumentFragment();
+    m.segments.forEach((s, si) => {
+      const span = document.createElement("span");
+      span.className = "seg " + KIND_CLASS[s.kind];
+      span.innerHTML = escapeHtml(s.bits) + '<span class="cap">' + escapeHtml(s.caption) + "</span>";
+      span.addEventListener("mouseenter", () => setHighlight(s.tokenIndex < m.tokens.length ? s.tokenIndex : -2, s.symKey));
+      span.addEventListener("mouseleave", clearHighlight);
+      refs.segs.push(span);
+      rf.appendChild(span);
+    });
+    el.ribbon.appendChild(rf);
+
+    buildTree();
+    renderStats();
+  }
+
+  function escapeHtml(s) { return s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+
+  function buildTree() {
+    const m = state.model, huff = m.huff;
+    const svg = el.tree;
+    svg.innerHTML = "";
+    refs.leafHit = new Map(); refs.leafGroups = new Map(); refs.edges = new Map();
+
+    // layout: leaves in DFS order get evenly-spaced x; internal = midpoint of children; y by depth
+    const leaves = huff.leaves;
+    const depths = new Map();
+    let maxDepth = 0;
+    (function d(node, depth) {
+      depths.set(node.id, depth); maxDepth = Math.max(maxDepth, depth);
+      if (node.left) d(node.left, depth + 1);
+      if (node.right) d(node.right, depth + 1);
+    })(huff.root, 0);
+
+    const xpos = new Map();
+    let leafIdx = 0;
+    (function assign(node) {
+      if (node.sym) { xpos.set(node.id, leafIdx++); return xpos.get(node.id); }
+      let sum = 0, cnt = 0;
+      if (node.left) { sum += assign(node.left); cnt++; }
+      if (node.right) { sum += assign(node.right); cnt++; }
+      const x = cnt ? sum / cnt : leafIdx++;
+      xpos.set(node.id, x);
+      return x;
+    })(huff.root);
+
+    const nLeaf = Math.max(1, leaves.length);
+    const colW = 34, rowH = 46, padX = 24, padTop = 20, padBot = 34;
+    const W = Math.max(60, padX * 2 + (nLeaf - 1) * colW);
+    const H = Math.max(60, padTop + padBot + maxDepth * rowH);
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    // Render at natural pixel size so labels stay legible; #treewrap scrolls
+    // (overflow:auto) instead of shrink-to-fitting a wide tree into a smear.
+    // If the tree is narrower than the container, let it fill the width.
+    const wrapW = el.treewrap.clientWidth || W;
+    svg.setAttribute("width", Math.max(W, wrapW));
+    svg.setAttribute("height", H);
+
+    const px = (node) => padX + xpos.get(node.id) * colW;
+    const py = (node) => padTop + depths.get(node.id) * rowH;
+
+    const NS = "http://www.w3.org/2000/svg";
+    const mk = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+
+    // edges first
+    (function drawEdges(node) {
+      const kids = [["left", node.left, "0"], ["right", node.right, "1"]];
+      for (const [, child, bit] of kids) {
+        if (!child) continue;
+        const line = mk("path", {
+          class: "edge", "data-node": child.id,
+          d: "M" + px(node) + " " + py(node) + " L" + px(child) + " " + py(child),
+        });
+        line.dataset.birth = child.birth;
+        svg.appendChild(line);
+        // bit label near child
+        const lx = (px(node) + px(child)) / 2, ly = (py(node) + py(child)) / 2;
+        const lab = mk("text", { class: "elabel", x: lx, y: ly - 2 });
+        lab.textContent = bit; lab.dataset.node = child.id; lab.dataset.birth = child.birth;
+        svg.appendChild(lab);
+        refs.edges.set(child.id, { line, lab });
+        drawEdges(child);
+      }
+    })(huff.root);
+
+    // nodes
+    for (const node of huff.nodeList) {
+      const cx = px(node), cy = py(node);
+      const g = mk("g", { "data-node": node.id });
+      g.dataset.birth = node.birth;
+      const isLeaf = !!node.sym;
+      const circle = mk("circle", {
+        class: "node" + (isLeaf ? " leaf " + KIND_CLASS[node.sym.kind] : ""),
+        cx, cy, r: isLeaf ? 6.5 : 4,
+      });
+      g.appendChild(circle);
+      if (isLeaf) {
+        const label = leafLabel(node.sym);
+        const t1 = mk("text", { class: "lbl", x: cx, y: cy + 16 });
+        t1.textContent = label;
+        g.appendChild(t1);
+        if (leaves.length <= 90) {
+          const t2 = mk("text", { class: "code", x: cx, y: cy + 25 });
+          t2.textContent = node.code;
+          g.appendChild(t2);
+        }
+        // invisible larger hit target for hovering
+        const hit = mk("circle", { class: "leafhit", cx, cy, r: 12 });
+        hit.addEventListener("mouseenter", () => setHighlight(-3, node.sym.key));
+        hit.addEventListener("mouseleave", clearHighlight);
+        g.appendChild(hit);
+        refs.leafGroups.set(node.sym.key, { g, circle });
+      }
+      svg.appendChild(g);
+    }
+    el.treebadge.textContent = leaves.length + " symbols · depth " + maxDepth;
+  }
+
+  function leafLabel(sym) {
+    if (sym.kind === "lit") return prettyByte(sym.value);
+    if (sym.kind === "len") return "L" + sym.value;
+    if (sym.kind === "dist") return "D" + sym.value;
+    return "EOB";
+  }
+
+  /* ==================================================================
+     RENDERING — per-step state (fast class toggling only)
+     ================================================================== */
+
+  function phaseInfo() {
+    const m = state.model;
+    // decode gets one extra terminal step so the "round-trip verified" keyframe renders
+    const L = m.tokens.length, B = m.huff.merges.length, E = m.segments.length, D = m.tokens.length + 1;
+    const total = L + B + E + D;
+    return { L, B, E, D, total };
+  }
+
+  function decodePhaseStep() {
+    // maps global step -> { phase, idx, sub }
+    const { L, B, E } = phaseInfo();
+    let s = state.step;
+    if (s < L) return { phase: "lz77", idx: s };
+    s -= L;
+    if (s < B) return { phase: "build", idx: s };
+    s -= B;
+    if (s < E) return { phase: "encode", idx: s };
+    s -= E;
+    return { phase: "decode", idx: s };
+  }
+
+  function applyStep() {
+    const m = state.model;
+    if (!m) return;
+    const info = phaseInfo();
+    const p = decodePhaseStep();
+
+    // phase pills
+    [...el.phasePills.children].forEach((pill) =>
+      pill.classList.toggle("active", pill.dataset.phase === p.phase));
+    el.stepLabel.textContent = (state.step + 1) + " / " + info.total;
+
+    // ---- source spans ----
+    for (let i = 0; i < refs.chars.length; i++) {
+      const c = refs.chars[i];
+      c.className = "ch" + (state.viewMode === "bytes" ? " hexpair" : "");
+    }
+
+    // determine how many tokens are "emitted" for the current phase
+    let emittedTokens;
+    if (p.phase === "lz77") emittedTokens = p.idx + 1;
+    else if (p.phase === "decode") emittedTokens = Math.min(p.idx + 1, m.tokens.length);
+    else emittedTokens = m.tokens.length;
+    const consumedChars = emittedTokens > 0 ? m.tokens[emittedTokens - 1].srcEnd : 0;
+
+    if (p.phase === "lz77") {
+      const cur = m.tokens[p.idx];
+      const searchStart = Math.max(0, cur.srcStart - m.windowSize);
+      for (let i = 0; i < refs.chars.length; i++) {
+        const c = refs.chars[i];
+        if (i < cur.srcStart) c.classList.add(i >= searchStart ? "win" : "done");
+        if (i >= cur.srcStart && i < cur.srcEnd) c.classList.add(cur.type === "match" ? "matchsrc" : "look");
+        else if (i >= cur.srcEnd) c.classList.add("pending");
+        if (i === cur.srcStart) c.classList.add("cursor");
+        if (cur.type === "match" && i >= cur.matchStart && i < cur.matchStart + cur.len) c.classList.add("matchsrc");
+      }
+    } else {
+      for (let i = 0; i < refs.chars.length; i++) {
+        const c = refs.chars[i];
+        if (p.phase === "decode") {
+          // reconstruction: reveal chars covered by decoded tokens
+          if (i < consumedChars) c.classList.add("done");
+        } else {
+          c.classList.add("done");
+        }
+      }
+    }
+
+    // ---- tokens ----
+    for (let ti = 0; ti < refs.toks.length; ti++) {
+      const t = refs.toks[ti];
+      t.classList.remove("hl");
+      t.style.opacity = (p.phase === "lz77" && ti >= emittedTokens) ? "0.18" : "1";
+    }
+    if (p.phase === "lz77") refs.toks[p.idx] && refs.toks[p.idx].classList.add("hl");
+
+    // ---- tree reveal ----
+    let revealBirth;
+    if (p.phase === "lz77") revealBirth = -1;         // leaves only faint
+    else if (p.phase === "build") revealBirth = p.idx + 1;
+    else revealBirth = Infinity;
+    revealTree(revealBirth, p.phase);
+
+    // ---- ribbon reveal ----
+    let revealSeg;
+    if (p.phase === "encode") revealSeg = p.idx;
+    else if (p.phase === "decode") revealSeg = decodeSegForToken(p.idx);
+    else if (p.phase === "build" || p.phase === "lz77") revealSeg = -1;
+    for (let si = 0; si < refs.segs.length; si++) {
+      const s = refs.segs[si];
+      s.classList.remove("hl");
+      s.classList.toggle("pending", si > revealSeg);
+    }
+    if (p.phase === "encode") {
+      const seg = refs.segs[p.idx];
+      if (seg) { seg.classList.add("hl"); scrollIntoView(el.ribbon, seg); }
+    }
+
+    // ---- current-decision highlight linking ----
+    if (state.highlightTok === null) {
+      if (p.phase === "encode") {
+        const st = m.segments[p.idx];
+        applyLinkHighlight(st.tokenIndex < m.tokens.length ? st.tokenIndex : -2, st.symKey);
+      } else if (p.phase === "lz77") {
+        applyLinkHighlight(p.idx, null, true);
+      }
+    } else {
+      applyLinkHighlight(state.highlightTok, state._hlSym || null);
+    }
+
+    renderAnnotation(p);
+    renderStats(p);
+  }
+
+  function decodeSegForToken(tokIdx) {
+    // during decode, reveal all segments up to and including token tokIdx
+    const m = state.model;
+    let last = -1;
+    for (let si = 0; si < m.segments.length; si++) {
+      if (m.segments[si].tokenIndex <= tokIdx) last = si;
+    }
+    return last;
+  }
+
+  function revealTree(birth, phase) {
+    const faint = phase === "lz77";
+    for (const [id, node] of nodeBirthCache()) {
+      const g = node.g;
+      if (!g) continue;
+      const visible = birth === Infinity || node.birth <= birth;
+      g.classList.toggle("hidden", !visible);
+      g.style.opacity = faint ? "0.28" : (visible ? "1" : "0");
+    }
+    for (const [id, e] of refs.edges) {
+      const b = +e.line.dataset.birth;
+      const visible = birth === Infinity || b <= birth;
+      e.line.classList.toggle("hidden", !(visible));
+      e.lab.classList.toggle("hidden", !(visible));
+      e.line.style.opacity = faint ? "0.2" : (visible ? "1" : "0");
+      e.lab.style.opacity = faint ? "0.2" : (visible ? "1" : "0");
+    }
+  }
+
+  let _nodeBirthCache = null, _nodeBirthKey = null;
+  function nodeBirthCache() {
+    const m = state.model;
+    const key = m; // rebuilt per model
+    if (_nodeBirthKey === key && _nodeBirthCache) return _nodeBirthCache;
+    const map = new Map();
+    for (const node of m.huff.nodeList) {
+      const g = el.tree.querySelector('g[data-node="' + node.id + '"]');
+      map.set(node.id, { birth: node.birth, g });
+    }
+    _nodeBirthCache = map; _nodeBirthKey = key;
+    return map;
+  }
+
+  /* ---- hover / decision link highlighting ---- */
+  function setHighlight(tok, symKey) {
+    state.highlightTok = (tok === undefined ? null : tok);
+    state._hlSym = symKey || null;
+    applyStepLight();
+  }
+  function clearHighlight() { state.highlightTok = null; state._hlSym = null; applyStepLight(); }
+
+  // lighter reapply (only linking classes) to keep hover snappy
+  function applyStepLight() {
+    // clear link classes
+    for (const c of refs.chars) c.classList.remove("hl", "hl-lit", "hl-match");
+    for (const t of refs.toks) t.classList.remove("hl");
+    for (const s of refs.segs) if (!s.classList.contains("pending")) s.classList.remove("hl");
+    clearTreePath();
+
+    const p = decodePhaseStep();
+    // re-add the current-decision hl for encode/lz77 when nothing hovered
+    if (state.highlightTok === null) {
+      if (p.phase === "encode") { const st = state.model.segments[p.idx]; applyLinkHighlight(st.tokenIndex < state.model.tokens.length ? st.tokenIndex : -2, st.symKey); refs.segs[p.idx] && refs.segs[p.idx].classList.add("hl"); }
+      else if (p.phase === "lz77") applyLinkHighlight(p.idx, null, true);
+      return;
+    }
+    applyLinkHighlight(state.highlightTok, state._hlSym);
+  }
+
+  function applyLinkHighlight(tok, symKey, subtle) {
+    const m = state.model;
+    // highlight tree path for the symbol
+    if (symKey && m.huff.codes.has(symKey)) highlightTreePath(symKey);
+    else if (symKey) { /* END with no code path edge case */ }
+
+    if (tok === -2 || tok === -3) {
+      // symbol-driven (from ribbon END or tree leaf): highlight all segs with that symbol + their tokens/chars
+      if (symKey) {
+        for (let si = 0; si < m.segments.length; si++) {
+          if (m.segments[si].symKey === symKey && !refs.segs[si].classList.contains("pending")) refs.segs[si].classList.add("hl");
+        }
+        // highlight source chars & tokens of matching tokens (only when tree-leaf origin)
+        if (tok === -3) {
+          for (let ti = 0; ti < m.tokens.length; ti++) {
+            const segIds = m.tokenSegs[ti];
+            if (segIds.some((si) => m.segments[si].symKey === symKey)) {
+              refs.toks[ti].classList.add("hl");
+              const t = m.tokens[ti];
+              for (let i = t.srcStart; i < t.srcEnd; i++) refs.chars[i] && refs.chars[i].classList.add(t.type === "lit" ? "hl-lit" : "hl-match");
+            }
+          }
+        }
+      }
+      return;
+    }
+    if (tok < 0 || tok >= m.tokens.length) return;
+    const t = m.tokens[tok];
+    refs.toks[tok] && refs.toks[tok].classList.add("hl");
+    // source chars
+    for (let i = t.srcStart; i < t.srcEnd; i++) {
+      if (!refs.chars[i]) continue;
+      refs.chars[i].classList.add(t.type === "lit" ? "hl-lit" : "hl-match");
+    }
+    // also highlight the back-reference source span for a match
+    if (t.type === "match") {
+      for (let i = t.matchStart; i < t.matchStart + t.len; i++) refs.chars[i] && refs.chars[i].classList.add("hl");
+    }
+    // segments (skip if subtle / not yet revealed)
+    if (!subtle) {
+      for (const si of m.tokenSegs[tok]) if (!refs.segs[si].classList.contains("pending")) refs.segs[si].classList.add("hl");
+      // trace tree path for each of the token's symbols
+      for (const si of m.tokenSegs[tok]) highlightTreePath(m.segments[si].symKey);
+    }
+  }
+
+  function highlightTreePath(symKey) {
+    const code = state.model.huff.codes.get(symKey);
+    if (!code) return;
+    for (const id of code.pathIds) {
+      const e = refs.edges.get(id);
+      if (e) { e.line.classList.add("hl"); e.lab.classList.add("hl"); }
+    }
+    const leaf = refs.leafGroups.get(symKey);
+    if (leaf) leaf.circle.classList.add("hl");
+  }
+  function clearTreePath() {
+    for (const [, e] of refs.edges) { e.line.classList.remove("hl"); e.lab.classList.remove("hl"); }
+    for (const [, lg] of refs.leafGroups) lg.circle.classList.remove("hl");
+  }
+
+  /* ---- annotation ("explain this decision") ---- */
+  function renderAnnotation(p) {
+    const m = state.model;
+    let html = "";
+    if (p.phase === "lz77") {
+      const t = m.tokens[p.idx];
+      if (t.type === "match") {
+        const litCost = 8, refCost = (m.huff.codes.get("N" + t.len)?.code.length || 0) + (m.huff.codes.get("D" + t.dist)?.code.length || 0);
+        html = "<b>LZ77 · match.</b> At position " + t.srcStart + " the longest run in the search window is <b>length " +
+          t.len + "</b>, found <b>" + t.dist + " bytes back</b>. <span class='why'>Emitting one (dist,len) token replaces " +
+          t.len + " literals — copying beats spelling them out.</span>";
+      } else {
+        html = "<b>LZ77 · literal.</b> No match of length ≥ 3 exists in the window at position " + t.srcStart +
+          ", so the byte <b>'" + prettyByte(t.ch) + "'</b> is emitted verbatim. <span class='why'>Nothing to copy — store it and move on.</span>";
+      }
+    } else if (p.phase === "build") {
+      const mg = m.huff.merges[p.idx];
+      const a = nodeById(mg.a), b = mg.b == null ? null : nodeById(mg.b);
+      html = "<b>Huffman · merge " + (p.idx + 1) + "/" + m.huff.merges.length + ".</b> " +
+        "Combine the two lowest-frequency nodes" + (b ? " (freq " + nodeFreq(mg.a) + " + " + nodeFreq(mg.b) + ")" : "") +
+        " into a parent. <span class='why'>Rare symbols sink deep in the tree → long codes; frequent symbols stay shallow → short codes. That's what makes the code optimal.</span>";
+    } else if (p.phase === "encode") {
+      const s = m.segments[p.idx];
+      const label = s.kind === "lit" ? "literal '" + prettyByte(s.symKey.slice(1) | 0) + "'"
+        : s.kind === "len" ? "length " + s.symKey.slice(1)
+        : s.kind === "dist" ? "distance " + s.symKey.slice(1) : "end-of-block";
+      html = "<b>Encode · " + s.kind + ".</b> The " + label + " symbol maps to the prefix code <b>" + s.bits +
+        "</b> (" + s.bits.length + " bit" + (s.bits.length === 1 ? "" : "s") + "). <span class='why'>Its length reflects how often it appears — this is where the actual squeezing happens.</span>";
+    } else {
+      const t = m.tokens[p.idx];
+      if (!t) html = "<b>Decompress complete.</b> " + (m.roundtrip ? "The bellows expanded the bit-stream back to your exact input. ✓" : "Round-trip mismatch.");
+      else if (t.type === "match")
+        html = "<b>Decompress · expand.</b> Read a (dist,len) = (" + t.dist + "," + t.len + ") token → copy <b>" + t.len +
+          "</b> bytes from <b>" + t.dist + " back</b> in the already-decoded output. <span class='why'>The bellows expands: back-references become real bytes again.</span>";
+      else
+        html = "<b>Decompress · literal.</b> Read a literal code → append '" + prettyByte(t.ch) + "'. <span class='why'>Literals pass straight through.</span>";
+    }
+    el.annotation.innerHTML = html;
+  }
+  function nodeById(id) { return state.model.huff.nodeList.find((n) => n.id === id); }
+  function nodeFreq(id) { const n = nodeById(id); return n ? n.freq : "?"; }
+
+  /* ---- stats ---- */
+  function renderStats(p) {
+    const m = state.model;
+    if (!m) return;
+    const r = ratioSummary(m);
+    el.stOrig.innerHTML = m.originalBits.toLocaleString() + ' <small>bits · ' + m.bytes.length + ' B</small>';
+    el.stComp.innerHTML = m.compressedBits.toLocaleString() + ' <small>bits · ' + Math.ceil(m.compressedBits / 8) + ' B</small>';
+    el.stRatio.innerHTML = m.originalBits === 0 ? "—" : (r.factor.toFixed(2) + "×") + ' <small>' + (100 - r.pct).toFixed(1) + "% smaller</small>";
+    el.stTok.innerHTML = m.tokens.length + ' <small>' + m.matchCount + " matches · " + m.litCount + " literals</small>";
+
+    const pctW = m.originalBits === 0 ? 0 : Math.min(100, r.pct);
+    el.barFill.style.width = pctW + "%";
+    const floorPct = m.originalBits === 0 ? 0 : Math.min(100, (m.floorBits / m.originalBits) * 100);
+    el.barFloor.style.left = floorPct + "%";
+    el.barLabel.textContent = m.originalBits === 0 ? "" : Math.round(pctW) + "% of original";
+
+    const beat = m.compressedBits < m.floorBits;
+    el.entropyNote.innerHTML = m.originalBits === 0 ? "" :
+      "Order-0 entropy floor ≈ <b style='color:var(--floor)'>" + Math.round(m.floorBits).toLocaleString() + " bits</b> (" +
+      (m.floorBits / m.bytes.length).toFixed(2) + " bits/byte). " +
+      (beat
+        ? "Bellows went <b style='color:var(--good)'>below</b> the order-0 floor — LZ77 exploited repetition the per-byte floor can't see."
+        : "The Huffman stage approaches this per-symbol floor; LZ77's back-references are what let repetitive text dive under it.");
+
+    if (m.originalBits > 0) {
+      el.verifyBadge.innerHTML = m.roundtrip
+        ? '<span class="verify ok">✓ round-trip verified</span>'
+        : '<span class="verify fail">✗ round-trip failed</span>';
+    } else el.verifyBadge.innerHTML = "";
+  }
+
+  function scrollIntoView(container, node) {
+    const cr = container.getBoundingClientRect(), nr = node.getBoundingClientRect();
+    if (nr.bottom > cr.bottom || nr.top < cr.top) node.scrollIntoView({ block: "nearest" });
+  }
+
+  /* ==================================================================
+     PLAYBACK
+     ================================================================== */
+  function setStep(s) {
+    const info = phaseInfo();
+    state.step = Math.max(0, Math.min(info.total - 1, s));
+    el.scrub.value = state.step;
+    applyStep();
+  }
+  function play() {
+    if (!state.model) return;
+    const info = phaseInfo();
+    if (state.step >= info.total - 1) state.step = 0;
+    state.playing = true; el.playBtn.textContent = "⏸";
+    lastTick = performance.now();
+    if (!raf) raf = requestAnimationFrame(tick);
+  }
+  function pause() { state.playing = false; el.playBtn.textContent = "▶"; if (raf) { cancelAnimationFrame(raf); raf = null; } }
+  function tick(now) {
+    raf = null;
+    if (!state.playing) return;
+    const info = phaseInfo();
+    const interval = 260 / state.speed; // ms per step
+    if (now - lastTick >= interval) {
+      const stepsToAdvance = Math.max(1, Math.floor((now - lastTick) / interval));
+      lastTick = now;
+      if (state.step >= info.total - 1) { pause(); return; }
+      setStep(state.step + stepsToAdvance);
+    }
+    raf = requestAnimationFrame(tick);
+  }
+
+  /* ==================================================================
+     RECOMPUTE + WIRING
+     ================================================================== */
+  function recompute(resetStep) {
+    let text = state.text;
+    if (text.length > MAX_INPUT) {
+      text = text.slice(0, MAX_INPUT);
+      el.notice.textContent = "Input capped at " + MAX_INPUT.toLocaleString() + " characters for a smooth animation (" +
+        state.text.length.toLocaleString() + " received).";
+      el.notice.classList.add("show");
+    } else el.notice.classList.remove("show");
+
+    state.model = buildModel(text, state.windowSize, state.maxMatch);
+    _nodeBirthCache = null;
+    buildStatic();
+    const info = phaseInfo();
+    el.scrub.max = Math.max(0, info.total - 1);
+    if (resetStep || state.step > info.total - 1) state.step = 0;
+    el.scrub.value = state.step;
+    applyStep();
+    if (!hashLoading) writeHash();
+  }
+
+  function autoWindowFor(len) {
+    if (len <= 64) return 64;
+    if (len <= 256) return 128;
+    if (len <= 800) return 256;
+    if (len <= 1600) return 512;
+    return 1024;
+  }
+
+  // debounced input
+  let inputTimer = null;
+  function onInput(auto) {
+    state.text = el.input.value;
+    if (auto) {
+      const w = autoWindowFor(state.text.length);
+      state.windowSize = w; el.winRange.value = w; el.winVal.textContent = w;
+    }
+    clearTimeout(inputTimer);
+    inputTimer = setTimeout(() => { pause(); recompute(true); }, 180);
+  }
+
+  el.input.addEventListener("input", () => onInput(false));
+  el.input.addEventListener("paste", () => setTimeout(() => onInput(true), 0));
+
+  el.winRange.addEventListener("input", () => { el.winVal.textContent = el.winRange.value; });
+  el.winRange.addEventListener("change", () => { state.windowSize = +el.winRange.value; pause(); recompute(true); });
+  el.matRange.addEventListener("input", () => { el.matVal.textContent = el.matRange.value; });
+  el.matRange.addEventListener("change", () => { state.maxMatch = +el.matRange.value; pause(); recompute(true); });
+  el.viewMode.addEventListener("change", () => { state.viewMode = el.viewMode.value; buildStatic(); applyStep(); writeHash(); });
+
+  document.querySelectorAll(".preset-btn").forEach((b) => b.addEventListener("click", () => {
+    el.input.value = PRESETS[b.dataset.preset];
+    state.text = el.input.value;
+    const w = autoWindowFor(state.text.length);
+    state.windowSize = w; el.winRange.value = w; el.winVal.textContent = w;
+    pause(); recompute(true);
+  }));
+
+  // timeline
+  el.scrub.addEventListener("input", () => { pause(); setStep(+el.scrub.value); });
+  el.playBtn.addEventListener("click", () => (state.playing ? pause() : play()));
+  el.stepFwd.addEventListener("click", () => { pause(); setStep(state.step + 1); });
+  el.stepBack.addEventListener("click", () => { pause(); setStep(state.step - 1); });
+  el.toStart.addEventListener("click", () => { pause(); setStep(0); });
+  el.toEnd.addEventListener("click", () => { pause(); setStep(phaseInfo().total - 1); });
+  el.speed.addEventListener("input", () => { state.speed = +el.speed.value; el.spdVal.textContent = state.speed.toFixed(2) + "×"; });
+  el.phasePills.querySelectorAll(".pill").forEach((pill) => pill.addEventListener("click", () => {
+    pause();
+    const info = phaseInfo();
+    const starts = { lz77: 0, build: info.L, encode: info.L + info.B, decode: info.L + info.B + info.E };
+    setStep(starts[pill.dataset.phase]);
+  }));
+
+  document.addEventListener("keydown", (e) => {
+    // don't hijack keys while an interactive control is focused (sliders need
+    // arrows, buttons need Space); shortcuts still work from the page body.
+    if (e.target && /^(TEXTAREA|INPUT|SELECT|BUTTON|OPTION)$/.test(e.target.tagName)) return;
+    if (e.key === " ") { e.preventDefault(); state.playing ? pause() : play(); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); pause(); setStep(state.step + 1); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); pause(); setStep(state.step - 1); }
+    else if (e.key === "Home") { e.preventDefault(); pause(); setStep(0); }
+    else if (e.key === "End") { e.preventDefault(); pause(); setStep(phaseInfo().total - 1); }
+    else if (e.key.toLowerCase() === "t") toggleTheme();
+  });
+
+  // theme
+  function updateThemeBtn() {
+    const cur = document.documentElement.getAttribute("data-theme");
+    // show the theme the button will switch TO
+    el.themeBtn.textContent = cur === "dark" ? "☀️ Light" : "🌙 Dark";
+  }
+  function toggleTheme() {
+    const cur = document.documentElement.getAttribute("data-theme");
+    const next = cur === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    updateThemeBtn();
+    try { localStorage.setItem("bellows.theme", next); } catch (e) {}
+    writeHash();
+  }
+  el.themeBtn.addEventListener("click", toggleTheme);
+
+  // file drop
+  function readFile(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      let txt = reader.result;
+      if (txt.length > MAX_INPUT) txt = txt.slice(0, MAX_INPUT);
+      el.input.value = txt; state.text = txt;
+      state.viewMode = "bytes"; el.viewMode.value = "bytes";
+      const w = autoWindowFor(txt.length); state.windowSize = w; el.winRange.value = w; el.winVal.textContent = w;
+      el.notice.textContent = 'Loaded "' + file.name + '" (' + txt.length.toLocaleString() + " chars shown as bytes" +
+        (file.size > MAX_INPUT ? "; capped for animation" : "") + ").";
+      el.notice.classList.add("show");
+      pause(); recompute(true);
+    };
+    reader.readAsText(file);
+  }
+  el.dropzone.addEventListener("click", () => el.fileInput.click());
+  el.fileInput.addEventListener("change", () => { if (el.fileInput.files[0]) readFile(el.fileInput.files[0]); });
+  ["dragenter", "dragover"].forEach((ev) => el.dropzone.addEventListener(ev, (e) => { e.preventDefault(); el.dropzone.classList.add("drag"); }));
+  ["dragleave", "drop"].forEach((ev) => el.dropzone.addEventListener(ev, (e) => { e.preventDefault(); el.dropzone.classList.remove("drag"); }));
+  el.dropzone.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) readFile(f); });
+
+  // share
+  el.shareBtn.addEventListener("click", () => {
+    writeHash();
+    const url = location.href;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(() => toast("Shareable URL copied to clipboard")).catch(() => toast("URL is in the address bar"));
+    } else toast("URL is in the address bar");
+  });
+
+  function toast(msg) {
+    el.toast.textContent = msg; el.toast.classList.add("show");
+    clearTimeout(el.toast._t); el.toast._t = setTimeout(() => el.toast.classList.remove("show"), 2200);
+  }
+
+  /* ---- URL hash ---- */
+  function writeHash() {
+    const payload = { t: state.text, w: state.windowSize, m: state.maxMatch, v: state.viewMode,
+      th: document.documentElement.getAttribute("data-theme") };
+    try {
+      const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+      history.replaceState(null, "", "#" + b64);
+    } catch (e) {}
+  }
+  function readHash() {
+    if (!location.hash || location.hash.length < 2) return false;
+    try {
+      const json = decodeURIComponent(escape(atob(location.hash.slice(1))));
+      const p = JSON.parse(json);
+      if (typeof p.t === "string") state.text = p.t;
+      if (p.w) state.windowSize = p.w;
+      if (p.m) state.maxMatch = p.m;
+      if (p.v) state.viewMode = p.v;
+      if (p.th) document.documentElement.setAttribute("data-theme", p.th);
+      return true;
+    } catch (e) { return false; }
+  }
+
+  /* ==================================================================
+     A/B RACE
+     ================================================================== */
+  function runRace() {
+    const entries = [
+      { name: "Repetitive", sub: "structured", text: PRESETS.repetitive },
+      { name: "English prose", sub: "natural language", text: PRESETS.prose },
+      { name: "Source code", sub: "tokens repeat", text: PRESETS.code },
+      { name: "Random bytes", sub: "incompressible", text: PRESETS.random },
+    ];
+    el.race.innerHTML = "";
+    const colors = ["var(--good)", "var(--len)", "var(--dist)", "var(--bad)"];
+    entries.forEach((e, i) => {
+      const m = buildModel(e.text.slice(0, MAX_INPUT), autoWindowFor(e.text.length), 32);
+      const pct = (m.compressedBits / m.originalBits) * 100;
+      const floorPct = (m.floorBits / m.originalBits) * 100;
+      const factor = m.originalBits / m.compressedBits;
+      const row = document.createElement("div");
+      row.className = "race-row";
+      row.innerHTML =
+        '<div class="race-name">' + e.name + '<small>' + e.sub + '</small></div>' +
+        '<div class="race-track"><div class="race-fill" style="width:100%;background:' + colors[i] + '"></div>' +
+        '<div class="race-floor" style="left:' + Math.min(100, floorPct) + '%"></div></div>' +
+        '<div class="race-val">' + factor.toFixed(2) + '×<br><span style="color:var(--text-faint);font-size:10.5px">' + pct.toFixed(0) + '%</span></div>';
+      el.race.appendChild(row);
+      const fill = row.querySelector(".race-fill");
+      const targetW = Math.min(100, pct) + "%";
+      if (prefersReducedMotion()) {
+        // render bars at their final width instead of animating from 100%
+        fill.style.width = targetW;
+      } else {
+        // animate from 100% down to actual pct
+        requestAnimationFrame(() => requestAnimationFrame(() => { fill.style.width = targetW; }));
+      }
+    });
+  }
+  el.raceBtn.addEventListener("click", runRace);
+
+  /* ==================================================================
+     CHALLENGE BOARD
+     ================================================================== */
+  const BOARD_KEY = "bellows.board";
+  function loadBoard() { try { return JSON.parse(localStorage.getItem(BOARD_KEY) || "[]"); } catch (e) { return []; } }
+  function saveBoard(b) { try { localStorage.setItem(BOARD_KEY, JSON.stringify(b)); } catch (e) {} }
+  function renderBoard(currentTs) {
+    const board = loadBoard().slice().sort((a, b) => a.pct - b.pct);
+    el.board.innerHTML = "";
+    if (board.length === 0) { el.board.innerHTML = '<div class="empty">No runs logged yet. Craft an input and hit “Log this run” to compete. Try to beat the entropy floor!</div>'; return; }
+    board.forEach((r, i) => {
+      const li = document.createElement("li");
+      if (i === 0) li.classList.add("best");
+      if (i === board.length - 1 && board.length > 1) li.classList.add("worst");
+      if (r.ts === currentTs) li.classList.add("current");
+      li.innerHTML = '<span class="rank">' + (i + 1) + '</span>' +
+        '<span class="lbl" title="' + escapeHtml(r.label) + '">' + escapeHtml(r.label) + '</span>' +
+        '<span class="r">' + r.pct.toFixed(1) + '% · ' + r.factor.toFixed(2) + '×</span>';
+      el.board.appendChild(li);
+    });
+  }
+  el.logRun.addEventListener("click", () => {
+    const m = state.model;
+    if (!m || m.originalBits === 0) { toast("Nothing to log — add some input first"); return; }
+    const r = ratioSummary(m);
+    const label = (state.text.trim().slice(0, 40) || "(empty)").replace(/\s+/g, " ") + (state.text.length > 40 ? "…" : "");
+    const board = loadBoard();
+    const ts = Date.now();
+    board.push({ label, pct: r.pct, factor: r.factor, bytes: m.bytes.length, ts });
+    // keep last 30
+    saveBoard(board.slice(-30));
+    renderBoard(ts);
+    const best = board.slice().sort((a, b) => a.pct - b.pct)[0];
+    toast(best.ts === ts ? "New best! " + r.pct.toFixed(1) + "% — most compressible so far" : "Logged: " + r.pct.toFixed(1) + "% of original");
+  });
+  el.clearBoard.addEventListener("click", () => { saveBoard([]); renderBoard(); toast("Challenge board cleared"); });
+
+  /* ==================================================================
+     BOOT
+     ================================================================== */
+  function boot() {
+    // theme from storage unless hash overrides
+    try { const th = localStorage.getItem("bellows.theme"); if (th) document.documentElement.setAttribute("data-theme", th); } catch (e) {}
+
+    hashLoading = true;
+    const fromHash = readHash();
+    if (!fromHash) state.text = PRESETS.repetitive;
+    hashLoading = false;
+    updateThemeBtn();
+
+    el.input.value = state.text;
+    el.winRange.value = state.windowSize; el.winVal.textContent = state.windowSize;
+    el.matRange.value = state.maxMatch; el.matVal.textContent = state.maxMatch;
+    el.viewMode.value = state.viewMode;
+    el.speed.value = state.speed; el.spdVal.textContent = state.speed.toFixed(2) + "×";
+
+    recompute(true);
+    runRace();
+    renderBoard();
+  }
+  boot();
+})();
+</script>
+</body>
+</html>

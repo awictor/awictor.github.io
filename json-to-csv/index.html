@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JsonToCsv — JSON to CSV converter</title>
+<meta name="description" content="Free offline JSON to CSV converter. Turn an array of objects into CSV with union headers and RFC 4180 quoting. Choose comma, semicolon, or tab. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/json-to-csv/">
+<style>
+  :root{
+    --c:#0f172a; --bg:#f7f8fa; --fg:#121722; --muted:#57627a;
+    --card:#ffffff; --border:#dfe3ea; --code:#eef1f5;
+  }
+  [data-theme="dark"]{
+    --bg:#0a0e16; --fg:#e6eaf2; --muted:#8893a8; --card:#141a25;
+    --border:#262e3c; --code:#1a212e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:900px;margin:0 auto;padding:24px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#334155);display:grid;place-items:center;color:#fff;font-size:15px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:900px;margin:0 auto;padding:6px 20px 60px}
+  .bar{display:flex;gap:12px;align-items:center;margin-top:14px}
+  .bar label{font-size:.82rem;font-weight:600;color:var(--muted)}
+  select{padding:8px 11px;border:1px solid var(--border);border-radius:9px;background:var(--card);color:var(--fg);font-size:.9rem}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px}
+  @media(max-width:720px){.grid{grid-template-columns:1fr}}
+  .pane{background:var(--card);border:1px solid var(--border);border-radius:14px;display:flex;flex-direction:column;overflow:hidden}
+  .pane .h{display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);
+    font-size:.8rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .copy{margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);
+    border-radius:7px;padding:3px 11px;cursor:pointer;font-size:.72rem;text-transform:none;letter-spacing:0}
+  .copy:hover{color:var(--c);border-color:var(--c)}
+  textarea,pre{border:none;background:none;color:var(--fg);min-height:380px;margin:0;padding:15px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9rem;line-height:1.6;width:100%}
+  textarea{resize:vertical}
+  textarea:focus{outline:none}
+  pre{overflow:auto;white-space:pre-wrap;word-break:break-all}
+  pre.err{color:#dc2626}
+  footer{max-width:900px;margin:0 auto;padding:14px 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('j2c.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">CSV</div>
+  <div>
+    <h1>JsonToCsv</h1>
+    <p class="sub">JSON &rarr; CSV converter</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="bar">
+    <label for="delim">Delimiter</label>
+    <select id="delim">
+      <option value=",">Comma (,)</option>
+      <option value=";">Semicolon (;)</option>
+      <option value="\t">Tab</option>
+    </select>
+  </div>
+  <div class="grid">
+    <div class="pane">
+      <div class="h">JSON (array of objects)</div>
+      <textarea id="in" spellcheck="false">[
+  { "name": "Alice", "role": "Eng", "city": "Seattle" },
+  { "name": "Bob, Jr.", "role": "Design", "note": "says \"hi\"" }
+]</textarea>
+    </div>
+    <div class="pane">
+      <div class="h">CSV <button class="copy" id="copy">Copy</button></div>
+      <pre id="out"></pre>
+    </div>
+  </div>
+</main>
+<footer>
+  JsonToCsv is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/json-to-csv">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function escapeField(val, delim){
+  if(val === null || val === undefined) return '';
+  var s = (typeof val === 'object') ? JSON.stringify(val) : String(val);
+  if(s.indexOf(delim) !== -1 || s.indexOf('"') !== -1 || /[\n\r]/.test(s)){
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+function collectHeaders(rows){
+  var seen = [], set = {};
+  rows.forEach(function(r){
+    if(r && typeof r === 'object' && !Array.isArray(r)){
+      Object.keys(r).forEach(function(k){ if(!set[k]){ set[k] = 1; seen.push(k); } });
+    }
+  });
+  return seen;
+}
+function toCsv(data, opts){
+  opts = opts || {};
+  var delim = opts.delimiter || ',';
+  var rows = Array.isArray(data) ? data : [data];
+  var headers = opts.headers || collectHeaders(rows);
+  var lines = [ headers.map(function(h){ return escapeField(h, delim); }).join(delim) ];
+  rows.forEach(function(r){
+    lines.push(headers.map(function(h){ return escapeField(r ? r[h] : '', delim); }).join(delim));
+  });
+  return lines.join('\n');
+}
+function jsonToCsv(jsonText, opts){
+  var data;
+  try{ data = JSON.parse(jsonText); }
+  catch(e){ return { error: 'Invalid JSON: ' + e.message, csv: '' }; }
+  return { error: null, csv: toCsv(data, opts) };
+}
+
+if(typeof module !== 'undefined') module.exports = { escapeField, collectHeaders, toCsv, jsonToCsv };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var inEl = document.getElementById('in');
+  var outEl = document.getElementById('out');
+  var delimEl = document.getElementById('delim');
+  function render(){
+    var delim = delimEl.value === '\\t' ? '\t' : delimEl.value;
+    var r = jsonToCsv(inEl.value, { delimiter: delim });
+    if(r.error){ outEl.className = 'err'; outEl.textContent = '⚠ ' + r.error; }
+    else { outEl.className = ''; outEl.textContent = r.csv; }
+    try{ localStorage.setItem('j2c.in', inEl.value); localStorage.setItem('j2c.delim', delimEl.value); }catch(e){}
+  }
+  inEl.addEventListener('input', render);
+  delimEl.addEventListener('change', render);
+  document.getElementById('copy').addEventListener('click', function(){
+    if(navigator.clipboard) navigator.clipboard.writeText(outEl.textContent);
+    this.textContent = 'Copied'; var b = this; setTimeout(function(){ b.textContent = 'Copy'; }, 1000);
+  });
+  try{
+    var si = localStorage.getItem('j2c.in'); if(si !== null) inEl.value = si;
+    var sd = localStorage.getItem('j2c.delim'); if(sd) delimEl.value = sd;
+  }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('j2c.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('j2c.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

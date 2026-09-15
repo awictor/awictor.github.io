@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timecode Calculator — SMPTE timecode, frames &amp; seconds</title>
+<meta name="description" content="Convert SMPTE timecode (HH:MM:SS:FF) to frame count and real seconds at any frame rate, and add timecodes together. For video editors. Offline, no tracking.">
+<style>
+  :root{
+    --c:#e11d48;
+    --bg:#fdeef1; --card:#ffffff; --fg:#2a0710; --muted:#7a4653;
+    --line:#f6cdd7; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#160308; --card:#240810; --fg:#f7dbe2; --muted:#c58a99;
+    --line:#3d1420; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.78rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .row>div{flex:1 1 180px}
+  input,select{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.1rem;font-weight:600;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus,select:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .out{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:16px}
+  @media(max-width:560px){.out{grid-template-columns:1fr}}
+  .box{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:16px;text-align:center}
+  .box .v{font-family:ui-monospace,monospace;font-size:1.35rem;font-weight:800;color:var(--c)}
+  .box .k{font-size:.72rem;color:var(--muted);margin-top:4px}
+  .err{color:#dc2626;font-size:.86rem;margin-top:10px;text-align:center;min-height:1em}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .note code{background:var(--bg);padding:1px 5px;border-radius:5px}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🎬</div>
+  <div>
+    <h1>Timecode Calculator</h1>
+    <p>SMPTE timecode · frames · seconds</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="row">
+      <div>
+        <label>Timecode (HH:MM:SS:FF)</label>
+        <input id="tc" value="01:23:45:12">
+      </div>
+      <div>
+        <label>Frame rate (fps)</label>
+        <select id="fps">
+          <option>23.976</option><option>24</option><option>25</option>
+          <option selected>30</option><option>50</option><option>60</option>
+        </select>
+      </div>
+    </div>
+    <div class="out">
+      <div class="box"><div class="v" id="frames">—</div><div class="k">Total frames</div></div>
+      <div class="box"><div class="v" id="secs">—</div><div class="k">Real seconds</div></div>
+      <div class="box"><div class="v" id="clock">—</div><div class="k">Clock (H:M:S)</div></div>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>Add a second timecode</h2>
+    <div class="row">
+      <div>
+        <label>Timecode to add (HH:MM:SS:FF)</label>
+        <input id="tc2" value="00:00:15:00">
+      </div>
+      <div>
+        <label>Sum</label>
+        <input id="sum" value="—" readonly>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>About timecode</h2>
+    <p class="note">SMPTE timecode labels each frame as <code>HH:MM:SS:FF</code> — hours, minutes, seconds, and the frame within that second. The frame count must be below the frame rate (at 24&nbsp;fps the frames run 00&ndash;23). This tool uses <b>non-drop-frame</b> counting: frames map linearly to time as <code>seconds = frames ÷ fps</code>. Real seconds can differ slightly from the clock reading for fractional rates like 23.976, which is exactly why editors track frames, not wall-clock time. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function pad(n){ return (n < 10 ? '0' : '') + n; }
+  function nominalFps(fps){ return Math.round(fps); }
+  function tcToFrames(tc, fps){
+    var m = /^(\d+):(\d{1,2}):(\d{1,2}):(\d{1,2})$/.exec(String(tc).trim());
+    if(!m) throw new Error('use HH:MM:SS:FF');
+    var h = +m[1], mi = +m[2], s = +m[3], f = +m[4], nf = nominalFps(fps);
+    if(mi > 59 || s > 59) throw new Error('minutes and seconds must be 0-59');
+    if(f >= nf) throw new Error('frame must be 0-' + (nf - 1) + ' at ' + fps + ' fps');
+    return ((h * 3600 + mi * 60 + s) * nf) + f;
+  }
+  function framesToTc(frames, fps){
+    frames = Math.round(frames);
+    if(frames < 0) throw new Error('frames must be >= 0');
+    var nf = nominalFps(fps);
+    var f = frames % nf, total = Math.floor(frames / nf);
+    var s = total % 60, mtot = Math.floor(total / 60);
+    var mi = mtot % 60, h = Math.floor(mtot / 60);
+    return pad(h) + ':' + pad(mi) + ':' + pad(s) + ':' + pad(f);
+  }
+  function secondsToTc(seconds, fps){ return framesToTc(Math.round(seconds * fps), fps); }
+  function addTimecodes(a, b, fps){ return framesToTc(tcToFrames(a, fps) + tcToFrames(b, fps), fps); }
+
+  if(typeof module !== 'undefined') module.exports = { tcToFrames:tcToFrames, framesToTc:framesToTc, secondsToTc:secondsToTc, addTimecodes:addTimecodes };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var $ = function(id){ return document.getElementById(id); };
+    function render(){
+      $('err').textContent = '';
+      var fps = parseFloat($('fps').value);
+      try{
+        var fr = tcToFrames($('tc').value, fps);
+        $('frames').textContent = fr.toLocaleString();
+        var sec = fr / fps;
+        $('secs').textContent = (Math.round(sec * 1000) / 1000);
+        var hh = Math.floor(sec / 3600), mm = Math.floor((sec % 3600) / 60), ss = sec % 60;
+        $('clock').textContent = pad(hh) + ':' + pad(mm) + ':' + pad(Math.floor(ss));
+      }catch(e){ $('frames').textContent = $('secs').textContent = $('clock').textContent = '—'; $('err').textContent = e.message; }
+      try{ $('sum').value = addTimecodes($('tc').value, $('tc2').value, fps); }
+      catch(e){ $('sum').value = '—'; }
+    }
+    ['tc','tc2','fps'].forEach(function(id){ $(id).addEventListener('input', render); });
+    render();
+
+    var root = document.documentElement, tb = $('theme');
+    function setTheme(t){ root.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? '☀️' : '🌙'; try{ localStorage.setItem('timecode-theme', t); }catch(e){} }
+    var saved; try{ saved = localStorage.getItem('timecode-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); });
+  }
+</script>
+</body>
+</html>

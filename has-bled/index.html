@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HAS-BLED Calculator — major bleeding risk</title>
+<meta name="description" content="Score HAS-BLED to estimate 1-year major bleeding risk on anticoagulation for atrial fibrillation. Companion to CHA2DS2-VASc. Offline, no tracking.">
+<style>
+  :root{
+    --c:#9f1239;
+    --bg:#fdf1f4; --card:#ffffff; --fg:#250a13; --muted:#75505c;
+    --line:#f4d7df; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#16080c; --card:#210e14; --fg:#f7e6eb; --muted:#c0929c;
+    --line:#3a1c25; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:800px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:800px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .crit{display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);cursor:pointer}
+  .crit:last-child{border-bottom:0}
+  .crit input{margin-top:3px;width:18px;height:18px;accent-color:var(--c);flex:0 0 auto}
+  .crit .txt{flex:1;font-size:.9rem}
+  .crit .letter{font-weight:800;color:var(--c);width:16px;text-align:center}
+  .result{text-align:center;margin:8px 0}
+  .result .n{font-size:3.4rem;font-weight:800;color:var(--c);font-variant-numeric:tabular-nums;line-height:1}
+  .result .k{color:var(--muted);font-size:.9rem;margin-top:4px}
+  .verdict{display:inline-block;padding:8px 20px;border-radius:999px;font-weight:700;margin-top:12px}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🩸</div>
+  <div>
+    <h1>HAS-BLED</h1>
+    <p>Major bleeding risk on anticoagulation</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div id="crits"></div>
+  </div>
+  <div class="card">
+    <div class="result">
+      <div class="n" id="score">0</div>
+      <div class="k">HAS-BLED score (0–9)</div>
+      <div><span class="verdict" id="verdict">—</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>About HAS-BLED</h2>
+    <p class="note">HAS-BLED estimates 1-year major-bleeding risk in atrial-fibrillation patients on anticoagulation — the companion to <a href="https://awictor.github.io/chads-vasc/">CHA₂DS₂-VASc</a> (stroke risk). One point each for <b>H</b>ypertension, <b>A</b>bnormal renal <b>and</b> liver function (up to 2), <b>S</b>troke, <b>B</b>leeding history, <b>L</b>abile INR, <b>E</b>lderly (&gt;65), and <b>D</b>rugs/alcohol (up to 2). A score of <b>≥ 3</b> flags high bleeding risk warranting caution and closer review — not automatically stopping anticoagulation, but addressing modifiable factors. A decision aid, not a directive. Everything runs locally.</p>
+  </div>
+
+  <p class="foot">100% offline · not medical advice · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var CRITERIA = [
+    { key: 'hypertension', letter: 'H', label: 'Hypertension (uncontrolled, systolic > 160 mmHg)' },
+    { key: 'renal', letter: 'A', label: 'Abnormal renal function (dialysis, transplant, creatinine ≥ 200 µmol/L)' },
+    { key: 'liver', letter: 'A', label: 'Abnormal liver function (cirrhosis, bilirubin > 2× or AST/ALT > 3× ULN)' },
+    { key: 'stroke', letter: 'S', label: 'Prior stroke' },
+    { key: 'bleeding', letter: 'B', label: 'Bleeding history or predisposition (e.g. anemia)' },
+    { key: 'labileINR', letter: 'L', label: 'Labile INR (unstable/high, time in range < 60%)' },
+    { key: 'elderly', letter: 'E', label: 'Elderly (age > 65)' },
+    { key: 'drugs', letter: 'D', label: 'Drugs predisposing to bleeding (antiplatelets, NSAIDs)' },
+    { key: 'alcohol', letter: 'D', label: 'Alcohol use (≥ 8 drinks/week)' }
+  ];
+
+  // Sum the criteria (each 1 point). Max 9.
+  function hasBled(selected){
+    if(selected === null || typeof selected !== 'object') throw new Error('selected must be an object');
+    var total = 0;
+    CRITERIA.forEach(function(c){ if(selected[c.key]) total += 1; });
+    return total;
+  }
+  // Risk band: 0-1 low, 2 moderate, >=3 high.
+  function hasBledRisk(score){
+    score = Number(score);
+    if(!isFinite(score)) throw new Error('score must be a number');
+    if(score >= 3) return 'high';
+    if(score >= 2) return 'moderate';
+    return 'low';
+  }
+
+  if(typeof module !== 'undefined') module.exports = { CRITERIA:CRITERIA, hasBled:hasBled, hasBledRisk:hasBledRisk };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var host = document.getElementById('crits');
+    host.innerHTML = CRITERIA.map(function(c){
+      return '<label class="crit"><input type="checkbox" data-k="' + c.key + '"><span class="letter">' + c.letter + '</span><span class="txt">' + c.label + '</span></label>';
+    }).join('');
+    var boxes = host.querySelectorAll('input');
+    var COLORS = { low: '#16a34a', moderate: '#d97706', high: '#dc2626' };
+    function render(){
+      var sel = {};
+      boxes.forEach(function(b){ sel[b.getAttribute('data-k')] = b.checked; });
+      var s = hasBled(sel), band = hasBledRisk(s);
+      document.getElementById('score').textContent = s;
+      document.getElementById('score').style.color = COLORS[band];
+      var vd = document.getElementById('verdict');
+      vd.textContent = band.charAt(0).toUpperCase() + band.slice(1) + ' bleeding risk';
+      vd.style.background = COLORS[band]; vd.style.color = '#fff';
+    }
+    boxes.forEach(function(b){ b.addEventListener('change', render); });
+    render();
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('hasbled-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('hasbled-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

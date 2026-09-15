@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CalBurn — calories burned calculator (MET)</title>
+<meta name="description" content="Free offline calories burned calculator. Pick an activity, enter your weight and duration, and get calories burned using MET values. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/cal-burn/">
+<style>
+  :root{
+    --c:#854d0e; --bg:#fdfaf3; --fg:#211a0c; --muted:#77673f;
+    --card:#ffffff; --border:#ece2cc; --code:#f6efdd;
+  }
+  [data-theme="dark"]{
+    --bg:#161207; --fg:#f1ebdb; --muted:#b4a276; --card:#221b0d;
+    --border:#3a2f18; --code:#2c2411;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:700px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#f59e0b);display:grid;place-items:center;color:#fff;font-size:20px}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:700px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  .field{margin-bottom:14px}
+  input,select{width:100%;padding:11px 13px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:1rem}
+  input:focus,select:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .row{display:flex;gap:12px}
+  .row .field{flex:1}
+  .unit{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-left:8px;vertical-align:middle}
+  .unit button{background:var(--bg);border:none;color:var(--fg);padding:3px 10px;cursor:pointer;font-size:.78rem;border-right:1px solid var(--border)}
+  .unit button:last-child{border-right:none}
+  .unit button.on{background:var(--c);color:#fff}
+  .result{margin-top:18px;text-align:center}
+  .kcal{font-family:ui-monospace,monospace;font-size:3rem;font-weight:700;color:var(--c)}
+  .meta{color:var(--muted);font-size:.9rem;margin-top:2px}
+  .err{color:#dc2626;font-size:.86rem;margin-top:10px;min-height:1.1em}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:700px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('cb.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">🔥</div>
+  <div>
+    <h1>CalBurn</h1>
+    <p class="sub">Calories burned calculator</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <div class="field">
+      <label for="act">Activity</label>
+      <select id="act"></select>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>Weight <span class="unit" id="wu"><button data-u="kg" class="on">kg</button><button data-u="lb">lb</button></span></label>
+        <input id="weight" value="70" inputmode="decimal" spellcheck="false">
+      </div>
+      <div class="field">
+        <label for="mins">Duration (minutes)</label>
+        <input id="mins" value="30" inputmode="decimal" spellcheck="false">
+      </div>
+    </div>
+    <p class="err" id="err"></p>
+    <div class="result" id="result"></div>
+    <p class="hint">Calories = MET × 3.5 × weight(kg) ÷ 200 × minutes. MET (metabolic equivalent) values
+      are population averages — your actual burn varies. Not medical advice. Runs locally.</p>
+  </div>
+</main>
+<footer>
+  CalBurn is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/cal-burn">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+var ACTIVITIES = [
+  ['Walking (3 mph)', 3.5], ['Walking (4 mph, brisk)', 5.0], ['Running (6 mph)', 9.8],
+  ['Running (8 mph)', 11.8], ['Cycling (moderate)', 8.0], ['Cycling (vigorous)', 10.0],
+  ['Swimming (moderate)', 7.0], ['Hiking', 6.0], ['Rowing (moderate)', 7.0],
+  ['Jump rope', 12.3], ['Elliptical', 5.0], ['Weightlifting', 3.5], ['HIIT', 8.0],
+  ['Yoga', 2.5], ['Dancing', 4.8], ['Basketball', 6.5], ['Soccer', 7.0], ['Tennis', 7.3],
+  ['Housework', 3.3], ['Sitting', 1.3], ['Sleeping', 0.95]
+];
+function lbToKg(lb){ return Number(lb) * 0.45359237; }
+function perMinute(met, weightKg){
+  met = Number(met); weightKg = Number(weightKg);
+  if(!(met > 0) || !(weightKg > 0)) return null;
+  return met * 3.5 * weightKg / 200;
+}
+function caloriesBurned(met, weightKg, minutes){
+  var pm = perMinute(met, weightKg);
+  minutes = Number(minutes);
+  if(pm === null || !isFinite(minutes) || minutes < 0) return null;
+  return pm * minutes;
+}
+
+if(typeof module !== 'undefined') module.exports = { ACTIVITIES, lbToKg, perMinute, caloriesBurned };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var actEl = document.getElementById('act');
+  var weightEl = document.getElementById('weight');
+  var minsEl = document.getElementById('mins');
+  var errEl = document.getElementById('err');
+  var resultEl = document.getElementById('result');
+  var wuEl = document.getElementById('wu');
+  var unit = 'kg';
+
+  ACTIVITIES.forEach(function(a, i){
+    var o = document.createElement('option');
+    o.value = i; o.textContent = a[0] + ' (MET ' + a[1] + ')';
+    if(a[0] === 'Running (6 mph)') o.selected = true;
+    actEl.appendChild(o);
+  });
+
+  function render(){
+    var met = ACTIVITIES[Number(actEl.value)][1];
+    var w = Number(weightEl.value);
+    var kg = unit === 'lb' ? lbToKg(w) : w;
+    var mins = Number(minsEl.value);
+    var cal = caloriesBurned(met, kg, mins);
+    if(cal === null){
+      errEl.textContent = 'Enter a valid weight and duration.';
+      resultEl.innerHTML = '';
+      return;
+    }
+    errEl.textContent = '';
+    var pm = perMinute(met, kg);
+    resultEl.innerHTML = '<div class="kcal">' + Math.round(cal) + ' kcal</div>' +
+      '<div class="meta">' + pm.toFixed(1) + ' kcal/min · MET ' + met + '</div>';
+    try{
+      localStorage.setItem('cb.act', actEl.value);
+      localStorage.setItem('cb.weight', weightEl.value);
+      localStorage.setItem('cb.mins', minsEl.value);
+      localStorage.setItem('cb.unit', unit);
+    }catch(e){}
+  }
+  wuEl.addEventListener('click', function(e){
+    var b = e.target.closest ? e.target.closest('button') : null;
+    if(!b) return;
+    unit = b.getAttribute('data-u');
+    [].forEach.call(wuEl.querySelectorAll('button'), function(x){ x.className = (x === b) ? 'on' : ''; });
+    render();
+  });
+  [actEl, weightEl, minsEl].forEach(function(e){ e.addEventListener('input', render); });
+  actEl.addEventListener('change', render);
+  try{
+    var sa = localStorage.getItem('cb.act'); if(sa !== null) actEl.value = sa;
+    var sw = localStorage.getItem('cb.weight'); if(sw !== null) weightEl.value = sw;
+    var sm = localStorage.getItem('cb.mins'); if(sm !== null) minsEl.value = sm;
+    var su = localStorage.getItem('cb.unit');
+    if(su){ unit = su; [].forEach.call(wuEl.querySelectorAll('button'), function(x){
+      x.className = (x.getAttribute('data-u') === su) ? 'on' : ''; }); }
+  }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('cb.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('cb.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

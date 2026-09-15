@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DownloadTime — File Transfer Time Calculator</title>
+<meta name="description" content="Estimate how long a file takes to download or transfer from its size and your connection speed, with unit pickers and a humanized duration. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('download-time-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#0369a1;
+    --bg:#f4f6f8; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e2e5e9; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#0e1319; --card:#171d25; --fg:#eef2f6; --muted:#96a0ac; --line:#242c37; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#075985);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:720px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  .pair{display:grid;grid-template-columns:2fr 1fr;gap:10px}
+  .field{margin-bottom:14px}
+  .out{text-align:center;margin-top:4px}
+  .big{font-size:2.8rem;font-weight:800;color:var(--c);letter-spacing:-1px}
+  .presets{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .presets button{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:999px;padding:5px 12px;cursor:pointer;font:inherit;font-size:.8rem}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">⬇️</div>
+    <div><h1>DownloadTime</h1><div class="sub">How long will that file take?</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="field">
+      <label for="size">File size</label>
+      <div class="pair">
+        <input type="number" id="size" value="700" step="any" min="0">
+        <select id="sizeUnit"><option>B</option><option>KB</option><option selected>MB</option><option>GB</option><option>TB</option></select>
+      </div>
+    </div>
+    <div class="field">
+      <label for="speed">Connection speed</label>
+      <div class="pair">
+        <input type="number" id="speed" value="50" step="any" min="0">
+        <select id="speedUnit"><option>bps</option><option>Kbps</option><option selected>Mbps</option><option>Gbps</option></select>
+      </div>
+    </div>
+    <div class="presets" id="presets"></div>
+  </div>
+  <div class="card out">
+    <div class="big" id="result">—</div>
+    <div class="sub">estimated transfer time</div>
+  </div>
+</main>
+<footer>
+  Uses decimal units (1 MB = 1,000,000 bytes) and ignores overhead. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/download-time">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  const SIZE = { B: 1, KB: 1e3, MB: 1e6, GB: 1e9, TB: 1e12 };
+  const SPEED = { bps: 1, Kbps: 1e3, Mbps: 1e6, Gbps: 1e9 };
+
+  function transferSeconds(size, sizeUnit, speed, speedUnit){
+    if(!(SIZE[sizeUnit])) throw new Error('unknown size unit: ' + sizeUnit);
+    if(!(SPEED[speedUnit])) throw new Error('unknown speed unit: ' + speedUnit);
+    if(!(size >= 0)) throw new Error('size must be non-negative');
+    if(!(speed > 0)) throw new Error('speed must be positive');
+    const bits = size * SIZE[sizeUnit] * 8;
+    return bits / (speed * SPEED[speedUnit]);
+  }
+
+  function humanize(sec){
+    if(!(sec >= 0)) throw new Error('seconds must be non-negative');
+    if(sec < 1) return (Math.round(sec * 100) / 100) + 's';
+    sec = Math.round(sec);
+    const d = Math.floor(sec / 86400); sec %= 86400;
+    const h = Math.floor(sec / 3600); sec %= 3600;
+    const m = Math.floor(sec / 60); const s = sec % 60;
+    const parts = [];
+    if(d) parts.push(d + 'd');
+    if(h) parts.push(h + 'h');
+    if(m) parts.push(m + 'm');
+    if(s || !parts.length) parts.push(s + 's');
+    return parts.join(' ');
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('result')){
+    const $ = id => document.getElementById(id);
+    const PRESETS = [['DSL 10 Mbps', 10, 'Mbps'], ['Cable 100 Mbps', 100, 'Mbps'], ['Gigabit', 1, 'Gbps'], ['4G ~25 Mbps', 25, 'Mbps'], ['Dial-up 56 Kbps', 56, 'Kbps']];
+
+    function render(){
+      try{
+        const sec = transferSeconds(+$('size').value, $('sizeUnit').value, +$('speed').value, $('speedUnit').value);
+        $('result').textContent = humanize(sec);
+      }catch(e){ $('result').textContent = '—'; }
+    }
+
+    $('presets').innerHTML = PRESETS.map((p, i) => `<button type="button" data-i="${i}">${p[0]}</button>`).join('');
+    $('presets').addEventListener('click', e => { const b = e.target.closest('button'); if(!b) return; const [, sp, u] = PRESETS[+b.dataset.i]; $('speed').value = sp; $('speedUnit').value = u; render(); });
+    ['size', 'sizeUnit', 'speed', 'speedUnit'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('download-time-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { SIZE, SPEED, transferSeconds, humanize };
+</script>
+</body>
+</html>

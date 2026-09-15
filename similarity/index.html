@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Similarity — string similarity &amp; edit distance</title>
+<meta name="description" content="Free offline string similarity tool. Compare two strings with Levenshtein edit distance, similarity ratio, Sørensen–Dice coefficient, and Hamming distance. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/similarity/">
+<style>
+  :root{
+    --c:#9d174d; --bg:#fcf7f9; --fg:#22131a; --muted:#7c5966;
+    --card:#ffffff; --border:#eedde4; --code:#faedf1;
+  }
+  [data-theme="dark"]{
+    --bg:#190f13; --fg:#f2e5ea; --muted:#b5949f; --card:#25151c;
+    --border:#3a2530; --code:#2d1922;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#ec4899);display:grid;place-items:center;color:#fff;font-size:20px}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:720px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  textarea{width:100%;min-height:70px;padding:11px 13px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:.95rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    resize:vertical;line-height:1.5}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .field{margin-bottom:14px}
+  .bar{height:12px;border-radius:99px;background:var(--code);overflow:hidden;margin-top:18px}
+  .bar>i{display:block;height:100%;background:var(--c);width:0;transition:width .3s}
+  .pctline{display:flex;justify-content:space-between;align-items:baseline;margin-top:8px}
+  .pct{font-family:ui-monospace,monospace;font-size:2rem;font-weight:700;color:var(--c)}
+  .pctlbl{color:var(--muted);font-size:.85rem}
+  .grid{margin-top:18px;display:grid;grid-template-columns:1fr 1fr;gap:1px;
+    background:var(--border);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .cell{background:var(--card);padding:13px 15px}
+  .cell .k{font-size:.74rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .cell .v{font-family:ui-monospace,monospace;font-weight:700;font-size:1.1rem;margin-top:2px}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('sim.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">≈</div>
+  <div>
+    <h1>Similarity</h1>
+    <p class="sub">String similarity &amp; edit distance</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <div class="field">
+      <label for="a">String A</label>
+      <textarea id="a" spellcheck="false">kitten</textarea>
+    </div>
+    <div class="field">
+      <label for="b">String B</label>
+      <textarea id="b" spellcheck="false">sitting</textarea>
+    </div>
+    <div class="bar"><i id="barFill"></i></div>
+    <div class="pctline">
+      <span class="pct" id="pct"></span>
+      <span class="pctlbl">Levenshtein similarity</span>
+    </div>
+    <div class="grid" id="grid"></div>
+    <p class="hint">Levenshtein counts single-character insertions, deletions, and substitutions.
+      Sørensen–Dice compares character bigrams. Hamming needs equal-length strings. All computed locally.</p>
+  </div>
+</main>
+<footer>
+  Similarity is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/similarity">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function levenshtein(a, b){
+  a = String(a); b = String(b);
+  var m = a.length, n = b.length;
+  if(m === 0) return n;
+  if(n === 0) return m;
+  var prev = [];
+  for(var j = 0; j <= n; j++) prev[j] = j;
+  for(var i = 1; i <= m; i++){
+    var cur = [i];
+    for(var j2 = 1; j2 <= n; j2++){
+      var cost = a.charAt(i-1) === b.charAt(j2-1) ? 0 : 1;
+      cur[j2] = Math.min(prev[j2] + 1, cur[j2-1] + 1, prev[j2-1] + cost);
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+function similarityRatio(a, b){
+  a = String(a); b = String(b);
+  var max = Math.max(a.length, b.length);
+  if(max === 0) return 1;
+  return 1 - levenshtein(a, b) / max;
+}
+function bigrams(s){
+  var out = [];
+  for(var i = 0; i < s.length - 1; i++) out.push(s.substr(i, 2));
+  return out;
+}
+function diceCoefficient(a, b){
+  a = String(a); b = String(b);
+  if(a.length < 2 && b.length < 2) return a === b ? 1 : 0;
+  var A = bigrams(a), B = bigrams(b);
+  if(A.length === 0 || B.length === 0) return 0;
+  var counts = {};
+  A.forEach(function(g){ counts[g] = (counts[g] || 0) + 1; });
+  var inter = 0;
+  B.forEach(function(g){ if(counts[g] > 0){ inter++; counts[g]--; } });
+  return 2 * inter / (A.length + B.length);
+}
+function hamming(a, b){
+  a = String(a); b = String(b);
+  if(a.length !== b.length) return null;
+  var d = 0;
+  for(var i = 0; i < a.length; i++) if(a.charAt(i) !== b.charAt(i)) d++;
+  return d;
+}
+
+if(typeof module !== 'undefined') module.exports = {
+  levenshtein, similarityRatio, bigrams, diceCoefficient, hamming
+};
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var aEl = document.getElementById('a');
+  var bEl = document.getElementById('b');
+  var pctEl = document.getElementById('pct');
+  var barFill = document.getElementById('barFill');
+  var gridEl = document.getElementById('grid');
+  function pct(x){ return (x * 100).toFixed(1) + '%'; }
+  function cell(k, v){ return '<div class="cell"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>'; }
+  function render(){
+    var a = aEl.value, b = bEl.value;
+    var ratio = similarityRatio(a, b);
+    pctEl.textContent = pct(ratio);
+    barFill.style.width = (ratio * 100) + '%';
+    var ham = hamming(a, b);
+    gridEl.innerHTML =
+      cell('Levenshtein distance', levenshtein(a, b)) +
+      cell('Sørensen–Dice', pct(diceCoefficient(a, b))) +
+      cell('Hamming distance', ham === null ? 'n/a (unequal length)' : ham) +
+      cell('Lengths', a.length + ' / ' + b.length);
+    try{ localStorage.setItem('sim.a', a); localStorage.setItem('sim.b', b); }catch(e){}
+  }
+  aEl.addEventListener('input', render);
+  bEl.addEventListener('input', render);
+  try{
+    var sa = localStorage.getItem('sim.a'); if(sa !== null) aEl.value = sa;
+    var sb = localStorage.getItem('sim.b'); if(sb !== null) bEl.value = sb;
+  }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('sim.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('sim.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

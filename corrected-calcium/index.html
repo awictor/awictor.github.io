@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CorrectedCalcium — Albumin-Corrected Calcium Calculator</title>
+<meta name="description" content="Correct serum calcium for a low or high albumin level (mg/dL or SI mmol/L), with a normal / low / high interpretation. 100% offline, informational only.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('cca-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#0e7490;
+    --bg:#f1f8fa; --card:#ffffff; --fg:#111e22; --muted:#556970; --line:#d9eaee; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#08151a; --card:#0f1e24; --fg:#e7f4f8; --muted:#82a1aa; --line:#1a2c33; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:620px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#155e75);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:620px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.78rem;color:var(--muted);margin-bottom:5px;font-weight:600}
+  .units{display:flex;gap:6px;margin-bottom:14px}
+  .units button{flex:1;padding:9px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;cursor:pointer;font:inherit}
+  .units button.active{background:var(--c);color:#fff;border-color:var(--c)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  input{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem}
+  .out{text-align:center;margin-top:4px}
+  .big{font-size:3rem;font-weight:800;color:var(--c);line-height:1}
+  .u{color:var(--muted);font-size:.85rem}
+  .cat{display:inline-block;margin-top:10px;padding:5px 16px;border-radius:999px;color:#fff;font-weight:700}
+  .note{color:var(--muted);font-size:.9rem;margin-top:10px;text-align:center}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:620px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.8rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🦴</div>
+    <div><h1>CorrectedCalcium</h1><div class="sub">Albumin-corrected calcium</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="units">
+      <button id="uUs" class="active" type="button">mg/dL</button>
+      <button id="uSi" type="button">SI (mmol/L)</button>
+    </div>
+    <div class="grid">
+      <div><label for="ca">Measured calcium (<span id="caU">mg/dL</span>)</label><input type="number" id="ca" value="8.0" step="0.1" min="0"></div>
+      <div><label for="alb">Albumin (<span id="albU">g/dL</span>)</label><input type="number" id="alb" value="2.0" step="0.1" min="0.1"></div>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card out">
+    <div class="big" id="corr">—</div>
+    <div class="u" id="corrU">mg/dL corrected calcium</div>
+    <div><span class="cat" id="cat"></span></div>
+    <div class="note" id="note"></div>
+  </div>
+</main>
+<footer>
+  Corrected Ca = measured Ca + 0.8 × (4.0 − albumin) mg/dL (SI: + 0.02 × (40 − albumin g/L)). Low albumin lowers total calcium without changing the ionized (active) level, so correction avoids over-diagnosing hypocalcemia. Informational only — <strong>not medical advice</strong>. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/corrected-calcium">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  // US units: Ca mg/dL, albumin g/dL. Corrected = Ca + 0.8*(4.0 - albumin).
+  function correctedCalcium(caMgdl, albuminGdl){
+    const c = Number(caMgdl), a = Number(albuminGdl);
+    if(!Number.isFinite(c) || !Number.isFinite(a)) throw new Error('enter numbers');
+    if(c < 0) throw new Error('calcium must be ≥ 0');
+    if(a <= 0) throw new Error('albumin must be > 0');
+    return c + 0.8 * (4.0 - a);
+  }
+
+  // SI units: Ca mmol/L, albumin g/L. Corrected = Ca + 0.02*(40 - albumin).
+  function correctedCalciumSI(caMmol, albuminGl){
+    const c = Number(caMmol), a = Number(albuminGl);
+    if(!Number.isFinite(c) || !Number.isFinite(a)) throw new Error('enter numbers');
+    if(c < 0) throw new Error('calcium must be ≥ 0');
+    if(a <= 0) throw new Error('albumin must be > 0');
+    return c + 0.02 * (40 - a);
+  }
+
+  // Category by corrected calcium. Normal reference ~8.5–10.2 mg/dL (2.12–2.55 mmol/L).
+  function category(value, si = false){
+    const v = Number(value);
+    const lo = si ? 2.12 : 8.5, hi = si ? 2.55 : 10.2;
+    if(v < lo) return { name: 'Low (hypocalcemia)', color: '#0891b2' };
+    if(v <= hi) return { name: 'Normal', color: '#16a34a' };
+    return { name: 'High (hypercalcemia)', color: '#dc2626' };
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('corr')){
+    const $ = id => document.getElementById(id);
+    let si = false;
+    const r2 = n => Math.round(n * 100) / 100;
+
+    function render(){
+      try{
+        const v = si ? correctedCalciumSI($('ca').value, $('alb').value) : correctedCalcium($('ca').value, $('alb').value);
+        const cat = category(v, si);
+        $('corr').textContent = r2(v);
+        $('cat').textContent = cat.name;
+        $('cat').style.background = cat.color;
+        const normalAlb = si ? 40 : 4.0;
+        $('note').textContent = Number($('alb').value) < normalAlb
+          ? 'Low albumin — total calcium understates the true level; correction raises it.'
+          : Number($('alb').value) > normalAlb ? 'High albumin lowers the corrected value.' : 'Albumin normal — no correction applied.';
+        $('err').textContent = '';
+      }catch(e){ $('corr').textContent = '—'; $('cat').textContent = ''; $('note').textContent = ''; $('err').textContent = e.message; }
+    }
+    function setUnit(useSi){
+      si = useSi;
+      $('uUs').classList.toggle('active', !useSi); $('uSi').classList.toggle('active', useSi);
+      $('caU').textContent = useSi ? 'mmol/L' : 'mg/dL';
+      $('albU').textContent = useSi ? 'g/L' : 'g/dL';
+      $('corrU').textContent = (useSi ? 'mmol/L' : 'mg/dL') + ' corrected calcium';
+      $('ca').value = useSi ? '2.0' : '8.0';
+      $('alb').value = useSi ? '20' : '2.0';
+      render();
+    }
+    $('uUs').addEventListener('click', () => setUnit(false));
+    $('uSi').addEventListener('click', () => setUnit(true));
+    ['ca', 'alb'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('cca-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { correctedCalcium, correctedCalciumSI, category };
+</script>
+</body>
+</html>

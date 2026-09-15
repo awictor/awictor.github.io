@@ -1,0 +1,1715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cartotype — Type that reads like terrain</title>
+<meta name="description" content="A zero-dependency generative typography studio that turns any phrase into a topographic contour-map poster." />
+<style>
+  :root {
+    --bg: #0c0e13;
+    --panel: #14171f;
+    --panel-2: #1b1f2a;
+    --line: #262b38;
+    --text: #e7ebf3;
+    --muted: #8b93a7;
+    --accent: #ff7a3c;
+    --accent-2: #4fd1c5;
+    --ok: #5bd97a;
+    --radius: 10px;
+    --shadow: 0 8px 30px rgba(0,0,0,0.45);
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13px;
+    overflow: hidden;
+  }
+  .app {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    height: 100vh;
+    width: 100vw;
+  }
+  /* ---------- Sidebar ---------- */
+  .sidebar {
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .brand {
+    padding: 16px 18px 12px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .brand .mark {
+    width: 34px; height: 34px; border-radius: 8px;
+    background:
+      radial-gradient(circle at 50% 50%, transparent 2px, rgba(255,122,60,0.9) 2px 3px, transparent 3px 6px, rgba(255,122,60,0.6) 6px 7px, transparent 7px 10px, rgba(79,209,197,0.5) 10px 11px, transparent 11px);
+    border: 1px solid var(--line);
+    flex: none;
+  }
+  .brand h1 {
+    font-size: 16px; margin: 0; letter-spacing: 0.5px; font-weight: 700;
+  }
+  .brand p { margin: 2px 0 0; font-size: 11px; color: var(--muted); }
+  .controls {
+    overflow-y: auto;
+    padding: 6px 14px 20px;
+    flex: 1 1 auto;
+    min-height: 0;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
+  }
+  .controls::-webkit-scrollbar { width: 9px; }
+  .controls::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; }
+  .group { border-top: 1px solid var(--line); padding: 12px 0 4px; }
+  .group:first-child { border-top: none; }
+  .group > .g-title {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1.4px;
+    color: var(--muted); margin-bottom: 10px; font-weight: 700;
+    display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;
+  }
+  .group > .g-title .chev { margin-left: auto; transition: transform .15s; opacity:.7; }
+  .group.collapsed > .g-title .chev { transform: rotate(-90deg); }
+  .group.collapsed > .g-body { display: none; }
+  .field { margin-bottom: 12px; }
+  .field label {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 11px; color: var(--muted); margin-bottom: 5px;
+  }
+  .field label .val { color: var(--text); font-family: var(--mono); font-size: 11px; }
+  input[type="text"], select, textarea {
+    width: 100%; background: var(--panel-2); border: 1px solid var(--line);
+    color: var(--text); border-radius: 8px; padding: 8px 9px; font-size: 13px;
+    font-family: var(--sans); outline: none;
+  }
+  textarea { resize: vertical; min-height: 46px; line-height: 1.35; }
+  input[type="text"]:focus, select:focus, textarea:focus { border-color: var(--accent); }
+  input[type="range"] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 4px;
+    background: var(--line); border-radius: 3px; outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 15px; height: 15px;
+    border-radius: 50%; background: var(--accent); cursor: pointer;
+    border: 2px solid #1b1f2a; box-shadow: 0 0 0 1px var(--accent);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 15px; height: 15px; border-radius: 50%; background: var(--accent);
+    cursor: pointer; border: 2px solid #1b1f2a;
+  }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .seg {
+    display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 0;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+    overflow: hidden;
+  }
+  .seg button {
+    background: transparent; border: none; color: var(--muted); padding: 7px 4px;
+    font-size: 11px; cursor: pointer; font-family: var(--sans); transition: .12s;
+  }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.active { background: var(--accent); color: #14171f; font-weight: 700; }
+  .seg button:hover:not(.active) { color: var(--text); }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+    border-radius: 8px; padding: 9px 10px; font-size: 12px; cursor: pointer;
+    font-family: var(--sans); transition: .12s; width: 100%; font-weight: 600;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: #14171f; border-color: var(--accent); }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.ghost { background: transparent; }
+  .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .swatches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+  .swatch {
+    height: 30px; border-radius: 7px; cursor: pointer; border: 2px solid transparent;
+    position: relative; overflow: hidden;
+  }
+  .swatch.active { border-color: #fff; box-shadow: 0 0 0 2px var(--accent); }
+  .swatch span { position: absolute; bottom: 2px; left: 4px; font-size: 8px; color: rgba(255,255,255,.85); text-shadow: 0 1px 2px #000; }
+  .color-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .color-row .cc { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .color-row input[type="color"] {
+    width: 100%; height: 30px; border: 1px solid var(--line); border-radius: 7px;
+    background: var(--panel-2); cursor: pointer; padding: 2px;
+  }
+  .color-row .cc small { color: var(--muted); font-size: 9px; }
+  .chk { display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 10px; font-size: 12px; }
+  .chk input { accent-color: var(--accent); width: 15px; height: 15px; }
+  .presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+  .preset {
+    aspect-ratio: 1/1.25; border-radius: 8px; cursor: pointer; border: 1px solid var(--line);
+    overflow: hidden; position: relative; background: #000;
+  }
+  .preset canvas { width: 100%; height: 100%; display: block; }
+  .preset .pname {
+    position: absolute; bottom: 0; left: 0; right: 0; font-size: 9px; padding: 3px 4px;
+    background: linear-gradient(transparent, rgba(0,0,0,.8)); color: #fff; text-align: center;
+    font-weight: 600;
+  }
+  .preset:hover { border-color: var(--accent); }
+  /* ---------- Stage ---------- */
+  .stage {
+    position: relative; display: flex; align-items: center; justify-content: center;
+    padding: 26px; min-width: 0; min-height: 0;
+    background:
+      radial-gradient(circle at 30% 20%, #171b25, var(--bg) 70%);
+  }
+  .canvas-wrap {
+    position: relative; box-shadow: var(--shadow); border-radius: 4px; overflow: hidden;
+    max-width: 100%; max-height: 100%;
+  }
+  #view { display: block; max-width: 100%; max-height: calc(100vh - 120px); background: #111; }
+  .topbar {
+    position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 8px; align-items: center; z-index: 5;
+    background: rgba(20,23,31,0.82); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    border: 1px solid var(--line); border-radius: 999px; padding: 6px 8px;
+  }
+  .topbar .tb {
+    background: transparent; border: none; color: var(--text); cursor: pointer;
+    padding: 6px 12px; border-radius: 999px; font-size: 12px; font-family: var(--sans);
+    display: inline-flex; align-items: center; gap: 6px; font-weight: 600;
+  }
+  .topbar .tb:hover { background: var(--panel-2); }
+  .topbar .tb.accent { color: var(--accent); }
+  .topbar .divider { width: 1px; height: 20px; background: var(--line); }
+  .status {
+    position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+    font-size: 11px; color: var(--muted); font-family: var(--mono);
+    background: rgba(20,23,31,0.7); padding: 5px 12px; border-radius: 999px;
+    border: 1px solid var(--line); z-index: 5; white-space: nowrap;
+  }
+  .status b { color: var(--accent-2); font-weight: 600; }
+  .toast {
+    position: fixed; bottom: 22px; right: 22px; z-index: 50;
+    background: var(--panel-2); border: 1px solid var(--accent); color: var(--text);
+    padding: 11px 16px; border-radius: 10px; box-shadow: var(--shadow);
+    font-size: 12px; opacity: 0; transform: translateY(10px); transition: .25s;
+    pointer-events: none; max-width: 320px;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .hint { font-size: 10px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
+  .badge { font-size: 9px; padding: 1px 6px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); }
+  @media (max-width: 820px) {
+    .app { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+    .sidebar { order: 2; border-right: none; border-top: 1px solid var(--line); max-height: 46vh; }
+    .stage { order: 1; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ================= SIDEBAR ================= -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="mark"></div>
+      <div>
+        <h1>Cartotype</h1>
+        <p>Type that reads like terrain.</p>
+      </div>
+    </div>
+    <div class="controls" id="controls">
+
+      <div class="group" data-group="text">
+        <div class="g-title">Phrase <span class="chev">▾</span></div>
+        <div class="g-body">
+          <div class="field">
+            <textarea id="text" rows="2" spellcheck="false">TERRAIN</textarea>
+            <div class="hint">Each line becomes its own band of elevation. Keep it short for dense contours.</div>
+          </div>
+          <div class="field">
+            <label>Font <span class="val" id="fontFamily-v"></span></label>
+            <select id="fontFamily">
+              <option value='900 -impact'>Heavy Sans (Impact/Arial Black)</option>
+              <option value='800 -sans'>Bold Sans-serif</option>
+              <option value='700 -serif'>Bold Serif (Georgia)</option>
+              <option value='700 -mono'>Bold Mono</option>
+              <option value='400 -sans'>Light Sans-serif</option>
+            </select>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label>Size <span class="val" id="fontSize-v"></span></label>
+              <input type="range" id="fontSize" min="0.20" max="0.95" step="0.01" />
+            </div>
+            <div class="field">
+              <label>Tracking <span class="val" id="letterSpacing-v"></span></label>
+              <input type="range" id="letterSpacing" min="-0.15" max="0.6" step="0.01" />
+            </div>
+          </div>
+          <div class="field">
+            <label>Line gap <span class="val" id="lineHeight-v"></span></label>
+            <input type="range" id="lineHeight" min="0.7" max="1.6" step="0.01" />
+          </div>
+        </div>
+      </div>
+
+      <div class="group" data-group="contours">
+        <div class="g-title">Contours <span class="chev">▾</span></div>
+        <div class="g-body">
+          <div class="field">
+            <label>Render mode</label>
+            <div class="seg" id="mode">
+              <button data-v="topo" class="active">Topographic</button>
+              <button data-v="stream">Streamline</button>
+              <button data-v="hatch">Relief</button>
+            </div>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label>Lines <span class="val" id="lineCount-v"></span></label>
+              <input type="range" id="lineCount" min="6" max="80" step="1" />
+            </div>
+            <div class="field">
+              <label>Spacing <span class="val" id="lineSpacing-v"></span></label>
+              <input type="range" id="lineSpacing" min="1.5" max="14" step="0.5" />
+            </div>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label>Weight <span class="val" id="lineWeight-v"></span></label>
+              <input type="range" id="lineWeight" min="0.3" max="4" step="0.1" />
+            </div>
+            <div class="field">
+              <label>Jitter <span class="val" id="jitter-v"></span></label>
+              <input type="range" id="jitter" min="0" max="1" step="0.02" />
+            </div>
+          </div>
+          <div class="field">
+            <label>Detail (grid) <span class="val" id="gridScale-v"></span></label>
+            <input type="range" id="gridScale" min="0.35" max="1.1" step="0.05" />
+            <div class="hint">Higher = finer contours, more CPU. Lower = faster, chunkier.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="group" data-group="warp">
+        <div class="g-title">Turbulence <span class="chev">▾</span></div>
+        <div class="g-body">
+          <div class="row">
+            <div class="field">
+              <label>Amplitude <span class="val" id="warpAmp-v"></span></label>
+              <input type="range" id="warpAmp" min="0" max="60" step="0.5" />
+            </div>
+            <div class="field">
+              <label>Frequency <span class="val" id="warpFreq-v"></span></label>
+              <input type="range" id="warpFreq" min="0.2" max="6" step="0.1" />
+            </div>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label>Octaves <span class="val" id="warpOct-v"></span></label>
+              <input type="range" id="warpOct" min="1" max="6" step="1" />
+            </div>
+            <div class="field">
+              <label>Seed <span class="val" id="seed-v"></span></label>
+              <input type="range" id="seed" min="1" max="9999" step="1" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="group" data-group="palette">
+        <div class="g-title">Palette &amp; paper <span class="chev">▾</span></div>
+        <div class="g-body">
+          <div class="field">
+            <div class="swatches" id="swatches"></div>
+          </div>
+          <label class="chk"><input type="checkbox" id="useCustom" /> Custom colors</label>
+          <div class="field" id="customColors" style="display:none">
+            <div class="color-row">
+              <div class="cc"><input type="color" id="col0" value="#0b1d3a" /><small>low</small></div>
+              <div class="cc"><input type="color" id="col1" value="#2a7f9e" /><small>mid</small></div>
+              <div class="cc"><input type="color" id="col2" value="#f4e9c9" /><small>high</small></div>
+            </div>
+          </div>
+          <div class="field">
+            <label>Background <span class="val" id="bgStyle-v"></span></label>
+            <div class="seg" id="bgStyle">
+              <button data-v="paper" class="active">Paper</button>
+              <button data-v="dark">Ink</button>
+              <button data-v="tint">Tinted</button>
+            </div>
+          </div>
+          <label class="chk"><input type="checkbox" id="grain" checked /> Paper grain</label>
+          <label class="chk"><input type="checkbox" id="vignette" checked /> Vignette</label>
+          <label class="chk"><input type="checkbox" id="glow" /> Contour glow</label>
+        </div>
+      </div>
+
+      <div class="group" data-group="format">
+        <div class="g-title">Format &amp; motion <span class="chev">▾</span></div>
+        <div class="g-body">
+          <div class="field">
+            <label>Aspect ratio</label>
+            <select id="aspect">
+              <option value="portrait">Poster — 2:3 portrait</option>
+              <option value="a-series">A-series — 1:1.414</option>
+              <option value="square">Square — 1:1</option>
+              <option value="social">Social — 4:5</option>
+              <option value="wide">Wide — 16:9</option>
+              <option value="story">Story — 9:16</option>
+            </select>
+          </div>
+          <label class="chk"><input type="checkbox" id="animate" /> Breathing animation</label>
+          <div class="field">
+            <label>Drift speed <span class="val" id="animSpeed-v"></span></label>
+            <input type="range" id="animSpeed" min="0.05" max="2" step="0.05" />
+          </div>
+        </div>
+      </div>
+
+      <div class="group" data-group="presets">
+        <div class="g-title">Gallery <span class="badge">1-click</span> <span class="chev">▾</span></div>
+        <div class="g-body">
+          <div class="presets" id="presets"></div>
+          <div class="hint" style="margin-top:8px">Click any tile to load it instantly. Or hit <b>Surprise me</b> in the top bar.</div>
+        </div>
+      </div>
+
+    </div>
+  </aside>
+
+  <!-- ================= STAGE ================= -->
+  <main class="stage">
+    <div class="topbar">
+      <button class="tb accent" id="surprise" title="Randomize everything (R)">↻ Surprise me</button>
+      <button class="tb" id="playBtn" title="Play / pause animation (Space)">▶ Play</button>
+      <button class="tb" id="resetBtn" title="Reset to defaults">Reset</button>
+      <div class="divider"></div>
+      <button class="tb" id="shareBtn" title="Copy shareable link">Share link</button>
+      <button class="tb" id="pngBtn" title="Export high-res PNG (P)">↓ PNG</button>
+      <button class="tb" id="svgBtn" title="Export vector SVG (S)">↓ SVG</button>
+      <button class="tb" id="webmBtn" title="Record animated WebM loop">● WebM</button>
+    </div>
+    <div class="canvas-wrap">
+      <canvas id="view"></canvas>
+    </div>
+    <div class="status" id="status">ready</div>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+(function () {
+  // =====================================================================
+  //  Cartotype — single-file generative topographic typography engine
+  // =====================================================================
+
+  // ---------- Seeded PRNG (mulberry32) ----------
+  function makeRNG(seed) {
+    let a = (seed >>> 0) || 1;
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // ---------- Value noise (own hash, no libs) ----------
+  function makeNoise(seed) {
+    const perm = new Uint8Array(512);
+    const rng = makeRNG(seed);
+    const p = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) p[i] = i;
+    for (let i = 255; i > 0; i--) {
+      const j = (rng() * (i + 1)) | 0;
+      const t = p[i]; p[i] = p[j]; p[j] = t;
+    }
+    for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+    function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+    function grad(h) { return (h & 255) / 255 * 2 - 1; }
+    // 2D value noise in [-1,1]
+    return function noise2(x, y) {
+      const X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
+      const xf = x - Math.floor(x), yf = y - Math.floor(y);
+      const u = fade(xf), v = fade(yf);
+      const aa = grad(perm[perm[X] + Y]);
+      const ba = grad(perm[perm[X + 1] + Y]);
+      const ab = grad(perm[perm[X] + Y + 1]);
+      const bb = grad(perm[perm[X + 1] + Y + 1]);
+      const x1 = aa + u * (ba - aa);
+      const x2 = ab + u * (bb - ab);
+      return x1 + v * (x2 - x1);
+    };
+  }
+
+  function fbm(noise, x, y, octaves) {
+    let sum = 0, amp = 1, freq = 1, norm = 0;
+    for (let i = 0; i < octaves; i++) {
+      sum += amp * noise(x * freq, y * freq);
+      norm += amp;
+      amp *= 0.5; freq *= 2.0;
+    }
+    return sum / (norm || 1);
+  }
+
+  // ---------- 1D squared Euclidean distance transform (Felzenszwalb) ----------
+  function edt1d(f, d, v, z, n) {
+    let k = 0;
+    v[0] = 0; z[0] = -1e20; z[1] = 1e20;
+    for (let q = 1; q < n; q++) {
+      let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+      while (s <= z[k]) {
+        k--;
+        s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+      }
+      k++; v[k] = q; z[k] = s; z[k + 1] = 1e20;
+    }
+    k = 0;
+    for (let q = 0; q < n; q++) {
+      while (z[k + 1] < q) k++;
+      d[q] = (q - v[k]) * (q - v[k]) + f[v[k]];
+    }
+  }
+
+  // Compute squared EDT of a binary mask (1 = seed). Returns Float64Array of sq distances.
+  function edt2d(mask, w, h) {
+    const INF = 1e20;
+    const grid = new Float64Array(w * h);
+    for (let i = 0; i < w * h; i++) grid[i] = mask[i] ? 0 : INF;
+    const maxd = Math.max(w, h);
+    const f = new Float64Array(maxd);
+    const d = new Float64Array(maxd);
+    const v = new Int32Array(maxd);
+    const z = new Float64Array(maxd + 1);
+    // columns
+    for (let x = 0; x < w; x++) {
+      for (let y = 0; y < h; y++) f[y] = grid[y * w + x];
+      edt1d(f, d, v, z, h);
+      for (let y = 0; y < h; y++) grid[y * w + x] = d[y];
+    }
+    // rows
+    for (let y = 0; y < h; y++) {
+      const off = y * w;
+      for (let x = 0; x < w; x++) f[x] = grid[off + x];
+      edt1d(f, d, v, z, w);
+      for (let x = 0; x < w; x++) grid[off + x] = d[x];
+    }
+    return grid;
+  }
+
+  // ---------- Text -> signed distance field ----------
+  function buildSDF(state, gridW, gridH, aspectW, aspectH) {
+    // Rasterize text into an offscreen canvas at grid resolution.
+    const oc = document.createElement("canvas");
+    oc.width = gridW; oc.height = gridH;
+    const g = oc.getContext("2d", { willReadFrequently: true });
+    g.fillStyle = "#000"; g.fillRect(0, 0, gridW, gridH);
+    g.fillStyle = "#fff";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+
+    const fam = fontStackFor(state.fontFamily);
+    const lines = state.text.replace(/\r/g, "").split("\n");
+    const usableLines = lines.length ? lines : [" "];
+
+    // Choose a font size so the block fits inside the grid with a margin.
+    const margin = 0.10;
+    const availW = gridW * (1 - margin * 2);
+    const availH = gridH * (1 - margin * 2);
+    const nL = usableLines.length;
+
+    // Binary search font px so text fits both width & height.
+    let lo = 4, hi = gridH; let best = 8;
+    for (let it = 0; it < 26; it++) {
+      const px = (lo + hi) / 2;
+      g.font = `${fam.weight} ${px}px ${fam.stack}`;
+      let maxW = 0;
+      for (const ln of usableLines) {
+        const w = measureTracked(g, ln, state.letterSpacing * px);
+        if (w > maxW) maxW = w;
+      }
+      const blockH = px * state.lineHeight * nL;
+      if (maxW <= availW && blockH <= availH) { best = px; lo = px; }
+      else { hi = px; }
+    }
+    best *= state.fontSize / 0.72; // fontSize slider scales relative to fitted size
+    best = Math.max(4, Math.min(best, gridH * 1.4));
+
+    g.font = `${fam.weight} ${best}px ${fam.stack}`;
+    const lineH = best * state.lineHeight;
+    const totalH = lineH * nL;
+    let y = gridH / 2 - totalH / 2 + lineH / 2;
+    for (const ln of usableLines) {
+      drawTracked(g, ln, gridW / 2, y, state.letterSpacing * best);
+      y += lineH;
+    }
+
+    const img = g.getImageData(0, 0, gridW, gridH).data;
+    const inside = new Uint8Array(gridW * gridH);
+    const outside = new Uint8Array(gridW * gridH);
+    let anyInside = false;
+    for (let i = 0; i < gridW * gridH; i++) {
+      const on = img[i * 4] > 127;
+      inside[i] = on ? 1 : 0;
+      outside[i] = on ? 0 : 1;
+      if (on) anyInside = true;
+    }
+    if (!anyInside) {
+      // empty phrase -> flat field
+      return { field: new Float32Array(gridW * gridH), gridW, gridH, maxAbs: 1, empty: true };
+    }
+    const dOut = edt2d(inside, gridW, gridH);  // distance to nearest inside pixel (for outside points)
+    const dIn = edt2d(outside, gridW, gridH);  // distance to nearest outside pixel (for inside points)
+    const field = new Float32Array(gridW * gridH);
+    let maxAbs = 1;
+    for (let i = 0; i < gridW * gridH; i++) {
+      // Positive outside, negative inside. Signed distance in grid units.
+      const val = Math.sqrt(dOut[i]) - Math.sqrt(dIn[i]);
+      field[i] = val;
+      const a = Math.abs(val);
+      if (a > maxAbs) maxAbs = a;
+    }
+    return { field, gridW, gridH, maxAbs, empty: false };
+  }
+
+  function fontStackFor(key) {
+    const parts = key.split("-");
+    const weight = parts[0].trim();
+    const kind = parts[1];
+    let stack;
+    if (kind === "impact") stack = '"Arial Black", Impact, "Helvetica Neue", sans-serif';
+    else if (kind === "serif") stack = 'Georgia, "Times New Roman", serif';
+    else if (kind === "mono") stack = 'ui-monospace, "Courier New", monospace';
+    else stack = 'system-ui, "Segoe UI", Helvetica, Arial, sans-serif';
+    return { weight, stack };
+  }
+
+  function measureTracked(g, text, spacing) {
+    if (!text.length) return 0;
+    let w = 0;
+    for (const ch of text) w += g.measureText(ch).width + spacing;
+    return w - spacing;
+  }
+  function drawTracked(g, text, cx, cy, spacing) {
+    const total = measureTracked(g, text, spacing);
+    let x = cx - total / 2;
+    for (const ch of text) {
+      const cw = g.measureText(ch).width;
+      g.fillText(ch, x + cw / 2, cy);
+      x += cw + spacing;
+    }
+  }
+
+  // ---------- Domain-warped field sampler ----------
+  // Returns a function sampling the (bilinear) warped SDF at grid coords, plus a helper
+  // to bake a full grid for marching squares.
+  function makeWarpedField(sdf, state, noise, time) {
+    const { field, gridW, gridH } = sdf;
+    function raw(gx, gy) {
+      // clamp
+      if (gx < 0) gx = 0; else if (gx > gridW - 1) gx = gridW - 1;
+      if (gy < 0) gy = 0; else if (gy > gridH - 1) gy = gridH - 1;
+      const x0 = Math.floor(gx), y0 = Math.floor(gy);
+      const x1 = Math.min(x0 + 1, gridW - 1), y1 = Math.min(y0 + 1, gridH - 1);
+      const fx = gx - x0, fy = gy - y0;
+      const a = field[y0 * gridW + x0], b = field[y0 * gridW + x1];
+      const c = field[y1 * gridW + x0], d = field[y1 * gridW + x1];
+      const top = a + fx * (b - a), bot = c + fx * (d - c);
+      return top + fy * (bot - top);
+    }
+    const freq = state.warpFreq / 100;
+    const amp = state.warpAmp * (gridW / 500);
+    const oct = state.warpOct;
+    function sample(gx, gy) {
+      if (amp > 0) {
+        const nx = fbm(noise, gx * freq + 11.3 + time, gy * freq + 3.1, oct);
+        const ny = fbm(noise, gx * freq - 7.7, gy * freq + 19.2 - time, oct);
+        gx += nx * amp;
+        gy += ny * amp;
+      }
+      return raw(gx, gy);
+    }
+    return { sample, raw, gridW, gridH };
+  }
+
+  // Bake warped field into a Float32 grid at same resolution for marching squares.
+  function bakeField(wf) {
+    const { gridW, gridH, sample } = wf;
+    const out = new Float32Array(gridW * gridH);
+    for (let y = 0; y < gridH; y++) {
+      for (let x = 0; x < gridW; x++) {
+        out[y * gridW + x] = sample(x, y);
+      }
+    }
+    return out;
+  }
+
+  // ---------- Marching squares -> stitched polylines ----------
+  function marchingSquares(field, w, h, level) {
+    // Produce line segments, then stitch into polylines via endpoint hashing.
+    const segs = [];
+    function interp(v0, v1, p0, p1) {
+      const t = (level - v0) / (v1 - v0);
+      return [p0[0] + t * (p1[0] - p0[0]), p0[1] + t * (p1[1] - p0[1])];
+    }
+    for (let y = 0; y < h - 1; y++) {
+      for (let x = 0; x < w - 1; x++) {
+        const tl = field[y * w + x];
+        const tr = field[y * w + x + 1];
+        const br = field[(y + 1) * w + x + 1];
+        const bl = field[(y + 1) * w + x];
+        let idx = 0;
+        if (tl > level) idx |= 8;
+        if (tr > level) idx |= 4;
+        if (br > level) idx |= 2;
+        if (bl > level) idx |= 1;
+        if (idx === 0 || idx === 15) continue;
+        const pTL = [x, y], pTR = [x + 1, y], pBR = [x + 1, y + 1], pBL = [x, y + 1];
+        // Edge crossing points
+        const top = () => interp(tl, tr, pTL, pTR);
+        const right = () => interp(tr, br, pTR, pBR);
+        const bottom = () => interp(bl, br, pBL, pBR);
+        const left = () => interp(tl, bl, pTL, pBL);
+        switch (idx) {
+          case 1: segs.push(left(), bottom()); break;
+          case 2: segs.push(bottom(), right()); break;
+          case 3: segs.push(left(), right()); break;
+          case 4: segs.push(top(), right()); break;
+          case 5: segs.push(left(), top()); segs.push(bottom(), right()); break;
+          case 6: segs.push(top(), bottom()); break;
+          case 7: segs.push(left(), top()); break;
+          case 8: segs.push(top(), left()); break;
+          case 9: segs.push(top(), bottom()); break;
+          case 10: segs.push(top(), right()); segs.push(left(), bottom()); break;
+          case 11: segs.push(top(), right()); break;
+          case 12: segs.push(left(), right()); break;
+          case 13: segs.push(bottom(), right()); break;
+          case 14: segs.push(left(), bottom()); break;
+        }
+      }
+    }
+    return stitch(segs);
+  }
+
+  function stitch(segs) {
+    // segs: flat array of [x,y] points, pairs are segments.
+    const q = 1000; // quantization for endpoint matching
+    const key = (p) => (Math.round(p[0] * q)) + "," + (Math.round(p[1] * q));
+    const map = new Map(); // point key -> list of {seg, end}
+    const used = new Array(segs.length / 2).fill(false);
+    const nSeg = segs.length / 2;
+    for (let i = 0; i < nSeg; i++) {
+      const a = segs[i * 2], b = segs[i * 2 + 1];
+      const ka = key(a), kb = key(b);
+      if (!map.has(ka)) map.set(ka, []);
+      if (!map.has(kb)) map.set(kb, []);
+      map.get(ka).push({ i, end: 0 });
+      map.get(kb).push({ i, end: 1 });
+    }
+    const polylines = [];
+    for (let i = 0; i < nSeg; i++) {
+      if (used[i]) continue;
+      used[i] = true;
+      const a = segs[i * 2], b = segs[i * 2 + 1];
+      const line = [a, b];
+      // extend forward from b
+      extend(line, key(b), 1);
+      // extend backward from a (prepend)
+      const back = [];
+      extendBack(back, key(a));
+      for (let j = 0; j < back.length; j++) line.unshift(back[j]);
+      polylines.push(line);
+    }
+
+    function findNext(k, excludeI) {
+      const list = map.get(k);
+      if (!list) return null;
+      for (const e of list) {
+        if (!used[e.i]) return e;
+      }
+      return null;
+    }
+    function extend(line, fromKey, dir) {
+      let curKey = fromKey;
+      while (true) {
+        const nx = findNext(curKey);
+        if (!nx) break;
+        used[nx.i] = true;
+        const other = nx.end === 0 ? segs[nx.i * 2 + 1] : segs[nx.i * 2];
+        line.push(other);
+        curKey = key(other);
+      }
+    }
+    function extendBack(arr, fromKey) {
+      let curKey = fromKey;
+      while (true) {
+        const nx = findNext(curKey);
+        if (!nx) break;
+        used[nx.i] = true;
+        const other = nx.end === 0 ? segs[nx.i * 2 + 1] : segs[nx.i * 2];
+        arr.push(other);
+        curKey = key(other);
+      }
+    }
+    return polylines;
+  }
+
+  // ---------- Douglas-Peucker simplification ----------
+  function simplify(points, eps) {
+    if (points.length < 3 || eps <= 0) return points;
+    const keep = new Uint8Array(points.length);
+    keep[0] = 1; keep[points.length - 1] = 1;
+    const stack = [[0, points.length - 1]];
+    while (stack.length) {
+      const [s, e] = stack.pop();
+      let maxD = 0, idx = -1;
+      const A = points[s], B = points[e];
+      const dx = B[0] - A[0], dy = B[1] - A[1];
+      const len2 = dx * dx + dy * dy || 1e-9;
+      for (let i = s + 1; i < e; i++) {
+        const P = points[i];
+        const t = ((P[0] - A[0]) * dx + (P[1] - A[1]) * dy) / len2;
+        const px = A[0] + t * dx, py = A[1] + t * dy;
+        const d = (P[0] - px) * (P[0] - px) + (P[1] - py) * (P[1] - py);
+        if (d > maxD) { maxD = d; idx = i; }
+      }
+      if (maxD > eps * eps && idx !== -1) {
+        keep[idx] = 1;
+        stack.push([s, idx], [idx, e]);
+      }
+    }
+    const out = [];
+    for (let i = 0; i < points.length; i++) if (keep[i]) out.push(points[i]);
+    return out;
+  }
+
+  // ---------- Color / palette ----------
+  const PALETTES = {
+    "Cartographer": ["#1b3a4b", "#2f7d8c", "#8fc7c1", "#f2e8cf"],
+    "Sunset Ridge": ["#2b1055", "#7b2d8b", "#ff6a3d", "#ffd56b"],
+    "Bathymetry": ["#03045e", "#0077b6", "#00b4d8", "#caf0f8"],
+    "Ember": ["#1a0b0b", "#7a1f0f", "#e0562a", "#ffce85"],
+    "Sage Survey": ["#20301f", "#4a6b3a", "#9cb380", "#e8ecd0"],
+    "Mono Ink": ["#0a0a0a", "#3a3a3a", "#8a8a8a", "#e8e8e8"],
+    "Aurora": ["#03071e", "#2d6a4f", "#40916c", "#95d5b2"],
+    "Rose Relief": ["#2d0a24", "#8c2f5a", "#e07a8b", "#ffd9d0"],
+    "Copper Map": ["#1e130c", "#5c3a21", "#b5793b", "#f0d9a8"],
+    "Deep Sea": ["#000814", "#001d3d", "#003566", "#669bbc"],
+    "Lava Field": ["#000000", "#3d0000", "#a30000", "#ffba08"],
+    "Glacier": ["#1e2a3a", "#3b6ea5", "#8ecae6", "#f7fbff"]
+  };
+
+  function hexToRgb(h) {
+    h = h.replace("#", "");
+    if (h.length === 3) h = h.split("").map(c => c + c).join("");
+    const n = parseInt(h, 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  function rgbToHex(r, g, b) {
+    return "#" + [r, g, b].map(v => Math.max(0, Math.min(255, v | 0)).toString(16).padStart(2, "0")).join("");
+  }
+  function lerpColor(stops, t) {
+    t = Math.max(0, Math.min(1, t));
+    const n = stops.length - 1;
+    const seg = Math.min(Math.floor(t * n), n - 1);
+    const local = t * n - seg;
+    const a = hexToRgb(stops[seg]), b = hexToRgb(stops[seg + 1]);
+    return rgbToHex(a[0] + (b[0] - a[0]) * local, a[1] + (b[1] - a[1]) * local, a[2] + (b[2] - a[2]) * local);
+  }
+
+  function paletteStops(state) {
+    if (state.useCustom) return [state.col0, state.col1, state.col2];
+    return PALETTES[state.palette] || PALETTES["Cartographer"];
+  }
+
+  function backgroundColor(state) {
+    const stops = paletteStops(state);
+    if (state.bgStyle === "dark") return "#0d0f14";
+    if (state.bgStyle === "tint") {
+      const c = hexToRgb(stops[0]);
+      // very dark tint of low color
+      return rgbToHex(c[0] * 0.28 + 10, c[1] * 0.28 + 10, c[2] * 0.28 + 14);
+    }
+    // paper: light warm tone derived from high color
+    const hi = hexToRgb(stops[stops.length - 1]);
+    return rgbToHex(hi[0] * 0.55 + 110, hi[1] * 0.55 + 108, hi[2] * 0.5 + 100);
+  }
+
+  // ---------- Aspect ratios ----------
+  const ASPECTS = {
+    portrait: [1000, 1500],
+    "a-series": [1000, 1414],
+    square: [1200, 1200],
+    social: [1080, 1350],
+    wide: [1600, 900],
+    story: [900, 1600]
+  };
+
+  // =====================================================================
+  //  Renderer: computes contours once, draws at any scale
+  // =====================================================================
+  const CACHE = { key: null, sdf: null };
+
+  function sdfCacheKey(state, gridW, gridH) {
+    return [state.text, state.fontFamily, state.fontSize, state.letterSpacing,
+      state.lineHeight, gridW, gridH].join("|");
+  }
+
+  function computeScene(state, time) {
+    const [W, H] = ASPECTS[state.aspect] || ASPECTS.portrait;
+    // grid resolution driven by detail slider
+    const targetGridW = Math.round(W * 0.34 * state.gridScale);
+    const gridW = Math.max(40, Math.min(targetGridW, 460));
+    const gridH = Math.round(gridW * H / W);
+
+    const key = sdfCacheKey(state, gridW, gridH);
+    if (CACHE.key !== key) {
+      CACHE.sdf = buildSDF(state, gridW, gridH, W, H);
+      CACHE.key = key;
+    }
+    const sdf = CACHE.sdf;
+    const noise = makeNoise(state.seed);
+    const wf = makeWarpedField(sdf, state, noise, time * 0.5);
+    const baked = bakeField(wf);
+
+    // contour levels: symmetric around 0 crossing bands
+    const levels = [];
+    const N = state.lineCount;
+    const spacing = state.lineSpacing * (gridW / 300);
+    // center band near the letter edge (0), extend inward (neg) and outward (pos)
+    for (let i = -Math.floor(N * 0.55); i <= Math.ceil(N * 0.45); i++) {
+      levels.push(i * spacing);
+    }
+
+    const rng = makeRNG(state.seed + 4242);
+    const jitterAmt = state.jitter * spacing * 0.5;
+
+    const contours = []; // {level, t, polylines}
+    const maxAbs = sdf.maxAbs || 1;
+    // Streamline mode draws integrated iso-flow lines from `baked`, not these
+    // marching-squares contours — skip the expensive tracing entirely.
+    const levelsToTrace = state.mode === "stream" ? [] : levels;
+    for (const lv of levelsToTrace) {
+      let pls = marchingSquares(baked, gridW, gridH, lv);
+      // simplify + jitter
+      const eps = 0.6;
+      const out = [];
+      for (let pl of pls) {
+        if (pl.length < 2) continue;
+        pl = simplify(pl, eps);
+        if (jitterAmt > 0) {
+          for (const p of pl) {
+            p[0] += (rng() - 0.5) * jitterAmt;
+            p[1] += (rng() - 0.5) * jitterAmt;
+          }
+        }
+        // scale from grid to canvas coords
+        const sx = W / (gridW - 1), sy = H / (gridH - 1);
+        const scaled = pl.map(p => [p[0] * sx, p[1] * sy]);
+        out.push(scaled);
+      }
+      // color param: map level to 0..1 using field range
+      const t = (lv + maxAbs * 0.55) / (maxAbs * 1.0);
+      contours.push({ level: lv, t: Math.max(0, Math.min(1, t)), polylines: out });
+    }
+
+    return { W, H, gridW, gridH, baked, sdf, wf, contours, noise, spacing };
+  }
+
+  // Draw the scene onto a 2D context. scale maps design px -> device px.
+  function drawScene(ctx, scene, state, scale) {
+    const { W, H, contours } = scene;
+    ctx.save();
+    ctx.scale(scale, scale);
+
+    // background
+    const bg = backgroundColor(state);
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    const stops = paletteStops(state);
+
+    if (state.mode === "hatch") {
+      drawRelief(ctx, scene, state, stops);
+    } else if (state.mode === "stream") {
+      drawStreamlines(ctx, scene, state, stops);
+    } else {
+      drawTopo(ctx, scene, state, stops);
+    }
+
+    if (state.grain) drawGrain(ctx, W, H, state);
+    if (state.vignette) drawVignette(ctx, W, H);
+
+    ctx.restore();
+  }
+
+  function drawTopo(ctx, scene, state, stops) {
+    const { contours, W } = scene;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    const lw = state.lineWeight * (W / 1000);
+    for (const c of contours) {
+      const col = lerpColor(stops, c.t);
+      ctx.strokeStyle = col;
+      // emphasize the zero-level (letter edge) line slightly
+      const emph = Math.abs(c.level) < 0.001 ? 1.9 : 1;
+      ctx.lineWidth = lw * emph;
+      if (state.glow) {
+        ctx.shadowColor = col;
+        ctx.shadowBlur = 6 * (W / 1000);
+      } else {
+        ctx.shadowBlur = 0;
+      }
+      for (const pl of c.polylines) {
+        ctx.beginPath();
+        ctx.moveTo(pl[0][0], pl[0][1]);
+        for (let i = 1; i < pl.length; i++) ctx.lineTo(pl[i][0], pl[i][1]);
+        ctx.stroke();
+      }
+    }
+    ctx.shadowBlur = 0;
+  }
+
+  function drawRelief(ctx, scene, state, stops) {
+    // Fill nested contour bands (elevation shading) then overlay thin lines.
+    const { contours, W } = scene;
+    // Draw filled bands from outer (low t) to inner: use even-odd via successive fills.
+    // Simpler: fill each contour region by painting its polylines as closed shapes with band color.
+    const sorted = contours.slice().sort((a, b) => a.level - b.level);
+    ctx.lineJoin = "round";
+    for (const c of sorted) {
+      const col = lerpColor(stops, c.t);
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      for (const pl of c.polylines) {
+        if (pl.length < 3) continue;
+        ctx.moveTo(pl[0][0], pl[0][1]);
+        for (let i = 1; i < pl.length; i++) ctx.lineTo(pl[i][0], pl[i][1]);
+        ctx.closePath();
+      }
+      ctx.globalAlpha = 0.92;
+      ctx.fill("evenodd");
+    }
+    ctx.globalAlpha = 1;
+    // overlay hairlines for a printed relief feel
+    const lw = Math.max(0.4, state.lineWeight * 0.5) * (W / 1000);
+    ctx.lineWidth = lw;
+    for (const c of contours) {
+      const col = lerpColor(stops, Math.min(1, c.t + 0.12));
+      ctx.strokeStyle = col;
+      for (const pl of c.polylines) {
+        ctx.beginPath();
+        ctx.moveTo(pl[0][0], pl[0][1]);
+        for (let i = 1; i < pl.length; i++) ctx.lineTo(pl[i][0], pl[i][1]);
+        ctx.stroke();
+      }
+    }
+  }
+
+  // Integrate streamlines along iso-direction (perpendicular to gradient of the field).
+  // Returns an array of { points:[[x,y]...], color, alpha } in canvas coordinates.
+  // Shared by the canvas renderer (drawStreamlines) and the SVG exporter (buildSVG).
+  function computeStreamlines(scene, state, stops) {
+    const { baked, gridW, gridH, W, H } = scene;
+    const sx = W / (gridW - 1), sy = H / (gridH - 1);
+    function grad(gx, gy) {
+      const x = Math.max(1, Math.min(gridW - 2, gx));
+      const y = Math.max(1, Math.min(gridH - 2, gy));
+      const xi = x | 0, yi = y | 0;
+      const dx = baked[yi * gridW + xi + 1] - baked[yi * gridW + xi - 1];
+      const dy = baked[(yi + 1) * gridW + xi] - baked[(yi - 1) * gridW + xi];
+      return [dx * 0.5, dy * 0.5];
+    }
+    function fieldAt(gx, gy) {
+      const x = Math.max(0, Math.min(gridW - 1, gx)) | 0;
+      const y = Math.max(0, Math.min(gridH - 1, gy)) | 0;
+      return baked[y * gridW + x];
+    }
+    const rng = makeRNG(state.seed + 99);
+    const step = 0.9;
+    const maxLen = Math.round(60 + state.lineCount * 3);
+    const density = Math.round(4 + state.lineCount * 1.4);
+    const maxAbs = scene.sdf.maxAbs || 1;
+    // seed a jittered grid of start points
+    const gap = Math.max(3, Math.round(gridW / density));
+    const lines = [];
+    for (let sy0 = 2; sy0 < gridH - 2; sy0 += gap) {
+      for (let sx0 = 2; sx0 < gridW - 2; sx0 += gap) {
+        let gx = sx0 + (rng() - 0.5) * gap;
+        let gy = sy0 + (rng() - 0.5) * gap;
+        const fv = fieldAt(gx, gy);
+        // color by field value
+        const t = Math.max(0, Math.min(1, (fv + maxAbs * 0.55) / maxAbs));
+        const pts = [];
+        // integrate both directions along the iso-line
+        for (let dir = -1; dir <= 1; dir += 2) {
+          let cx = gx, cy = gy;
+          const seg = [];
+          for (let s = 0; s < maxLen; s++) {
+            const g = grad(cx, cy);
+            const gl = Math.hypot(g[0], g[1]) || 1e-6;
+            // perpendicular to gradient => along contour
+            const vx = -g[1] / gl, vy = g[0] / gl;
+            cx += vx * step * dir;
+            cy += vy * step * dir;
+            if (cx < 1 || cy < 1 || cx > gridW - 2 || cy > gridH - 2) break;
+            seg.push([cx * sx, cy * sy]);
+          }
+          if (dir === -1) { for (let i = seg.length - 1; i >= 0; i--) pts.push(seg[i]); }
+          else { for (const p of seg) pts.push(p); }
+        }
+        if (pts.length < 2) continue;
+        lines.push({
+          points: pts,
+          color: lerpColor(stops, t),
+          alpha: 0.55 + 0.4 * (1 - Math.abs(fv) / maxAbs)
+        });
+      }
+    }
+    return lines;
+  }
+
+  function drawStreamlines(ctx, scene, state, stops) {
+    const lw = state.lineWeight * 0.9 * (scene.W / 1000);
+    ctx.lineWidth = lw;
+    ctx.lineCap = "round";
+    const lines = computeStreamlines(scene, state, stops);
+    scene._drawnCount = lines.length;
+    for (const ln of lines) {
+      ctx.strokeStyle = ln.color;
+      ctx.globalAlpha = ln.alpha;
+      const pts = ln.points;
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawGrain(ctx, W, H, state) {
+    // Cheap procedural grain via a small tiled noise pattern.
+    const tile = 128;
+    if (!drawGrain._c || drawGrain._seed !== state.seed) {
+      const c = document.createElement("canvas");
+      c.width = tile; c.height = tile;
+      const g = c.getContext("2d");
+      const id = g.createImageData(tile, tile);
+      const rng = makeRNG(state.seed * 7 + 13);
+      for (let i = 0; i < tile * tile; i++) {
+        const v = 128 + (rng() - 0.5) * 60;
+        id.data[i * 4] = v; id.data[i * 4 + 1] = v; id.data[i * 4 + 2] = v;
+        id.data[i * 4 + 3] = 255;
+      }
+      g.putImageData(id, 0, 0);
+      drawGrain._c = c; drawGrain._seed = state.seed;
+    }
+    ctx.save();
+    ctx.globalAlpha = 0.05;
+    ctx.globalCompositeOperation = "overlay";
+    const pat = ctx.createPattern(drawGrain._c, "repeat");
+    ctx.fillStyle = pat;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  function drawVignette(ctx, W, H) {
+    const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.3, W / 2, H / 2, Math.max(W, H) * 0.72);
+    g.addColorStop(0, "rgba(0,0,0,0)");
+    g.addColorStop(1, "rgba(0,0,0,0.34)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // =====================================================================
+  //  State + defaults
+  // =====================================================================
+  const DEFAULT = {
+    text: "TERRAIN",
+    fontFamily: "900 -impact",
+    fontSize: 0.62,
+    letterSpacing: 0.02,
+    lineHeight: 1.0,
+    mode: "topo",
+    lineCount: 34,
+    lineSpacing: 5,
+    lineWeight: 1.1,
+    jitter: 0.12,
+    gridScale: 0.7,
+    warpAmp: 14,
+    warpFreq: 1.6,
+    warpOct: 4,
+    seed: 1337,
+    palette: "Cartographer",
+    useCustom: false,
+    col0: "#0b1d3a", col1: "#2a7f9e", col2: "#f4e9c9",
+    bgStyle: "paper",
+    grain: true,
+    vignette: true,
+    glow: false,
+    aspect: "portrait",
+    animate: false,
+    animSpeed: 0.5
+  };
+
+  let state = Object.assign({}, DEFAULT);
+
+  // ---------- URL hash codec ----------
+  const KEYMAP = Object.keys(DEFAULT);
+  function encodeState(s) {
+    const obj = {};
+    for (const k of KEYMAP) obj[k] = s[k];
+    const json = JSON.stringify(obj);
+    return "s=" + b64encode(json);
+  }
+  function b64encode(str) {
+    // UTF-8 safe base64, URL-friendly
+    const bytes = new TextEncoder().encode(str);
+    let bin = "";
+    for (const b of bytes) bin += String.fromCharCode(b);
+    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  function b64decode(str) {
+    str = str.replace(/-/g, "+").replace(/_/g, "/");
+    while (str.length % 4) str += "=";
+    const bin = atob(str);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  }
+  function decodeState(hash) {
+    try {
+      const m = /(?:^#?|&)s=([^&]+)/.exec(hash);
+      if (!m) return null;
+      const obj = JSON.parse(b64decode(m[1]));
+      const out = Object.assign({}, DEFAULT);
+      for (const k of KEYMAP) if (k in obj) out[k] = obj[k];
+      return out;
+    } catch (e) { return null; }
+  }
+
+  // =====================================================================
+  //  UI wiring
+  // =====================================================================
+  const $ = (id) => document.getElementById(id);
+  const view = $("view");
+  const vctx = view.getContext("2d");
+  let currentScene = null;
+  let animTime = 0;
+  let playing = false;
+  let rafId = null;
+
+  function fmt(v, d = 2) { return (typeof v === "number") ? (Math.round(v * Math.pow(10, d)) / Math.pow(10, d)) : v; }
+
+  function syncUIFromState() {
+    $("text").value = state.text;
+    $("fontFamily").value = state.fontFamily;
+    setRange("fontSize"); setRange("letterSpacing"); setRange("lineHeight");
+    setRange("lineCount"); setRange("lineSpacing"); setRange("lineWeight");
+    setRange("jitter"); setRange("gridScale");
+    setRange("warpAmp"); setRange("warpFreq"); setRange("warpOct"); setRange("seed");
+    setRange("animSpeed");
+    $("aspect").value = state.aspect;
+    $("useCustom").checked = state.useCustom;
+    $("customColors").style.display = state.useCustom ? "" : "none";
+    $("col0").value = state.col0; $("col1").value = state.col1; $("col2").value = state.col2;
+    $("grain").checked = state.grain;
+    $("vignette").checked = state.vignette;
+    $("glow").checked = state.glow;
+    $("animate").checked = state.animate;
+    // segmented
+    setSeg("mode", state.mode);
+    setSeg("bgStyle", state.bgStyle);
+    // labels
+    updateLabels();
+    // swatches
+    renderSwatches();
+    playing = state.animate;
+    $("playBtn").innerHTML = playing ? "❚❚ Pause" : "▶ Play";
+  }
+
+  function setRange(id) { const el = $(id); if (el) el.value = state[id]; }
+  function setSeg(id, v) {
+    document.querySelectorAll(`#${id} button`).forEach(b => b.classList.toggle("active", b.dataset.v === v));
+  }
+
+  function updateLabels() {
+    const map = {
+      "fontFamily-v": "",
+      "fontSize-v": fmt(state.fontSize),
+      "letterSpacing-v": fmt(state.letterSpacing),
+      "lineHeight-v": fmt(state.lineHeight),
+      "lineCount-v": state.lineCount,
+      "lineSpacing-v": fmt(state.lineSpacing, 1),
+      "lineWeight-v": fmt(state.lineWeight, 1),
+      "jitter-v": fmt(state.jitter),
+      "gridScale-v": fmt(state.gridScale, 2),
+      "warpAmp-v": fmt(state.warpAmp, 1),
+      "warpFreq-v": fmt(state.warpFreq, 1),
+      "warpOct-v": state.warpOct,
+      "seed-v": state.seed,
+      "animSpeed-v": fmt(state.animSpeed, 2),
+      "bgStyle-v": "",
+    };
+    for (const k in map) { const el = $(k); if (el) el.textContent = map[k]; }
+  }
+
+  function renderSwatches() {
+    const wrap = $("swatches");
+    wrap.innerHTML = "";
+    for (const name in PALETTES) {
+      const stops = PALETTES[name];
+      const div = document.createElement("div");
+      div.className = "swatch" + (!state.useCustom && state.palette === name ? " active" : "");
+      div.style.background = `linear-gradient(90deg, ${stops.join(",")})`;
+      div.title = name;
+      const s = document.createElement("span"); s.textContent = name;
+      div.appendChild(s);
+      div.onclick = () => {
+        state.palette = name; state.useCustom = false;
+        $("useCustom").checked = false; $("customColors").style.display = "none";
+        renderSwatches(); scheduleRender(false);
+      };
+      wrap.appendChild(div);
+    }
+  }
+
+  // rAF-coalesced render: every input previews live but at most once per frame.
+  // `recompute` = true when the change affects geometry (needs a scene rebuild);
+  // false for pure draw-only changes (palette, background, glow, grain, vignette).
+  let pendingRender = false;
+  let pendingRecompute = false;
+  function scheduleRender(recompute) {
+    pendingRecompute = pendingRecompute || !!recompute;
+    pushHash();
+    if (pendingRender) return;
+    pendingRender = true;
+    requestAnimationFrame(() => {
+      const rc = pendingRecompute;
+      pendingRender = false;
+      pendingRecompute = false;
+      render(rc);
+    });
+  }
+
+  let hashTimer = null;
+  function pushHash() {
+    clearTimeout(hashTimer);
+    hashTimer = setTimeout(() => {
+      history.replaceState(null, "", "#" + encodeState(state));
+    }, 200);
+  }
+
+  function render(recompute) {
+    const t0 = performance.now();
+    const [W, H] = ASPECTS[state.aspect] || ASPECTS.portrait;
+    // fit canvas backing store to a reasonable on-screen size
+    const dispScale = Math.min(1, (window.innerHeight - 130) / H, (window.innerWidth - 420) / W);
+    const backW = Math.round(W * Math.max(dispScale, 0.4));
+    const backH = Math.round(H * Math.max(dispScale, 0.4));
+    view.width = backW; view.height = backH;
+    view.style.width = (W * dispScale) + "px";
+    view.style.height = (H * dispScale) + "px";
+
+    if (recompute || !currentScene) {
+      currentScene = computeScene(state, animTime);
+    }
+    const drawScale = backW / W;
+    vctx.setTransform(1, 0, 0, 1, 0, 0);
+    vctx.clearRect(0, 0, backW, backH);
+    drawScene(vctx, currentScene, state, drawScale);
+
+    const isEmpty = currentScene.sdf && currentScene.sdf.empty;
+    if (isEmpty) drawEmptyHint(vctx, backW, backH);
+
+    const t1 = performance.now();
+    // Mode-appropriate geometry metric: streamlines drawn in stream mode, else contour paths.
+    let count = 0, unit = "paths";
+    if (state.mode === "stream") {
+      count = currentScene._drawnCount || 0;
+      unit = "streamlines";
+    } else if (currentScene.contours) {
+      for (const c of currentScene.contours) count += c.polylines.length;
+    }
+    if (isEmpty) {
+      $("status").innerHTML = `<b>empty</b> · type a phrase to generate terrain`;
+    } else {
+      $("status").innerHTML = `${state.mode} · <b>${count}</b> ${unit} · grid ${currentScene.gridW}×${currentScene.gridH} · ${Math.round(t1 - t0)}ms`;
+    }
+  }
+
+  // Centered on-brand helper drawn only in the live view (not baked into exports).
+  function drawEmptyHint(ctx, backW, backH) {
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const size = Math.max(13, Math.round(backW * 0.028));
+    ctx.font = `600 ${size}px system-ui, "Segoe UI", Helvetica, Arial, sans-serif`;
+    ctx.fillStyle = "rgba(0,0,0,0.42)";
+    ctx.fillText("Type a phrase to generate terrain", backW / 2, backH / 2);
+    ctx.restore();
+  }
+
+  // ---------- animation loop ----------
+  function loop() {
+    if (!playing) return;
+    animTime += 0.016 * state.animSpeed;
+    currentScene = computeScene(state, animTime);
+    render(false);
+    rafId = requestAnimationFrame(loop);
+  }
+  function setPlaying(p) {
+    playing = p;
+    state.animate = p;
+    $("animate").checked = p;
+    $("playBtn").innerHTML = p ? "❚❚ Pause" : "▶ Play";
+    if (p) { cancelAnimationFrame(rafId); rafId = requestAnimationFrame(loop); }
+    else { cancelAnimationFrame(rafId); pushHash(); }
+  }
+
+  // ---------- wire inputs ----------
+  function bindRange(id, parse) {
+    const el = $(id);
+    el.addEventListener("input", () => {
+      state[id] = parse ? parse(el.value) : parseFloat(el.value);
+      updateLabels();
+      // All slider changes affect geometry; rAF-coalescing caps the cost.
+      scheduleRender(true);
+    });
+  }
+  ["fontSize", "letterSpacing", "lineHeight", "lineSpacing", "lineWeight", "jitter", "gridScale",
+    "warpAmp", "warpFreq", "animSpeed"].forEach(id => bindRange(id));
+  ["lineCount", "warpOct", "seed"].forEach(id => bindRange(id, v => parseInt(v, 10)));
+
+  $("text").addEventListener("input", () => { state.text = $("text").value; scheduleRender(true); });
+  $("fontFamily").addEventListener("change", () => { state.fontFamily = $("fontFamily").value; scheduleRender(true); });
+  $("aspect").addEventListener("change", () => { state.aspect = $("aspect").value; scheduleRender(true); });
+
+  document.querySelectorAll("#mode button").forEach(b => b.addEventListener("click", () => {
+    state.mode = b.dataset.v; setSeg("mode", state.mode); scheduleRender(false);
+  }));
+  document.querySelectorAll("#bgStyle button").forEach(b => b.addEventListener("click", () => {
+    state.bgStyle = b.dataset.v; setSeg("bgStyle", state.bgStyle); scheduleRender(false);
+  }));
+
+  $("useCustom").addEventListener("change", () => {
+    state.useCustom = $("useCustom").checked;
+    $("customColors").style.display = state.useCustom ? "" : "none";
+    renderSwatches(); scheduleRender(false);
+  });
+  ["col0", "col1", "col2"].forEach(id => $(id).addEventListener("input", () => {
+    state[id] = $(id).value; state.useCustom = true; $("useCustom").checked = true;
+    $("customColors").style.display = ""; renderSwatches(); scheduleRender(false);
+  }));
+  ["grain", "vignette", "glow"].forEach(id => $(id).addEventListener("change", () => {
+    state[id] = $(id).checked; scheduleRender(false);
+  }));
+  $("animate").addEventListener("change", () => setPlaying($("animate").checked));
+
+  // collapsible groups
+  document.querySelectorAll(".group .g-title").forEach(t => {
+    t.addEventListener("click", () => t.parentElement.classList.toggle("collapsed"));
+  });
+
+  // ---------- top bar actions ----------
+  $("playBtn").addEventListener("click", () => setPlaying(!playing));
+  $("surprise").addEventListener("click", surpriseMe);
+  $("resetBtn").addEventListener("click", () => {
+    setPlaying(false);
+    state = Object.assign({}, DEFAULT);
+    syncUIFromState();
+    render(true);
+    pushHash();
+    toast("Reset to defaults");
+  });
+  $("shareBtn").addEventListener("click", copyLink);
+  $("pngBtn").addEventListener("click", () => exportPNG(3));
+  $("svgBtn").addEventListener("click", exportSVG);
+  $("webmBtn").addEventListener("click", recordWebM);
+
+  // =====================================================================
+  //  Surprise / presets
+  // =====================================================================
+  const WORDS = ["TERRAIN", "SUMMIT", "DRIFT", "RELIEF", "COAST", "RIDGE", "NORTH",
+    "VALLEY", "TIDE", "STRATA", "ELEVATE", "BASIN", "MESA", "DELTA", "SLOPE", "FLOW"];
+
+  function surpriseMe() {
+    const paletteNames = Object.keys(PALETTES);
+    const fonts = ["900 -impact", "800 -sans", "700 -serif", "700 -mono"];
+    const modes = ["topo", "topo", "topo", "stream", "hatch"];
+    const bgs = ["paper", "dark", "tint"];
+    const aspects = ["portrait", "a-series", "square", "social"];
+    const R = Math.random;
+    state.text = WORDS[(R() * WORDS.length) | 0];
+    state.fontFamily = fonts[(R() * fonts.length) | 0];
+    state.fontSize = 0.45 + R() * 0.35;
+    state.letterSpacing = R() * 0.15;
+    state.lineHeight = 0.9 + R() * 0.3;
+    state.mode = modes[(R() * modes.length) | 0];
+    state.lineCount = 18 + (R() * 46) | 0;
+    state.lineSpacing = 3 + R() * 7;
+    state.lineWeight = 0.7 + R() * 1.6;
+    state.jitter = R() * 0.4;
+    state.warpAmp = R() * 34;
+    state.warpFreq = 0.6 + R() * 3;
+    state.warpOct = 2 + (R() * 4) | 0;
+    state.seed = 1 + (R() * 9998) | 0;
+    state.palette = paletteNames[(R() * paletteNames.length) | 0];
+    state.useCustom = false;
+    state.bgStyle = bgs[(R() * bgs.length) | 0];
+    state.grain = R() > 0.3;
+    state.vignette = R() > 0.25;
+    state.glow = state.bgStyle !== "paper" && R() > 0.6;
+    state.aspect = aspects[(R() * aspects.length) | 0];
+    syncUIFromState();
+    render(true);
+    pushHash();
+    toast("Surprise! New poster generated.");
+  }
+
+  // Curated presets (deterministic, hand-tuned)
+  const PRESETS = [
+    { name: "Cartographer", s: { text: "TERRAIN", fontFamily: "900 -impact", fontSize: 0.62, letterSpacing: 0.02, lineCount: 40, lineSpacing: 4.5, lineWeight: 1.0, jitter: 0.1, warpAmp: 12, warpFreq: 1.4, warpOct: 4, seed: 1337, palette: "Cartographer", bgStyle: "paper", mode: "topo", aspect: "portrait" } },
+    { name: "Bathymetry", s: { text: "TIDE", fontFamily: "800 -sans", fontSize: 0.7, letterSpacing: 0.03, lineCount: 52, lineSpacing: 3.5, lineWeight: 0.9, jitter: 0.06, warpAmp: 8, warpFreq: 2.1, warpOct: 5, seed: 552, palette: "Bathymetry", bgStyle: "tint", mode: "topo", aspect: "square", glow: true } },
+    { name: "Lava Relief", s: { text: "MESA", fontFamily: "900 -impact", fontSize: 0.66, letterSpacing: 0.04, lineCount: 30, lineSpacing: 6, lineWeight: 1.2, jitter: 0.15, warpAmp: 20, warpFreq: 1.2, warpOct: 4, seed: 88, palette: "Lava Field", bgStyle: "dark", mode: "hatch", aspect: "portrait" } },
+    { name: "Sage Flow", s: { text: "VALLEY", fontFamily: "700 -serif", fontSize: 0.5, letterSpacing: 0.05, lineCount: 44, lineSpacing: 4, lineWeight: 0.8, jitter: 0.05, warpAmp: 16, warpFreq: 1.8, warpOct: 4, seed: 2024, palette: "Sage Survey", bgStyle: "paper", mode: "stream", aspect: "a-series" } },
+    { name: "Glacier", s: { text: "NORTH", fontFamily: "800 -sans", fontSize: 0.58, letterSpacing: 0.08, lineCount: 48, lineSpacing: 3.5, lineWeight: 1.0, jitter: 0.08, warpAmp: 10, warpFreq: 2.4, warpOct: 5, seed: 700, palette: "Glacier", bgStyle: "tint", mode: "topo", aspect: "social", glow: true } },
+    { name: "Ember Ridge", s: { text: "RIDGE", fontFamily: "900 -impact", fontSize: 0.64, letterSpacing: 0.02, lineCount: 36, lineSpacing: 5, lineWeight: 1.1, jitter: 0.2, warpAmp: 26, warpFreq: 1.1, warpOct: 3, seed: 4141, palette: "Ember", bgStyle: "dark", mode: "topo", aspect: "portrait" } },
+    { name: "Deep Sea", s: { text: "DELTA", fontFamily: "700 -mono", fontSize: 0.6, letterSpacing: 0.06, lineCount: 46, lineSpacing: 3.8, lineWeight: 0.9, jitter: 0.04, warpAmp: 9, warpFreq: 2.6, warpOct: 5, seed: 313, palette: "Deep Sea", bgStyle: "tint", mode: "stream", aspect: "square" } },
+    { name: "Rose Survey", s: { text: "COAST", fontFamily: "800 -sans", fontSize: 0.56, letterSpacing: 0.05, lineCount: 42, lineSpacing: 4.2, lineWeight: 1.0, jitter: 0.1, warpAmp: 14, warpFreq: 1.7, warpOct: 4, seed: 909, palette: "Rose Relief", bgStyle: "paper", mode: "topo", aspect: "portrait" } },
+    { name: "Aurora Hatch", s: { text: "FLOW", fontFamily: "900 -impact", fontSize: 0.68, letterSpacing: 0.03, lineCount: 34, lineSpacing: 5.5, lineWeight: 1.0, jitter: 0.12, warpAmp: 18, warpFreq: 1.5, warpOct: 4, seed: 1212, palette: "Aurora", bgStyle: "dark", mode: "hatch", aspect: "a-series" } }
+  ];
+
+  function applyPreset(p) {
+    state = Object.assign({}, DEFAULT, p.s);
+    syncUIFromState();
+    render(true);
+    pushHash();
+    toast("Loaded preset: " + p.name);
+  }
+
+  function renderPresetGallery() {
+    const wrap = $("presets");
+    wrap.innerHTML = "";
+    for (const p of PRESETS) {
+      const div = document.createElement("div");
+      div.className = "preset";
+      const c = document.createElement("canvas");
+      const pstate = Object.assign({}, DEFAULT, p.s);
+      // small thumbnail render
+      const [W, H] = ASPECTS[pstate.aspect] || ASPECTS.portrait;
+      const tw = 120, th = Math.round(tw * H / W);
+      c.width = tw; c.height = th;
+      div.appendChild(c);
+      const label = document.createElement("div");
+      label.className = "pname"; label.textContent = p.name;
+      div.appendChild(label);
+      div.onclick = () => applyPreset(p);
+      wrap.appendChild(div);
+      // render thumb asynchronously to avoid blocking
+      setTimeout(() => {
+        try {
+          const scene = computeScene(pstate, 0);
+          const g = c.getContext("2d");
+          drawScene(g, scene, pstate, tw / W);
+        } catch (e) { /* ignore thumb errors */ }
+      }, 10);
+    }
+  }
+
+  // =====================================================================
+  //  Exports
+  // =====================================================================
+  function exportPNG(scale) {
+    const [W, H] = ASPECTS[state.aspect] || ASPECTS.portrait;
+    const oc = document.createElement("canvas");
+    oc.width = W * scale; oc.height = H * scale;
+    const g = oc.getContext("2d");
+    const scene = currentScene || computeScene(state, animTime);
+    drawScene(g, scene, state, scale);
+    oc.toBlob((blob) => {
+      downloadBlob(blob, filename("png"));
+      toast(`Exported PNG · ${oc.width}×${oc.height}`);
+    }, "image/png");
+  }
+
+  function exportSVG() {
+    const scene = currentScene || computeScene(state, animTime);
+    const svg = buildSVG(scene, state);
+    const blob = new Blob([svg], { type: "image/svg+xml" });
+    downloadBlob(blob, filename("svg"));
+    toast("Exported vector SVG");
+  }
+
+  function buildSVG(scene, state) {
+    const { W, H, contours } = scene;
+    const stops = paletteStops(state);
+    const bg = backgroundColor(state);
+    const MAX_LINES = 6000; // guard against runaway path count
+    let pathCount = 0;
+    let body = "";
+    const lw = state.lineWeight * (W / 1000);
+
+    if (state.mode === "hatch") {
+      const sorted = contours.slice().sort((a, b) => a.level - b.level);
+      for (const c of sorted) {
+        const col = lerpColor(stops, c.t);
+        let d = "";
+        for (const pl of c.polylines) {
+          if (pl.length < 3 || pathCount >= MAX_LINES) continue;
+          d += pathData(simplify(pl, 0.8)) + "Z ";
+          pathCount++;
+        }
+        if (d) body += `<path d="${d.trim()}" fill="${col}" fill-rule="evenodd" fill-opacity="0.92"/>\n`;
+      }
+    } else if (state.mode === "stream") {
+      // WYSIWYG streamline export: emit the same integrated iso-flow lines the canvas draws.
+      const slw = fmt(state.lineWeight * 0.9 * (W / 1000), 2);
+      const lines = computeStreamlines(scene, state, stops);
+      for (const ln of lines) {
+        if (pathCount >= MAX_LINES) break;
+        const simp = simplify(ln.points, 0.6);
+        if (simp.length < 2) continue;
+        body += `<path d="${pathData(simp)}" fill="none" stroke="${ln.color}" stroke-width="${slw}" stroke-opacity="${fmt(ln.alpha, 2)}" stroke-linecap="round" stroke-linejoin="round"/>\n`;
+        pathCount++;
+      }
+    }
+
+    for (const c of contours) {
+      if (state.mode !== "topo") break; // hatch/stream handled above
+      const col = lerpColor(stops, c.t);
+      const emph = Math.abs(c.level) < 0.001 ? 1.9 : 1;
+      let d = "";
+      let n = 0;
+      for (const pl of c.polylines) {
+        if (pathCount >= MAX_LINES) break;
+        const simp = simplify(pl, 0.9);
+        if (simp.length < 2) continue;
+        d += pathData(simp) + " ";
+        pathCount++; n++;
+      }
+      if (d) body += `<path d="${d.trim()}" fill="none" stroke="${col}" stroke-width="${fmt(lw * emph, 2)}" stroke-linejoin="round" stroke-linecap="round"/>\n`;
+    }
+
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+<title>Cartotype — ${escapeXml(state.text)}</title>
+<rect width="${W}" height="${H}" fill="${bg}"/>
+${body}</svg>`;
+  }
+
+  function pathData(pl) {
+    let d = "M" + fmt(pl[0][0], 2) + " " + fmt(pl[0][1], 2);
+    for (let i = 1; i < pl.length; i++) d += "L" + fmt(pl[i][0], 2) + " " + fmt(pl[i][1], 2);
+    return d;
+  }
+  function escapeXml(s) { return String(s).replace(/[<>&"]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c])); }
+
+  function recordWebM() {
+    if (typeof MediaRecorder === "undefined" || !view.captureStream) {
+      toast("WebM recording not supported in this browser. Try PNG/SVG.");
+      return;
+    }
+    const wasPlaying = playing;
+    setPlaying(true);
+    const stream = view.captureStream(30);
+    let mime = "video/webm;codecs=vp9";
+    if (!MediaRecorder.isTypeSupported(mime)) mime = "video/webm;codecs=vp8";
+    if (!MediaRecorder.isTypeSupported(mime)) mime = "video/webm";
+    let rec;
+    try { rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 }); }
+    catch (e) { toast("Recorder init failed: " + e.message); return; }
+    const chunks = [];
+    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    rec.onstop = () => {
+      const blob = new Blob(chunks, { type: "video/webm" });
+      downloadBlob(blob, filename("webm"));
+      if (!wasPlaying) setPlaying(false);
+      toast("Exported animated WebM (4s loop)");
+      $("webmBtn").innerHTML = "● WebM";
+    };
+    rec.start();
+    $("webmBtn").innerHTML = "◉ rec…";
+    toast("Recording 4s animated loop…");
+    setTimeout(() => { if (rec.state !== "inactive") rec.stop(); }, 4000);
+  }
+
+  function filename(ext) {
+    const slug = (state.text || "cartotype").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24) || "poster";
+    return `cartotype-${slug}-${state.seed}.${ext}`;
+  }
+  function downloadBlob(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+
+  async function copyLink() {
+    // Use full href (works on http(s) AND file://, where location.origin is "null")
+    const url = location.href.split("#")[0] + "#" + encodeState(state);
+    try {
+      await navigator.clipboard.writeText(url);
+      toast("Shareable link copied to clipboard!");
+    } catch (e) {
+      // fallback
+      const ta = document.createElement("textarea");
+      ta.value = url; document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); toast("Link copied!"); }
+      catch (_) { toast("Copy failed — here it is in the URL bar."); }
+      ta.remove();
+    }
+    history.replaceState(null, "", "#" + encodeState(state));
+  }
+
+  // ---------- toast ----------
+  let toastTimer = null;
+  function toast(msg) {
+    const t = $("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
+  }
+
+  // =====================================================================
+  //  Boot
+  // =====================================================================
+  function boot() {
+    const fromHash = decodeState(location.hash);
+    if (fromHash) state = fromHash;
+    syncUIFromState();
+    renderPresetGallery();
+    render(true);
+    if (state.animate) setPlaying(true);
+    // keyboard shortcuts
+    window.addEventListener("keydown", (e) => {
+      if (e.target.matches("input, textarea, select")) return;
+      if (e.key === " ") { e.preventDefault(); setPlaying(!playing); }
+      else if (e.key.toLowerCase() === "r") surpriseMe();
+      else if (e.key.toLowerCase() === "p") exportPNG(3);
+      else if (e.key.toLowerCase() === "s") exportSVG();
+    });
+    window.addEventListener("resize", () => { if (!playing) render(false); });
+    window.addEventListener("hashchange", () => {
+      const s = decodeState(location.hash);
+      if (s && encodeState(s) !== encodeState(state)) {
+        state = s; syncUIFromState(); render(true);
+      }
+    });
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>

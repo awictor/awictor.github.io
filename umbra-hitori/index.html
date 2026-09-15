@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Umbra — Hitori Logic Puzzle</title>
+<style>
+  :root{
+    --bg:#f5f3ef; --ink:#232f3e; --accent:#ff6100; --line:#d9d3c7;
+    --cell:#fffdf9; --shade:#232f3e; --safe:#2d7d5a; --bad:#d64545; --warn:#e08a1e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);
+    display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:16px 12px 40px}
+  h1{font-size:2rem;margin:.2rem 0 0;letter-spacing:.06em;color:var(--accent)}
+  .tag{font-size:.85rem;color:#5f594d;margin:.15rem 0 1rem;text-align:center;max-width:520px}
+  .panel{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;align-items:center;margin-bottom:8px}
+  button,select{font:inherit;font-size:.85rem;padding:6px 12px;border:1.5px solid var(--ink);
+    background:var(--cell);color:var(--ink);border-radius:8px;cursor:pointer;transition:.12s}
+  button:hover{background:var(--ink);color:var(--bg)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary:hover{filter:brightness(1.08)}
+  button:disabled{opacity:.45;cursor:default}
+  #badge{font-size:.8rem;font-weight:600;padding:5px 12px;border-radius:20px;
+    background:var(--ink);color:var(--bg);margin:4px 0}
+  .stats{display:flex;gap:16px;font-size:.85rem;margin:4px 0 10px;flex-wrap:wrap;justify-content:center}
+  .stats b{color:var(--accent)}
+  #board{display:grid;gap:4px;--n:7;
+    grid-template-columns:repeat(var(--n),1fr);
+    padding:10px;background:var(--line);border-radius:12px;
+    box-shadow:0 6px 22px rgba(35,47,62,.16)}
+  .cell{width:clamp(30px,10.5vw,54px);height:clamp(30px,10.5vw,54px);
+    display:flex;align-items:center;justify-content:center;
+    font-size:clamp(1rem,4vw,1.5rem);font-weight:600;
+    background:var(--cell);border:1.5px solid var(--line);border-radius:7px;
+    cursor:pointer;position:relative;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;
+    touch-action:manipulation;transition:background .12s,transform .12s}
+  .cell.shaded{background:var(--shade);color:rgba(255,255,255,.14);
+    background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.09) 0 3px,transparent 3px 7px)}
+  .cell.safe::after{content:"";position:absolute;width:9px;height:9px;border-radius:50%;
+    background:var(--safe);bottom:5px;right:5px}
+  .cell.dup{box-shadow:inset 0 0 0 3px var(--bad)}
+  .cell.adj{outline:3px solid var(--warn);outline-offset:-3px}
+  .cell.disc{border-style:dashed;border-color:var(--bad);border-width:2px}
+  .cell.focus{transform:scale(1.06);z-index:2;box-shadow:0 0 0 3px var(--accent)}
+  .cell.flash{animation:flash .7s ease}
+  @keyframes flash{0%{background:var(--accent);color:#fff}100%{}}
+  #board.won .cell{animation:pop .5s ease both}
+  #board.won .cell.shaded{animation:pop .5s ease both}
+  @keyframes pop{0%{transform:scale(1)}40%{transform:scale(1.14) rotate(-3deg)}100%{transform:scale(1)}}
+  #explain{min-height:2.4em;max-width:560px;text-align:center;font-size:.85rem;
+    margin:12px 0 0;color:#544c3f;line-height:1.35}
+  #explain b{color:var(--accent)}
+  #banner{margin-top:10px;font-weight:700;color:var(--safe);font-size:1.1rem;min-height:1.3em}
+  .hint{font-size:.8rem;color:#5f594d;margin-top:14px;max-width:560px;text-align:center;line-height:1.45}
+  kbd{background:var(--cell);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:.72rem}
+</style>
+</head>
+<body>
+  <h1>UMBRA</h1>
+  <div class="tag">A Hitori logic puzzle that generates, verifies a unique solution, and teaches — shade duplicates so every row and column has no repeats, no two shaded cells touch, and the unshaded cells stay connected.</div>
+
+  <div class="panel">
+    <select id="diff" title="Difficulty">
+      <option value="5">Easy · 5×5</option>
+      <option value="7" selected>Medium · 7×7</option>
+      <option value="9">Hard · 9×9</option>
+    </select>
+    <button id="new" class="primary">New</button>
+    <button id="restart">Restart</button>
+    <button id="share">Share</button>
+    <button id="daily">Daily</button>
+    <button id="hint">Hint</button>
+    <button id="solve">Guided solve</button>
+  </div>
+  <div id="badge">—</div>
+  <div class="stats">
+    <span>Moves <b id="moves">0</b></span>
+    <span>Time <b id="timer">00:00</b></span>
+    <span id="streakWrap" hidden>Daily streak <b id="streak">0</b></span>
+    <span id="bestWrap" hidden>Best <b id="best">—</b></span>
+    <span id="viol">Rules OK</span>
+  </div>
+
+  <div id="board" aria-label="Hitori board" role="grid" tabindex="0"></div>
+  <div id="banner"></div>
+  <div id="explain">Shade the duplicates so no number repeats in any line among the unshaded cells. Click (or tap) to shade; right-click or long-press marks a cell safe.</div>
+
+  <div class="hint">
+    Keyboard: <kbd>← ↑ → ↓</kbd> move · <kbd>Space</kbd> cycle open→shaded→safe · <kbd>X</kbd> toggle shaded.
+    Share links look like <kbd>#7x7-42</kbd> and are fully reproducible.
+  </div>
+
+<script>
+'use strict';
+const $=s=>document.querySelector(s);
+const DIRS=[[-1,0],[1,0],[0,-1],[0,1]];
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+let N=7,SEED=1,val=null,sol=null,marks=null,focusI=0,moves=0,startT=0,timer=null,dailyMode=false,won=false,autoTimer=null,lastFlash=-1,boardFocused=false;
+const isTouch=window.matchMedia&&window.matchMedia('(pointer:coarse)').matches;
+
+/* ---------- lines (row + column index arrays) ---------- */
+function buildLines(){
+  const lines=[];
+  for(let r=0;r<N;r++){const a=[];for(let c=0;c<N;c++)a.push(r*N+c);lines.push(a);}
+  for(let c=0;c<N;c++){const a=[];for(let r=0;r<N;r++)a.push(r*N+c);lines.push(a);}
+  return lines;
+}
+
+/* ---------- solver primitives (st: 0 unknown,1 shaded,2 unshaded) ---------- */
+function propagate(st){
+  const n=N*N;let changed=true;
+  while(changed){changed=false;
+    for(let i=0;i<n;i++){
+      const r=(i/N)|0,c=i%N;
+      if(st[i]===1){
+        for(const[dr,dc]of DIRS){const nr=r+dr,nc=c+dc;if(nr<0||nc<0||nr>=N||nc>=N)continue;const j=nr*N+nc;
+          if(st[j]===1)return false;if(st[j]===0){st[j]=2;changed=true;}}
+      }else if(st[i]===2){
+        for(let k=0;k<N;k++){const j=r*N+k;if(j!==i&&val[j]===val[i]){if(st[j]===2)return false;if(st[j]===0){st[j]=1;changed=true;}}}
+        for(let k=0;k<N;k++){const j=k*N+c;if(j!==i&&val[j]===val[i]){if(st[j]===2)return false;if(st[j]===0){st[j]=1;changed=true;}}}
+      }
+    }
+  }
+  return true;
+}
+function connOK(st){ // all unshaded cells reachable within one non-shaded component
+  const n=N*N,comp=new Int16Array(n).fill(-1);let cid=0;
+  for(let s=0;s<n;s++){if(st[s]===1||comp[s]>=0)continue;const q=[s];comp[s]=cid;
+    while(q.length){const i=q.pop();const r=(i/N)|0,c=i%N;
+      for(const[dr,dc]of DIRS){const nr=r+dr,nc=c+dc;if(nr<0||nc<0||nr>=N||nc>=N)continue;const j=nr*N+nc;
+        if(st[j]!==1&&comp[j]<0){comp[j]=cid;q.push(j);}}}cid++;}
+  let w=-1;for(let i=0;i<n;i++)if(st[i]===2){if(w<0)w=comp[i];else if(comp[i]!==w)return false;}
+  return true;
+}
+function solveCount(){ // returns {count, sol} — counts up to 2 solutions
+  const n=N*N;let count=0,solFound=null,nodes=0;
+  function search(st){
+    if(count>=2||nodes>300000)return;nodes++;
+    const s=st.slice();
+    if(!propagate(s)||!connOK(s))return;
+    let i=-1;for(let k=0;k<n;k++)if(s[k]===0){i=k;break;}
+    if(i<0){count++;if(count===1)solFound=s.slice();return;}
+    s[i]=2;search(s);s[i]=1;search(s);
+  }
+  search(new Int8Array(n));
+  return{count:nodes>300000?9:count,sol:solFound};
+}
+
+/* ---------- deduction stepper (used by hints, guided solve, difficulty rating) ---------- */
+function nextStep(st,allowElim){
+  const n=N*N,lines=buildLines();
+  for(let i=0;i<n;i++)if(st[i]===1){const r=(i/N)|0,c=i%N;
+    for(const[dr,dc]of DIRS){const nr=r+dr,nc=c+dc;if(nr<0||nc<0||nr>=N||nc>=N)continue;const j=nr*N+nc;
+      if(st[j]===0)return{cells:[[j,2]],tech:1,rule:'No touching',desc:'A cell beside a shaded cell must stay unshaded — shaded cells can never be orthogonally adjacent.'};}}
+  for(let i=0;i<n;i++)if(st[i]===2){const r=(i/N)|0,c=i%N;
+    for(let k=0;k<N;k++){const j=r*N+k;if(j!==i&&val[j]===val[i]&&st[j]===0)return{cells:[[j,1]],tech:1,rule:'Unique per line',desc:'That value already sits unshaded in this row, so its duplicate must be shaded.'};}
+    for(let k=0;k<N;k++){const j=k*N+c;if(j!==i&&val[j]===val[i]&&st[j]===0)return{cells:[[j,1]],tech:1,rule:'Unique per line',desc:'That value already sits unshaded in this column, so its duplicate must be shaded.'};}}
+  for(const ln of lines)for(let p=1;p<N-1;p++){const A=ln[p-1],B=ln[p],C=ln[p+1];
+    if(val[A]===val[B]&&val[B]===val[C]){const cells=[];
+      if(st[A]===0)cells.push([A,1]);if(st[B]===0)cells.push([B,2]);if(st[C]===0)cells.push([C,1]);
+      if(cells.length)return{cells,tech:2,rule:'Three in a line',desc:'Three equal cells in a line: the middle one stays unshaded and both ends must be shaded.'};}}
+  for(const ln of lines)for(let p=0;p<N-1;p++){const A=ln[p],Bp=ln[p+1];
+    if(val[A]===val[Bp])for(let q=0;q<N;q++){const D=ln[q];
+      if(D!==A&&D!==Bp&&val[D]===val[A]&&st[D]===0)
+        return{cells:[[D,1]],tech:2,rule:'Adjacent pair',desc:'Two equal cells sit side by side, so one of them stays unshaded — every other copy of that value in the line must be shaded.'};}}
+  for(let i=0;i<n;i++)if(st[i]===0){const t=st.slice();t[i]=1;
+    if(!connOK(t))return{cells:[[i,2]],tech:3,rule:'Connectivity forcing',desc:'Shading this cell would split the unshaded cells into disconnected groups, so it is forced to stay unshaded.'};}
+  if(allowElim)for(let i=0;i<n;i++)if(st[i]===0)
+    return{cells:[[i,sol[i]]],tech:4,rule:'Elimination',desc:'Pure rules stall here; only one state keeps the board solvable, found by trial elimination.'};
+  return null;
+}
+function rateBoard(){
+  const st=new Int8Array(N*N);let maxT=1;
+  for(let g=0;g<N*N*4;g++){
+    const s=nextStep(st,false);
+    if(!s)break;
+    for(const[i,v]of s.cells)st[i]=v;
+    if(s.tech>maxT)maxT=s.tech;
+    let any=false;for(let k=0;k<N*N;k++)if(st[k]===0){any=true;break;}
+    if(!any)return maxT;
+  }
+  return 4; // pure logic stalled -> needs elimination
+}
+
+/* ---------- generation ---------- */
+function neighborsShaded(shaded,i){const r=(i/N)|0,c=i%N;
+  for(const[dr,dc]of DIRS){const nr=r+dr,nc=c+dc;if(nr<0||nc<0||nr>=N||nc>=N)continue;if(shaded[nr*N+nc])return true;}return false;}
+function complementConnected(shaded){
+  const n=N*N;let start=-1,total=0;
+  for(let i=0;i<n;i++)if(!shaded[i]){total++;if(start<0)start=i;}
+  if(start<0)return false;
+  const seen=new Uint8Array(n);const q=[start];seen[start]=1;let cnt=1;
+  while(q.length){const i=q.pop();const r=(i/N)|0,c=i%N;
+    for(const[dr,dc]of DIRS){const nr=r+dr,nc=c+dc;if(nr<0||nc<0||nr>=N||nc>=N)continue;const j=nr*N+nc;
+      if(!shaded[j]&&!seen[j]){seen[j]=1;cnt++;q.push(j);}}}
+  return cnt===total;
+}
+function generate(){
+  const rng=mulberry32(((SEED*2654435761)>>>0)^((N*0x9e3779b1)>>>0)^0xabc);
+  const n=N*N,dens=N>=9?0.30:N>=7?0.28:0.26;
+  let lastShaded=null; // a structurally valid solved shading kept as a non-trivial fallback
+  for(let attempt=0;attempt<800;attempt++){
+    const shaded=new Uint8Array(n);
+    const order=[...Array(n).keys()];
+    for(let k=n-1;k>0;k--){const j=Math.floor(rng()*(k+1));[order[k],order[j]]=[order[j],order[k]];}
+    const target=Math.floor(n*dens);let cnt=0;
+    for(const i of order){if(cnt>=target)break;
+      if(shaded[i]||neighborsShaded(shaded,i))continue;
+      shaded[i]=1;if(!complementConnected(shaded)){shaded[i]=0;continue;}cnt++;}
+    val=new Int16Array(n);
+    for(let i=0;i<n;i++){const r=(i/N)|0,c=i%N;val[i]=((r+c)%N)+1;} // Latin base: unshaded auto-distinct per line
+    for(let i=0;i<n;i++)if(shaded[i]){ // give each shaded cell a value that duplicates an unshaded cell in its line
+      const r=(i/N)|0,c=i%N,opts=[];
+      for(let k=0;k<N;k++){const j=r*N+k;if(j!==i&&!shaded[j])opts.push(j);}
+      for(let k=0;k<N;k++){const j=k*N+c;if(j!==i&&!shaded[j])opts.push(j);}
+      if(opts.length)val[i]=val[opts[Math.floor(rng()*opts.length)]];
+    }
+    lastShaded=shaded; // valid by construction: non-adjacent shades, connected complement, each shade duplicates a line value
+    const res=solveCount();
+    if(res.count===1){sol=res.sol;return rateBoard();}
+  }
+  // Fallback (not observed in practice): never ship an all-zero solution, which checkWin() would treat
+  // as an already-won empty board. Prefer any real solution the counter found, else the last constructed shading.
+  const res=solveCount();
+  if(res.sol){sol=res.sol;}
+  else if(lastShaded){sol=new Int8Array(n);for(let i=0;i<n;i++)sol[i]=lastShaded[i]?1:2;}
+  else{sol=new Int8Array(n).fill(2);} // last resort: all-unshaded is still not a trivial win
+  return 4;
+}
+
+/* ---------- validation for live feedback ---------- */
+function computeViol(){
+  const n=N*N,dup=new Set(),adj=new Set(),disc=new Set(),lines=buildLines();
+  for(const ln of lines){const map={};
+    for(const i of ln)if(marks[i]!==1){(map[val[i]]=map[val[i]]||[]).push(i);}
+    for(const k in map)if(map[k].length>1)map[k].forEach(i=>dup.add(i));}
+  for(let i=0;i<n;i++)if(marks[i]===1){const r=(i/N)|0,c=i%N;
+    for(const[dr,dc]of DIRS){const nr=r+dr,nc=c+dc;if(nr<0||nc<0||nr>=N||nc>=N)continue;const j=nr*N+nc;
+      if(marks[j]===1){adj.add(i);adj.add(j);}}}
+  // connectivity: components of non-shaded cells; flag every cell outside the largest one
+  const comp=new Int16Array(n).fill(-1),size=[];let cid=0;
+  for(let s=0;s<n;s++){if(marks[s]===1||comp[s]>=0)continue;const q=[s];comp[s]=cid;let sz=1;
+    while(q.length){const i=q.pop();const r=(i/N)|0,c=i%N;
+      for(const[dr,dc]of DIRS){const nr=r+dr,nc=c+dc;if(nr<0||nc<0||nr>=N||nc>=N)continue;const j=nr*N+nc;
+        if(marks[j]!==1&&comp[j]<0){comp[j]=cid;sz++;q.push(j);}}}size.push(sz);cid++;}
+  if(cid>1){let big=0;for(let k=1;k<cid;k++)if(size[k]>size[big])big=k;
+    for(let i=0;i<n;i++)if(marks[i]!==1&&comp[i]!==big)disc.add(i);}
+  return{dup,adj,disc};
+}
+
+/* ---------- rendering ---------- */
+function render(){
+  const b=$('#board');b.style.setProperty('--n',N);
+  const v=computeViol();
+  let html='';
+  for(let i=0;i<N*N;i++){
+    let cls='cell';
+    if(marks[i]===1)cls+=' shaded';else if(marks[i]===2)cls+=' safe';
+    if(v.dup.has(i))cls+=' dup';
+    if(v.adj.has(i))cls+=' adj';
+    if(v.disc.has(i))cls+=' disc';
+    if(i===focusI&&boardFocused)cls+=' focus';
+    if(i===lastFlash)cls+=' flash';
+    let label=val[i]+', '+(marks[i]===1?'shaded':marks[i]===2?'marked safe':'open');
+    if(v.dup.has(i))label+=', duplicate value in line';
+    if(v.adj.has(i))label+=', touching another shaded cell';
+    if(v.disc.has(i))label+=', cut off from the group';
+    html+=`<div class="${cls}" data-i="${i}" role="gridcell" aria-label="${label}"${v.dup.has(i)||v.adj.has(i)||v.disc.has(i)?' aria-invalid="true"':''}>${val[i]}</div>`;
+  }
+  b.innerHTML=html;
+  const tot=v.dup.size+v.adj.size+v.disc.size;
+  $('#viol').innerHTML=tot?`<span style="color:var(--bad)">${v.dup.size} dup · ${v.adj.size} touching · ${v.disc.size} cut off</span>`:'Rules OK';
+  $('#moves').textContent=moves;
+}
+function explain(s){$('#explain').innerHTML=`<b>${s.rule}.</b> ${s.desc}`;}
+
+/* ---------- game actions ---------- */
+function cycle(i){ // Space: open->shaded->safe->open
+  marks[i]=(marks[i]+1)%3;moves++;after();
+}
+function toggleShade(i){marks[i]=marks[i]===1?0:1;moves++;after();}
+function toggleSafe(i){marks[i]=marks[i]===2?0:2;moves++;after();}
+function after(){render();if(checkWin())win();}
+function checkWin(){for(let i=0;i<N*N;i++)if((marks[i]===1)!==(sol[i]===1))return false;return true;}
+function win(){
+  if(won)return;won=true;clearInterval(timer);clearInterval(autoTimer);
+  $('#board').classList.add('won');
+  const t=Date.now()-startT;
+  $('#banner').textContent='Solved! '+fmt(t)+(dailyMode?' — daily complete':'');
+  if(dailyMode)recordDaily(Math.floor(t/1000));
+}
+
+/* ---------- hints / guided solve ---------- */
+function stepReveal(){ // reveals the next canonical deduction the player hasn't made yet
+  const st=new Int8Array(N*N);
+  while(true){
+    const s=nextStep(st,true);
+    if(!s)return false;
+    for(const[i,v]of s.cells){
+      const cur=marks[i]===1?1:(marks[i]===2?2:0);
+      if(cur!==v){marks[i]=v;lastFlash=i;focusI=i;explain(s);moves++;render();if(checkWin())win();return true;}
+      st[i]=v;
+    }
+  }
+}
+function hint(){if(won)return;if(!stepReveal())$('#explain').textContent='Nothing left to deduce — the board is complete.';}
+function guided(){
+  if(won)return;
+  if(autoTimer){clearInterval(autoTimer);autoTimer=null;$('#solve').textContent='Guided solve';return;}
+  $('#solve').textContent='Stop';
+  autoTimer=setInterval(()=>{
+    const more=stepReveal();
+    if(!more||won){clearInterval(autoTimer);autoTimer=null;$('#solve').textContent='Guided solve';}
+  },420);
+}
+
+/* ---------- timer / daily / streak ---------- */
+function fmt(ms){const s=Math.floor(ms/1000);return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');}
+function startTimer(){startT=Date.now();clearInterval(timer);$('#timer').textContent='00:00';
+  timer=setInterval(()=>{if(!won)$('#timer').textContent=fmt(Date.now()-startT);},500);}
+function dstr(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function recordDaily(sec){
+  let s;try{s=JSON.parse(localStorage.getItem('umbra:daily'))||{}}catch(e){s={}}
+  const today=dstr(new Date()),yes=dstr(new Date(Date.now()-864e5));
+  if(s.last!==today){s.streak=(s.last===yes)?(s.streak||0)+1:1;s.last=today;}
+  const key='best'+SEED;if(s[key]===undefined||sec<s[key])s[key]=sec;
+  try{localStorage.setItem('umbra:daily',JSON.stringify(s));}catch(e){/* private mode / locked origin: degrade gracefully */}
+  showDaily(s);
+}
+function showDaily(s){
+  s=s||(()=>{try{return JSON.parse(localStorage.getItem('umbra:daily'))||{}}catch(e){return{}}})();
+  $('#streakWrap').hidden=false;$('#bestWrap').hidden=false;
+  $('#streak').textContent=(s.last===dstr(new Date())?s.streak:0)||0;
+  const bt=s['best'+SEED];$('#best').textContent=bt!==undefined?fmt(bt*1000):'—';
+}
+
+/* ---------- board lifecycle ---------- */
+const TECH=['','solvable by basic deductions','needs pair & triple logic','needs connectivity forcing','needs trial elimination'];
+const GRID={5:'Easy',7:'Medium',9:'Hard'};
+function newBoard(setHash){
+  clearInterval(autoTimer);autoTimer=null;$('#solve').textContent='Guided solve';
+  won=false;moves=0;lastFlash=-1;focusI=0;
+  const tech=generate();
+  marks=new Int8Array(N*N);
+  $('#board').classList.remove('won');$('#banner').textContent='';
+  $('#badge').textContent=`${GRID[N]} · ${N}×${N} — ${TECH[tech]}`;
+  $('#diff').value=String(N);
+  if(dailyMode){showDaily();}else{$('#streakWrap').hidden=true;$('#bestWrap').hidden=true;}
+  if(setHash)location.hash=dailyMode?'daily':`${N}x${N}-${SEED}`;
+  startTimer();render();
+  const mark=isTouch?'Tap to shade a cell, long-press to mark it <b>safe</b>.':'Left-click to shade, right-click to mark a cell <b>safe</b>.';
+  $('#explain').innerHTML=mark+' Use <b>Hint</b> for one deduction or <b>Guided solve</b> to watch the logic unfold.';
+}
+function startDaily(){dailyMode=true;N=7;SEED=(()=>{const d=new Date();return d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate();})();newBoard(true);}
+function randomBoard(){dailyMode=false;N=+$('#diff').value;SEED=Math.floor(Math.random()*90000)+1;newBoard(true);}
+
+/* ---------- events ---------- */
+const boardEl=$('#board');
+boardEl.addEventListener('focus',()=>{boardFocused=true;render();});
+boardEl.addEventListener('blur',()=>{boardFocused=false;render();});
+
+// long-press (touch/pen) marks a cell safe — the third state is unreachable via tap+right-click on touchscreens
+let pressTimer=null,longPressed=false;
+function clearPress(){if(pressTimer){clearTimeout(pressTimer);pressTimer=null;}}
+boardEl.addEventListener('pointerdown',e=>{
+  if(e.pointerType==='mouse'||won)return; // mouse keeps click=shade / right-click=safe
+  const c=e.target.closest('.cell');if(!c)return;
+  const i=+c.dataset.i;longPressed=false;
+  clearPress();pressTimer=setTimeout(()=>{longPressed=true;pressTimer=null;lastFlash=-1;focusI=i;toggleSafe(i);if(navigator.vibrate)navigator.vibrate(12);},450);
+});
+boardEl.addEventListener('pointerup',clearPress);
+boardEl.addEventListener('pointercancel',clearPress);
+boardEl.addEventListener('pointerleave',clearPress);
+boardEl.addEventListener('contextmenu',e=>{e.preventDefault();const c=e.target.closest('.cell');if(!c||won)return;lastFlash=-1;focusI=+c.dataset.i;toggleSafe(focusI);});
+boardEl.addEventListener('click',e=>{
+  if(longPressed){longPressed=false;return;} // this click follows a long-press that already marked the cell safe
+  const c=e.target.closest('.cell');if(!c||won)return;lastFlash=-1;focusI=+c.dataset.i;toggleShade(focusI);});
+$('#board').addEventListener('keydown',e=>{
+  const r=(focusI/N)|0,c=focusI%N;let nr=r,nc=c;
+  if(e.key==='ArrowUp')nr=(r+N-1)%N;else if(e.key==='ArrowDown')nr=(r+1)%N;
+  else if(e.key==='ArrowLeft')nc=(c+N-1)%N;else if(e.key==='ArrowRight')nc=(c+1)%N;
+  else if(e.key===' '){e.preventDefault();if(!won){lastFlash=-1;cycle(focusI);}return;}
+  else if(e.key==='x'||e.key==='X'){if(!won){lastFlash=-1;toggleShade(focusI);}return;}
+  else return;
+  e.preventDefault();focusI=nr*N+nc;render();
+});
+$('#new').onclick=randomBoard;
+$('#diff').onchange=()=>{dailyMode=false;N=+$('#diff').value;SEED=Math.floor(Math.random()*90000)+1;newBoard(true);};
+$('#restart').onclick=()=>{if(!marks)return;marks=new Int8Array(N*N);moves=0;won=false;lastFlash=-1;
+  clearInterval(autoTimer);autoTimer=null;$('#solve').textContent='Guided solve';
+  $('#board').classList.remove('won');$('#banner').textContent='';startTimer();render();};
+$('#hint').onclick=hint;
+$('#solve').onclick=guided;
+$('#share').onclick=async()=>{
+  const url=location.href.split('#')[0]+'#'+(dailyMode?'daily':`${N}x${N}-${SEED}`);
+  try{await navigator.clipboard.writeText(url);$('#explain').innerHTML='<b>Link copied.</b> '+url;}
+  catch(e){$('#explain').innerHTML='<b>Share this link:</b> '+url;}
+};
+$('#daily').onclick=startDaily;
+
+/* ---------- init from hash ---------- */
+function init(){
+  const h=location.hash.slice(1);
+  if(h==='daily'){startDaily();return;}
+  const m=h.match(/^(\d+)x(\d+)-(\d+)$/);
+  if(m&&[5,7,9].includes(+m[1])){dailyMode=false;N=+m[1];SEED=+m[3];newBoard(false);return;}
+  dailyMode=false;N=7;SEED=42;newBoard(true);
+}
+window.addEventListener('hashchange',()=>{const h=location.hash.slice(1);
+  if(h==='daily'){if(dailyMode)return;startDaily();return;}
+  const m=h.match(/^(\d+)x(\d+)-(\d+)$/);
+  if(m&&[5,7,9].includes(+m[1])){
+    if(!dailyMode&&+m[1]===N&&+m[3]===SEED)return; // ignore the hash write newBoard() just made
+    dailyMode=false;N=+m[1];SEED=+m[3];newBoard(false);}});
+init();
+</script>
+</body>
+</html>

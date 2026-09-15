@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chaff — hidden-message word search forge</title>
+<style>
+  :root{
+    --bg:#f5f3ef; --ink:#232f3e; --accent:#ff6100; --line:#d8d2c6;
+    --panel:#fffdf9; --dim:#b7b0a3; --found:#2f8f5b; --chaff:#ffd9bf;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg);color:var(--ink);
+    font-family:"Segoe UI",system-ui,-apple-system,sans-serif;
+    line-height:1.4;
+  }
+  header{padding:18px 24px 6px}
+  h1{margin:0;font-size:28px;letter-spacing:.5px}
+  h1 .k{color:var(--accent)}
+  .tag{color:#6b6458;font-size:13px;margin-top:2px}
+  .wrap{display:flex;gap:22px;padding:14px 24px 40px;align-items:flex-start;flex-wrap:wrap}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;width:320px;flex:0 0 auto}
+  .panel h2{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#8a8272;margin:0 0 8px}
+  label{display:block;font-size:12px;font-weight:600;margin:10px 0 3px}
+  textarea,input,select{
+    width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:7px;
+    font:inherit;font-size:13px;background:#fff;color:var(--ink)
+  }
+  textarea{resize:vertical;min-height:88px;font-family:"Consolas",monospace}
+  .row{display:flex;gap:8px}
+  .row>*{flex:1}
+  button{
+    cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--ink);
+    border-radius:7px;padding:8px 10px;font:inherit;font-size:13px;font-weight:600;transition:.15s
+  }
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  button.primary:hover{background:#e65600;color:#fff}
+  .btns{display:flex;flex-wrap:wrap;gap:7px;margin-top:14px}
+  .btns button{flex:1 1 44%}
+  .meter{margin-top:14px;font-size:12px}
+  .bar{height:9px;border-radius:5px;background:#eae4d8;overflow:hidden;margin:4px 0}
+  .bar>i{display:block;height:100%;background:var(--accent);width:0;transition:width .3s}
+  .note{font-size:12px;color:#6b6458;margin-top:6px}
+  .warn{color:#c0392b}
+  .stage{flex:1 1 380px;min-width:340px}
+  #grid{
+    display:grid;gap:2px;background:var(--line);border:6px solid var(--panel);
+    border-radius:10px;box-shadow:0 6px 22px rgba(35,47,62,.12);
+    user-select:none;touch-action:none;max-width:640px;margin:0 auto
+  }
+  .cell{
+    background:var(--panel);display:flex;align-items:center;justify-content:center;
+    aspect-ratio:1;font-weight:700;cursor:crosshair;position:relative;
+    transition:background .25s,color .25s;color:var(--ink)
+  }
+  .cell:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+  .cell.sel{background:#ffe7d4}
+  .cell.anchor{background:#ffd0ad;box-shadow:inset 0 0 0 2px var(--accent)}
+  .cell.found{background:#d8efe1;color:var(--found)}
+  .cell.miss{animation:miss .4s both}
+  @keyframes miss{
+    0%{background:#f8d7d5}
+    20%{transform:translateX(-3px)}40%{transform:translateX(3px)}
+    60%{transform:translateX(-2px)}80%{transform:translateX(2px)}
+    100%{transform:translateX(0);background:var(--panel)}
+  }
+  #grid.reveal .cell.word{background:var(--panel);color:var(--dim);opacity:.35}
+  #grid.reveal .cell.chaff{
+    background:var(--chaff);color:var(--accent);opacity:1;
+    animation:pop .4s both;animation-delay:var(--d,0s)
+  }
+  @keyframes pop{0%{transform:scale(.5);background:#fff}60%{transform:scale(1.15)}100%{transform:scale(1)}}
+  .bank{margin-top:16px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .bank h2{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#8a8272;margin:0 0 10px}
+  .words{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:14px}
+  .words span{padding:1px 2px}
+  .words span.done{color:var(--found);text-decoration:line-through}
+  .secret{
+    margin-top:14px;padding:14px;border:2px dashed var(--accent);border-radius:12px;
+    background:#fff6ef;display:none
+  }
+  .secret.show{display:block;animation:pop .5s both}
+  .secret .lbl{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--accent);font-weight:700}
+  .secret .msg{font-size:22px;font-weight:800;margin-top:4px;letter-spacing:1px;word-break:break-word}
+  .howto{font-size:13px;color:#6b6458;margin:10px auto 2px;text-align:center;max-width:640px}
+  .howto b{color:var(--ink)}
+  .status{font-size:13px;color:#6b6458;margin:8px auto;text-align:center;max-width:640px}
+  .print-key{display:none}
+  @media print{
+    body{background:#fff}
+    header .tag,.panel,.btns,.status,.howto{display:none!important}
+    .wrap{display:block;padding:0}
+    #grid{box-shadow:none;border-color:#fff;page-break-inside:avoid}
+    .cell{color:#000!important;background:#fff!important;opacity:1!important;border:none}
+    #grid.reveal .cell{opacity:1!important}
+    .print-key{display:block;page-break-before:always;padding:20px}
+    .print-key h2{color:#000}
+    .secret{display:block!important;border-color:#000;background:#fff}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="k">Chaff</span> — the word-search forge</h1>
+  <div class="tag">Pack your words in. The leftover cells spell a secret — separate the wheat from the chaff.</div>
+</header>
+
+<div class="wrap">
+  <div class="panel">
+    <h2>Forge</h2>
+    <label for="words">Theme words (one per line or comma-separated)</label>
+    <textarea id="words">HARVEST
+SICKLE
+GRAIN
+FIELD
+THRESH
+WINNOW
+STALK
+BUSHEL</textarea>
+
+    <label for="msg">Hidden message (spelled by leftover cells)</label>
+    <input id="msg" value="SEPARATE THE WHEAT FROM THE CHAFF">
+
+    <div class="row">
+      <div>
+        <label for="size">Grid size</label>
+        <select id="size"></select>
+      </div>
+      <div>
+        <label for="diff">Difficulty</label>
+        <select id="diff">
+          <option value="easy">Easy · no diagonals/reverse</option>
+          <option value="medium" selected>Medium · + reverse</option>
+          <option value="hard">Hard · all 8 directions</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="seed">Seed</label>
+        <input id="seed" type="number" placeholder="auto">
+      </div>
+      <div>
+        <label for="pack">Example pack</label>
+        <select id="pack"></select>
+      </div>
+    </div>
+
+    <div class="meter">
+      <div><b>Fit meter</b> · <span id="fitpct">0%</span> occupancy</div>
+      <div class="bar"><i id="fitbar"></i></div>
+      <div class="note" id="fitnote"></div>
+    </div>
+
+    <div class="btns">
+      <button class="primary" id="gen">Generate</button>
+      <button id="autofit">Auto-size</button>
+      <button id="daily">Daily puzzle</button>
+      <button id="reveal">Reveal secret</button>
+      <button id="share">Copy share link</button>
+      <button id="copytxt">Copy grid text</button>
+      <button id="print">Print / PDF</button>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div id="grid" role="grid" aria-label="Word search grid"></div>
+    <div class="howto" id="howto"></div>
+    <div class="status" id="status"></div>
+    <div class="bank">
+      <h2>Word bank — <span id="progress">0 / 0 found</span></h2>
+      <div class="words" id="wordlist"></div>
+      <div class="secret" id="secret">
+        <div class="lbl">Decoded chaff message</div>
+        <div class="msg" id="secretmsg"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="print-key" id="printkey"></div>
+
+<script>
+"use strict";
+// ---------- seeded RNG (mulberry32) ----------
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+// ---------- direction sets by difficulty ----------
+const DIRS={
+  easy:[[0,1],[1,0]],                                   // E,S
+  medium:[[0,1],[1,0],[0,-1],[-1,0]],                   // + W,N
+  hard:[[0,1],[1,0],[0,-1],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]]
+};
+
+// ---------- example / theme packs ----------
+const PACKS=[
+  {name:"Harvest",size:13,diff:"medium",words:"HARVEST SICKLE GRAIN FIELD THRESH WINNOW STALK BUSHEL",msg:"SEPARATE THE WHEAT FROM THE CHAFF"},
+  {name:"Cosmos",size:14,diff:"hard",words:"NEBULA COMET GALAXY ORBIT QUASAR PULSAR METEOR COSMOS",msg:"WE ARE MADE OF STAR STUFF"},
+  {name:"Ocean",size:12,diff:"easy",words:"CORAL TIDE WHALE REEF KELP WAVE SHARK PEARL",msg:"THE SEA KEEPS ITS SECRETS"},
+  {name:"Kitchen",size:12,diff:"medium",words:"WHISK KNEAD SIMMER ROAST BRAISE SPICE DOUGH BROTH",msg:"GOOD FOOD GOOD MOOD"},
+  {name:"Cipher",size:13,diff:"hard",words:"CIPHER SECRET DECODE KEYWORD HIDDEN VECTOR PUZZLE ENIGMA",msg:"HIDING IN PLAIN SIGHT"}
+];
+
+// ---------- utils ----------
+const $=id=>document.getElementById(id);
+const cleanWords=t=>t.toUpperCase().split(/[\s,]+/).map(w=>w.replace(/[^A-Z]/g,"")).filter(w=>w.length>=2);
+const letters=s=>s.toUpperCase().replace(/[^A-Z]/g,"");
+const keyOf=cells=>cells.map(c=>c[0]+","+c[1]).sort().join(";");
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+// clipboard with feature-detection + execCommand fallback (works on file:// and non-secure LAN origins)
+function copyText(text){
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    return navigator.clipboard.writeText(text).catch(()=>legacyCopy(text));
+  }
+  return legacyCopy(text);
+}
+function legacyCopy(text){
+  return new Promise((resolve,reject)=>{
+    try{
+      const ta=document.createElement("textarea");
+      ta.value=text;ta.style.position="fixed";ta.style.top="0";ta.style.opacity="0";
+      document.body.appendChild(ta);ta.focus();ta.select();
+      const ok=document.execCommand("copy");ta.remove();
+      ok?resolve():reject(new Error("execCommand copy failed"));
+    }catch(e){reject(e);}
+  });
+}
+
+// ---------- placement engine ----------
+function placeWords(words,size,dirs,rng){
+  const grid=Array.from({length:size},()=>Array(size).fill(null));
+  const placements=[],dropped=[];
+  const list=[...words].sort((a,b)=>b.length-a.length);
+  for(const word of list){
+    if(word.length>size){dropped.push(word);continue;}
+    let placed=false;
+    for(let a=0;a<250&&!placed;a++){
+      const[dr,dc]=dirs[Math.floor(rng()*dirs.length)];
+      const r0=Math.floor(rng()*size),c0=Math.floor(rng()*size);
+      const rE=r0+dr*(word.length-1),cE=c0+dc*(word.length-1);
+      if(rE<0||rE>=size||cE<0||cE>=size)continue;
+      let ok=true;
+      for(let i=0;i<word.length;i++){
+        const v=grid[r0+dr*i][c0+dc*i];
+        if(v!==null&&v!==word[i]){ok=false;break;}
+      }
+      if(!ok)continue;
+      const cells=[];
+      for(let i=0;i<word.length;i++){const rr=r0+dr*i,cc=c0+dc*i;grid[rr][cc]=word[i];cells.push([rr,cc]);}
+      placements.push({word,cells,key:keyOf(cells)});placed=true;
+    }
+    if(!placed)dropped.push(word);
+  }
+  return{grid,placements,dropped};
+}
+
+// fill leftover ("chaff") cells with the secret in reading order, cycling
+function fillChaff(grid,size,msg,rng){
+  const chaff=[];
+  for(let r=0;r<size;r++)for(let c=0;c<size;c++)if(grid[r][c]===null)chaff.push([r,c]);
+  const L=letters(msg);let out="";
+  chaff.forEach(([r,c],i)=>{
+    const ch=L.length?L[i%L.length]:String.fromCharCode(65+Math.floor(rng()*26));
+    grid[r][c]=ch;out+=ch;
+  });
+  return{chaff,decoded:out};
+}
+
+// ---------- state ----------
+let S=null; // {grid,size,placements,dropped,chaff,decoded,found:Set,foundCells:Set}
+
+// ---------- build a puzzle from inputs ----------
+const DEFAULT_SIZE=13;
+// coerce any value to a supported grid size (8..24), falling back to the default on garbage
+function safeSize(v){const n=parseInt(v,10);return Number.isFinite(n)?Math.max(8,Math.min(24,n)):DEFAULT_SIZE;}
+
+function readInputs(){
+  return{
+    words:cleanWords($("words").value),
+    msg:$("msg").value,
+    size:safeSize($("size").value),
+    diff:$("diff").value,
+    seed:$("seed").value===""?null:parseInt($("seed").value,10)
+  };
+}
+
+function build(cfg,autoReveal){
+  const seed=(cfg.seed==null||isNaN(cfg.seed))?(Math.floor(Math.random()*1e9)):cfg.seed;
+  $("seed").value=seed;
+  const rng=mulberry32(seed);
+  const{grid,placements,dropped}=placeWords(cfg.words,cfg.size,DIRS[cfg.diff],rng);
+  const{chaff,decoded}=fillChaff(grid,cfg.size,cfg.msg,rng);
+  const wordSet=new Set();placements.forEach(p=>{p.cells.forEach(c=>wordSet.add(c[0]+","+c[1]));});
+  const chaffSet=new Set(chaff.map(c=>c[0]+","+c[1]));
+  S={grid,size:cfg.size,placements,dropped,chaff,chaffSet,wordSet,decoded,msg:cfg.msg,
+     found:new Set(),foundCells:new Set(),diff:cfg.diff,seed};
+  renderGrid();renderBank();updateStatus();updateHowto();
+  $("grid").classList.remove("reveal");$("secret").classList.remove("show");
+  if(autoReveal)doReveal();
+}
+
+// ---------- rendering ----------
+function renderGrid(){
+  const g=$("grid");g.innerHTML="";g.style.gridTemplateColumns=`repeat(${S.size},1fr)`;
+  const fs=Math.max(11,Math.round(30-S.size*0.9));
+  for(let r=0;r<S.size;r++)for(let c=0;c<S.size;c++){
+    const d=document.createElement("div");
+    d.className="cell";d.dataset.r=r;d.dataset.c=c;
+    d.style.fontSize=fs+"px";d.textContent=S.grid[r][c];
+    d.setAttribute("role","gridcell");
+    d.setAttribute("tabindex",r===0&&c===0?"0":"-1");
+    d.setAttribute("aria-label",`Row ${r+1} column ${c+1}, letter ${S.grid[r][c]}`);
+    g.appendChild(d);
+  }
+  anchorRC=null;
+}
+function cellEl(r,c){return $("grid").children[r*S.size+c];}
+
+function renderBank(){
+  const wl=$("wordlist");wl.innerHTML="";
+  const uniq=[...new Set(S.placements.map(p=>p.word))].sort();
+  uniq.forEach(w=>{const s=document.createElement("span");s.textContent=w;s.dataset.w=w;wl.appendChild(s);});
+  $("progress").textContent=`0 / ${uniq.length} found`;
+  renderPrintKey(uniq);
+}
+
+function renderPrintKey(uniq){
+  const rows=[];
+  for(let r=0;r<S.size;r++){let line="";for(let c=0;c<S.size;c++)line+=S.grid[r][c]+" ";rows.push(line.trim());}
+  $("printkey").innerHTML=
+    `<h2>Chaff — Solution Key (seed ${esc(S.seed)})</h2>`+
+    `<p><b>Hidden message:</b> ${S.msg?esc(S.msg):"(random filler)"}</p>`+
+    `<p><b>Decoded from chaff cells:</b> ${esc(S.decoded.replace(/(.{40})/g,"$1 "))}</p>`+
+    `<p><b>Words (${uniq.length}):</b> ${esc(uniq.join(", "))}</p>`+
+    (S.dropped.length?`<p class="warn"><b>Dropped:</b> ${esc(S.dropped.join(", "))}</p>`:"")+
+    `<pre style="font-family:Consolas,monospace;font-size:12px">${esc(rows.join("\n"))}</pre>`;
+}
+
+const DIR_HINT={easy:"→ ↓ only",medium:"→ ↓ ← ↑ (incl. reverse)",hard:"all 8 directions incl. diagonals & reverse"};
+function updateHowto(){
+  $("howto").innerHTML=`<b>Drag across letters</b> to find each word — or click a start then an end cell, or focus the grid and use arrow keys + Enter. `+
+    `Directions this puzzle: <b>${DIR_HINT[S.diff]||""}</b>.`;
+}
+
+function updateStatus(){
+  const dropTxt=S.dropped.length?` · dropped ${S.dropped.length}: ${S.dropped.join(", ")} (try Auto-size)`:"";
+  $("status").innerHTML=`Seed <b>${S.seed}</b> · ${S.size}×${S.size} · ${S.placements.length} words placed`+
+    `<span class="${S.dropped.length?'warn':''}">${dropTxt}</span>`;
+}
+
+// ---------- drag select ----------
+function lineCells(r1,c1,r2,c2){
+  let dr=r2-r1,dc=c2-c1;const adr=Math.abs(dr),adc=Math.abs(dc);
+  let sr=Math.sign(dr),sc=Math.sign(dc),steps;
+  if(dr===0)steps=adc;else if(dc===0)steps=adr;else if(adr===adc)steps=adr;
+  else if(adr>adc){sc=0;steps=adr;}else{sr=0;steps=adc;}
+  const cells=[];for(let i=0;i<=steps;i++)cells.push([r1+sr*i,c1+sc*i]);
+  return cells;
+}
+let dragging=false,startRC=null,curSel=[],didDrag=false;
+// two-click / keyboard selection: pick a start cell, then an end cell on the same axis
+let anchorRC=null;
+function setAnchor(rc){
+  clearAnchor();
+  if(rc){anchorRC=rc;const el=cellEl(rc[0],rc[1]);if(el)el.classList.add("anchor");}
+}
+function clearAnchor(){document.querySelectorAll("#grid .cell.anchor").forEach(el=>el.classList.remove("anchor"));anchorRC=null;}
+// handle a discrete pick (click or Enter/Space) on cell rc
+function pickCell(rc){
+  if(!S||!rc)return;
+  if(!anchorRC){setAnchor(rc);return;}
+  if(anchorRC[0]===rc[0]&&anchorRC[1]===rc[1]){clearAnchor();return;}
+  const cells=lineCells(anchorRC[0],anchorRC[1],rc[0],rc[1]);
+  clearAnchor();
+  if(cells.length>=2)trySelection(cells);
+}
+function clearSel(){curSel.forEach(([r,c])=>cellEl(r,c).classList.remove("sel"));curSel=[];}
+function paintSel(cells){clearSel();cells.forEach(([r,c])=>{if(r>=0&&r<S.size&&c>=0&&c<S.size){cellEl(r,c).classList.add("sel");}});curSel=cells;}
+function rcFromEvent(e){
+  const t=(e.touches&&e.touches[0])||e;
+  const el=document.elementFromPoint(t.clientX,t.clientY);
+  if(el&&el.classList.contains("cell"))return[+el.dataset.r,+el.dataset.c];
+  return null;
+}
+function startDrag(e){if(!S)return;const rc=rcFromEvent(e);if(!rc)return;e.preventDefault();dragging=true;didDrag=false;startRC=rc;paintSel([rc]);}
+function moveDrag(e){if(!dragging)return;const rc=rcFromEvent(e);if(!rc)return;e.preventDefault();const cells=lineCells(startRC[0],startRC[1],rc[0],rc[1]);if(cells.length>1)didDrag=true;paintSel(cells);}
+function endDrag(){
+  if(!dragging)return;dragging=false;
+  const sel=curSel.slice();clearSel();
+  if(sel.length<2)return;
+  trySelection(sel);
+}
+// evaluate a selected line of cells: mark as found, or flash a miss
+function trySelection(sel){
+  const k=keyOf(sel);
+  const hit=S.placements.find(p=>p.key===k&&!S.found.has(p.word+"@"+p.key));
+  if(hit){
+    S.found.add(hit.word+"@"+hit.key);
+    hit.cells.forEach(([r,c])=>{cellEl(r,c).classList.add("found");S.foundCells.add(r+","+c);});
+    const done=[...new Set(S.placements.filter(p=>S.found.has(p.word+"@"+p.key)).map(p=>p.word))];
+    document.querySelectorAll("#wordlist span").forEach(s=>{if(done.includes(s.dataset.w))s.classList.add("done");});
+    const uniq=[...new Set(S.placements.map(p=>p.word))];
+    $("progress").textContent=`${done.length} / ${uniq.length} found`;
+    if(done.length===uniq.length)setTimeout(()=>doReveal(true),350);
+  }else{
+    // wrong guess: briefly flash the selected cells so the attempt registers
+    sel.forEach(([r,c])=>{const el=cellEl(r,c);if(!el||el.classList.contains("found"))return;el.classList.add("miss");setTimeout(()=>el.classList.remove("miss"),400);});
+  }
+}
+
+// ---------- reveal payoff ----------
+function doReveal(solved){
+  if(!S)return;
+  S.wordSet.forEach(k=>{const[r,c]=k.split(",").map(Number);cellEl(r,c).classList.add("word");});
+  S.chaff.forEach(([r,c],i)=>{const el=cellEl(r,c);el.classList.add("chaff");el.style.setProperty("--d",(i*0.02).toFixed(2)+"s");});
+  $("grid").classList.add("reveal");
+  $("secretmsg").textContent=S.msg?S.msg.toUpperCase():("("+S.decoded.slice(0,60)+"…)");
+  $("secret").classList.add("show");
+  if(solved)writeHash(true);
+}
+// un-reveal so a player can keep solving after peeking
+function unReveal(){
+  if(!S)return;
+  $("grid").classList.remove("reveal");
+  document.querySelectorAll("#grid .cell.word,#grid .cell.chaff").forEach(el=>{el.classList.remove("word","chaff");el.style.removeProperty("--d");});
+  $("secret").classList.remove("show");
+}
+// Reveal button: toggle so peeking is reversible
+function toggleReveal(){
+  if(!S)return;
+  $("grid").classList.contains("reveal")?unReveal():doReveal(false);
+}
+
+// ---------- hash codec ----------
+function stateObj(solved){
+  return{w:$("words").value,m:$("msg").value,s:S?S.size:safeSize($("size").value),d:$("diff").value,seed:S?S.seed:+$("seed").value,solved:!!solved};
+}
+function writeHash(solved){
+  try{location.hash=btoa(unescape(encodeURIComponent(JSON.stringify(stateObj(solved)))));}catch(e){}
+}
+function readHash(){
+  if(!location.hash||location.hash.length<3)return null;
+  try{return JSON.parse(decodeURIComponent(escape(atob(location.hash.slice(1)))));}catch(e){return null;}
+}
+function applyState(st){
+  $("words").value=st.w!=null?st.w:"";
+  $("msg").value=st.m!=null?st.m:"";
+  $("size").value=safeSize(st.s);
+  $("diff").value=DIRS[st.d]?st.d:"medium";
+  $("seed").value=st.seed;
+  build(readInputs(),st.solved);
+}
+
+// ---------- fit meter (live) ----------
+function updateFit(){
+  const words=cleanWords($("words").value),size=+$("size").value;
+  const total=words.reduce((s,w)=>s+w.length,0);
+  const cap=size*size;const pct=Math.min(100,Math.round(total/cap*100));
+  $("fitpct").textContent=pct+"%";$("fitbar").style.width=pct+"%";
+  const tooLong=words.filter(w=>w.length>size);
+  const msgLen=letters($("msg").value).length;
+  let note=`${words.length} words · ${total} letters into ${cap} cells · ${cap-total} chaff cells for the secret`;
+  $("fitnote").className="note";
+  if(tooLong.length){note=`⚠ ${tooLong.join(", ")} longer than grid (${size}). Bump size.`;$("fitnote").className="note warn";}
+  else if(pct>70){note=`⚠ Dense (${pct}%). Words may drop — Auto-size suggests a roomier grid.`;$("fitnote").className="note warn";}
+  else if(msgLen===0)note+=" · no message → random filler.";
+  $("fitnote").textContent=note;
+}
+
+// ---------- auto-size ----------
+function autoSize(){
+  const cfg=readInputs();const longest=Math.max(2,...cfg.words.map(w=>w.length));
+  const seed=cfg.seed==null||isNaN(cfg.seed)?12345:cfg.seed;
+  for(let size=Math.max(longest,8);size<=24;size++){
+    const rng=mulberry32(seed);
+    const{dropped}=placeWords(cfg.words,size,DIRS[cfg.diff],rng);
+    if(dropped.length===0){$("size").value=size;updateFit();build({...cfg,size,seed},false);return;}
+  }
+  $("size").value=24;updateFit();build({...cfg,size:24,seed},false);
+}
+
+// ---------- daily ----------
+function daily(){
+  const d=new Date();const key=d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate();
+  const pack=PACKS[key%PACKS.length];
+  $("words").value=pack.words.split(" ").join("\n");$("msg").value=pack.msg;
+  $("size").value=pack.size;$("diff").value=pack.diff;$("seed").value=key;
+  updateFit();build(readInputs(),false);
+}
+
+// ---------- copy grid text ----------
+function copyGrid(){
+  if(!S)return;
+  let out="";for(let r=0;r<S.size;r++){let l="";for(let c=0;c<S.size;c++)l+=S.grid[r][c]+" ";out+=l.trim()+"\n";}
+  out+="\nWords: "+[...new Set(S.placements.map(p=>p.word))].sort().join(", ");
+  copyText(out).then(()=>flash("copytxt","Copied!")).catch(()=>flash("copytxt","Copy failed"));
+}
+function flash(id,txt){const b=$(id),o=b.textContent;b.textContent=txt;setTimeout(()=>b.textContent=o,1200);}
+
+// ---------- init ----------
+function init(){
+  const sizeSel=$("size");for(let n=8;n<=24;n++){const o=document.createElement("option");o.value=n;o.textContent=n+"×"+n;if(n===13)o.selected=true;sizeSel.appendChild(o);}
+  const packSel=$("pack");packSel.innerHTML='<option value="">— load a pack —</option>';
+  PACKS.forEach((p,i)=>{const o=document.createElement("option");o.value=i;o.textContent=p.name;packSel.appendChild(o);});
+
+  $("gen").onclick=()=>{build(readInputs(),false);writeHash(false);};
+  $("autofit").onclick=autoSize;
+  $("daily").onclick=daily;
+  $("reveal").onclick=toggleReveal;
+  $("share").onclick=()=>{
+    writeHash(false);
+    const local=location.protocol==="file:";
+    copyText(location.href)
+      .then(()=>flash("share",local?"Copied (local link)":"Link copied!"))
+      .catch(()=>flash("share","Copy failed"));
+  };
+  $("copytxt").onclick=copyGrid;
+  $("print").onclick=()=>window.print();
+  packSel.onchange=()=>{const i=packSel.value;if(i==="")return;const p=PACKS[+i];
+    $("words").value=p.words.split(" ").join("\n");$("msg").value=p.msg;$("size").value=p.size;$("diff").value=p.diff;$("seed").value="";
+    updateFit();build(readInputs(),false);packSel.value="";};
+
+  ["words","msg","size","diff"].forEach(id=>$(id).addEventListener("input",updateFit));
+
+  const g=$("grid");
+  g.addEventListener("mousedown",startDrag);
+  window.addEventListener("mousemove",moveDrag);
+  window.addEventListener("mouseup",endDrag);
+  g.addEventListener("touchstart",startDrag,{passive:false});
+  g.addEventListener("touchmove",moveDrag,{passive:false});
+  window.addEventListener("touchend",endDrag);
+
+  // two-click selection (also serves mouse users who prefer click-click over drag)
+  g.addEventListener("click",e=>{
+    if(didDrag){didDrag=false;return;}
+    const cell=e.target.closest(".cell");if(!cell)return;
+    pickCell([+cell.dataset.r,+cell.dataset.c]);
+  });
+  // keyboard: arrows move focus, Enter/Space picks start then end, Escape cancels
+  g.addEventListener("keydown",e=>{
+    if(!S)return;
+    const cell=e.target.closest&&e.target.closest(".cell");if(!cell)return;
+    let r=+cell.dataset.r,c=+cell.dataset.c;
+    if(e.key==="ArrowRight"||e.key==="ArrowLeft"||e.key==="ArrowUp"||e.key==="ArrowDown"){
+      e.preventDefault();
+      if(e.key==="ArrowRight")c=Math.min(S.size-1,c+1);
+      else if(e.key==="ArrowLeft")c=Math.max(0,c-1);
+      else if(e.key==="ArrowDown")r=Math.min(S.size-1,r+1);
+      else r=Math.max(0,r-1);
+      const t=cellEl(r,c);if(t){cell.setAttribute("tabindex","-1");t.setAttribute("tabindex","0");t.focus();}
+    }else if(e.key==="Enter"||e.key===" "){
+      e.preventDefault();pickCell([r,c]);
+    }else if(e.key==="Escape"){
+      clearAnchor();
+    }
+  });
+
+  updateFit();
+  const st=readHash();
+  if(st)applyState(st);else build(readInputs(),false);
+}
+init();
+</script>
+</body>
+</html>

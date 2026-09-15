@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fiducia — seeded PCB generator</title>
+<style>
+  :root{--bg:#0c0f13;--panel:#151a21;--line:#232c38;--ink:#e7edf4;--dim:#8794a5;--acc:#4bd6a0}
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--ink);font:13px/1.4 ui-sans-serif,system-ui,Segoe UI,Roboto,sans-serif;display:flex;overflow:hidden}
+  #stage{flex:1;display:flex;align-items:center;justify-content:center;padding:22px;min-width:0;position:relative}
+  #wrap{position:relative;width:100%;height:100%;max-width:1000px;display:flex;align-items:center;justify-content:center}
+  canvas{width:100%;height:100%;border-radius:10px;box-shadow:0 24px 60px rgba(0,0,0,.55);cursor:crosshair}
+  #tip{position:fixed;pointer-events:none;background:#0a0d11;border:1px solid var(--line);border-radius:7px;padding:6px 9px;font-size:12px;opacity:0;transition:opacity .12s;z-index:9;box-shadow:0 6px 18px rgba(0,0,0,.5)}
+  #tip b{color:var(--acc)}#tip span{color:var(--dim)}
+  #panel{width:296px;flex:none;height:100%;overflow-y:auto;background:var(--panel);border-left:1px solid var(--line);padding:18px 16px 40px}
+  h1{font-size:19px;margin:0 0 2px;letter-spacing:.5px}
+  h1 b{color:var(--acc)}
+  .sub{color:var(--dim);font-size:11.5px;margin:0 0 16px}
+  .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--dim);margin:16px 0 7px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  button.chip{background:#0f141a;color:var(--dim);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font-size:12px;cursor:pointer;transition:.12s}
+  button.chip:hover{color:var(--ink);border-color:#3a4757}
+  button.chip.on{background:var(--acc);color:#062015;border-color:var(--acc);font-weight:600}
+  .sw{display:flex;flex-wrap:wrap;gap:7px}
+  .sw button{width:30px;height:30px;border-radius:50%;border:2px solid #2a3441;cursor:pointer;padding:0}
+  .sw button.on{border-color:#fff;box-shadow:0 0 0 2px var(--acc)}
+  .row{margin:11px 0}
+  .row label{display:flex;justify-content:space-between;font-size:11.5px;color:#b9c4d2;margin-bottom:3px}
+  .row label span{color:var(--acc);font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:var(--acc);cursor:pointer}
+  .act{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:8px}
+  .act button,#reseed{width:100%;background:#0f141a;color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:9px;font-size:12.5px;cursor:pointer;transition:.12s}
+  .act button:hover,#reseed:hover{border-color:var(--acc);color:var(--acc)}
+  #reseed{margin-top:14px;background:var(--acc);color:#062015;font-weight:600;border-color:var(--acc)}
+  .foot{margin-top:20px;font-size:10.5px;color:#5a6675;line-height:1.5}
+  .seedrow{display:flex;gap:7px;margin-top:14px}
+  .seedrow input{flex:1;min-width:0;background:#0f141a;color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:9px;font:12px ui-monospace,Menlo,monospace}
+  .seedrow input:focus{outline:none;border-color:var(--acc)}
+  .seedrow #reseed{margin-top:0;width:auto;flex:none;padding:9px 12px;white-space:nowrap}
+  @media(max-width:640px){
+    body{flex-direction:column}
+    #panel{width:100%;height:auto;border-left:none;border-top:1px solid var(--line)}
+    #stage{height:56vh;padding:12px}
+  }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap"><canvas id="c"></canvas></div></div>
+<div id="tip"></div>
+<div id="panel">
+  <h1><b>Fiducia</b></h1>
+  <p class="sub">Seeded generator for fictional printed circuit boards. Hover a part to trace its net.</p>
+  <div class="lbl">Board archetype</div><div class="chips" id="arch"></div>
+  <div class="lbl">Soldermask &amp; finish</div><div class="sw" id="mask"></div>
+  <div class="lbl">Routing angle</div><div class="chips" id="ang"></div>
+  <div id="sliders"></div>
+  <div class="lbl">Seed</div>
+  <div class="seedrow"><input id="seedin" type="text" inputmode="numeric" spellcheck="false" aria-label="Board seed — edit to reproduce a specific board" title="Seed — type a value to reproduce a specific board"><button id="reseed" aria-label="Generate a new random seed">↻ New</button></div>
+  <div class="act">
+    <button id="png">Export PNG</button>
+    <button id="svg">Export SVG</button>
+    <button id="tile">Tile poster</button>
+    <button id="link">Copy link</button>
+  </div>
+  <p class="foot">The seed rides in the URL hash — share the link to share the exact board. SVG exports with named layer groups (copper / silkscreen / soldermask / drill).</p>
+</div>
+<script>
+const $=s=>document.querySelector(s), clamp=(v,a,b)=>v<a?a:v>b?b:v;
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+const THEMES={
+ green:{n:'Green',board:'#0b5d38',trace:'#12894f',pad:'#e7bd5a',silk:'#eef4ee',drill:'#04180f',glow:'#8ffcae',sheen:'rgba(180,255,200,.10)'},
+ blue:{n:'Blue',board:'#123a63',trace:'#1c568f',pad:'#e7bd5a',silk:'#eef2f8',drill:'#061626',glow:'#7fd0ff',sheen:'rgba(160,220,255,.10)'},
+ red:{n:'Red',board:'#7a1626',trace:'#a72a3f',pad:'#e7bd5a',silk:'#fbeef0',drill:'#2a0810',glow:'#ff9db0',sheen:'rgba(255,180,190,.10)'},
+ purple:{n:'OSH Purple',board:'#4d0f86',trace:'#7127b4',pad:'#e7bd5a',silk:'#f3ecfb',drill:'#1a0533',glow:'#c79bff',sheen:'rgba(210,180,255,.12)'},
+ black:{n:'Matte Black ENIG',board:'#15191d',trace:'#2b333c',pad:'#d8a441',silk:'#e9edf0',drill:'#000000',glow:'#ffd98a',sheen:'rgba(255,255,255,.05)'},
+ silver:{n:'White HASL',board:'#e3e4e7',trace:'#b9bdc6',pad:'#aab0ba',silk:'#2b2f36',drill:'#7d838d',glow:'#5cb8ff',sheen:'rgba(255,255,255,.35)'}
+};
+const ARCH={
+ retro:{name:'Retro through-hole',th:true,angle:90,dens:.55,types:['U','R','C','J','D','R'],size:1.35,silk:1.05},
+ smd:{name:'Dense SMD',th:false,angle:90,dens:1.05,types:['U','R','C','R','C','D'],size:.82,silk:1.05},
+ rf:{name:'RF',th:false,angle:45,dens:.85,types:['U','C','TP','L','C'],size:.92,silk:.72},
+ breakout:{name:'Breakout',th:false,angle:90,dens:.45,types:['J','U','C','TP','J'],size:1.15,silk:1.2},
+ ornamental:{name:'Ornamental',th:false,angle:45,dens:1.25,types:['R','C','D','TP','R'],size:.9,silk:1.4,sym:true}
+};
+const VALS={R:['1k','4.7k','10k','100k','220','47k','330','2.2k','1M'],C:['100nF','10uF','1uF','22pF','47nF','4.7uF','220pF','470uF'],
+ U:['MCU','LDO','OPA','ADC','FLASH','RF-IC','DAC'],J:['HDR','USB','PWR','I2C','UART'],D:['LED','1N4148','SCHOTTKY','ZENER'],
+ TP:['TP','GND','VCC','CLK','RST'],L:['10uH','4.7uH','1nH','FB','100nH']};
+const SLD=[['dens','Trace density',.2,1.6,.05],['count','Component count',.3,1.6,.05],['pad','Pad size',.6,1.7,.05],
+ ['silk','Silkscreen',0,1.5,.05],['round','Board roundness',0,1,.02],['via','Via frequency',0,1,.05],['sym','Symmetry',0,1,.05]];
+
+const S={arch:'smd',ang:'auto',theme:'green',seed:(Math.random()*1e9)|0,dens:1,count:1,pad:1,silk:1,round:.25,via:.4,sym:0};
+const cv=$('#c'),ctx=cv.getContext('2d'),tip=$('#tip');
+let model=null,animStart=0;const DUR=2200;let hover=null;
+
+// ---------- build (pure: returns geometry model for W,H,seed) ----------
+function buildModel(W,H,seed){
+ const rnd=mulberry32(seed>>>0),A=ARCH[S.arch];
+ const ang=S.ang==='auto'?A.angle:+S.ang;
+ const pick=arr=>arr[(rnd()*arr.length)|0];
+ const mg=Math.max(26,Math.min(W,H)*.05);
+ const board={x:mg,y:mg,w:W-2*mg,h:H-2*mg,r:S.round*Math.min(W,H)*.12};
+ const holes=[[board.x+18,board.y+18],[board.x+board.w-18,board.y+18],[board.x+18,board.y+board.h-18],[board.x+board.w-18,board.y+board.h-18]].map(p=>({x:p[0],y:p[1]}));
+ const inner={x:board.x+28,y:board.y+28,w:board.w-56,h:board.h-56};
+ const comps=[],pads=[],cnt={R:0,C:0,U:0,J:0,D:0,TP:0,L:0};
+ const doSym=A.sym||S.sym>.35;
+ let N=clamp(Math.round(inner.w*inner.h/8200*S.count*(A.dens*.6+.6)),6,52);
+ const cols=clamp(Math.round(Math.sqrt(N*inner.w/inner.h)),2,10),rows=Math.ceil(N/cols);
+ const cw=inner.w/cols,ch=inner.h/rows,ps=S.pad;
+ const make=(cx,cy)=>{
+   const type=pick(A.types),sz=A.size*(.8+rnd()*.45),c={type,x:cx,y:cy,ref:type+(++cnt[type]),val:pick(VALS[type]),padIdx:[]};
+   const addPad=(x,y,round,w,h)=>{pads.push({x,y,round,w:w||0,h:h||0,r:round?(A.th?4.6:3.4)*ps*sz:0,comp:comps.length});c.padIdx.push(pads.length-1);};
+   if(type==='R'||type==='C'||type==='L'){c.w=20*sz;c.h=11*sz;const px=c.w/2;
+     if(A.th){addPad(cx-px,cy,true);addPad(cx+px,cy,true);}else{addPad(cx-px,cy,false,6*ps*sz,9*ps*sz);addPad(cx+px,cy,false,6*ps*sz,9*ps*sz);}}
+   else if(type==='D'){c.w=13*sz;c.h=8*sz;c.glow=true;addPad(cx-c.w/2,cy,!!A.th,5*ps*sz,7*ps*sz);addPad(cx+c.w/2,cy,!!A.th,5*ps*sz,7*ps*sz);}
+   else if(type==='TP'){c.w=11*sz;c.h=11*sz;c.glow=true;addPad(cx,cy,true);}
+   else if(type==='J'){const n=[2,3,4,6][(rnd()*4)|0],pit=9*sz;c.w=n*pit;c.h=15*sz;
+     for(let i=0;i<n;i++)addPad(cx-c.w/2+pit/2+i*pit,cy,!!A.th,5.5*ps*sz,8*ps*sz);}
+   else{const n=[6,8,14,16][(rnd()*4)|0],half=n/2,pit=8*sz;c.w=28*sz;c.h=half*pit;c.chip=true;
+     for(let i=0;i<half;i++){const yy=cy-c.h/2+pit/2+i*pit;
+       addPad(cx-c.w/2,yy,!!A.th,6*ps*sz,5*ps*sz);addPad(cx+c.w/2,yy,!!A.th,6*ps*sz,5*ps*sz);}}
+   comps.push(c);
+ };
+ const M=doSym?Math.ceil(N/2):N;
+ for(let i=0;i<M;i++){const col=i%cols,row=(i/cols|0);
+   let cx=inner.x+(col+.5)*cw+(rnd()-.5)*cw*.32,cy=inner.y+(row+.5)*ch+(rnd()-.5)*ch*.32;
+   if(doSym)cx=inner.x+(col+.5)*cw*.5+(rnd()-.5)*cw*.16;
+   cx=clamp(cx,inner.x+14,inner.x+inner.w-14);cy=clamp(cy,inner.y+14,inner.y+inner.h-14);
+   make(cx,cy);
+   if(doSym&&Math.abs(cx-W/2)>26)make(W-cx,cy);
+ }
+ // traces + nets (union-find over pads)
+ const par=pads.map((_,i)=>i),find=x=>{while(par[x]!==x){par[x]=par[par[x]];x=par[x];}return x;};
+ const uni=(a,b)=>{par[find(a)]=find(b);};
+ const traces=[],maxL=Math.min(W,H)*.55,ntr=Math.round(pads.length*.6*S.dens);
+ for(let k=0;k<ntr;k++){const ai=(rnd()*pads.length)|0,a=pads[ai];let bi=-1,bd=maxL;
+   for(let s=0;s<16;s++){const j=(rnd()*pads.length)|0,b=pads[j];if(b.comp===a.comp)continue;
+     const d=Math.hypot(a.x-b.x,a.y-b.y);if(d<bd){bd=d;bi=j;}}
+   if(bi<0)continue;const b=pads[bi];uni(ai,bi);
+   traces.push({pts:route(a,b,ang,rnd),w:(1.6+rnd()*1.3)*S.pad,a:ai,b:bi});}
+ pads.forEach((p,i)=>p.net=find(i));traces.forEach(t=>t.net=find(t.a));
+ comps.forEach(c=>{c.nets=[...new Set(c.padIdx.map(i=>pads[i].net))];});
+ // vias: at bends + at crossings
+ const vias=[];traces.forEach(t=>{for(let i=1;i<t.pts.length-1;i++)if(rnd()<S.via*.5)vias.push({x:t.pts[i].x,y:t.pts[i].y,net:t.net});});
+ outer: for(let i=0;i<traces.length;i++)for(let j=i+1;j<traces.length;j++){
+   const A1=traces[i].pts,B1=traces[j].pts;if(traces[i].net===traces[j].net)continue;
+   for(let a=0;a<A1.length-1;a++)for(let b=0;b<B1.length-1;b++){const X=segX(A1[a],A1[a+1],B1[b],B1[b+1]);
+     if(X&&rnd()<.55){vias.push({x:X.x,y:X.y,net:traces[i].net});if(vias.length>75)break outer;}}}
+ // hatched ground pour (diagonal lines, clipped to board when drawn)
+ const pour=[];for(let x=board.x-board.h;x<board.x+board.w;x+=11)pour.push([x,board.y,x+board.h,board.y+board.h]);
+ // silkscreen labels
+ const labels=[];comps.forEach(c=>{if(S.silk<=0)return;if(S.silk<.5&&rnd()>.6)return;
+   labels.push({x:c.x,y:c.y-c.h/2-4,t:c.ref,s:7.2*S.silk});
+   if(S.silk>.65&&rnd()<.7)labels.push({x:c.x,y:c.y+c.h/2+8,t:c.val,s:6*S.silk,dim:1});});
+ const fids=[{x:board.x+16,y:board.y+board.h-16},{x:board.x+board.w-16,y:board.y+16}];
+ const arrows=comps.filter(c=>c.type==='J').slice(0,2).map(c=>({x:c.x,y:c.y-c.h/2-16,to:c.y-c.h/2-4}));
+ const title={x:board.x+board.w-132,y:board.y+board.h-56,w:118,h:44,
+   lines:['FIDUCIA',A.name,'SEED '+(seed>>>0).toString(16).toUpperCase(),'REV A · 2L']};
+ return {W,H,board,holes,comps,pads,traces,vias,pour,labels,fids,arrows,title};
+}
+function route(a,b,ang,rnd){const p=[{x:a.x,y:a.y}];
+ if(ang===45){const dx=b.x-a.x,dy=b.y-a.y,s=Math.min(Math.abs(dx),Math.abs(dy));
+   p.push({x:a.x+Math.sign(dx)*s,y:a.y+Math.sign(dy)*s});}
+ else{if(rnd()<.5)p.push({x:b.x,y:a.y});else p.push({x:a.x,y:b.y});}
+ p.push({x:b.x,y:b.y});return p;}
+function segX(a,b,c,d){const cr=(p,q,r)=>(q.x-p.x)*(r.y-p.y)-(q.y-p.y)*(r.x-p.x);
+ const d1=cr(c,d,a),d2=cr(c,d,b),d3=cr(a,b,c),d4=cr(a,b,d);
+ if(((d1>0&&d2<0)||(d1<0&&d2>0))&&((d3>0&&d4<0)||(d3<0&&d4>0))){const t=d3/(d3-d4);
+   return{x:a.x+t*(b.x-a.x),y:a.y+t*(b.y-a.y)};}return null;}
+
+// ---------- draw ----------
+function rr(g,x,y,w,h,r){g.beginPath();g.moveTo(x+r,y);g.arcTo(x+w,y,x+w,y+h,r);g.arcTo(x+w,y+h,x,y+h,r);g.arcTo(x,y+h,x,y,r);g.arcTo(x,y,x+w,y,r);g.closePath();}
+function poly(g,pts,frac){g.beginPath();g.moveTo(pts[0].x,pts[0].y);
+ if(frac>=1){for(let i=1;i<pts.length;i++)g.lineTo(pts[i].x,pts[i].y);g.stroke();return;}
+ let tot=0,seg=[];for(let i=0;i<pts.length-1;i++){const l=Math.hypot(pts[i+1].x-pts[i].x,pts[i+1].y-pts[i].y);seg.push(l);tot+=l;}
+ let need=tot*frac;for(let i=0;i<seg.length;i++){if(need>=seg[i]){g.lineTo(pts[i+1].x,pts[i+1].y);need-=seg[i];}
+   else{const t=need/seg[i];g.lineTo(pts[i].x+t*(pts[i+1].x-pts[i].x),pts[i].y+t*(pts[i+1].y-pts[i].y));break;}}g.stroke();}
+function drawPad(g,p,th){if(p.round){g.beginPath();g.arc(p.x,p.y,p.r,0,7);g.fillStyle=th.pad;g.fill();
+   if(p.r>3.6){g.beginPath();g.arc(p.x,p.y,p.r*.45,0,7);g.fillStyle=th.drill;g.fill();}}
+ else{g.fillStyle=th.pad;g.fillRect(p.x-p.w/2,p.y-p.h/2,p.w,p.h);}}
+
+function draw(g,m,th,t,hi,bg){
+ if(bg){g.fillStyle=bg;g.fillRect(0,0,m.W,m.H);}else g.clearRect(0,0,m.W,m.H);
+ const ph=(a,b)=>clamp((t-a)/(b-a),0,1);
+ g.lineCap='round';g.lineJoin='round';
+ const dim=hi?.14:1;
+ // board
+ g.save();g.globalAlpha=ph(0,.12);rr(g,m.board.x,m.board.y,m.board.w,m.board.h,m.board.r);g.fillStyle=th.board;g.fill();
+ const gr=g.createLinearGradient(m.board.x,m.board.y,m.board.x+m.board.w,m.board.y+m.board.h);
+ gr.addColorStop(0,th.sheen);gr.addColorStop(.5,'rgba(0,0,0,0)');gr.addColorStop(1,'rgba(0,0,0,.18)');g.fillStyle=gr;g.fill();g.restore();
+ g.save();rr(g,m.board.x,m.board.y,m.board.w,m.board.h,m.board.r);g.clip();
+ // ground pour
+ const pp=ph(.6,.82);if(pp>0){g.globalAlpha=pp*.42*dim;g.strokeStyle=th.trace;g.lineWidth=.9;
+   g.beginPath();m.pour.forEach(l=>{g.moveTo(l[0],l[1]);g.lineTo(l[2],l[3]);});g.stroke();g.globalAlpha=1;}
+ // traces (grow)
+ g.strokeStyle=th.trace;m.traces.forEach((tr,i)=>{const gp=ph(.38+(i/m.traces.length)*.2,.38+(i/m.traces.length)*.2+.09);
+   if(gp<=0)return;g.globalAlpha=hi?(tr.net===hi?1:.10):1;g.lineWidth=tr.w;poly(g,tr.pts,gp);});g.globalAlpha=1;
+ // pads + component copper/bodies
+ const cp=ph(.12,.4);if(cp>0){m.pads.forEach(p=>{g.globalAlpha=cp*(hi?(p.net===hi?1:.12):1);drawPad(g,p,th);});g.globalAlpha=1;}
+ // vias
+ const vp=ph(.5,.72);if(vp>0)m.vias.forEach(v=>{g.globalAlpha=vp*(hi?(v.net===hi?1:.12):1);
+   g.beginPath();g.arc(v.x,v.y,3.1,0,7);g.fillStyle=th.pad;g.fill();g.beginPath();g.arc(v.x,v.y,1.4,0,7);g.fillStyle=th.drill;g.fill();});g.globalAlpha=1;
+ // silkscreen
+ const sp=ph(.8,1);g.globalAlpha=sp;g.strokeStyle=th.silk;g.fillStyle=th.silk;g.lineWidth=1;
+ g.textAlign='center';g.textBaseline='middle';
+ m.comps.forEach(c=>{const a=sp*(hi?(c.nets.includes(hi)?1:.12):1);g.globalAlpha=a;
+   if(c.glow){g.save();g.globalAlpha=a*.9;const rg=g.createRadialGradient(c.x,c.y,0,c.x,c.y,c.w);
+     rg.addColorStop(0,th.glow);rg.addColorStop(1,'rgba(0,0,0,0)');g.fillStyle=rg;g.beginPath();g.arc(c.x,c.y,c.w,0,7);g.fill();g.restore();}
+   g.strokeStyle=th.silk;if(c.type==='TP'){g.beginPath();g.arc(c.x,c.y,c.w*.6,0,7);g.stroke();}
+   else{g.strokeRect(c.x-c.w/2,c.y-c.h/2,c.w,c.h);
+     if(c.chip){g.beginPath();g.arc(c.x-c.w/2+4,c.y-c.h/2+4,1.6,0,7);g.fillStyle=th.silk;g.fill();}}});
+ g.globalAlpha=sp;g.strokeStyle=th.silk;
+ m.arrows.forEach(ar=>{g.beginPath();g.moveTo(ar.x,ar.y);g.lineTo(ar.x,ar.to);g.moveTo(ar.x-3,ar.to-4);g.lineTo(ar.x,ar.to);g.lineTo(ar.x+3,ar.to-4);g.stroke();});
+ m.fids.forEach(f=>{g.beginPath();g.arc(f.x,f.y,4,0,7);g.fillStyle=th.pad;g.fill();g.beginPath();g.arc(f.x,f.y,7,0,7);g.strokeStyle=th.silk;g.stroke();});
+ m.labels.forEach(l=>{g.globalAlpha=sp*(l.dim?.6:1);g.fillStyle=th.silk;g.font=(l.s|0)+'px ui-monospace,Menlo,monospace';g.fillText(l.t,l.x,l.y);});
+ // title block
+ g.globalAlpha=sp;g.strokeStyle=th.silk;g.strokeRect(m.title.x,m.title.y,m.title.w,m.title.h);
+ g.textAlign='left';m.title.lines.forEach((ln,i)=>{g.fillStyle=th.silk;g.globalAlpha=sp*(i?.7:1);
+   g.font=(i?'8px':'bold 11px')+' ui-monospace,Menlo,monospace';g.fillText(ln,m.title.x+7,m.title.y+(i?18+i*8:11));});
+ g.restore();
+ // drill: mounting holes on top
+ g.globalAlpha=ph(.12,.3);m.holes.forEach(h=>{g.beginPath();g.arc(h.x,h.y,7,0,7);g.fillStyle=th.pad;g.fill();
+   g.beginPath();g.arc(h.x,h.y,4,0,7);g.fillStyle=th.drill;g.fill();});g.globalAlpha=1;
+}
+
+// ---------- loop / lifecycle ----------
+function resize(){const r=cv.getBoundingClientRect(),dpr=Math.min(devicePixelRatio||1,2);
+ cv.width=r.width*dpr;cv.height=r.height*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);
+ model=buildModel(r.width,r.height,S.seed);}
+let running=false;
+function frame(now){const t=clamp((now-animStart)/DUR,0,1);draw(ctx,model,THEMES[S.theme],t,hover);
+ if(t<1)requestAnimationFrame(frame);else running=false;}
+function kick(){if(!running){running=true;requestAnimationFrame(frame);}}
+function syncSeed(){const si=$('#seedin');if(si)si.value=S.seed;}
+function regen(reveal){const r=cv.getBoundingClientRect();model=buildModel(r.width,r.height,S.seed);
+ animStart=reveal?performance.now():performance.now()-DUR;syncSeed();writeHash();kick();}
+
+// ---------- SVG export (named layer groups) ----------
+function svg(m,th){const e=[],esc=s=>String(s).replace(/[<&>]/g,c=>({'<':'&lt;','&':'&amp;','>':'&gt;'}[c]));
+ const px=(p)=>p.round?`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${p.r.toFixed(1)}" fill="${th.pad}"/>`+(p.r>3.6?`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${(p.r*.45).toFixed(1)}" fill="${th.drill}"/>`:''):`<rect x="${(p.x-p.w/2).toFixed(1)}" y="${(p.y-p.h/2).toFixed(1)}" width="${p.w.toFixed(1)}" height="${p.h.toFixed(1)}" fill="${th.pad}"/>`;
+ e.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${m.W}" height="${m.H}" viewBox="0 0 ${m.W} ${m.H}">`);
+ e.push(`<g id="soldermask"><rect x="${m.board.x}" y="${m.board.y}" width="${m.board.w}" height="${m.board.h}" rx="${m.board.r.toFixed(1)}" fill="${th.board}"/></g>`);
+ e.push(`<clipPath id="bd"><rect x="${m.board.x}" y="${m.board.y}" width="${m.board.w}" height="${m.board.h}" rx="${m.board.r.toFixed(1)}"/></clipPath>`);
+ e.push(`<g id="copper" clip-path="url(#bd)">`);
+ e.push(`<g opacity="0.42" stroke="${th.trace}" stroke-width="0.9">`+m.pour.map(l=>`<line x1="${l[0].toFixed(1)}" y1="${l[1].toFixed(1)}" x2="${l[2].toFixed(1)}" y2="${l[3].toFixed(1)}"/>`).join('')+`</g>`);
+ e.push(`<g fill="none" stroke="${th.trace}" stroke-linecap="round" stroke-linejoin="round">`+m.traces.map(t=>`<polyline points="${t.pts.map(p=>p.x.toFixed(1)+','+p.y.toFixed(1)).join(' ')}" stroke-width="${t.w.toFixed(1)}"/>`).join('')+`</g>`);
+ e.push(m.pads.map(px).join(''));
+ e.push(m.vias.map(v=>`<circle cx="${v.x.toFixed(1)}" cy="${v.y.toFixed(1)}" r="3.1" fill="${th.pad}"/><circle cx="${v.x.toFixed(1)}" cy="${v.y.toFixed(1)}" r="1.4" fill="${th.drill}"/>`).join(''));
+ e.push(`</g>`);
+ e.push(`<g id="silkscreen" clip-path="url(#bd)" fill="none" stroke="${th.silk}" stroke-width="1">`);
+ m.comps.forEach(c=>{e.push(c.type==='TP'?`<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="${(c.w*.6).toFixed(1)}"/>`:`<rect x="${(c.x-c.w/2).toFixed(1)}" y="${(c.y-c.h/2).toFixed(1)}" width="${c.w.toFixed(1)}" height="${c.h.toFixed(1)}"/>`);});
+ e.push(m.fids.map(f=>`<circle cx="${f.x}" cy="${f.y}" r="7"/><circle cx="${f.x}" cy="${f.y}" r="4" fill="${th.pad}" stroke="none"/>`).join(''));
+ e.push(`<g fill="${th.silk}" stroke="none" font-family="monospace" text-anchor="middle">`+m.labels.map(l=>`<text x="${l.x.toFixed(1)}" y="${(l.y+3).toFixed(1)}" font-size="${l.s|0}" opacity="${l.dim?.6:1}">${esc(l.t)}</text>`).join('')+`</g>`);
+ e.push(`<rect x="${m.title.x}" y="${m.title.y}" width="${m.title.w}" height="${m.title.h}"/>`);
+ e.push(`<g fill="${th.silk}" stroke="none" font-family="monospace">`+m.title.lines.map((ln,i)=>`<text x="${m.title.x+7}" y="${m.title.y+(i?18+i*8:13)}" font-size="${i?8:11}" font-weight="${i?'normal':'bold'}" opacity="${i?.7:1}">${esc(ln)}</text>`).join('')+`</g></g>`);
+ e.push(`<g id="drill">`+m.holes.map(h=>`<circle cx="${h.x.toFixed(1)}" cy="${h.y.toFixed(1)}" r="7" fill="${th.pad}"/><circle cx="${h.x.toFixed(1)}" cy="${h.y.toFixed(1)}" r="4" fill="${th.drill}"/>`).join('')+`</g>`);
+ e.push('</svg>');return e.join('');}
+function dl(name,data,type){const b=new Blob([data],{type});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=name;a.click();URL.revokeObjectURL(u);}
+
+// ---------- UI ----------
+function chips(host,items,key,cb){host.innerHTML='';items.forEach(([v,lab])=>{const b=document.createElement('button');b.className='chip'+(S[key]===v?' on':'');b.textContent=lab;
+ b.onclick=()=>{S[key]=v;[...host.children].forEach(x=>x.classList.remove('on'));b.classList.add('on');cb();};host.appendChild(b);});}
+function buildUI(){
+ chips($('#arch'),Object.entries(ARCH).map(([k,a])=>[k,a.name]),'arch',()=>regen(true));
+ chips($('#ang'),[['auto','Auto'],['90','90° L'],['45','45°']],'ang',()=>regen(false));
+ const mk=$('#mask');Object.entries(THEMES).forEach(([k,t])=>{const b=document.createElement('button');b.style.background=t.board;b.title=t.n;
+   b.className=S.theme===k?'on':'';b.onclick=()=>{S.theme=k;[...mk.children].forEach(x=>x.classList.remove('on'));b.classList.add('on');writeHash();kick();};mk.appendChild(b);});
+ const sl=$('#sliders');sl.innerHTML='';SLD.forEach(([k,lab,mn,mx,st])=>{const row=document.createElement('div');row.className='row';
+   row.innerHTML=`<label>${lab}<span id="v_${k}">${S[k]}</span></label><input type="range" min="${mn}" max="${mx}" step="${st}" value="${S[k]}" id="s_${k}">`;
+   sl.appendChild(row);const inp=row.querySelector('input');
+   inp.oninput=()=>{S[k]=+inp.value;$('#v_'+k).textContent=(+inp.value).toFixed(2).replace(/\.?0+$/,'');regen(false);};});
+}
+
+function writeHash(){location.replace('#'+[S.arch,S.seed,S.dens,S.count,S.ang,S.pad,S.silk,S.round,S.via,S.sym,S.theme].join(','));}
+function readHash(){const p=decodeURIComponent(location.hash.slice(1)).split(',');if(p.length<11)return;
+ if(ARCH[p[0]])S.arch=p[0];
+ const sv=parseInt(p[1],10);if(Number.isFinite(sv))S.seed=sv>>>0;
+ if(['auto','90','45'].includes(p[4]))S.ang=p[4];
+ if(THEMES[p[10]])S.theme=p[10];
+ const idx={dens:2,count:3,pad:5,silk:6,round:7,via:8,sym:9};
+ SLD.forEach(([k,,mn,mx])=>{const x=+p[idx[k]];if(Number.isFinite(x))S[k]=clamp(x,mn,mx);});}
+
+// hover / tooltip
+function hit(x,y){for(const c of model.comps){const pw=Math.max(c.w,10)/2+7,ph2=Math.max(c.h,10)/2+7;
+ if(Math.abs(x-c.x)<pw&&Math.abs(y-c.y)<ph2)return c;}return null;}
+function tipHTML(f){return `<b>${f.ref}</b> <span>${f.val}</span><br><span>net ${(f.nets[0]).toString(16).toUpperCase()} · ${f.padIdx.length} pad${f.padIdx.length>1?'s':''}</span>`;}
+function placeTip(cx,cy){const w=tip.offsetWidth,h=tip.offsetHeight;
+ let l=cx+14;if(l+w>innerWidth)l=cx-w-14;let tp=cy+14;if(tp+h>innerHeight)tp=cy-h-14;
+ tip.style.left=Math.max(4,l)+'px';tip.style.top=Math.max(4,tp)+'px';}
+function setHover(nh){if(nh!==hover){hover=nh;kick();}}
+cv.addEventListener('mousemove',e=>{const r=cv.getBoundingClientRect(),f=hit(e.clientX-r.left,e.clientY-r.top);
+ cv.style.cursor=f?'pointer':'crosshair';
+ if(f){setHover(f.nets[0]);tip.innerHTML=tipHTML(f);tip.style.opacity=1;placeTip(e.clientX,e.clientY);}
+ else{setHover(null);tip.style.opacity=0;}});
+cv.addEventListener('mouseleave',()=>{setHover(null);tip.style.opacity=0;cv.style.cursor='crosshair';});
+// touch: tap a part to trace its net, tap empty space to clear
+cv.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse')return;
+ const r=cv.getBoundingClientRect(),f=hit(e.clientX-r.left,e.clientY-r.top);
+ if(f){setHover(f.nets[0]);tip.innerHTML=tipHTML(f);tip.style.opacity=1;placeTip(e.clientX,e.clientY);}
+ else{setHover(null);tip.style.opacity=0;}});
+
+// actions
+const flash=(b,msg,rest)=>{b.textContent=msg;setTimeout(()=>b.textContent=rest,1100);};
+$('#reseed').onclick=()=>{S.seed=(Math.random()*1e9)|0;regen(true);};
+const si=$('#seedin');si.value=S.seed;
+si.onchange=()=>{const v=parseInt(si.value,10);if(Number.isFinite(v)){S.seed=v>>>0;regen(true);}else si.value=S.seed;};
+$('#png').onclick=()=>{const b=$('#png');draw(ctx,model,THEMES[S.theme],1,null);
+ cv.toBlob(bl=>{dl('fiducia-'+S.seed+'.png',bl,'image/png');flash(b,'Saved!','Export PNG');},'image/png');};
+$('#svg').onclick=()=>{const b=$('#svg');dl('fiducia-'+S.seed+'.svg',svg(model,THEMES[S.theme]),'image/svg+xml');flash(b,'Saved!','Export SVG');};
+$('#link').onclick=()=>{writeHash();const b=$('#link');
+ if(navigator.clipboard&&navigator.clipboard.writeText)
+   navigator.clipboard.writeText(location.href).then(()=>flash(b,'Copied!','Copy link')).catch(()=>flash(b,'Copy from URL bar','Copy link'));
+ else flash(b,'Copy from URL bar','Copy link');};
+$('#tile').onclick=()=>{const b=$('#tile');b.textContent='Rendering…';
+ const G=3,cellW=440,cellH=320,pad=16,off=document.createElement('canvas');
+ off.width=G*cellW+(G+1)*pad;off.height=G*cellH+(G+1)*pad;const o=off.getContext('2d');o.fillStyle='#0c0f13';o.fillRect(0,0,off.width,off.height);
+ const th=THEMES[S.theme];for(let i=0;i<G*G;i++){const cm=buildModel(cellW,cellH,(S.seed+i*97)>>>0);
+   o.save();o.translate(pad+(i%G)*(cellW+pad),pad+((i/G|0))*(cellH+pad));draw(o,cm,th,1,null,'#0c0f13');o.restore();}
+ off.toBlob(bl=>{dl('fiducia-tile-'+S.seed+'.png',bl,'image/png');flash(b,'Saved!','Tile poster');},'image/png');};
+
+// boot
+readHash();resize();buildUI();syncSeed();animStart=performance.now();kick();
+addEventListener('resize',()=>{resize();animStart=performance.now()-DUR;kick();});
+</script>
+</body>
+</html>

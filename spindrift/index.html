@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Spindrift — a pocket particle-fluid</title>
+<style>
+  :root{ --ink:#e9eef6; --panel:rgba(12,16,24,.62); --line:rgba(255,255,255,.14); }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; height:100%; overflow:hidden; background:#05070b;
+    font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; color:var(--ink); }
+  #stage{ position:fixed; inset:0; touch-action:none; display:block; }
+  .bar{ position:fixed; left:0; right:0; display:flex; gap:8px; align-items:center;
+    padding:10px 12px; z-index:5; pointer-events:none; }
+  .bar > *{ pointer-events:auto; }
+  #top{ top:0; flex-wrap:wrap; }
+  #bot{ bottom:0; justify-content:center; flex-wrap:wrap; gap:14px; }
+  .brand{ font-weight:700; letter-spacing:.5px; margin-right:6px; }
+  .brand small{ font-weight:400; opacity:.6; letter-spacing:0; }
+  .chip,.btn{ border:1px solid var(--line); background:var(--panel); color:var(--ink);
+    padding:6px 11px; border-radius:999px; cursor:pointer; font-size:13px;
+    -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);
+    transition:background .15s,border-color .15s,transform .05s; }
+  .chip:hover,.btn:hover{ border-color:rgba(255,255,255,.4); }
+  .chip:active,.btn:active{ transform:translateY(1px); }
+  .chip:focus-visible,.btn:focus-visible,.sl input:focus-visible{ outline:2px solid #7ed6ff; outline-offset:2px; }
+  .btn:disabled{ opacity:.4; cursor:default; }
+  .btn:disabled:hover{ border-color:var(--line); }
+  .chip.on{ background:rgba(255,255,255,.92); color:#0a0d12; border-color:#fff; font-weight:600; }
+  .btn.rec{ color:#ff6b6b; }
+  .btn.rec.on{ background:#ff3b3b; color:#fff; border-color:#ff3b3b; animation:pulse 1s infinite; }
+  @keyframes pulse{ 50%{ opacity:.55; } }
+  .spacer{ flex:1; }
+  .sl{ display:flex; flex-direction:column; align-items:center; gap:3px; min-width:120px;
+    background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:7px 12px 5px;
+    -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px); }
+  .sl label{ font-size:11px; letter-spacing:.6px; text-transform:uppercase; opacity:.75; }
+  .sl label b{ font-variant-numeric:tabular-nums; opacity:.9; }
+  .sl input{ width:130px; accent-color:#7ed6ff; }
+  .hint{ position:fixed; left:50%; top:52px; transform:translateX(-50%); z-index:4;
+    font-size:12px; opacity:.55; pointer-events:none; text-align:center; max-width:92vw; }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<svg width="0" height="0" style="position:absolute"><defs>
+  <filter id="goo"><feGaussianBlur in="SourceGraphic" stdDeviation="8" result="b"/>
+  <feColorMatrix in="b" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 24 -9"/></filter>
+</defs></svg>
+
+<div class="bar" id="top">
+  <span class="brand">Spindrift <small>tilt · stir · morph</small></span>
+  <button class="chip" data-preset="water">Water</button>
+  <button class="chip" data-preset="honey">Honey</button>
+  <button class="chip" data-preset="slime">Slime</button>
+  <button class="chip" data-preset="mercury">Mercury</button>
+  <span class="spacer"></span>
+  <button class="btn" id="peg">+ Peg</button>
+  <button class="btn" id="reset">Reset</button>
+  <button class="btn" id="share">Share</button>
+  <button class="btn" id="motion">Tilt: motion</button>
+  <button class="btn rec" id="rec">● Clip</button>
+</div>
+<div class="hint">tap to add liquid · drag to stir · right-click / long-press to remove · drag the dial to pour · grab a peg to move it</div>
+<div class="bar" id="bot">
+  <div class="sl"><label>Viscosity <b id="s_v_v">0.00</b></label><input id="s_v" type="range" min="0" max="1" step="0.01"></div>
+  <div class="sl"><label>Elasticity <b id="s_e_v">0.00</b></label><input id="s_e" type="range" min="0" max="1" step="0.01"></div>
+  <div class="sl"><label>Plasticity <b id="s_l_v">0.00</b></label><input id="s_l" type="range" min="0" max="1" step="0.01"></div>
+</div>
+
+<script>
+"use strict";
+const cv = document.getElementById('stage'), ctx = cv.getContext('2d');
+const field = document.createElement('canvas'), fx = field.getContext('2d');
+
+// ---- Presets: v=viscosity e=elasticity l=plasticity, plus palette ------------
+const PRESETS = {
+  water:   {v:.14,e:0,   l:.92, calm:[22,86,164], hot:[132,222,255], bg:['#071a2b','#0b2f4c'], sheen:.28},
+  honey:   {v:.78,e:.16, l:.86, calm:[122,72,10], hot:[255,206,74],  bg:['#241505','#402808'], sheen:.36},
+  slime:   {v:.42,e:.82, l:.12, calm:[22,92,32],  hot:[162,255,92],  bg:['#07160a','#0d2612'], sheen:.30},
+  mercury: {v:.10,e:.06, l:.90, calm:[74,82,96],  hot:[234,242,255], bg:['#0a0c10','#171d27'], sheen:.62},
+};
+const MAXP = 720, MAXV = 8, H = 22;          // interaction radius
+const K = 0.35, KNEAR = 0.55, RHO0 = 3.2, DT = 1, GYIELD = 0.12, G = 0.20;
+
+// ---- State -------------------------------------------------------------------
+let preset='water', pal=PRESETS.water, sv=pal.v, se=pal.e, sl=pal.l;
+let grav={x:0,y:G};                          // gravity vector (px/step^2)
+let obst=[];                                 // {x,y,r} in px
+let jar={x0:0,y0:0,x1:0,y1:0};
+let dial={x:0,y:0,r:52};
+// particles
+let px=[],py=[],ox=[],oy=[],vx=[],vy=[];
+let springs=new Map();
+let seenSprings=new Set();                   // spring keys touched this step (for pruning)
+let N=0;
+
+// ---- Sizing ------------------------------------------------------------------
+let pw=innerWidth||1, ph=innerHeight||1;            // previous viewport (for rescaling pegs)
+function resize(){
+  const w=innerWidth, h=innerHeight, dpr=Math.min(devicePixelRatio||1,2);
+  cv.width=w*dpr; cv.height=h*dpr; cv.style.width=w+'px'; cv.style.height=h+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  field.width=cv.width; field.height=cv.height; fx.setTransform(dpr,0,0,dpr,0,0);
+  // rescale obstacle pegs (stored in absolute px) to the new viewport
+  if(obst.length && pw && ph){ const rx=w/pw, ry=h/ph; for(const o of obst){ o.x*=rx; o.y*=ry; } }
+  jar={x0:28,y0:88,x1:w-28,y1:h-78};
+  dial={x:66,y:h-70,r:46};
+  for(const o of obst){ o.x=Math.max(jar.x0,Math.min(jar.x1,o.x)); o.y=Math.max(jar.y0,Math.min(jar.y1,o.y)); }
+  pw=w; ph=h;
+  clampAll(); placeHint();
+}
+function placeHint(){ const t=document.getElementById('top'), hint=document.querySelector('.hint');
+  if(t&&hint) hint.style.top=(t.offsetHeight+6)+'px'; }
+addEventListener('resize',resize);
+
+// ---- Particle helpers --------------------------------------------------------
+function spawn(x,y){ if(N>=MAXP) return;
+  px.push(x); py.push(y); ox.push(x); oy.push(y);
+  vx.push((Math.random()-.5)*.4); vy.push((Math.random()-.5)*.4); N++; }
+function initFill(count){
+  px=[];py=[];ox=[];oy=[];vx=[];vy=[];N=0; springs.clear();
+  const w=jar.x1-jar.x0, gap=H*0.62, cols=Math.max(1,Math.floor(w/gap));
+  let i=0; outer:
+  for(let r=0;;r++) for(let c=0;c<cols;c++){
+    if(i>=count) break outer;
+    spawn(jar.x0+8+c*gap+(r%2)*gap*.5, jar.y0+8+r*gap); i++;
+  }
+}
+function addBlob(x,y){ for(let i=0;i<28&&N<MAXP;i++)
+  spawn(x+(Math.random()-.5)*24, y+(Math.random()-.5)*24); springs.clear(); pushHash(); }
+function removeNear(x,y){ const R=34;
+  for(let i=N-1;i>=0;i--){ const dx=px[i]-x, dy=py[i]-y;
+    if(dx*dx+dy*dy<R*R){ px.splice(i,1);py.splice(i,1);ox.splice(i,1);oy.splice(i,1);
+      vx.splice(i,1);vy.splice(i,1); N--; } }
+  springs.clear(); pushHash(); }
+function clampAll(){ for(let i=0;i<N;i++){
+  px[i]=Math.max(jar.x0,Math.min(jar.x1,px[i])); py[i]=Math.max(jar.y0,Math.min(jar.y1,py[i])); } }
+
+// ---- Spatial hash ------------------------------------------------------------
+let grid=new Map();
+function gkey(cx,cy){ return cx*46341+cy; }
+function buildGrid(){ grid.clear();
+  for(let i=0;i<N;i++){ const k=gkey(Math.floor(px[i]/H),Math.floor(py[i]/H));
+    let b=grid.get(k); if(!b){ b=[]; grid.set(k,b);} b.push(i); } }
+// neighbour pair buffers (rebuilt each step)
+let pi=[],pj=[],pnx=[],pny=[],pr=[];
+function buildPairs(){ pi.length=pj.length=pnx.length=pny.length=pr.length=0;
+  for(let i=0;i<N;i++){ const cx=Math.floor(px[i]/H), cy=Math.floor(py[i]/H);
+    for(let a=-1;a<=1;a++) for(let b=-1;b<=1;b++){ const bkt=grid.get(gkey(cx+a,cy+b));
+      if(!bkt) continue;
+      for(const j of bkt){ if(j<=i) continue;
+        const dx=px[j]-px[i], dy=py[j]-py[i], r=Math.hypot(dx,dy);
+        if(r<H && r>1e-4){ pi.push(i); pj.push(j); pnx.push(dx/r); pny.push(dy/r); pr.push(r); } } } } }
+
+// ---- Simulation (Clavet double-density relaxation + viscoelastic springs) ----
+function step(){
+  buildGrid(); buildPairs();
+  const beta=sv*0.34, sigma=sv*0.06;          // quadratic + linear viscosity
+  const kspring=se*0.30, useSpr=se>0.02;      // elasticity
+  const alpha=sl*0.30;                        // plasticity (rest-length creep)
+  const P=pr.length;
+  // gravity
+  for(let i=0;i<N;i++){ vx[i]+=grav.x*DT; vy[i]+=grav.y*DT; }
+  // viscosity impulses
+  if(beta>0||sigma>0) for(let p=0;p<P;p++){ const i=pi[p],j=pj[p],q=pr[p]/H;
+    const nx=pnx[p],ny=pny[p], u=(vx[i]-vx[j])*nx+(vy[i]-vy[j])*ny;
+    if(u>0){ const im=DT*(1-q)*(sigma*u+beta*u*u), ix=im*nx*.5, iy=im*ny*.5;
+      vx[i]-=ix; vy[i]-=iy; vx[j]+=ix; vy[j]+=iy; } }
+  // advance + remember previous
+  for(let i=0;i<N;i++){ ox[i]=px[i]; oy[i]=py[i]; px[i]+=vx[i]*DT; py[i]+=vy[i]*DT; }
+  // viscoelastic springs
+  if(useSpr){
+    seenSprings.clear();
+    for(let p=0;p<P;p++){ const i=pi[p],j=pj[p],r=pr[p],key=i*MAXP+j;
+      let L=springs.get(key); if(L===undefined) L=r;
+      const d=GYIELD*L;
+      if(r>L+d) L+=DT*alpha*(r-L-d); else if(r<L-d) L-=DT*alpha*(L-d-r);
+      if(L>H){ springs.delete(key); continue; } springs.set(key,L); seenSprings.add(key);
+      const disp=DT*DT*kspring*(1-L/H)*(L-r), dx=disp*pnx[p]*.5, dy=disp*pny[p]*.5;
+      px[i]-=dx; py[i]-=dy; px[j]+=dx; py[j]+=dy; }
+    // prune orphaned springs: pairs that separated (r>=H) or otherwise weren't visited this step
+    if(springs.size>seenSprings.size) for(const key of springs.keys()) if(!seenSprings.has(key)) springs.delete(key);
+  } else if(springs.size) springs.clear();
+  // double-density relaxation
+  const rho=new Float32Array(N), rhon=new Float32Array(N);
+  for(let p=0;p<P;p++){ const q=1-pr[p]/H, q2=q*q;
+    rho[pi[p]]+=q2; rho[pj[p]]+=q2; rhon[pi[p]]+=q2*q; rhon[pj[p]]+=q2*q; }
+  const pre=new Float32Array(N), pren=new Float32Array(N);
+  for(let i=0;i<N;i++){ pre[i]=K*(rho[i]-RHO0); pren[i]=KNEAR*rhon[i]; }
+  for(let p=0;p<P;p++){ const i=pi[p],j=pj[p],q=1-pr[p]/H;
+    let dm=DT*DT*((pre[i]+pre[j])*q+(pren[i]+pren[j])*q*q); if(dm>H) dm=H;   // clamp near term
+    const dx=dm*pnx[p]*.5, dy=dm*pny[p]*.5;
+    px[i]-=dx; py[i]-=dy; px[j]+=dx; py[j]+=dy; }
+  // collisions: jar walls + obstacles
+  for(let i=0;i<N;i++){
+    if(px[i]<jar.x0){ px[i]=jar.x0; } else if(px[i]>jar.x1){ px[i]=jar.x1; }
+    if(py[i]<jar.y0){ py[i]=jar.y0; } else if(py[i]>jar.y1){ py[i]=jar.y1; }
+    for(const o of obst){ const dx=px[i]-o.x, dy=py[i]-o.y, r=Math.hypot(dx,dy);
+      if(r<o.r && r>1e-4){ const s=o.r/r; px[i]=o.x+dx*s; py[i]=o.y+dy*s; } }
+  }
+  // recompute velocity, clamp
+  for(let i=0;i<N;i++){ let ux=(px[i]-ox[i])/DT, uy=(py[i]-oy[i])/DT;
+    const sp=Math.hypot(ux,uy); if(sp>MAXV){ ux*=MAXV/sp; uy*=MAXV/sp; }
+    vx[i]=ux; vy[i]=uy; }
+}
+
+// ---- Render (speed-tinted metaballs via goo filter + preset sheen) -----------
+function lerp(a,b,t){ return a+(b-a)*t; }
+function render(){
+  const w=innerWidth, h=innerHeight;
+  // background
+  const bg=ctx.createLinearGradient(0,0,0,h);
+  bg.addColorStop(0,pal.bg[0]); bg.addColorStop(1,pal.bg[1]);
+  ctx.fillStyle=bg; ctx.fillRect(0,0,w,h);
+  // metaball field (offscreen)
+  fx.clearRect(0,0,w,h); fx.globalCompositeOperation='source-over';
+  const rb=H*1.15;
+  for(let i=0;i<N;i++){ const t=Math.min(1,Math.hypot(vx[i],vy[i])/MAXV);
+    const r=lerp(pal.calm[0],pal.hot[0],t)|0, g=lerp(pal.calm[1],pal.hot[1],t)|0, b=lerp(pal.calm[2],pal.hot[2],t)|0;
+    const gr=fx.createRadialGradient(px[i],py[i],0,px[i],py[i],rb);
+    gr.addColorStop(0,`rgba(${r},${g},${b},.95)`); gr.addColorStop(1,`rgba(${r},${g},${b},0)`);
+    fx.fillStyle=gr; fx.fillRect(px[i]-rb,py[i]-rb,rb*2,rb*2); }
+  // gooey isosurface
+  ctx.save(); ctx.filter='url(#goo)'; ctx.drawImage(field,0,0,w,h); ctx.restore();
+  // specular sheen + rim light
+  ctx.globalCompositeOperation='screen';
+  const sh=ctx.createLinearGradient(0,jar.y0,0,jar.y1);
+  sh.addColorStop(0,`rgba(255,255,255,${pal.sheen})`); sh.addColorStop(.28,'rgba(255,255,255,0)');
+  ctx.filter='url(#goo)'; ctx.globalAlpha=.85; ctx.drawImage(field,0,0,w,h); // brighten inside
+  ctx.filter='none'; ctx.globalAlpha=1; ctx.fillStyle=sh; ctx.fillRect(0,0,w,h);
+  ctx.globalCompositeOperation='source-over';
+  // obstacles
+  for(const o of obst){ const g=ctx.createRadialGradient(o.x-o.r*.35,o.y-o.r*.35,o.r*.15,o.x,o.y,o.r);
+    g.addColorStop(0,'#5a6474'); g.addColorStop(1,'#1a1f2a');
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(o.x,o.y,o.r,0,7); ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,.25)'; ctx.lineWidth=1.5; ctx.stroke(); }
+  // jar frame
+  ctx.strokeStyle='rgba(255,255,255,.16)'; ctx.lineWidth=2;
+  ctx.strokeRect(jar.x0-2,jar.y0-2,jar.x1-jar.x0+4,jar.y1-jar.y0+4);
+  // gravity dial
+  ctx.beginPath(); ctx.arc(dial.x,dial.y,dial.r,0,7);
+  ctx.fillStyle='rgba(10,14,22,.55)'; ctx.fill();
+  ctx.strokeStyle='rgba(255,255,255,.25)'; ctx.lineWidth=1.5; ctx.stroke();
+  const gm=Math.hypot(grav.x,grav.y)||1e-6, hx=dial.x+grav.x/G*dial.r, hy=dial.y+grav.y/G*dial.r;
+  ctx.beginPath(); ctx.moveTo(dial.x,dial.y); ctx.lineTo(hx,hy);
+  ctx.strokeStyle='#7ed6ff'; ctx.lineWidth=2; ctx.stroke();
+  ctx.beginPath(); ctx.arc(hx,hy,7,0,7); ctx.fillStyle='#7ed6ff'; ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.5)'; ctx.font='10px system-ui';
+  ctx.textAlign='center'; ctx.fillText('gravity',dial.x,dial.y+dial.r+14);
+  ctx.fillText(N+' drops',w-52,74); ctx.textAlign='left';
+}
+
+let acc=0,last=performance.now();
+function loop(now){ acc+=Math.min(now-last,50); last=now;
+  while(acc>=16){ step(); acc-=16; }
+  render(); requestAnimationFrame(loop); }
+
+// ---- Input -------------------------------------------------------------------
+let mode=null, dragI=-1, lastP=null, downP=null, downT=0, moved=false, longPressed=false, lpTimer=0;
+function pos(e){ const r=cv.getBoundingClientRect(); return {x:e.clientX-r.left,y:e.clientY-r.top}; }
+function hitPeg(p){ for(let i=0;i<obst.length;i++){ const o=obst[i];
+  if(Math.hypot(p.x-o.x,p.y-o.y)<o.r+8) return i; } return -1; }
+cv.addEventListener('pointerdown',e=>{ if(e.button===2) return; cv.setPointerCapture(e.pointerId);
+  const p=pos(e);
+  if(Math.hypot(p.x-dial.x,p.y-dial.y)<dial.r+10){ mode='grav'; setGrav(p); return; }
+  const pk=hitPeg(p); if(pk>=0){ mode='peg'; dragI=pk; return; }
+  mode='fluid'; downP=p; lastP=p; downT=performance.now(); moved=false; longPressed=false;
+  clearTimeout(lpTimer); lpTimer=setTimeout(()=>{ if(mode==='fluid'&&!moved){ longPressed=true; removeNear(downP.x,downP.y); } },550); });
+cv.addEventListener('pointermove',e=>{ if(!mode) return; const p=pos(e);
+  if(mode==='grav'){ setGrav(p); }
+  else if(mode==='peg'){ const o=obst[dragI];
+    o.x=Math.max(jar.x0,Math.min(jar.x1,p.x)); o.y=Math.max(jar.y0,Math.min(jar.y1,p.y)); pushHash(); }
+  else if(mode==='fluid'){ if(Math.hypot(p.x-downP.x,p.y-downP.y)>4){ moved=true; clearTimeout(lpTimer); }
+    stir(p,p.x-lastP.x,p.y-lastP.y); lastP=p; } });
+cv.addEventListener('pointerup',e=>{ clearTimeout(lpTimer);
+  if(mode==='fluid' && !moved && !longPressed && performance.now()-downT<350) addBlob(downP.x,downP.y);
+  mode=null; dragI=-1; });
+cv.addEventListener('contextmenu',e=>{ e.preventDefault(); const p=pos(e); removeNear(p.x,p.y); });
+cv.addEventListener('dblclick',e=>{ const p=pos(e); const k=hitPeg(p);
+  if(k>=0){ obst.splice(k,1); pushHash(); } });
+function setGrav(p){ let dx=p.x-dial.x, dy=p.y-dial.y, m=Math.hypot(dx,dy)||1e-6;
+  const s=G*Math.min(1,m/dial.r)/m; grav.x=dx*s; grav.y=dy*s; pushHash(); }
+function stir(p,dx,dy){ const R=48;
+  for(let i=0;i<N;i++){ const ex=px[i]-p.x, ey=py[i]-p.y, d=Math.hypot(ex,ey);
+    if(d<R){ const f=(1-d/R)*0.6; vx[i]+=dx*f; vy[i]+=dy*f; } } }
+
+// ---- Device orientation tilt -------------------------------------------------
+let motionOn=false;
+function onOrient(e){ if(!motionOn||e.gamma==null) return;
+  grav.x=Math.max(-1,Math.min(1,e.gamma/45))*G;
+  grav.y=Math.max(-1,Math.min(1,(e.beta-35)/45))*G; }
+const motionBtn=document.getElementById('motion');
+const canTilt=(navigator.maxTouchPoints>0 || 'ontouchstart' in window) && typeof DeviceOrientationEvent!=='undefined';
+if(!canTilt){ motionBtn.disabled=true; motionBtn.textContent='Tilt: n/a'; motionBtn.title='Device tilt needs a phone or tablet'; }
+else if(!window.isSecureContext){ motionBtn.disabled=true; motionBtn.textContent='Tilt: needs https'; motionBtn.title='Serve this page over HTTPS to use device tilt'; }
+motionBtn.onclick=function(){
+  const enable=()=>{ motionOn=!motionOn; this.classList.toggle('on',motionOn);
+    this.textContent=motionOn?'Tilt: ON':'Tilt: motion';
+    if(motionOn) addEventListener('deviceorientation',onOrient); else removeEventListener('deviceorientation',onOrient); };
+  if(typeof DeviceOrientationEvent!=='undefined' && DeviceOrientationEvent.requestPermission){
+    DeviceOrientationEvent.requestPermission().then(s=>{ if(s==='granted') enable(); }).catch(()=>{});
+  } else enable();
+};
+
+// ---- Clip capture (MediaRecorder over canvas stream) -------------------------
+let rec=null,chunks=[];
+const recBtn=document.getElementById('rec');
+function pickMime(){ if(!window.MediaRecorder||!MediaRecorder.isTypeSupported) return '';
+  for(const m of ['video/webm;codecs=vp9','video/webm','video/mp4']) if(MediaRecorder.isTypeSupported(m)) return m;
+  return ''; }
+if(!cv.captureStream || !window.MediaRecorder || !pickMime()){
+  recBtn.disabled=true; recBtn.textContent='Clip n/a'; recBtn.title='Recording is not supported in this browser'; }
+recBtn.onclick=function(){
+  if(rec&&rec.state==='recording'){ rec.stop(); return; }
+  const mime=pickMime();
+  try{ const st=cv.captureStream(30); rec=new MediaRecorder(st, mime?{mimeType:mime}:undefined);
+    chunks=[]; rec.ondataavailable=e=>e.data.size&&chunks.push(e.data);
+    rec.onstop=()=>{ const type=(rec&&rec.mimeType)||mime||'video/webm', ext=type.indexOf('mp4')>=0?'mp4':'webm';
+      const blob=new Blob(chunks,{type}), url=URL.createObjectURL(blob);
+      const a=document.createElement('a'); a.href=url; a.download='spindrift.'+ext; a.click();
+      setTimeout(()=>URL.revokeObjectURL(url),4000);
+      this.classList.remove('on'); this.textContent='● Clip'; };
+    rec.start(); this.classList.add('on'); this.textContent='■ Stop';
+  }catch(err){ this.classList.remove('on'); this.textContent='no rec'; setTimeout(()=>{ this.textContent='● Clip'; },2000); }
+};
+document.getElementById('peg').onclick=()=>{ if(obst.length<12){
+  obst.push({x:(jar.x0+jar.x1)/2,y:(jar.y0+jar.y1)/2,r:26}); pushHash(); } };
+
+// ---- Presets + sliders -------------------------------------------------------
+function applyPreset(name){ preset=name; pal=PRESETS[name]; sv=pal.v; se=pal.e; sl=pal.l;
+  syncSliders(); document.querySelectorAll('.chip[data-preset]').forEach(c=>c.classList.toggle('on',c.dataset.preset===name)); }
+function syncSliders(){ s_v.value=sv; s_e.value=se; s_l.value=sl; slReadout(); }
+function slReadout(){ s_v_v.textContent=(+s_v.value).toFixed(2); s_e_v.textContent=(+s_e.value).toFixed(2); s_l_v.textContent=(+s_l.value).toFixed(2); }
+const s_v=document.getElementById('s_v'), s_e=document.getElementById('s_e'), s_l=document.getElementById('s_l');
+const s_v_v=document.getElementById('s_v_v'), s_e_v=document.getElementById('s_e_v'), s_l_v=document.getElementById('s_l_v');
+document.querySelectorAll('.chip[data-preset]').forEach(c=>c.onclick=()=>{ applyPreset(c.dataset.preset); pushHash(); });
+[s_v,s_e,s_l].forEach(s=>s.oninput=()=>{ sv=+s_v.value; se=+s_e.value; sl=+s_l.value; springs.clear(); slReadout();
+  document.querySelectorAll('.chip[data-preset]').forEach(c=>c.classList.remove('on')); pushHash(); });
+document.getElementById('reset').onclick=()=>{ obst=[]; grav={x:0,y:G}; applyPreset('water'); initFill(480); pushHash(); };
+document.getElementById('share').onclick=function(){ writeHash();
+  const flash=t=>{ this.textContent=t; setTimeout(()=>{ this.textContent='Share'; },1200); };
+  if(navigator.clipboard&&navigator.clipboard.writeText)
+    navigator.clipboard.writeText(location.href).then(()=>flash('Copied!')).catch(()=>flash('Link in URL'));
+  else flash('Link in URL'); };
+
+// ---- URL hash state (shareable) ----------------------------------------------
+let hashT=0;
+function writeHash(){
+  const w=innerWidth||1,h=innerHeight||1;
+  const o=obst.map(o=>`${(o.x/w).toFixed(3)},${(o.y/h).toFixed(3)},${(o.r).toFixed(0)}`).join(';');
+  const p=new URLSearchParams({ p:preset, n:N, gx:(grav.x/G).toFixed(3), gy:(grav.y/G).toFixed(3),
+    v:sv.toFixed(2), e:se.toFixed(2), l:sl.toFixed(2) });
+  if(o) p.set('o',o);
+  // replaceState can throw under opaque (file://) origins in some browsers — degrade gracefully
+  try{ history.replaceState(null,'','#'+p.toString()); }
+  catch(err){ try{ location.hash=p.toString(); }catch(_){ /* give up silently */ } }
+}
+function pushHash(){ clearTimeout(hashT); hashT=setTimeout(writeHash,250); }
+function readHash(){ const q=new URLSearchParams(location.hash.slice(1));
+  const name=q.get('p'); if(name&&PRESETS[name]) applyPreset(name); else applyPreset('water');
+  if(q.has('v')){ sv=+q.get('v'); se=+q.get('e'); sl=+q.get('l'); syncSliders(); }
+  if(q.has('gx')){ grav.x=(+q.get('gx'))*G; grav.y=(+q.get('gy'))*G; }
+  const w=innerWidth||1,h=innerHeight||1;
+  if(q.get('o')) obst=q.get('o').split(';').map(s=>{ const a=s.split(','); return {x:a[0]*w,y:a[1]*h,r:+a[2]||26}; });
+  // null-aware so a shared empty jar (n=0) restores empty, not the default 480
+  const n=q.has('n')?(parseInt(q.get('n'),10)||0):480; initFill(Math.max(0,Math.min(n,MAXP))); }
+
+// ---- Boot --------------------------------------------------------------------
+// fade the onboarding hint away after the first interaction
+addEventListener('pointerdown',()=>{ const hint=document.querySelector('.hint');
+  if(hint){ hint.style.transition='opacity .6s'; hint.style.opacity='0'; setTimeout(()=>{ hint.style.display='none'; },700); } },{once:true});
+resize();
+if(location.hash.length>1) readHash(); else { applyPreset('water'); initFill(480); pushHash(); }
+clampAll();
+placeHint();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

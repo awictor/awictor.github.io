@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Swivet — one key. orbit. reverse.</title>
+<style>
+  html,body{margin:0;height:100%;background:#05060a;overflow:hidden;
+    font-family:"Segoe UI",system-ui,sans-serif;color:#cde;-webkit-tap-highlight-color:transparent;}
+  #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;}
+  canvas{background:radial-gradient(circle at 50% 45%,#0b1020 0%,#05060a 70%);
+    touch-action:none;box-shadow:0 0 80px rgba(60,180,255,.08);border-radius:8px;
+    width:min(96vmin,720px);height:min(96vmin,720px);}
+  #ui{position:fixed;left:0;right:0;bottom:14px;display:flex;gap:10px;justify-content:center;
+    pointer-events:none;z-index:5;}
+  button{pointer-events:auto;background:rgba(10,18,34,.7);color:#9fe;border:1px solid #1f6f8f;
+    padding:7px 14px;border-radius:20px;font-size:13px;letter-spacing:.5px;cursor:pointer;
+    backdrop-filter:blur(4px);transition:.15s;}
+  button:hover{background:#0d2540;color:#dff;box-shadow:0 0 16px rgba(60,200,255,.35);}
+  #toast{position:fixed;top:16px;right:16px;background:rgba(8,16,30,.9);
+    border:1px solid #2a7;color:#bfe;padding:8px 16px;border-radius:8px;font-size:13px;opacity:0;
+    transition:opacity .3s;z-index:9;pointer-events:none;max-width:70vw;}
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c" width="720" height="720"></canvas></div>
+<div id="ui">
+  <button id="share">⟳ copy challenge link</button>
+  <button id="newseed">✦ new seed</button>
+</div>
+<div id="toast"></div>
+<script>
+"use strict";
+(function(){
+const TAU=Math.PI*2, cv=document.getElementById("c"), g=cv.getContext("2d");
+const W=720, H=720, CX=W/2, CY=H/2, RING=232;
+// respect photosensitivity / comfort: drop camera shake + strobe when requested
+const REDUCE = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+// cosmetic randomness (screen shake, particle spray) — MUST stay off the seeded gameplay stream
+const fxrng = Math.random;
+
+// ---------- seeded RNG (mulberry32) ----------
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function seedFromHash(){
+  const m=/s=([0-9a-z]+)/i.exec(location.hash);
+  if(m) return parseInt(m[1],36)>>>0;
+  const s=(Math.random()*4294967296)>>>0; location.hash="s="+s.toString(36); return s;
+}
+let SEED=seedFromHash(), rng=mulberry32(SEED);
+
+// ---------- audio (tiny WebAudio blip synth) ----------
+let AC=null;
+function ac(){ if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){}} return AC; }
+function blip(freq,dur,type,vol){
+  const a=ac(); if(!a) return; const t=a.currentTime;
+  const o=a.createOscillator(), gn=a.createGain();
+  o.type=type||"square"; o.frequency.setValueAtTime(freq,t);
+  gn.gain.setValueAtTime(0.0001,t); gn.gain.exponentialRampToValueAtTime(vol||0.15,t+0.005);
+  gn.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(gn).connect(a.destination); o.start(t); o.stop(t+dur+0.02);
+}
+function thud(){
+  const a=ac(); if(!a) return; const t=a.currentTime, len=0.35, buf=a.createBuffer(1,a.sampleRate*len,a.sampleRate);
+  const d=buf.getChannelData(0); for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*(1-i/d.length);
+  const src=a.createBufferSource(); src.buffer=buf;
+  const gn=a.createGain(); gn.gain.setValueAtTime(0.4,t); gn.gain.exponentialRampToValueAtTime(0.0001,t+len);
+  const flt=a.createBiquadFilter(); flt.type="lowpass"; flt.frequency.setValueAtTime(900,t);
+  flt.frequency.exponentialRampToValueAtTime(80,t+len);
+  src.connect(flt).connect(gn).connect(a.destination); src.start(t);
+}
+
+// ---------- helpers ----------
+function adiff(a,b){let d=Math.abs(((a-b)%TAU)+TAU)%TAU; return d>Math.PI?TAU-d:d;}
+function lerp(a,b,t){return a+(b-a)*t;}
+function ringXY(ang,r){return [CX+Math.cos(ang)*(r===undefined?RING:r), CY+Math.sin(ang)*(r===undefined?RING:r)];}
+// ghost angle at elapsed time t. New ghosts store {t,a} samples; legacy ghosts stored bare angle
+// numbers indexed by tick — fall back to tick indexing for those. Returns null once the run ends.
+function ghostAngle(path,t){
+  if(!path||!path.length) return null;
+  if(typeof path[0]==="number"){ return S.tick<path.length?path[S.tick]:null; } // legacy format
+  const last=path[path.length-1];
+  if(t>=last.t) return t>last.t+0.25?null:last.a;
+  if(t<=path[0].t) return path[0].a;
+  let lo=0,hi=path.length-1;
+  while(lo<hi){ const mid=(lo+hi+1)>>1; if(path[mid].t<=t) lo=mid; else hi=mid-1; }
+  const p=path[lo], q=path[Math.min(path.length-1,lo+1)];
+  const span=(q.t-p.t)||1, f=(t-p.t)/span;
+  let d=((q.a-p.a)%TAU+TAU)%TAU; if(d>Math.PI) d-=TAU;   // shortest-arc interpolation
+  return p.a + d*f;
+}
+
+// ---------- state ----------
+let S;
+function reset(startImmediately){
+  rng=mulberry32(SEED);
+  S={
+    state: startImmediately?"play":"title",
+    ang: -Math.PI/2, dir: 1, spd: 2.05,   // rad/s base
+    score:0, best:BEST, combo:0, mult:1, comboT:0,
+    arms:[], embers:[], parts:[], trail:[],
+    t:0, tick:0, shake:0, flash:0,
+    pulse:0, baitT:5, nextArmScore:120,
+    rec:[], ghost:GHOSTS[SEED]||null,
+  };
+  seedEmbers(3);
+  addArm(); addArm();
+}
+function seedEmbers(n){ for(let i=0;i<n;i++) spawnEmber(); }
+function spawnEmber(){
+  // place away from current spark to reward threading
+  let ang, tries=0;
+  do{ ang=rng()*TAU; tries++; }while(adiff(ang,S.ang)<0.6 && tries<8);
+  S.embers.push({ang, r:0});
+}
+
+// difficulty-scaled arm speed
+function diffLevel(){ return S.score/900; }
+function addArm(){
+  const maxCover=0.60;                       // <-- gap guarantee: never cover >60% of ring
+  let cover=0; for(const a of S.arms) cover+=a.w*2;
+  const lv=diffLevel();
+  const w=lerp(0.14,0.085,Math.min(1,lv))*(0.85+rng()*0.4); // half-width
+  if(cover+w*2 > TAU*maxCover) return false;  // refuse -> guarantees a traversable gap always exists
+  const base=lerp(0.7,2.6,Math.min(1,lv))*(0.7+rng()*0.7);
+  S.arms.push({ phi:rng()*TAU, w, spd:(rng()<0.5?-1:1)*base });
+  return true;
+}
+
+// ---------- input ----------
+function reverse(){
+  if(S.state==="play"){ S.dir*=-1; blip(430,0.05,"square",0.12); S.shake=Math.max(S.shake,3); }
+}
+function press(){
+  if(!AC) ac();
+  if(S.state==="title"){ reset(true); return; }
+  if(S.state==="dead"){ return; }   // R restarts; avoid accidental
+  reverse();
+}
+addEventListener("keydown",e=>{
+  if(e.code==="Space"){ e.preventDefault(); press(); }
+  else if(e.key==="r"||e.key==="R"){ if(S.state!=="title"){ reset(true);} }
+});
+cv.addEventListener("mousedown",e=>{ e.preventDefault(); if(S.state==="dead") reset(true); else press(); });
+cv.addEventListener("touchstart",e=>{ e.preventDefault(); if(S.state==="dead") reset(true); else press(); },{passive:false});
+
+document.getElementById("share").onclick=()=>{
+  const emoji=S.state==="dead"?`I scored ${S.score|0} on Swivet seed ${SEED.toString(36)} ✦⟳ — beat it:`:`Swivet challenge — seed ${SEED.toString(36)} ✦⟳:`;
+  const txt=emoji+" "+location.href;
+  // navigator.clipboard is undefined in insecure contexts (file:// on some browsers, plain http):
+  // guard so the button never throws, and fall back to a prompt the user can copy from.
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(txt).then(()=>toast("challenge link copied!"),()=>window.prompt("copy challenge link:",txt));
+    } else { window.prompt("copy challenge link:",txt); }
+  }catch(e){ window.prompt("copy challenge link:",txt); }
+};
+document.getElementById("newseed").onclick=()=>{
+  SEED=(Math.random()*4294967296)>>>0; location.hash="s="+SEED.toString(36);
+  reset(false); toast("new seed: "+SEED.toString(36));
+};
+function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.style.opacity=1;
+  clearTimeout(toast._); toast._=setTimeout(()=>t.style.opacity=0,1900); }
+
+// ---------- persistence ----------
+// merely touching localStorage throws in some privacy modes / sandboxed contexts — guard every access
+let BEST=0; try{ BEST=+(localStorage.getItem("swivet.best")||0); }catch(e){}
+let GHOSTS={}; try{ GHOSTS=JSON.parse(localStorage.getItem("swivet.ghosts")||"{}"); }catch(e){}
+
+// ---------- update ----------
+function update(dt){
+  S.t+=dt;
+  if(S.state!=="play"){ S.pulse+=dt*1.2; S.shake*=0.9; S.flash*=0.92; return; }
+  S.tick++;
+  // record ghost samples stamped with elapsed time so playback tracks real time, not frame count
+  S.rec.push({t:Math.round(S.t*1000)/1000, a:Math.round(S.ang*1000)/1000});
+
+  // combo tier drives pulse rate & feel
+  const tier=Math.min(6,Math.floor(S.combo/4));
+  S.mult=1+tier;
+  S.pulse+=dt*(1.3+tier*0.55);
+
+  // orbit
+  S.ang=(S.ang+S.dir*S.spd*dt+TAU)%TAU;
+  S.spd=lerp(2.05,3.15,Math.min(1,diffLevel())); // gentle global speedup
+
+  // trail
+  const [sx,sy]=ringXY(S.ang);
+  S.trail.push({x:sx,y:sy}); if(S.trail.length>26) S.trail.shift();
+
+  // arms
+  const lv=Math.min(1,diffLevel());
+  for(const a of S.arms){ a.phi=(a.phi+a.spd*dt*(1+lv*0.2)+TAU)%TAU; }
+
+  // director: add arms + bait counter-rotations as score climbs
+  if(S.score>=S.nextArmScore){ if(addArm()){ S.nextArmScore+=lerp(220,90,lv);} else { S.nextArmScore+=60; } }
+  S.baitT-=dt;
+  if(S.baitT<=0 && S.arms.length){ S.baitT=lerp(6,2.2,lv);
+    const a=S.arms[(rng()*S.arms.length)|0]; a.spd*=-1; S.flash=Math.min(1,S.flash+0.25); }
+
+  // collisions + near-miss
+  let nearest=99;
+  for(const a of S.arms){
+    const d=adiff(S.ang,a.phi);
+    if(d<a.w){ die(); return; }
+    nearest=Math.min(nearest,d-a.w);
+  }
+  if(nearest<0.06 && !S._near){ S._near=1; S.shake=Math.max(S.shake,6); S.flash=Math.min(1,S.flash+0.5);
+    S.score+=2*S.mult; blip(720,0.04,"sine",0.06); }
+  if(nearest>0.1) S._near=0;
+
+  // embers
+  for(let i=S.embers.length-1;i>=0;i--){
+    const e=S.embers[i]; e.r=Math.min(1,e.r+dt*4);
+    if(adiff(S.ang,e.ang)<0.11){
+      S.combo++; S.comboT=2.4; S.score+=10*S.mult;
+      const t2=Math.min(6,Math.floor(S.combo/4));
+      blip(330+t2*95,0.09,"triangle",0.13);
+      burst(...ringXY(e.ang), 190-t2*26, 14);
+      S.shake=Math.max(S.shake,2.5);
+      S.embers.splice(i,1); spawnEmber();
+      if(rng()<0.35 && S.embers.length<5) spawnEmber();
+    }
+  }
+  if(S.embers.length<2) spawnEmber();
+
+  // combo decay
+  S.comboT-=dt; if(S.comboT<=0 && S.combo>0){ S.combo=Math.max(0,S.combo-1); S.comboT=0.5; }
+
+  // passive score
+  S.score+=dt*6;
+
+  // particles
+  for(let i=S.parts.length-1;i>=0;i--){ const p=S.parts[i];
+    p.x+=p.vx*dt; p.y+=p.vy*dt; p.vx*=0.94; p.vy*=0.94; p.life-=dt;
+    if(p.life<=0) S.parts.splice(i,1); }
+
+  S.shake*=0.86; S.flash*=0.9;
+}
+function burst(x,y,hue,n){ for(let i=0;i<n;i++){ const a=fxrng()*TAU, sp=40+fxrng()*180;
+  S.parts.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:0.5+fxrng()*0.4,hue}); } }
+
+function die(){
+  S.state="dead"; S.shake=22; S.flash=1;
+  thud(); burst(...ringXY(S.ang),350,40);
+  if(S.score>BEST){ BEST=S.score|0; localStorage.setItem("swivet.best",BEST); }
+  // save ghost if this beats the seed's stored ghost
+  const cur=GHOSTS[SEED];
+  if(!cur || S.score>cur.score){ GHOSTS[SEED]={score:S.score|0,path:S.rec};
+    try{ localStorage.setItem("swivet.ghosts",JSON.stringify(GHOSTS)); }catch(e){} }
+}
+
+// ---------- render ----------
+function render(){
+  const tier=Math.min(6,Math.floor(S.combo/4));
+  g.setTransform(1,0,0,1,0,0);
+  g.clearRect(0,0,W,H);
+  // subtle bg gradient already via CSS; add vignette fill
+  g.fillStyle="rgba(5,7,12,0.42)"; g.fillRect(0,0,W,H);
+
+  // screen shake — cosmetic only: never draw from the seeded gameplay rng here, and drop it entirely
+  // under prefers-reduced-motion. (Using fxrng keeps seed->pattern reproducible across frame rates.)
+  const sh=REDUCE?0:S.shake, ox=(fxrng()-0.5)*sh, oy=(fxrng()-0.5)*sh;
+  g.save(); g.translate(ox,oy);
+  g.globalCompositeOperation="lighter";
+
+  // ring guide
+  g.lineWidth=2; g.strokeStyle="rgba(70,150,220,0.22)"; g.shadowBlur=14; g.shadowColor="#2af";
+  g.beginPath(); g.arc(CX,CY,RING,0,TAU); g.stroke();
+
+  // core — breathing, combo-reactive color temperature & pulse rate
+  const beat=(Math.sin(S.pulse*2)*0.5+0.5);
+  const coreHue=lerp(190,342,Math.min(1,tier/6));           // cool -> hot as combo climbs
+  const coreR=42+beat*(10+tier*4);
+  const cg=g.createRadialGradient(CX,CY,4,CX,CY,coreR*2.1);
+  cg.addColorStop(0,`hsla(${coreHue},100%,72%,0.95)`);
+  cg.addColorStop(0.4,`hsla(${coreHue},95%,55%,0.55)`);
+  cg.addColorStop(1,"hsla(0,0%,0%,0)");
+  g.shadowBlur=60+tier*10; g.shadowColor=`hsl(${coreHue},100%,60%)`;
+  g.fillStyle=cg; g.beginPath(); g.arc(CX,CY,coreR*2.1,0,TAU); g.fill();
+  g.shadowBlur=0; g.fillStyle=`hsla(${coreHue},100%,88%,0.95)`;
+  g.beginPath(); g.arc(CX,CY,coreR*0.5,0,TAU); g.fill();
+
+  // arms (scything blades)
+  for(const a of S.arms){
+    g.save(); g.translate(CX,CY); g.rotate(a.phi);
+    const grd=g.createLinearGradient(58,0,RING+34,0);
+    grd.addColorStop(0,"rgba(255,60,90,0.05)");
+    grd.addColorStop(1,"rgba(255,90,120,0.95)");
+    g.strokeStyle=grd; g.lineCap="round";
+    g.lineWidth=Math.max(6, a.w*RING*1.7);
+    g.shadowBlur=26; g.shadowColor="#f36";
+    g.beginPath(); g.moveTo(58,0); g.lineTo(RING+34,0); g.stroke();
+    g.restore();
+  }
+
+  // embers
+  for(const e of S.embers){ const [ex,ey]=ringXY(e.ang);
+    const r=4+e.r*4+Math.sin(S.t*6+e.ang)*1.2;
+    g.shadowBlur=22; g.shadowColor="#7fffcf"; g.fillStyle="rgba(140,255,205,0.95)";
+    g.beginPath(); g.arc(ex,ey,r,0,TAU); g.fill(); }
+
+  // ghost spark (faint racer) — sampled by elapsed time so it races at the right speed on any refresh rate
+  if(S.ghost && S.state==="play"){
+    const ga=ghostAngle(S.ghost.path,S.t);
+    if(ga!=null){
+      const [gx,gy]=ringXY(ga);
+      g.shadowBlur=18; g.shadowColor="#88aaff"; g.fillStyle="rgba(150,180,255,0.4)";
+      g.beginPath(); g.arc(gx,gy,7,0,TAU); g.fill();
+    }
+  }
+
+  // comet trail
+  for(let i=0;i<S.trail.length;i++){ const p=S.trail[i], f=i/S.trail.length;
+    g.shadowBlur=16*f; g.shadowColor=`hsl(${coreHue},100%,60%)`;
+    g.fillStyle=`hsla(${coreHue},100%,${70}%,${f*0.5})`;
+    g.beginPath(); g.arc(p.x,p.y,2+f*6,0,TAU); g.fill(); }
+
+  // spark
+  const [sx,sy]=ringXY(S.ang);
+  g.shadowBlur=34; g.shadowColor="#fff"; g.fillStyle="#fff";
+  g.beginPath(); g.arc(sx,sy,8,0,TAU); g.fill();
+  g.shadowBlur=40; g.shadowColor=`hsl(${coreHue},100%,65%)`;
+  g.fillStyle=`hsla(${coreHue},100%,75%,0.85)`;
+  g.beginPath(); g.arc(sx,sy,14,0,TAU); g.fill();
+
+  // particles
+  for(const p of S.parts){ const l=Math.max(0,p.life);
+    g.shadowBlur=12; g.shadowColor=`hsl(${p.hue},100%,60%)`;
+    g.fillStyle=`hsla(${p.hue},100%,68%,${l})`;
+    g.beginPath(); g.arc(p.x,p.y,2+l*3,0,TAU); g.fill(); }
+
+  // chromatic-aberration ring-flash on near-miss / death (strobe: suppressed under reduced-motion)
+  if(S.flash>0.02 && !REDUCE){
+    const off=S.flash*10;
+    g.lineWidth=3; g.globalAlpha=S.flash*0.7;
+    g.shadowBlur=0;
+    g.strokeStyle="rgba(255,40,40,1)"; g.beginPath(); g.arc(CX+off,CY,RING,0,TAU); g.stroke();
+    g.strokeStyle="rgba(40,255,120,1)"; g.beginPath(); g.arc(CX,CY,RING,0,TAU); g.stroke();
+    g.strokeStyle="rgba(60,120,255,1)"; g.beginPath(); g.arc(CX-off,CY,RING,0,TAU); g.stroke();
+    g.globalAlpha=1;
+  }
+
+  g.restore();
+  g.globalCompositeOperation="source-over";
+
+  // ---------- HUD ----------
+  g.textAlign="center"; g.shadowBlur=0;
+  if(S.state==="play"){
+    g.fillStyle="#dff"; g.font="700 44px 'Segoe UI',sans-serif";
+    g.fillText(S.score|0, CX, 62);
+    if(S.mult>1){ g.fillStyle=`hsl(${coreHue},100%,72%)`; g.font="700 20px 'Segoe UI'";
+      g.fillText("×"+S.mult+"  combo "+S.combo, CX, 90); }
+    g.fillStyle="rgba(150,200,230,0.5)"; g.font="13px 'Segoe UI'";
+    g.fillText("best "+(BEST|0), CX, H-24);
+  } else if(S.state==="title"){
+    g.fillStyle="#eaf6ff"; g.font="800 66px 'Segoe UI'"; g.fillText("SWIVET", CX, CY-96);
+    g.fillStyle="#8fd7ff"; g.font="18px 'Segoe UI'";
+    g.fillText("orbit a pulsing core • reverse to survive", CX, CY-60);
+    g.fillStyle="#cde"; g.font="600 22px 'Segoe UI'";
+    g.fillText("SPACE / CLICK / TAP  →  reverse", CX, CY+150);
+    g.fillStyle="rgba(150,200,230,0.7)"; g.font="15px 'Segoe UI'";
+    g.fillText("sweep embers for combo • R restarts • seed "+SEED.toString(36), CX, CY+182);
+    g.fillStyle="#7fffcf"; g.font="700 20px 'Segoe UI'";
+    g.fillText(BEST>0?("best "+(BEST|0)+"  —  press to begin"):"press to begin", CX, CY+120);
+    if(S.ghost){ g.fillStyle="rgba(150,180,255,0.8)"; g.font="14px 'Segoe UI'";
+      g.fillText("👻 ghost on this seed scored "+(S.ghost.score|0)+" — race it", CX, CY+214); }
+  } else { // dead
+    g.fillStyle="#ff7a8a"; g.font="800 54px 'Segoe UI'"; g.fillText("EXTINGUISHED", CX, CY-40);
+    g.fillStyle="#eaf6ff"; g.font="700 40px 'Segoe UI'"; g.fillText((S.score|0)+" pts", CX, CY+14);
+    g.fillStyle= (S.score|0)>=BEST?"#7fffcf":"#8fd7ff"; g.font="18px 'Segoe UI'";
+    g.fillText((S.score|0)>=BEST?"★ new best!":"best "+(BEST|0), CX, CY+46);
+    g.fillStyle="#cde"; g.font="600 20px 'Segoe UI'"; g.fillText("press / click / R  to run again", CX, CY+92);
+    g.fillStyle="rgba(150,200,230,0.6)"; g.font="14px 'Segoe UI'";
+    g.fillText("your best run is saved as a ghost on seed "+SEED.toString(36), CX, CY+120);
+  }
+}
+
+// ---------- loop ----------
+let last=performance.now();
+function frame(now){
+  let dt=(now-last)/1000; last=now; if(dt>0.05) dt=0.05;
+  update(dt); render();
+  requestAnimationFrame(frame);
+}
+reset(false);
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

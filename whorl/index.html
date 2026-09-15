@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Whorl — draw it, watch spinning circles redraw it</title>
+<style>
+  :root{ --bg:#0b0e14; --panel:#141924; --line:#243044; --ink:#e6edf7; --dim:#8494ad; --accent:#4fd6ff; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  #wrap{ max-width:960px; margin:0 auto; padding:14px 16px 28px; }
+  header{ display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:10px; }
+  h1{ font-size:22px; margin:0; letter-spacing:.5px; }
+  h1 b{ color:var(--accent); }
+  .tag{ color:var(--dim); font-size:13px; }
+  .stage{ position:relative; }
+  canvas#c{ width:100%; aspect-ratio:900/560; display:block; background:
+      radial-gradient(120% 120% at 50% 0%, #10151f 0%, #0a0d13 70%);
+    border:1px solid var(--line); border-radius:12px; cursor:crosshair; touch-action:none; }
+  .hint{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    color:var(--dim); font-size:15px; pointer-events:none; text-align:center; padding:20px; }
+  .readout{ position:absolute; top:10px; left:12px; font-size:12px; color:var(--dim);
+    background:rgba(10,13,19,.55); padding:6px 9px; border-radius:8px; line-height:1.5; }
+  .readout b{ color:var(--ink); }
+  .bar{ display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; margin:12px 0 6px; }
+  .grp{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--dim); }
+  button, select{ background:var(--panel); color:var(--ink); border:1px solid var(--line);
+    border-radius:8px; padding:6px 11px; font-size:12px; cursor:pointer; }
+  button:hover, select:hover{ border-color:var(--accent); }
+  button:focus-visible, select:focus-visible, input:focus-visible{
+    outline:2px solid var(--accent); outline-offset:2px; }
+  button.on{ border-color:var(--accent); color:var(--accent); }
+  button.rec{ border-color:#ff5a6e; color:#ff5a6e; }
+  input[type=range]{ accent-color:var(--accent); vertical-align:middle; }
+  label.chk{ display:inline-flex; gap:5px; align-items:center; user-select:none; }
+  #spec{ width:100%; height:78px; display:block; margin-top:8px; border:1px solid var(--line);
+    border-radius:10px; background:var(--panel); cursor:pointer; }
+  .caption{ font-size:11px; color:var(--dim); margin-top:5px; }
+  .caption b{ color:var(--accent); }
+  #toast{ position:fixed; bottom:18px; left:50%; transform:translateX(-50%);
+    background:var(--accent); color:#04121a; padding:8px 16px; border-radius:20px; font-size:13px;
+    font-weight:600; opacity:0; transition:opacity .25s; pointer-events:none; }
+  #toast.show{ opacity:1; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <header>
+    <h1><b>Whorl</b></h1>
+    <span class="tag">Draw anything. A chain of spinning circles redraws it from pure frequency.</span>
+  </header>
+
+  <div class="stage">
+    <canvas id="c" width="900" height="560"></canvas>
+    <div class="readout" id="readout"></div>
+    <div class="hint" id="hint">Draw a closed shape here — or pick a preset below.</div>
+  </div>
+
+  <div class="bar">
+    <div class="grp">Preset
+      <select id="preset">
+        <option value="">— pick —</option>
+        <option value="heart">Heart</option>
+        <option value="star">Star</option>
+        <option value="lightning">Lightning</option>
+        <option value="treble">Treble clef</option>
+        <option value="spiral">Spiral</option>
+      </select>
+    </div>
+    <button id="svg">Import SVG path</button>
+    <button id="clear">Clear</button>
+    <button id="share">Share link</button>
+    <button id="png">PNG</button>
+    <button id="rec">● Record WebM</button>
+  </div>
+
+  <div class="bar">
+    <div class="grp">Harmonics <input type="range" id="harm" aria-label="Harmonics" min="1" max="256" value="30" style="width:150px"><span id="harmv">30</span></div>
+    <div class="grp">Speed <input type="range" id="speed" aria-label="Speed" min="-3" max="3" step="0.25" value="1" style="width:110px"><span id="speedv">1×</span></div>
+    <div class="grp">Scrub <input type="range" id="scrub" aria-label="Scrub" min="0" max="1000" value="0" style="width:130px"></div>
+    <button id="play" class="on">Pause</button>
+  </div>
+
+  <div class="bar">
+    <label class="chk"><input type="checkbox" id="tCircles" checked> circles</label>
+    <label class="chk"><input type="checkbox" id="tVectors" checked> vectors</label>
+    <label class="chk"><input type="checkbox" id="tGhost" checked> ghost outline</label>
+  </div>
+
+  <canvas id="spec" width="900" height="78"></canvas>
+  <div class="caption">Spectrum of whorls (log magnitude) — <b>click a bar to mute/unmute</b>, hover to spotlight its circle. Dimmed bars are beyond the harmonics cutoff.</div>
+</div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const c=$("c"), ctx=c.getContext("2d"), sp=$("spec"), sctx=sp.getContext("2d");
+const W=900, H=560, SW=900, SH=78;
+// Painted stage background so PNG/WebM exports match the on-screen look.
+const bgGrad=ctx.createRadialGradient(W/2,0,0,W/2,0,H*1.2);
+bgGrad.addColorStop(0,"#10151f"); bgGrad.addColorStop(1,"#0a0d13");
+
+let raw=[], drawing=false;          // freehand capture (logical coords)
+let path=[], fourier=[], sorted=[]; // resampled points + DFT
+const N=256, SPECB=48;              // sample count / spectrum bars shown
+let M=30, time=0, speed=1, paused=false, scrubbing=false;
+let trail=[], muted=new Set(), hoverIdx=-1;
+let toggles={circles:true,vectors:true,ghost:true};
+let fidelity=0;
+
+/* ---------- geometry helpers ---------- */
+function resample(pts,n){
+  if(pts.length<2) return [];
+  const p=pts.concat([pts[0]]); const d=[0]; let tot=0;
+  for(let i=1;i<p.length;i++){ tot+=Math.hypot(p[i].x-p[i-1].x,p[i].y-p[i-1].y); d.push(tot); }
+  if(tot===0) return [];
+  const out=[];
+  for(let i=0;i<n;i++){
+    const target=tot*i/n; let j=1; while(j<d.length&&d[j]<target) j++;
+    const f=(d[j]-d[j-1])?(target-d[j-1])/(d[j]-d[j-1]):0;
+    out.push({x:p[j-1].x+(p[j].x-p[j-1].x)*f, y:p[j-1].y+(p[j].y-p[j-1].y)*f});
+  }
+  return out;
+}
+function dft(pts){
+  const n=pts.length, F=[];
+  for(let k=0;k<n;k++){
+    let re=0,im=0;
+    for(let i=0;i<n;i++){ const a=2*Math.PI*k*i/n, ca=Math.cos(a), sa=Math.sin(a);
+      re+=pts[i].x*ca+pts[i].y*sa; im+=pts[i].y*ca-pts[i].x*sa; }
+    re/=n; im/=n;
+    F.push({freq:k, amp:Math.hypot(re,im), phase:Math.atan2(im,re), idx:k});
+  }
+  return F;
+}
+function recon(F,t){ let x=0,y=0; for(const h of F){ x+=h.amp*Math.cos(h.freq*t+h.phase); y+=h.amp*Math.sin(h.freq*t+h.phase); } return {x,y}; }
+
+function computeFidelity(){
+  if(!path.length){ fidelity=0; return; }
+  const F=sorted.slice(0,M);
+  let cx=0,cy=0; for(const p of path){cx+=p.x;cy+=p.y;} cx/=path.length; cy/=path.length;
+  let err=0, scale=0;
+  for(let i=0;i<path.length;i++){
+    const r=recon(F,2*Math.PI*i/path.length);
+    err+=Math.hypot(r.x-path[i].x, r.y-path[i].y);
+    scale+=Math.hypot(path[i].x-cx, path[i].y-cy);
+  }
+  err/=path.length; scale=(scale/path.length)||1;
+  fidelity=Math.max(0,Math.min(100, 100*(1-err/scale)));
+}
+function build(pts){
+  path=resample(pts,N);
+  if(!path.length) return;
+  fourier=dft(path);
+  sorted=fourier.slice().sort((a,b)=>b.amp-a.amp);
+  muted.clear(); trail=[]; time=0;
+  M=Math.min(N, Math.max(2, +$("harm").value)); computeFidelity();
+  $("hint").style.display="none";
+}
+
+/* ---------- presets & SVG import ---------- */
+function heart(n){const o=[];for(let i=0;i<n;i++){const t=Math.PI*2*i/n;
+  const x=16*Math.sin(t)**3, y=13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t);
+  o.push({x:W/2+x*15, y:H/2-y*15});}return o;}
+function star(n){const pts=[];for(let i=0;i<10;i++){const r=i%2?70:180, a=-Math.PI/2+Math.PI*i/5;
+  pts.push({x:W/2+r*Math.cos(a), y:H/2+r*Math.sin(a)});}return resample(pts,n);}
+function lightning(){const v=[[-40,-190],[30,-60],[-15,-45],[70,60],[10,55],[55,190],[-70,20],[-15,10],[-70,-90]];
+  return v.map(p=>({x:W/2+p[0]*1.2, y:H/2+p[1]*1.2}));}
+function spiral(n){const o=[];for(let i=0;i<n;i++){const t=i/n, a=t*Math.PI*6, r=20+t*180;
+  o.push({x:W/2+r*Math.cos(a), y:H/2+r*Math.sin(a)});} o.push({x:W/2,y:H/2}); return o;}
+function fromSVGPath(d,n){
+  const el=document.createElementNS("http://www.w3.org/2000/svg","path");
+  el.setAttribute("d",d); const L=el.getTotalLength(); if(!L) return [];
+  const raw=[]; for(let i=0;i<400;i++){const p=el.getPointAtLength(L*i/400); raw.push({x:p.x,y:p.y});}
+  let mnx=1e9,mny=1e9,mxx=-1e9,mxy=-1e9;
+  for(const p of raw){mnx=Math.min(mnx,p.x);mny=Math.min(mny,p.y);mxx=Math.max(mxx,p.x);mxy=Math.max(mxy,p.y);}
+  const s=Math.min((W*0.75)/(mxx-mnx||1),(H*0.75)/(mxy-mny||1));
+  const ox=W/2-((mnx+mxx)/2)*s, oy=H/2-((mny+mxy)/2)*s;
+  return resample(raw.map(p=>({x:p.x*s+ox, y:p.y*s+oy})), n);
+}
+const TREBLE="M20 2 C10 6 8 20 22 26 C40 34 42 6 28 4 C16 3 14 22 26 30 L22 62 C20 76 40 78 40 64 C40 54 26 54 26 64";
+
+/* ---------- URL hash (delta + base64) ---------- */
+function pack12(v){ if(v.length%2)v.push(0); let s="";
+  for(let i=0;i<v.length;i+=2){const a=v[i],b=v[i+1]; s+=String.fromCharCode(a>>4,((a&15)<<4)|(b>>8),b&255);}
+  return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
+function unpack12(str){ const s=atob(str.replace(/-/g,"+").replace(/_/g,"/")); const v=[];
+  for(let i=0;i+2<s.length+1&&i+2<s.length;i+=3){const b0=s.charCodeAt(i),b1=s.charCodeAt(i+1),b2=s.charCodeAt(i+2);
+    v.push((b0<<4)|(b1>>4), ((b1&15)<<8)|b2);} return v; }
+function encodePath(){ const K=Math.min(path.length,128), step=path.length/K, v=[]; let px=0,py=0;
+  for(let i=0;i<K;i++){const p=path[Math.floor(i*step)];
+    const x=Math.max(0,Math.min(4095,Math.round(p.x))), y=Math.max(0,Math.min(4095,Math.round(p.y)));
+    if(i===0)v.push(x,y); else v.push(clamp(x-px+2048),clamp(y-py+2048)); px=x;py=y;}
+  return pack12(v); }
+function clamp(n){return Math.max(0,Math.min(4095,n));}
+function decodePath(str){ const v=unpack12(str); if(v.length<2)return [];
+  let px=v[0],py=v[1]; const pts=[{x:px,y:py}];
+  for(let i=2;i+1<v.length;i+=2){px+=v[i]-2048; py+=v[i+1]-2048; pts.push({x:px,y:py});} return pts; }
+
+/* ---------- input ---------- */
+function pos(e){const r=c.getBoundingClientRect(); const t=e.touches?e.touches[0]:e;
+  return {x:(t.clientX-r.left)*W/r.width, y:(t.clientY-r.top)*H/r.height};}
+function down(e){e.preventDefault(); drawing=true; raw=[pos(e)]; $("preset").value="";}
+function move(e){ if(drawing){e.preventDefault(); raw.push(pos(e));}}
+function up(){ if(!drawing)return; drawing=false; if(raw.length>3){ build(raw); location.hash="d="+encodePath(); } }
+c.addEventListener("mousedown",down); c.addEventListener("mousemove",move);
+window.addEventListener("mouseup",up);
+c.addEventListener("touchstart",down,{passive:false}); c.addEventListener("touchmove",move,{passive:false});
+window.addEventListener("touchend",up);
+
+/* ---------- controls ---------- */
+$("harm").oninput=e=>{ M=+e.target.value; $("harmv").textContent=M; computeFidelity(); };
+$("speed").oninput=e=>{ speed=+e.target.value; $("speedv").textContent=speed+"×";
+  // speed 0 freezes the machine; keep the Play button honest about it.
+  if(speed===0){ $("play").textContent="Play (0×)"; $("play").classList.remove("on"); }
+  else if(!paused){ $("play").textContent="Pause"; $("play").classList.add("on"); } };
+$("scrub").oninput=e=>{ scrubbing=true; paused=true; $("play").textContent="Play"; $("play").classList.remove("on");
+  time=(+e.target.value/1000)*2*Math.PI; };
+$("play").onclick=()=>{ paused=!paused; scrubbing=false;
+  $("play").textContent=paused?"Play":"Pause"; $("play").classList.toggle("on",!paused); };
+$("tCircles").onchange=e=>toggles.circles=e.target.checked;
+$("tVectors").onchange=e=>toggles.vectors=e.target.checked;
+$("tGhost").onchange=e=>toggles.ghost=e.target.checked;
+$("clear").onclick=()=>{ path=[];fourier=[];sorted=[];trail=[];muted.clear();
+  sctx.clearRect(0,0,SW,SH); $("readout").innerHTML="";
+  $("hint").style.display="flex"; $("preset").value=""; history.replaceState(null,"","#"); };
+$("preset").onchange=e=>{ const v=e.target.value; if(!v)return;
+  const gen={heart:()=>heart(N),star:()=>star(N),lightning:()=>resample(lightning(),N),
+    treble:()=>fromSVGPath(TREBLE,N),spiral:()=>spiral(N)}[v];
+  build(gen()); location.hash="d="+encodePath(); };
+$("svg").onclick=()=>{ const d=prompt("Paste an SVG path 'd' attribute (e.g. from a logo or letterform):");
+  if(!d)return; const pts=fromSVGPath(d.trim(),N);
+  if(pts.length){ build(pts); location.hash="d="+encodePath(); } else toast("Could not parse that path."); };
+$("share").onclick=async()=>{ if(!path.length){toast("Draw something first.");return;}
+  const url=location.origin+location.pathname+"#d="+encodePath();
+  try{ await navigator.clipboard.writeText(url); toast("Link copied to clipboard!"); }
+  catch{ location.hash="d="+encodePath(); toast("Link is in your address bar."); } };
+$("png").onclick=()=>{ const a=document.createElement("a");
+  a.download="whorl.png"; a.href=c.toDataURL("image/png"); a.click(); toast("PNG saved."); };
+
+let recorder=null;
+$("rec").onclick=()=>{
+  if(recorder){ recorder.stop(); return; }
+  if(!c.captureStream||!window.MediaRecorder){ toast("Recording not supported here."); return; }
+  // Safari's MediaRecorder rejects video/webm and only speaks video/mp4 — pick a supported codec.
+  const isSup=t=>{ try{ return MediaRecorder.isTypeSupported(t); }catch{ return false; } };
+  const mime=isSup("video/webm")?"video/webm":isSup("video/mp4")?"video/mp4":"";
+  const ext=mime.indexOf("mp4")>=0?"mp4":"webm";
+  const chunks=[];
+  try{ recorder=new MediaRecorder(c.captureStream(60), mime?{mimeType:mime}:undefined); }
+  catch{ recorder=null; toast("Recording not supported here."); return; }
+  recorder.ondataavailable=e=>e.data.size&&chunks.push(e.data);
+  recorder.onstop=()=>{ const a=document.createElement("a");
+    a.download="whorl."+ext; a.href=URL.createObjectURL(new Blob(chunks,{type:mime||"video/webm"}));
+    a.click(); recorder=null; $("rec").textContent="● Record WebM"; $("rec").classList.remove("rec"); toast(ext.toUpperCase()+" saved."); };
+  recorder.start(); $("rec").textContent="■ Stop"; $("rec").classList.add("rec"); toast("Recording one loop…");
+  const loopMs=(2*Math.PI/(2*Math.PI/N))*(1000/60)/Math.max(0.25,Math.abs(speed))+400;
+  setTimeout(()=>{ if(recorder&&recorder.state==="recording") recorder.stop(); }, Math.min(12000,loopMs));
+};
+
+/* spectrum interaction */
+function barAt(e){ const r=sp.getBoundingClientRect(); const x=(e.clientX-r.left)*SW/r.width;
+  const bars=sorted.filter(h=>h.freq!==0).slice(0,SPECB); const i=Math.floor(x/(SW/bars.length));
+  return bars[i]; }
+sp.onclick=e=>{ const h=barAt(e); if(!h)return; muted.has(h.idx)?muted.delete(h.idx):muted.add(h.idx); trail=[]; };
+sp.onmousemove=e=>{ const h=barAt(e); hoverIdx=h?h.idx:-1; sp.style.cursor=h?"pointer":"default"; };
+sp.onmouseleave=()=>hoverIdx=-1;
+
+function toast(m){ const t=$("toast"); t.textContent=m; t.classList.add("show");
+  clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("show"),1900); }
+
+/* ---------- render loop ---------- */
+function activeList(){ return sorted.slice(0,M).filter(h=>!muted.has(h.idx)); }
+
+function draw(){
+  ctx.fillStyle=bgGrad; ctx.fillRect(0,0,W,H);
+  if(!path.length){ requestAnimationFrame(draw); return; }
+
+  // ghost outline
+  if(toggles.ghost){ ctx.beginPath(); ctx.moveTo(path[0].x,path[0].y);
+    for(const p of path) ctx.lineTo(p.x,p.y); ctx.closePath();
+    ctx.strokeStyle="rgba(132,148,173,.35)"; ctx.lineWidth=1.5; ctx.setLineDash([5,5]); ctx.stroke(); ctx.setLineDash([]); }
+
+  const active=activeList();
+  const domFreq=active.find(h=>h.freq!==0)?.freq ?? 0;
+  const hue=(domFreq*35)%360;
+
+  // epicycle chain
+  let x=0,y=0;
+  for(const h of active){
+    const px=x,py=y; const r=h.amp;
+    x+=r*Math.cos(h.freq*time+h.phase); y+=r*Math.sin(h.freq*time+h.phase);
+    if(r<0.5) continue;
+    const hot=(h.idx===hoverIdx);
+    if(toggles.circles){ ctx.beginPath(); ctx.arc(px,py,r,0,2*Math.PI);
+      ctx.strokeStyle=hot?"#ffffff":"rgba(120,150,190,.20)"; ctx.lineWidth=hot?2:1; ctx.stroke(); }
+    if(toggles.vectors){ ctx.beginPath(); ctx.moveTo(px,py); ctx.lineTo(x,y);
+      ctx.strokeStyle=hot?"#ffffff":"rgba(180,205,235,.45)"; ctx.lineWidth=hot?2:1; ctx.stroke(); }
+  }
+
+  // trail
+  if(!paused && !scrubbing){ trail.push({x,y}); if(trail.length>N) trail.shift(); }
+  if(trail.length>1){
+    ctx.lineWidth=2.5; ctx.lineCap="round";
+    for(let i=1;i<trail.length;i++){ const a=i/trail.length;
+      ctx.strokeStyle=`hsla(${hue},100%,${55+a*15}%,${a})`;
+      ctx.beginPath(); ctx.moveTo(trail[i-1].x,trail[i-1].y); ctx.lineTo(trail[i].x,trail[i].y); ctx.stroke(); }
+  }
+  // comet tip
+  ctx.beginPath(); ctx.arc(x,y,4,0,2*Math.PI);
+  ctx.fillStyle=`hsl(${hue},100%,70%)`; ctx.shadowColor=`hsl(${hue},100%,60%)`; ctx.shadowBlur=14; ctx.fill(); ctx.shadowBlur=0;
+
+  // advance
+  if(!paused && !scrubbing){ time+=(2*Math.PI/N)*speed;
+    if(time>2*Math.PI) time-=2*Math.PI; if(time<0) time+=2*Math.PI;
+    $("scrub").value=Math.round((time/(2*Math.PI))*1000); }
+
+  // readout
+  const prog=Math.round((time/(2*Math.PI))*100);
+  $("readout").innerHTML=`whorls <b>${active.length}</b> / ${sorted.length}&nbsp; · &nbsp;`
+    +`fidelity <b>${fidelity.toFixed(1)}%</b>&nbsp; · &nbsp;trace <b>${prog}%</b>`;
+
+  drawSpectrum(active);
+  requestAnimationFrame(draw);
+}
+
+function drawSpectrum(active){
+  sctx.clearRect(0,0,SW,SH);
+  const bars=sorted.filter(h=>h.freq!==0).slice(0,SPECB);
+  if(!bars.length) return;
+  const bw=SW/bars.length, maxA=bars[0].amp||1, lm=Math.log(1+maxA);
+  const activeIdx=new Set(active.map(h=>h.idx));
+  for(let i=0;i<bars.length;i++){ const h=bars[i];
+    const bh=(Math.log(1+h.amp)/lm)*(SH-8);
+    const on=activeIdx.has(h.idx), mut=muted.has(h.idx), hot=(h.idx===hoverIdx);
+    sctx.fillStyle = mut ? "rgba(255,90,110,.35)"
+      : hot ? "#ffffff"
+      : on ? `hsl(${(h.freq*35)%360},85%,60%)`
+      : "rgba(120,140,170,.28)";
+    sctx.fillRect(i*bw+1, SH-bh-3, bw-2, bh);
+  }
+}
+
+/* ---------- boot ---------- */
+(function init(){
+  const m=location.hash.match(/d=([^&]+)/);
+  if(m){ let pts=null; try{ pts=decodePath(m[1]); }catch(e){}   // corrupt link -> fall back to default
+    if(pts&&pts.length>3){ build(pts); return; } }
+  build(heart(N)); $("preset").value="heart";
+})();
+draw();
+</script>
+</body>
+</html>

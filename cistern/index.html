@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cistern — reservoir sampling you can feel</title>
+<style>
+  :root{
+    --bg:#0b1620; --panel:#12222f; --panel2:#0e1b26; --ink:#e8f2f7; --dim:#8aa6b4;
+    --line:#1f3646; --water:#2fd7d1; --water2:#1a9ea6; --spill:#5fa8ff; --bias:#ff7a59;
+    --gold:#ffcf5c; --good:#4fe08b;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:radial-gradient(1200px 700px at 70% -10%,#16303f 0,var(--bg) 60%);
+    color:var(--ink);font:14px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding:18px 20px 40px}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+  h1{font-size:26px;margin:0;letter-spacing:.5px}
+  h1 .drop{color:var(--water)}
+  .tag{color:var(--dim);font-size:13px}
+  .grid{display:grid;grid-template-columns:1fr 340px;gap:16px;margin-top:14px}
+  @media(max-width:940px){.grid{grid-template-columns:1fr}}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);
+    border-radius:14px;padding:14px}
+  canvas{display:block;width:100%;border-radius:10px}
+  #stage{background:linear-gradient(180deg,#0a1a24,#0c2230);height:250px}
+  #hist{background:#0a1a24;height:300px;cursor:crosshair;margin-top:12px}
+  #hist:focus-visible,button:focus-visible,.seg button:focus-visible{outline:2px solid var(--water);outline-offset:2px}
+  .row{display:flex;align-items:center;gap:10px;margin:10px 0}
+  .row label{width:118px;color:var(--dim);font-size:12.5px;flex:none}
+  input[type=range]{flex:1;accent-color:var(--water)}
+  input[type=number],input[type=text]{background:#0a1721;border:1px solid var(--line);color:var(--ink);
+    border-radius:8px;padding:6px 8px;width:100%;font:inherit}
+  .val{width:52px;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink);flex:none}
+  .btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+  button{background:#173446;border:1px solid #27526a;color:var(--ink);border-radius:9px;
+    padding:8px 12px;font:inherit;cursor:pointer;transition:.12s}
+  button:hover{background:#1d4256;border-color:#3a7793}
+  button:active{transform:translateY(1px)}
+  button.primary{background:linear-gradient(180deg,var(--water),var(--water2));
+    color:#042;border-color:transparent;font-weight:600}
+  button:disabled{opacity:.45;cursor:default}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .seg button{border:none;border-radius:0;padding:7px 12px;background:#0e1f2b}
+  .seg button.on{background:var(--water);color:#042;font-weight:600}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;margin-top:12px}
+  .stat{background:#0a1721;border:1px solid var(--line);border-radius:9px;padding:8px 10px}
+  .stat .k{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+  .stat .v{font-size:17px;font-variant-numeric:tabular-nums;margin-top:2px}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--dim);margin-top:8px;align-items:center}
+  .sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:5px}
+  .hint{color:var(--dim);font-size:12px;margin-top:8px}
+  a{color:var(--water)}
+  .prog{height:4px;background:#0a1721;border-radius:3px;overflow:hidden;margin-top:10px}
+  .prog i{display:block;height:100%;width:0;background:var(--water);transition:width .1s}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Ci<span class="drop">s</span>tern</h1>
+    <span class="tag">A fixed tank sampling an infinite stream — perfectly, provably fair. Watch reservoir sampling (Knuth&rsquo;s Algorithm R).</span>
+  </header>
+
+  <div class="grid">
+    <div>
+      <div class="card">
+        <canvas id="stage" role="img" aria-label="Reservoir tank"></canvas>
+        <div class="btns" style="margin-top:12px">
+          <button id="play" class="primary">▶ Play</button>
+          <button id="step">Step ›</button>
+          <button id="reset">↺ Reset stream</button>
+          <span style="flex:1"></span>
+          <span class="seg" id="mode">
+            <button data-m="uniform" class="on">Uniform (Alg R)</button>
+            <button data-m="weighted">Weighted (A&#8209;Res)</button>
+          </span>
+        </div>
+      </div>
+
+      <div class="card">
+        <canvas id="hist" role="img" tabindex="0" aria-label="Survival histogram"></canvas>
+        <div class="legend">
+          <span><i class="sw" style="background:var(--water)"></i>Correct sampler survival freq</span>
+          <span id="lg_bias"><i class="sw" style="background:var(--bias)"></i>Biased sampler (fixed accept + recency)</span>
+          <span><i class="sw" style="background:var(--gold)"></i>Theoretical inclusion</span>
+          <span><i class="sw" style="background:var(--spill)"></i>Tracked position convergence</span>
+        </div>
+        <div class="hint" id="hhint">Click any bar to track one stream position &rarr; watch its inclusion frequency converge to the theoretical line as trials accumulate.</div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <div class="row"><label>Stream length n</label>
+          <input type="range" id="n" min="5" max="1000" value="60"><span class="val" id="nv">60</span></div>
+        <div class="row"><label>Reservoir k</label>
+          <input type="range" id="k" min="1" max="10" value="5"><span class="val" id="kv">5</span></div>
+        <div class="row"><label>Speed</label>
+          <input type="range" id="speed" min="1" max="12" value="4"><span class="val" id="spv">4</span></div>
+        <div class="row"><label>Seed</label>
+          <input type="number" id="seed" value="12345" min="0" step="1"></div>
+        <div class="row"><label>Trials / run</label>
+          <input type="number" id="tn" value="2000" min="1" max="50000" step="500"></div>
+        <div class="btns">
+          <button id="run">Run trials</button>
+          <button id="clear">Clear stats</button>
+          <button id="csv">Export CSV</button>
+          <button id="share">Share link</button>
+        </div>
+        <div class="prog"><i id="pbar"></i></div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="stats">
+          <div class="stat"><div class="k">Items seen</div><div class="v" id="s_seen">0 / 60</div></div>
+          <div class="stat"><div class="k">Tank contents</div><div class="v" id="s_tank">—</div></div>
+          <div class="stat"><div class="k">Live accept rate</div><div class="v" id="s_acc">—</div></div>
+          <div class="stat"><div class="k">Trials completed</div><div class="v" id="s_tri">0</div></div>
+          <div class="stat"><div class="k">Max deviation</div><div class="v" id="s_dev">—</div></div>
+          <div class="stat"><div class="k">&chi;&sup2; / dof</div><div class="v" id="s_chi">—</div></div>
+        </div>
+        <div class="hint" id="proof">Run trials: the correct sampler flattens to k/n regardless of arrival order; the biased one stays skewed. That gap is the whole point.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+// ---------- seeded PRNG ----------
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+// ---------- state ----------
+const S={n:60,k:5,speed:4,seed:12345,mode:"uniform",trialsN:2000,
+  seen:0,accepted:0,reservoir:[],liveRng:null,
+  trials:0,uCounts:null,bCounts:null,expected:null,W:0,
+  tracked:0,trackHist:[],running:false,hover:null};
+const reducedMotion=(window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches)||false;
+const anim={active:false,i:0,t:0,dec:null,splash:null};
+
+const $=id=>document.getElementById(id);
+const clamp=(x,a,b)=>x<a?a:x>b?b:x;
+function weight(i){return 1+1.5*(i-1)/Math.max(1,S.n-1);}
+
+function recompute(){
+  S.expected=new Float64Array(S.n+1);
+  if(S.mode==="weighted"){S.W=0;for(let i=1;i<=S.n;i++)S.W+=weight(i);
+    for(let i=1;i<=S.n;i++)S.expected[i]=Math.min(1,S.k*weight(i)/S.W);}
+  else{const e=S.k/S.n;for(let i=1;i<=S.n;i++)S.expected[i]=e;}
+}
+
+// ---------- live single-item engine (illustrative) ----------
+function resetStream(){
+  S.seen=0;S.accepted=0;S.reservoir=new Array(S.k).fill(null);
+  S.liveRng=mulberry32((S.seed^0x9e3779b9)>>>0);
+  anim.active=false;anim.i=0;anim.t=0;anim.dec=null;anim.splash=null;
+  updateStats();
+}
+function computeDecision(i){
+  const r=S.liveRng;
+  if(S.mode==="weighted"){
+    const w=weight(i),key=Math.pow(r(),1/w);
+    if(i<=S.k)return{fill:true,slot:i-1,accepted:true,key,w};
+    let m=0;for(let x=1;x<S.k;x++)if(S.reservoir[x].key<S.reservoir[m].key)m=x;
+    const acc=key>S.reservoir[m].key;
+    return{accepted:acc,slot:acc?m:-1,key,w,minKey:S.reservoir[m].key};
+  }else{
+    if(i<=S.k)return{fill:true,slot:i-1,accepted:true,p:1};
+    const j=Math.floor(r()*i),acc=j<S.k;
+    return{accepted:acc,slot:acc?j:-1,roll:j,p:S.k/i};
+  }
+}
+function beginItem(){
+  if(S.seen>=S.n){playing=false;$("play").textContent="▶ Play";updateAria();return false;}
+  anim.i=S.seen+1;anim.dec=computeDecision(anim.i);anim.t=0;anim.active=true;return true;
+}
+function commitItem(){
+  const d=anim.dec;
+  if(d.accepted){S.reservoir[d.slot]={pos:anim.i,key:d.key};anim.splash={slot:d.slot,t:1};}
+  S.seen=anim.i;if(d.accepted)S.accepted++;
+  updateStats();
+}
+
+// ---------- headless samplers ----------
+function sampleCorrect(r){
+  const k=S.k,n=S.n,res=new Array(k);
+  if(S.mode==="weighted"){
+    const keys=new Array(k);
+    for(let i=1;i<=n;i++){const key=Math.pow(r(),1/weight(i));
+      if(i<=k){res[i-1]=i;keys[i-1]=key;}
+      else{let m=0;for(let x=1;x<k;x++)if(keys[x]<keys[m])m=x;
+        if(key>keys[m]){res[m]=i;keys[m]=key;}}}
+  }else{
+    for(let i=1;i<=n;i++){if(i<=k)res[i-1]=i;
+      else{const j=Math.floor(r()*i);if(j<k)res[j]=i;}}
+  }
+  return res;
+}
+// Biased: naive recency sampler — fill k, then accept each with fixed p and evict random.
+function sampleBiased(r){
+  const k=S.k,n=S.n,res=[];
+  for(let i=1;i<=n;i++){
+    if(res.length<k)res.push(i);
+    else if(r()<0.5)res[Math.floor(r()*k)]=i;
+  }
+  return res;
+}
+function oneTrial(idx){
+  const rc=mulberry32((S.seed^Math.imul(idx+1,2654435761))>>>0);
+  const rb=mulberry32((S.seed^Math.imul(idx+1,40503)^0x777)>>>0);
+  const c=sampleCorrect(rc);for(let x=0;x<c.length;x++)S.uCounts[c[x]]++;
+  const b=sampleBiased(rb);for(let x=0;x<b.length;x++)S.bCounts[b[x]]++;
+}
+function clearStats(){
+  S.uCounts=new Float64Array(S.n+1);S.bCounts=new Float64Array(S.n+1);
+  S.trials=0;S.trackHist=[];updateStats();drawHist();
+}
+function runTrials(){
+  if(S.running)return;S.running=true;setBusy(true);
+  const target=S.trials+S.trialsN,CHUNK=200;
+  (function chunk(){
+    const end=Math.min(S.trials+CHUNK,target);
+    while(S.trials<end){oneTrial(S.trials);S.trials++;
+      if(S.tracked)S.trackHist.push(S.uCounts[S.tracked]/S.trials);}
+    updateStats();drawHist();
+    $("pbar").style.width=(100*(1-(target-S.trials)/S.trialsN)).toFixed(0)+"%";
+    if(S.trials<target)requestAnimationFrame(chunk);
+    else{S.running=false;setBusy(false);setTimeout(()=>$("pbar").style.width="0",250);}
+  })();
+}
+function setBusy(b){["run","reset","clear","n","k","seed","tn","csv"].forEach(id=>$(id).disabled=b);
+  document.querySelectorAll("#mode button").forEach(x=>x.disabled=b);}
+
+// ---------- stats readout ----------
+function stat(){
+  let chi=0,dev=0;
+  if(S.trials>0){for(let i=1;i<=S.n;i++){const e=S.expected[i],exp=S.trials*e;
+    const o=S.uCounts[i];if(exp>0)chi+=(o-exp)*(o-exp)/exp;
+    dev=Math.max(dev,Math.abs(o/S.trials-e));}}
+  return{chi,dev};
+}
+function updateStats(){
+  $("s_seen").textContent=S.seen+" / "+S.n;
+  const tank=S.reservoir.filter(Boolean).map(s=>s.pos).sort((a,b)=>a-b);
+  $("s_tank").textContent=tank.length?tank.join(", "):"—";
+  $("s_acc").textContent=S.seen?(100*S.accepted/S.seen).toFixed(0)+"%":"—";
+  $("s_tri").textContent=S.trials.toLocaleString();
+  const st=stat();
+  $("s_dev").textContent=S.trials?st.dev.toFixed(4):"—";
+  $("s_chi").textContent=S.trials?st.chi.toFixed(1)+" / "+(S.n-1):"—";
+  const p=$("proof");
+  if(S.trials){
+    p.innerHTML=S.mode==="weighted"
+      ?`After <b>${S.trials.toLocaleString()}</b> trials the survival histogram tracks the weight-proportional line (k&middot;w&#8339;/&Sigma;w): heavier items survive more, exactly as intended. Max deviation <b>${st.dev.toFixed(4)}</b>.`
+      :`After <b>${S.trials.toLocaleString()}</b> trials every position converges to the same <b>k/n = ${(S.k/S.n).toFixed(3)}</b> chance — arrival order does not matter. The biased sampler still slopes toward recent items. Max deviation <b>${st.dev.toFixed(4)}</b>.`;
+  }
+  updateAria();
+}
+function updateAria(){
+  if(!stageCv||!histCv)return;
+  const tank=S.reservoir.filter(Boolean).map(s=>s.pos).sort((a,b)=>a-b);
+  stageCv.setAttribute("aria-label",
+    `Reservoir: ${S.k} slots, ${S.seen} of ${S.n} stream items processed${playing?", playing":", paused"}`+
+    (tank.length?`. In tank: positions ${tank.join(", ")}`:""));
+  histCv.setAttribute("aria-label",
+    `Survival histogram over ${S.n} stream positions, mode ${S.mode==="weighted"?"weighted A-Res":"uniform Algorithm R"}, ${S.trials.toLocaleString()} trials accumulated`+
+    (S.tracked?`, tracking position ${S.tracked} (theoretical ${S.expected[S.tracked].toFixed(3)})`:""));
+}
+
+// ---------- canvas setup ----------
+function fit(cv){const dpr=devicePixelRatio||1,r=cv.getBoundingClientRect();
+  cv.width=r.width*dpr;cv.height=r.height*dpr;const c=cv.getContext("2d");
+  c.setTransform(dpr,0,0,dpr,0,0);return{c,w:r.width,h:r.height};}
+let stageCv,histCv;
+
+// ---------- stage render ----------
+function drawStage(){
+  const{c,w,h}=fit(stageCv);
+  c.clearRect(0,0,w,h);
+  const slotN=S.k,tankX=w-Math.min(360,slotN*44+40),gap=8;
+  const sw=Math.min(40,(w-tankX-30-gap*(slotN-1))/slotN),sh=54,ty=h/2-sh/2;
+  // conveyor
+  c.strokeStyle="#1c3444";c.lineWidth=2;c.beginPath();c.moveTo(20,h/2);c.lineTo(tankX-14,h/2);c.stroke();
+  for(let x=24;x<tankX-14;x+=22){c.fillStyle="#15303f";c.fillRect(x,h/2-3,10,6);}
+  // tank slots
+  for(let s=0;s<slotN;s++){
+    const x=tankX+s*(sw+gap);
+    const occ=S.reservoir[s];
+    c.fillStyle="#0a1a24";c.strokeStyle="#25506a";c.lineWidth=1.5;
+    rr(c,x,ty,sw,sh,7);c.fill();c.stroke();
+    if(occ){
+      let fh=sh-8;c.fillStyle="rgba(47,215,209,.28)";rr(c,x+3,ty+4,sw-6,fh,5);c.fill();
+      c.fillStyle="#8ff0ec";c.font="600 13px ui-sans-serif";
+      c.textAlign="center";c.textBaseline="middle";c.fillText(occ.pos,x+sw/2,ty+sh/2);
+    }
+    if(anim.splash&&anim.splash.slot===s&&anim.splash.t>0){
+      c.strokeStyle=`rgba(95,168,255,${anim.splash.t})`;c.lineWidth=3;
+      rr(c,x-2,ty-2,sw+4,sh+4,9);c.stroke();
+    }
+  }
+  c.fillStyle="#5c7d8d";c.font="11px ui-sans-serif";c.textAlign="center";c.textBaseline="alphabetic";
+  c.fillText("CISTERN — "+slotN+" slots",tankX+(slotN*(sw+gap)-gap)/2,ty+sh+18);
+
+  // incoming item
+  if(anim.active&&anim.dec){
+    const x0=40,x1=tankX-24,x=x0+(x1-x0)*Math.min(1,anim.t*1.05),y=h/2;
+    const d=anim.dec,revealed=anim.t>0.45;
+    // trajectory into slot after decision if accepted
+    let px=x,py=y;
+    if(anim.t>0.7&&d.accepted&&d.slot>=0){
+      const tx=tankX+d.slot*(sw+gap)+sw/2,ty2=ty+sh/2,f=(anim.t-0.7)/0.3;
+      px=x1+(tx-x1)*f;py=y+(ty2-y)*f;
+    }else if(anim.t>0.7&&!d.accepted){py=y+ (anim.t-0.7)*120;}
+    c.beginPath();c.arc(px,py,15,0,7);c.fillStyle=d.accepted?"#2fd7d1":"#37596b";c.fill();
+    c.strokeStyle=d.accepted?"#bff":"#4a7186";c.lineWidth=2;c.stroke();
+    c.fillStyle="#042";c.font="600 12px ui-sans-serif";c.textAlign="center";c.textBaseline="middle";
+    c.fillText(anim.i,px,py);
+    // label
+    c.textBaseline="alphabetic";c.font="12px ui-sans-serif";c.textAlign="center";
+    let l1,l2;
+    if(S.mode==="weighted"){
+      l1=`item ${anim.i}  ·  w=${d.w.toFixed(2)}`;
+      l2=revealed?`key=${d.key.toFixed(3)}`+(d.minKey!=null?` vs min ${d.minKey.toFixed(3)}`:"  (fills)"):"rolling key…";
+    }else{
+      l1=`item ${anim.i}  ·  P(keep)=k/i=${d.p.toFixed(3)}`;
+      l2=revealed?(d.roll!=null?`roll ${d.roll} < k=${S.k}? `:"fills empty slot"):"rolling dice…";
+    }
+    c.fillStyle="#cfe6ef";c.fillText(l1,Math.min(x,x1),y-40);
+    if(revealed){c.fillStyle=d.accepted?"#4fe08b":"#ff7a59";
+      c.fillText(l2+(S.mode==="weighted"?(d.accepted?" → SPLASH":" → DRAIN"):(d.roll!=null?(d.accepted?"YES → evict slot "+d.slot:"NO → drain"):"")),Math.min(x,x1),y-22);}
+  }else if(S.seen>=S.n){
+    c.fillStyle="#4fe08b";c.font="14px ui-sans-serif";c.textAlign="left";c.textBaseline="alphabetic";
+    c.fillText("Stream drained — "+S.n+" items processed. Reset or run trials.",30,40);
+  }else{
+    c.fillStyle="#5c7d8d";c.font="13px ui-sans-serif";c.textAlign="left";
+    c.fillText("Press Play or Step to send items down the conveyor →",30,40);
+  }
+}
+function rr(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);
+  c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
+
+// ---------- histogram render ----------
+let histGeom=null;
+function drawHist(){
+  const{c,w,h}=fit(histCv);
+  c.clearRect(0,0,w,h);
+  const padL=44,padR=14,padT=16,padB=28,pw=w-padL-padR,ph=h-padT-padB;
+  const B=Math.min(S.n,60),binSz=S.n/B;
+  // aggregate per bin
+  const cf=new Float64Array(B),bf=new Float64Array(B),ef=new Float64Array(B);
+  for(let b=0;b<B;b++){let lo=Math.floor(b*binSz)+1,hi=Math.floor((b+1)*binSz);if(hi<lo)hi=lo;
+    let cs=0,bs=0,es=0,cnt=0;
+    for(let i=lo;i<=hi;i++){cs+=S.uCounts?S.uCounts[i]:0;bs+=S.bCounts?S.bCounts[i]:0;es+=S.expected[i];cnt++;}
+    cf[b]=S.trials?cs/(S.trials*cnt):0;bf[b]=S.trials?bs/(S.trials*cnt):0;ef[b]=es/cnt;}
+  const showBias=S.mode!=="weighted";
+  let yMax=0.02;for(let b=0;b<B;b++){yMax=Math.max(yMax,cf[b],ef[b]);if(showBias)yMax=Math.max(yMax,bf[b]);}
+  yMax*=1.18;
+  histGeom={padL,padT,pw,ph,padB,B,binSz,h};
+  // axes
+  c.strokeStyle="#1c3444";c.lineWidth=1;
+  c.fillStyle="#5c7d8d";c.font="10px ui-sans-serif";c.textAlign="right";c.textBaseline="middle";
+  for(let g=0;g<=4;g++){const yy=padT+ph-ph*g/4;c.beginPath();c.moveTo(padL,yy);c.lineTo(w-padR,yy);c.stroke();
+    c.fillText((yMax*g/4).toFixed(3),padL-6,yy);}
+  const X=b=>padL+pw*(b+0.5)/B,Y=v=>padT+ph-ph*clamp(v/yMax,0,1);
+  const bwFull=pw/B;
+  // bars
+  for(let b=0;b<B;b++){
+    const cx=padL+bwFull*b;
+    if(showBias){
+      // correct (filled cyan)
+      const cw=bwFull*0.54;c.fillStyle="#2fd7d1";c.fillRect(cx+2,Y(cf[b]),cw,padT+ph-Y(cf[b]));
+      // biased (filled orange) — only meaningful in uniform mode
+      const bx=cx+cw+3,bw=bwFull*0.34;c.fillStyle="rgba(255,122,89,.85)";
+      c.fillRect(bx,Y(bf[b]),bw,padT+ph-Y(bf[b]));
+    }else{
+      // weighted: single cyan bar per bin, contrasted against the weight-proportional line
+      const cw=bwFull*0.7;c.fillStyle="#2fd7d1";c.fillRect(cx+2,Y(cf[b]),cw,padT+ph-Y(cf[b]));
+    }
+  }
+  // expected line
+  c.strokeStyle="#ffcf5c";c.lineWidth=2;c.setLineDash([6,4]);c.beginPath();
+  for(let b=0;b<B;b++){const xx=X(b),yy=Y(ef[b]);b?c.lineTo(xx,yy):c.moveTo(xx,yy);}c.stroke();c.setLineDash([]);
+  // x labels
+  c.fillStyle="#5c7d8d";c.textAlign="center";c.textBaseline="top";c.font="10px ui-sans-serif";
+  c.fillText("1",padL+bwFull*0.5,padT+ph+6);
+  c.fillText("stream position →",padL+pw/2,padT+ph+6);
+  c.textAlign="right";c.fillText(""+S.n,w-padR,padT+ph+6);
+
+  // hover guideline + readout (makes the crosshair cursor a real affordance)
+  if(S.hover!=null&&S.hover<B){
+    const b=S.hover,hx=padL+bwFull*b+bwFull/2;
+    c.strokeStyle="rgba(232,242,247,.28)";c.lineWidth=1;c.setLineDash([2,3]);
+    c.beginPath();c.moveTo(hx,padT);c.lineTo(hx,padT+ph);c.stroke();c.setLineDash([]);
+    let lo=Math.floor(b*binSz)+1,hi=Math.max(lo,Math.floor((b+1)*binSz));
+    const lines=[["pos "+(lo===hi?lo:lo+"–"+hi),"#cfe6ef"],["correct "+cf[b].toFixed(4),"#2fd7d1"]];
+    if(showBias)lines.push(["biased "+bf[b].toFixed(4),"#ff7a59"]);
+    lines.push(["theory "+ef[b].toFixed(4),"#ffcf5c"]);
+    const bw2=104,bh2=14*lines.length+10;
+    let bx2=hx+8;if(bx2+bw2>w-padR)bx2=hx-8-bw2;const by2=padT+6;
+    c.fillStyle="rgba(6,20,28,.92)";c.strokeStyle="#25506a";c.lineWidth=1;
+    rr(c,bx2,by2,bw2,bh2,7);c.fill();c.stroke();
+    c.textAlign="left";c.textBaseline="top";c.font="10px ui-sans-serif";
+    lines.forEach((ln,i)=>{c.fillStyle=ln[1];c.fillText(ln[0],bx2+8,by2+6+i*14);});
+  }
+
+  // tracked position marker + convergence inset
+  if(S.tracked){
+    const tb=clamp(Math.floor((S.tracked-1)/binSz),0,B-1);
+    const mx=padL+bwFull*tb+bwFull/2;
+    c.strokeStyle="rgba(95,168,255,.9)";c.lineWidth=1.5;c.setLineDash([3,3]);
+    c.beginPath();c.moveTo(mx,padT);c.lineTo(mx,padT+ph);c.stroke();c.setLineDash([]);
+    // inset convergence curve — dock it over whichever half has the least data
+    let lMax=0,rMax=0;
+    for(let b=0;b<B;b++){const v=Math.max(cf[b],ef[b],showBias?bf[b]:0);
+      if(b<B/2)lMax=Math.max(lMax,v);else rMax=Math.max(rMax,v);}
+    const iw=Math.min(190,pw*0.44),ih=78,iy=padT+6;
+    const ix=(lMax<=rMax)?padL+8:w-padR-iw;
+    c.fillStyle="rgba(6,20,28,.9)";c.strokeStyle="#25506a";c.lineWidth=1;
+    rr(c,ix,iy,iw,ih,8);c.fill();c.stroke();
+    c.fillStyle="#9ec9ff";c.font="10px ui-sans-serif";c.textAlign="left";c.textBaseline="top";
+    c.fillText("position "+S.tracked+" inclusion",ix+8,iy+6);
+    const e=S.expected[S.tracked];
+    const ic0=ix+8,icw=iw-16,icy=iy+22,ich=ih-30;
+    let vmax=e*1.6+1e-6;S.trackHist.forEach(v=>vmax=Math.max(vmax,v));
+    const eY=icy+ich-ich*clamp(e/vmax,0,1);
+    c.strokeStyle="#ffcf5c";c.setLineDash([4,3]);c.beginPath();c.moveTo(ic0,eY);c.lineTo(ic0+icw,eY);c.stroke();c.setLineDash([]);
+    if(S.trackHist.length){
+      c.strokeStyle="#5fa8ff";c.lineWidth=1.8;c.beginPath();
+      const L=S.trackHist.length;
+      for(let j=0;j<L;j++){const xx=ic0+icw*(j/(L-1||1)),yy=icy+ich-ich*clamp(S.trackHist[j]/vmax,0,1);
+        j?c.lineTo(xx,yy):c.moveTo(xx,yy);}c.stroke();
+      const cur=S.trackHist[L-1];
+      c.fillStyle="#cfe6ef";c.textAlign="right";c.textBaseline="bottom";
+      c.fillText(cur.toFixed(3)+" vs "+e.toFixed(3),ix+iw-8,iy+ih-6);
+    }else{
+      c.fillStyle="#5c7d8d";c.textAlign="left";c.textBaseline="top";
+      c.fillText("run trials to trace →",ic0,icy+ich/2);
+    }
+  }
+}
+
+// ---------- interaction ----------
+let playing=false,last=0,rafId=0;
+function needsFrame(){return playing||anim.active||!!anim.splash;}
+function ensureFrame(){if(!rafId){last=performance.now();rafId=requestAnimationFrame(frame);}}
+function frame(ts){
+  const dt=Math.min(0.05,(ts-last)/1000||0);last=ts;
+  if(playing&&!anim.active)beginItem();
+  if(anim.active){
+    // prefers-reduced-motion: snap the item straight to its final position, no conveyor tween
+    if(reducedMotion){anim.t=1;commitItem();anim.active=false;}
+    else{anim.t+=dt*S.speed;if(anim.t>=1){anim.t=1;commitItem();anim.active=false;}}
+  }
+  if(anim.splash){anim.splash.t-=dt*2;if(anim.splash.t<=0)anim.splash=null;}
+  drawStage();
+  // only keep the rAF loop alive while something is actually moving; otherwise it idles CPU
+  if(needsFrame())rafId=requestAnimationFrame(frame);else rafId=0;
+}
+function togglePlay(){if(S.seen>=S.n)resetStream();playing=!playing;
+  $("play").textContent=playing?"❚❚ Pause":"▶ Play";updateAria();
+  if(playing)ensureFrame();else drawStage();}
+function doStep(){playing=false;$("play").textContent="▶ Play";
+  if(S.seen>=S.n)return;if(!anim.active){beginItem();ensureFrame();}}
+function doReset(){playing=false;$("play").textContent="▶ Play";resetStream();drawStage();}
+function trackBin(b){const g=histGeom,B=g?g.B:Math.min(S.n,60),binSz=g?g.binSz:S.n/B;
+  if(b==null)b=S.tracked?clamp(Math.floor((S.tracked-1)/binSz),0,B-1):Math.floor(B/2);
+  b=clamp(b,0,B-1);
+  S.tracked=clamp(Math.round(b*binSz+binSz/2),1,S.n);
+  S.trackHist=S.trials?[S.uCounts[S.tracked]/S.trials]:[];
+  $("hhint").innerHTML="Tracking position <b>"+S.tracked+"</b> (theoretical "+S.expected[S.tracked].toFixed(3)+"). Run more trials to watch it converge. Click elsewhere or use arrow keys to move.";
+  writeHash();drawHist();updateAria();}
+
+function bindRange(id,vid,key,after){const el=$(id);el.oninput=()=>{
+  S[key]=+el.value;$(vid).textContent=el.value;if(after)after();writeHash();};}
+
+function fullReset(){S.k=clamp(S.k,1,S.n);$("k").max=Math.min(10,S.n);
+  recompute();resetStream();clearStats();drawStage();writeHash();}
+
+// URL hash
+let suppressHash=false;
+function writeHash(){
+  const nh="n="+S.n+"&k="+S.k+"&s="+S.speed+"&seed="+S.seed+"&m="+S.mode+(S.tracked?"&p="+S.tracked:"");
+  if(location.hash.slice(1)===nh)return;   // nothing changed — don't kick the hashchange round-trip
+  suppressHash=true;location.hash=nh;
+}
+function readHash(){const h=new URLSearchParams(location.hash.slice(1));
+  if(h.has("n"))S.n=clamp(+h.get("n")||60,5,1000);
+  if(h.has("k"))S.k=clamp(+h.get("k")||5,1,10);
+  if(h.has("s"))S.speed=clamp(+h.get("s")||4,1,12);
+  if(h.has("seed")){const sv=parseInt(h.get("seed"),10);S.seed=Number.isFinite(sv)?Math.max(0,sv):12345;}
+  if(h.has("m")&&(h.get("m")==="weighted"||h.get("m")==="uniform"))S.mode=h.get("m");
+  if(h.has("p"))S.tracked=clamp(+h.get("p")||0,0,S.n);
+  S.k=clamp(S.k,1,S.n);}
+
+function syncInputs(){
+  $("n").value=S.n;$("nv").textContent=S.n;
+  $("k").value=S.k;$("kv").textContent=S.k;$("k").max=Math.min(10,S.n);
+  $("speed").value=S.speed;$("spv").textContent=S.speed;
+  $("seed").value=S.seed;$("tn").value=S.trialsN;
+  document.querySelectorAll("#mode button").forEach(b=>b.classList.toggle("on",b.dataset.m===S.mode));
+  const lb=$("lg_bias");if(lb)lb.style.display=S.mode==="weighted"?"none":"";
+}
+
+function init(){
+  stageCv=$("stage");histCv=$("hist");
+  readHash();syncInputs();recompute();resetStream();clearStats();
+
+  bindRange("n","nv","n",fullReset);
+  bindRange("k","kv","k",fullReset);
+  bindRange("speed","spv","speed",null);
+  $("seed").onchange=()=>{S.seed=Math.max(0,parseInt($("seed").value)||0);fullReset();};
+  $("tn").onchange=()=>{S.trialsN=clamp(parseInt($("tn").value)||2000,1,50000);$("tn").value=S.trialsN;};
+
+  $("play").onclick=togglePlay;
+  $("step").onclick=doStep;
+  $("reset").onclick=doReset;
+  $("run").onclick=runTrials;
+  $("clear").onclick=()=>{S.tracked=0;clearStats();writeHash();};
+  document.querySelectorAll("#mode button").forEach(b=>b.onclick=()=>{
+    if(S.running)return;S.mode=b.dataset.m;syncInputs();fullReset();});
+
+  $("csv").onclick=()=>{
+    let out="position,weight,theoretical_prob,correct_freq,biased_freq\n";
+    for(let i=1;i<=S.n;i++)out+=i+","+(S.mode==="weighted"?weight(i).toFixed(4):"1")+","+
+      S.expected[i].toFixed(6)+","+(S.trials?(S.uCounts[i]/S.trials).toFixed(6):"0")+","+
+      (S.trials?(S.bCounts[i]/S.trials).toFixed(6):"0")+"\n";
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(new Blob([out],{type:"text/csv"}));
+    a.download="cistern_"+S.mode+"_n"+S.n+"_k"+S.k+".csv";a.click();};
+
+  $("share").onclick=()=>{
+    writeHash();
+    const b=$("share"),t="Share link";
+    const done=ok=>{b.textContent=ok?"✓ Copied":"Copy failed";setTimeout(()=>b.textContent=t,1200);};
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(location.href).then(()=>done(true),()=>done(false));
+    }else{
+      try{const ta=document.createElement("textarea");ta.value=location.href;
+        ta.style.position="fixed";ta.style.opacity="0";document.body.appendChild(ta);
+        ta.select();const ok=document.execCommand("copy");document.body.removeChild(ta);done(ok);}
+      catch(e){done(false);}
+    }};
+
+  histCv.onclick=e=>{
+    if(!histGeom)return;const r=histCv.getBoundingClientRect();
+    const x=e.clientX-r.left,g=histGeom;
+    if(x<g.padL||x>g.padL+g.pw)return;
+    trackBin(Math.floor((x-g.padL)/(g.pw/g.B)));};
+  histCv.onmousemove=e=>{
+    if(!histGeom)return;const r=histCv.getBoundingClientRect();
+    const x=e.clientX-r.left,g=histGeom;
+    if(x<g.padL||x>g.padL+g.pw){if(S.hover!=null){S.hover=null;drawHist();}return;}
+    const b=clamp(Math.floor((x-g.padL)/(g.pw/g.B)),0,g.B-1);
+    if(b!==S.hover){S.hover=b;drawHist();}};
+  histCv.onmouseleave=()=>{if(S.hover!=null){S.hover=null;drawHist();}};
+
+  // keyboard support
+  window.addEventListener("keydown",e=>{
+    const tag=(e.target&&e.target.tagName||"").toLowerCase();
+    if(tag==="input"||tag==="textarea"||tag==="select")return;
+    if(document.activeElement===histCv&&(e.key==="ArrowLeft"||e.key==="ArrowRight")){
+      e.preventDefault();
+      const g=histGeom,B=g?g.B:Math.min(S.n,60),binSz=g?g.binSz:S.n/B;
+      const cur=S.tracked?clamp(Math.floor((S.tracked-1)/binSz),0,B-1):0;
+      trackBin(cur+(e.key==="ArrowRight"?1:-1));return;}
+    switch(e.key){
+      case " ": case "Spacebar": e.preventDefault();togglePlay();break;
+      case "ArrowRight": case "s": case "S": e.preventDefault();doStep();break;
+      case "r": case "R": doReset();break;
+      case "Enter": if(document.activeElement===histCv){e.preventDefault();trackBin(null);}break;
+    }});
+
+  window.addEventListener("hashchange",()=>{
+    if(suppressHash){suppressHash=false;return;}
+    if(!S.running){readHash();syncInputs();fullReset();}});
+  window.addEventListener("resize",()=>{drawStage();drawHist();});
+  drawStage();drawHist();updateAria();
+}
+init();
+</script>
+</body>
+</html>

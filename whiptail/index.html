@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Whiptail</title>
+<style>
+  :root{--ink:#e9edff;--dim:#8892c0;}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:#05060d;overflow:hidden;font-family:'Segoe UI',system-ui,sans-serif;color:var(--ink);-webkit-user-select:none;user-select:none}
+  #wrap{position:fixed;inset:0}
+  canvas{display:block;width:100%;height:100%}
+  #bar{position:fixed;top:10px;left:0;right:0;display:flex;justify-content:center;gap:8px;pointer-events:none;z-index:5}
+  .tog{pointer-events:auto;background:rgba(20,24,46,.72);border:1px solid #2b3160;color:var(--dim);
+       font-size:12px;padding:5px 11px;border-radius:20px;cursor:pointer;letter-spacing:.3px;backdrop-filter:blur(4px)}
+  .tog.on{color:#fff;border-color:#5a67d8;box-shadow:0 0 10px #4756c855}
+  #over{position:fixed;left:50%;top:calc(50% + 110px);transform:translateX(-50%);display:none;gap:9px;z-index:6}
+  #over.show{display:flex}
+  .btn{background:linear-gradient(180deg,#3a44a0,#2a3178);border:1px solid #5a67d8;color:#fff;font-size:13px;
+       padding:9px 16px;border-radius:8px;cursor:pointer;font-weight:600;letter-spacing:.3px}
+  .btn:hover{filter:brightness(1.15)}
+  #toast{position:fixed;top:50px;left:50%;transform:translateX(-50%);background:#1c2145;border:1px solid #5a67d8;
+         padding:7px 15px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .25s;z-index:9;pointer-events:none}
+  #toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas></div>
+<div id="bar">
+  <button class="tog" id="tCB" title="Colorblind-safe palette (Okabe-Ito) — gems and mines also differ by shape">Colorblind</button>
+  <button class="tog on" id="tShake" title="Toggle screen shake">Screen shake</button>
+  <button class="tog" id="tGhost" title="Toggle ghost racer — replays your best run for this seed">Ghost</button>
+</div>
+<div id="over">
+  <button class="btn" id="bRestart">Restart (R)</button>
+  <button class="btn" id="bLink">Copy link</button>
+  <button class="btn" id="bImg">Copy image</button>
+</div>
+<div id="toast"></div>
+<script>
+"use strict";
+const C=document.getElementById('c'), X=C.getContext('2d');
+const FONT="'Segoe UI',system-ui,sans-serif", HOT='#ff8a3c';
+/* safe localStorage: degrade to defaults if storage throws (private mode, sandboxed iframe, quota) */
+function lsGet(k){ try{return localStorage.getItem(k);}catch(e){return null;} }
+function lsSet(k,v){ try{localStorage.setItem(k,v);}catch(e){} }
+/* non-seeded RNG for cosmetics only, so the seeded stream stays deterministic for spawns */
+const crand=Math.random;
+let W=0,H=0,DPR=Math.min(2,window.devicePixelRatio||1);
+function resize(){DPR=Math.min(2,window.devicePixelRatio||1);W=innerWidth;H=innerHeight;C.width=W*DPR;C.height=H*DPR;X.setTransform(DPR,0,0,DPR,0,0);}
+addEventListener('resize',resize);resize();
+
+/* ---------- seeded RNG (mulberry32) from URL hash ---------- */
+function hashStr(s){let h=1779033703^s.length;for(let i=0;i<s.length;i++){h=Math.imul(h^s.charCodeAt(i),3432918353);h=h<<13|h>>>19;}return (h^h>>>16)>>>0;}
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+let SEED = location.hash.slice(1);
+if(!SEED){SEED = Math.random().toString(36).slice(2,8); location.hash = SEED;}
+let rand = mulberry32(hashStr(SEED));
+addEventListener('hashchange',()=>{ if(location.hash.slice(1)!==SEED){SEED=location.hash.slice(1)||SEED; reset(true);} });
+
+/* ---------- audio ---------- */
+let AC=null;
+function actx(){ if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){}} if(AC&&AC.state==='suspended')AC.resume(); return AC; }
+function blip(freq,dur,type,vol){ const a=actx(); if(!a)return; const o=a.createOscillator(),g=a.createGain();
+  o.type=type||'sine'; o.frequency.value=freq; g.gain.value=0.0001;
+  o.connect(g).connect(a.destination); const t=a.currentTime;
+  g.gain.exponentialRampToValueAtTime(vol||0.16,t+0.01); g.gain.exponentialRampToValueAtTime(0.0001,t+(dur||0.12));
+  o.start(t); o.stop(t+(dur||0.12)+0.02); }
+function deathSfx(){ const a=actx(); if(!a)return; const o=a.createOscillator(),g=a.createGain();
+  o.type='sawtooth'; o.frequency.setValueAtTime(220,a.currentTime); o.frequency.exponentialRampToValueAtTime(40,a.currentTime+0.5);
+  g.gain.setValueAtTime(0.22,a.currentTime); g.gain.exponentialRampToValueAtTime(0.0001,a.currentTime+0.55);
+  o.connect(g).connect(a.destination); o.start(); o.stop(a.currentTime+0.56); }
+
+/* ---------- palettes / options ---------- */
+let CB=false, SHAKE=true, GHOSTON=true;
+const PAL={ normal:{gem:'#33e0ff',mine:'#ff3b6b'}, cb:{gem:'#56B4E9',mine:'#E69F00'} };
+function col(k){return CB?PAL.cb[k]:PAL.normal[k];}
+
+/* ---------- tuning ---------- */
+const DT=1/60, SPEED=3.15, TURN=0.056, NSEG=42, SEGLEN=8.5, FRIC=0.985;
+const GEM_R=7, COLLECT=11, MINE_R=11, TELE=42, NEARSELF=17, HEAD_GRACE=13;
+
+/* ---------- state ---------- */
+let comet, ghost, gems, mines, parts, score, hi, wave, combo, comboT, gemsWave, quota, running, over, shake, slow, chroma, tPrev, acc, steers, best, started, seen, waveBanner, bannerWave, hintT;
+hi = +(lsGet('whiptail_hi')||0);
+seen = !!lsGet('whiptail_seen');
+try{ best = JSON.parse(lsGet('whiptail_ghost_'+SEED)||'null'); }catch(e){ best=null; }
+
+function ringR(){ return Math.max(120, Math.min(W,H)*0.46 - (wave-1)*9); }
+function cx(){return W/2;} function cy(){return H/2;}
+
+function newComet(pinX,pinY,ang){ const t=[]; for(let i=0;i<NSEG;i++){t.push({x:pinX-i*SEGLEN,y:pinY,px:pinX-i*SEGLEN,py:pinY});}
+  return {x:pinX,y:pinY,ang:ang,tail:t}; }
+
+function reset(fromHash){
+  if(fromHash){ rand=mulberry32(hashStr(SEED)); try{best=JSON.parse(lsGet('whiptail_ghost_'+SEED)||'null');}catch(e){best=null;} }
+  else rand=mulberry32(hashStr(SEED));
+  comet=newComet(cx(),cy(),0);
+  gems=[]; mines=[]; parts=[]; score=0; wave=1; combo=0; comboT=0; gemsWave=0;
+  quota=6; running=true; over=false; shake=0; slow=1; chroma=0; acc=0; tPrev=performance.now();
+  started=seen; waveBanner=0; bannerWave=1; hintT=seen?3.5:0;
+  steers=[]; ghostReset();
+  for(let i=0;i<5;i++) spawnGem(); for(let i=0;i<3;i++) spawnMine();
+  document.getElementById('over').classList.remove('show');
+}
+function ghostReset(){ ghost=null; if(GHOSTON && best && best.steers){ let r=mulberry32(hashStr(SEED)); // ghost path only needs comet motion
+    ghost={c:newComet(cx(),cy(),0), i:0, s:best.steers}; } }
+
+function spawnPos(minHead){ let x,y,tries=0; const R=ringR()-24;
+  do{ const a=rand()*Math.PI*2, r=Math.sqrt(rand())*R; x=cx()+Math.cos(a)*r; y=cy()+Math.sin(a)*r; tries++; }
+  while(tries<20 && Math.hypot(x-comet.x,y-comet.y)<(minHead||90)); return {x,y}; }
+function spawnGem(){ const p=spawnPos(80); gems.push({x:p.x,y:p.y,ph:rand()*6.28,tele:0}); }
+function spawnMine(){ const p=spawnPos(140); const a=rand()*6.28, sp=(0.3+wave*0.14)*(0.5+rand());
+  mines.push({x:p.x,y:p.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,ph:rand()*6.28}); }
+
+/* ---------- physics ---------- */
+function stepComet(cm,steer){
+  cm.ang += steer*TURN;
+  cm.x += Math.cos(cm.ang)*SPEED; cm.y += Math.sin(cm.ang)*SPEED;
+  // ring boundary: reflect heading inward
+  const dx=cm.x-cx(), dy=cm.y-cy(), d=Math.hypot(dx,dy), R=ringR()-6;
+  if(d>R){ const nx=dx/d, ny=dy/d; cm.x=cx()+nx*R; cm.y=cy()+ny*R;
+    const dot=Math.cos(cm.ang)*nx+Math.sin(cm.ang)*ny; const rx=Math.cos(cm.ang)-2*dot*nx, ry=Math.sin(cm.ang)-2*dot*ny;
+    cm.ang=Math.atan2(ry,rx); }
+  const t=cm.tail; t[0].px=t[0].x; t[0].py=t[0].y; t[0].x=cm.x; t[0].y=cm.y;
+  for(let i=1;i<t.length;i++){ const p=t[i]; const vx=(p.x-p.px)*FRIC, vy=(p.y-p.py)*FRIC; p.px=p.x; p.py=p.y; p.x+=vx; p.y+=vy; }
+  for(let it=0;it<3;it++) for(let i=1;i<t.length;i++){ const a=t[i-1],b=t[i]; let ddx=b.x-a.x,ddy=b.y-a.y,dd=Math.hypot(ddx,ddy)||1e-4; const df=(dd-SEGLEN)/dd; b.x-=ddx*df; b.y-=ddy*df; }
+}
+function segDist(px,py,ax,ay,bx,by){ const dx=bx-ax,dy=by-ay,l2=dx*dx+dy*dy; let t=l2?((px-ax)*dx+(py-ay)*dy)/l2:0; t=t<0?0:t>1?1:t; const qx=ax+t*dx,qy=ay+t*dy; return Math.hypot(px-qx,py-qy); }
+
+function burst(x,y,c,n){ for(let i=0;i<n;i++){ const a=crand()*6.28, s=1+crand()*4; parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:1,c}); } }
+
+function tick(steer){
+  if(!started){ // first-run onboarding: comet idles, no scoring/mines until first steer
+    stepComet(comet,steer);
+    for(const g of gems) g.ph+=0.06;
+    if(steer!==0){ started=true; if(!seen){seen=true; lsSet('whiptail_seen',1);} }
+    return;
+  }
+  steers.push(steer);
+  stepComet(comet,steer);
+  const t=comet.tail;
+  // mines drift + bounce
+  for(const m of mines){ m.x+=m.vx; m.y+=m.vy; m.ph+=0.05; const dx=m.x-cx(),dy=m.y-cy(),d=Math.hypot(dx,dy),R=ringR()-MINE_R;
+    if(d>R){ const nx=dx/d,ny=dy/d,dot=m.vx*nx+m.vy*ny; m.vx-=2*dot*nx; m.vy-=2*dot*ny; m.x=cx()+nx*R; m.y=cy()+ny*R; } }
+  // gem collection by tail + telegraph
+  let scoredThis=false;
+  for(let gi=gems.length-1;gi>=0;gi--){ const g=gems[gi]; g.ph+=0.06; let near=1e9;
+    for(let i=1;i<t.length;i++){ const dd=segDist(g.x,g.y,t[i-1].x,t[i-1].y,t[i].x,t[i].y); if(dd<near)near=dd; }
+    g.tele = near<TELE ? Math.max(0,1-near/TELE) : g.tele*0.85;
+    if(g.tele>0.2){ // slight pull toward tail sweep
+      let bx=0,by=0,bd=1e9; for(let i=1;i<t.length;i++){ const d=Math.hypot(g.x-t[i].x,g.y-t[i].y); if(d<bd){bd=d;bx=t[i].x;by=t[i].y;} }
+      g.x+=(bx-g.x)*0.02*g.tele; g.y+=(by-g.y)*0.02*g.tele; }
+    if(near<COLLECT){ gems.splice(gi,1); combo++; comboT=1.6; const mult=1+Math.floor(combo/3);
+      score += 10*mult; scoredThis=true; gemsWave++;
+      burst(g.x,g.y,col('gem'),10+combo);
+      blip(520*(1+Math.min(combo,14)*0.055), 0.11, 'triangle', 0.15);
+      spawnGem(); }
+  }
+  // combo decay
+  if(comboT>0){ comboT-=DT; if(comboT<=0) combo=0; }
+  // wave advance
+  if(gemsWave>=quota){ wave++; gemsWave=0; quota=6+wave; spawnMine(); if(gems.length<4+wave) spawnGem();
+    shake=Math.max(shake,6); waveBanner=1.3; bannerWave=wave; blip(180,0.25,'square',0.14); blip(360,0.25,'square',0.1); }
+  if(waveBanner>0) waveBanner-=DT;
+  // self near-miss -> bullet time (only while scoring/combo active)
+  if(combo>0){ for(let i=HEAD_GRACE;i<t.length;i++){ const d=Math.hypot(comet.x-t[i].x,comet.y-t[i].y);
+      if(d<NEARSELF){ if(slow>0.55){ blip(880,0.08,'sine',0.1);} slow=0.32; chroma=1; break; } } }
+  slow += (1-slow)*0.045; chroma*=0.94;
+  // death: mines vs head or tail
+  let dead=false;
+  for(const m of mines){ if(Math.hypot(comet.x-m.x,comet.y-m.y)<MINE_R+5){dead=true;break;}
+    for(let i=1;i<t.length;i++){ if(segDist(m.x,m.y,t[i-1].x,t[i-1].y,t[i].x,t[i].y)<MINE_R+3){dead=true;break;} } if(dead)break; }
+  // near-miss shake vs mines (head)
+  for(const m of mines){ const d=Math.hypot(comet.x-m.x,comet.y-m.y); if(d<MINE_R+26 && d>MINE_R+5) shake=Math.max(shake,3.2*(1-(d-MINE_R-5)/21)); }
+  // particles
+  for(let i=parts.length-1;i>=0;i--){ const p=parts[i]; p.x+=p.vx; p.y+=p.vy; p.vx*=0.94; p.vy*=0.94; p.life-=0.035; if(p.life<=0) parts.splice(i,1); }
+  // ghost advance
+  if(ghost){ if(ghost.i<ghost.s.length){ stepComet(ghost.c, ghost.s[ghost.i]); ghost.i++; } }
+  if(shake>0) shake*=0.9;
+  if(dead) die();
+}
+
+function die(){ running=false; over=true; shake=12; deathSfx();
+  burst(comet.x,comet.y,col('mine'),40);
+  if(score>hi){ hi=score; lsSet('whiptail_hi',hi); }
+  if(!best || score>best.score){ best={seed:SEED,score,steers:steers.slice()}; lsSet('whiptail_ghost_'+SEED,JSON.stringify(best)); }
+  document.getElementById('over').classList.add('show');
+}
+
+/* ---------- render ---------- */
+function tailColor(cm,i,alpha,ghostly){ if(ghostly) return 'rgba(150,160,200,'+alpha+')';
+  const heat=Math.min(1,combo/16); const hue=200-heat*185; const light=45+heat*30+ (i/NSEG)*8;
+  return 'hsla('+hue+',95%,'+light+'%,'+alpha+')'; }
+function drawComet(cm,ghostly){ const t=cm.tail;
+  for(let i=t.length-1;i>=1;i--){ const w=(ghostly?2:2.4)*(1+ (1-i/t.length)*2.2) *(1+Math.min(combo,16)*0.02*(ghostly?0:1));
+    X.strokeStyle=tailColor(cm,i,(ghostly?0.28:0.9)*(0.35+0.65*(1-i/t.length)),ghostly);
+    X.lineWidth=w; X.lineCap='round'; X.beginPath(); X.moveTo(t[i-1].x,t[i-1].y); X.lineTo(t[i].x,t[i].y); X.stroke(); }
+  // head
+  const r=ghostly?5:7; X.save(); X.globalCompositeOperation='lighter';
+  const g=X.createRadialGradient(cm.x,cm.y,0,cm.x,cm.y,r*3.2);
+  g.addColorStop(0,ghostly?'rgba(180,190,220,.5)':'rgba(255,250,235,.95)');
+  g.addColorStop(0.4,ghostly?'rgba(120,130,180,.25)':'rgba(255,180,90,.55)');
+  g.addColorStop(1,'rgba(0,0,0,0)'); X.fillStyle=g; X.beginPath(); X.arc(cm.x,cm.y,r*3.2,0,6.283); X.fill(); X.restore();
+  X.fillStyle=ghostly?'rgba(200,210,235,.6)':'#fff'; X.beginPath(); X.arc(cm.x,cm.y,r,0,6.283); X.fill();
+}
+function star(x,y,rO,rI,pts,ph){ X.beginPath(); for(let i=0;i<pts*2;i++){ const rr=i%2?rI:rO, a=ph+i*Math.PI/pts; const px=x+Math.cos(a)*rr,py=y+Math.sin(a)*rr; i?X.lineTo(px,py):X.moveTo(px,py);} X.closePath(); }
+
+function render(){
+  X.setTransform(DPR,0,0,DPR,0,0);
+  X.fillStyle='#05060d'; X.fillRect(0,0,W,H);
+  X.save();
+  if(SHAKE && shake>0.3){ X.translate((crand()-0.5)*shake*2,(crand()-0.5)*shake*2); }
+  // ring
+  const R=ringR(); X.strokeStyle='rgba(90,103,216,'+(0.25+ (over?0:0.12*Math.sin(performance.now()/400)))+')';
+  X.lineWidth=2; X.beginPath(); X.arc(cx(),cy(),R,0,6.283); X.stroke();
+  X.strokeStyle='rgba(90,103,216,0.06)'; X.lineWidth=22; X.beginPath(); X.arc(cx(),cy(),R,0,6.283); X.stroke();
+  // ghost
+  if(ghost) drawComet(ghost.c,true);
+  // gems
+  X.save(); X.globalCompositeOperation='lighter';
+  for(const g of gems){ const pulse=0.6+0.4*Math.sin(g.ph); const gc=col('gem');
+    if(g.tele>0.15){ X.strokeStyle=gc; X.globalAlpha=g.tele*0.9; X.lineWidth=2; X.beginPath(); X.arc(g.x,g.y,COLLECT+6+g.tele*7,0,6.283); X.stroke(); X.globalAlpha=1; }
+    const gr=X.createRadialGradient(g.x,g.y,0,g.x,g.y,GEM_R*2.4); gr.addColorStop(0,gc); gr.addColorStop(0.5,gc+'88'); gr.addColorStop(1,'rgba(0,0,0,0)');
+    X.fillStyle=gr; X.beginPath(); X.arc(g.x,g.y,GEM_R*2.4*pulse,0,6.283); X.fill();
+    X.fillStyle='#fff'; X.save(); X.translate(g.x,g.y); X.rotate(0.785); X.fillRect(-3,-3,6,6); X.restore(); }
+  X.restore();
+  // mines (spiky star, always distinct shape)
+  for(const m of mines){ const mc=col('mine'); X.save(); X.globalCompositeOperation='lighter';
+    const mg=X.createRadialGradient(m.x,m.y,0,m.x,m.y,MINE_R*2); mg.addColorStop(0,mc+'cc'); mg.addColorStop(1,'rgba(0,0,0,0)');
+    X.fillStyle=mg; X.beginPath(); X.arc(m.x,m.y,MINE_R*2,0,6.283); X.fill(); X.restore();
+    X.fillStyle=mc; star(m.x,m.y,MINE_R+3,MINE_R*0.5,7,m.ph); X.fill();
+    X.fillStyle='#1a0008'; X.beginPath(); X.arc(m.x,m.y,MINE_R*0.34,0,6.283); X.fill(); }
+  // comet
+  drawComet(comet,false);
+  // particles
+  X.save(); X.globalCompositeOperation='lighter';
+  for(const p of parts){ X.fillStyle=p.c; X.globalAlpha=Math.max(0,p.life); X.beginPath(); X.arc(p.x,p.y,2.6*p.life+0.5,0,6.283); X.fill(); }
+  X.restore();
+  X.restore();
+  // chromatic pulse overlay (bullet-time)
+  if(chroma>0.02){ X.save(); X.globalCompositeOperation='screen'; X.globalAlpha=chroma*0.14;
+    X.fillStyle='#ff004c'; X.fillRect(-6*chroma,0,W,H); X.fillStyle='#00e0ff'; X.fillRect(6*chroma,0,W,H); X.restore(); }
+  // HUD
+  X.fillStyle='#fff'; X.font='700 26px '+FONT; X.textAlign='left'; X.textBaseline='top';
+  X.fillText(score.toLocaleString(), 18, 14);
+  X.fillStyle='#8892c0'; X.font='600 13px '+FONT;
+  X.fillText('HI '+hi.toLocaleString()+'   WAVE '+wave+'   seed '+SEED, 18, 46);
+  if(combo>0){ const mult=1+Math.floor(combo/3); X.textAlign='right'; X.font='800 30px '+FONT;
+    const heat=Math.min(1,combo/16); X.fillStyle='hsl('+(200-heat*185)+',95%,65%)';
+    X.fillText('×'+mult, W-18, 14); X.font='600 12px '+FONT; X.fillStyle='#8892c0';
+    X.fillText(combo+' chain', W-18, 50);
+    // combo timer bar
+    X.fillStyle='#2b3160'; X.fillRect(W-118,68,100,4); X.fillStyle='hsl('+(200-heat*185)+',95%,60%)'; X.fillRect(W-118,68,100*Math.max(0,comboT/1.6),4); }
+  // wave banner
+  if(waveBanner>0){ X.save(); X.textAlign='center'; X.textBaseline='middle'; X.globalAlpha=Math.min(1,waveBanner/1.3);
+    X.fillStyle=HOT; X.font='800 42px '+FONT; X.fillText('WAVE '+bannerWave, W/2, H*0.28); X.restore(); }
+  // controls hint (returning players; first-timers see the intro card instead)
+  if(hintT>0 && started && !over){ X.save(); X.textAlign='center'; X.textBaseline='bottom'; X.globalAlpha=Math.min(1,hintT);
+    X.fillStyle='#8892c0'; X.font='600 15px '+FONT; X.fillText('← →  steer', W/2, H-34); X.restore(); }
+  if(!started && !over) introCard();
+  if(over) endCard();
+}
+function introCard(){
+  X.setTransform(DPR,0,0,DPR,0,0);
+  X.fillStyle='rgba(5,6,13,0.72)'; X.fillRect(0,0,W,H);
+  const w=Math.min(470,W-40), h=246, ox=(W-w)/2, oy=H*0.5-h*0.55;
+  X.fillStyle='rgba(18,22,44,0.96)'; roundRect(ox,oy,w,h,16); X.fill();
+  X.strokeStyle='#5a67d8'; X.lineWidth=1.5; roundRect(ox,oy,w,h,16); X.stroke();
+  X.textAlign='center'; X.textBaseline='alphabetic';
+  X.fillStyle=HOT; X.font='800 40px '+FONT; X.fillText('WHIPTAIL', W/2, oy+46);
+  X.fillStyle='#c8cff0'; X.font='600 15px '+FONT; X.fillText('Steer  ← / →   (or A / D)', W/2, oy+90);
+  X.fillStyle='#fff'; X.font='600 15px '+FONT;
+  X.fillText('Whip your glowing TAIL through the diamonds', W/2, oy+124);
+  X.fillStyle='#8892c0'; X.fillText('— the head scores nothing.', W/2, oy+146);
+  X.fillStyle='#fff'; X.fillText('Carve hard turns; dodge the spiky mines.', W/2, oy+182);
+  X.fillStyle='#6470b8'; X.font='500 13px '+FONT; X.fillText('press ← or → to begin', W/2, oy+216);
+}
+
+function endCard(){
+  X.setTransform(DPR,0,0,DPR,0,0);
+  X.fillStyle='rgba(5,6,13,0.78)'; X.fillRect(0,0,W,H);
+  const w=Math.min(420,W-40), h=250, ox=(W-w)/2, oy=H*0.5-h*0.62;
+  X.fillStyle='rgba(18,22,44,0.96)'; roundRect(ox,oy,w,h,16); X.fill();
+  X.strokeStyle='#5a67d8'; X.lineWidth=1.5; roundRect(ox,oy,w,h,16); X.stroke();
+  X.textAlign='center'; X.textBaseline='alphabetic';
+  X.fillStyle=HOT; X.font='800 34px '+FONT; X.fillText('RUN OVER', W/2, oy+38);
+  X.fillStyle='#fff'; X.font='800 52px '+FONT; X.fillText(score.toLocaleString(), W/2, oy+78);
+  X.fillStyle='#8892c0'; X.font='600 15px '+FONT;
+  X.fillText((score>=hi?'★ NEW HIGH SCORE ★':'best '+hi.toLocaleString())+'   ·   wave '+wave, W/2, oy+140);
+  X.fillStyle='#c8cff0'; X.font='600 14px '+FONT;
+  X.fillText('seed  '+SEED+(best&&best.score===score?'  ·  ghost saved':''), W/2, oy+168);
+  X.fillStyle='#6470b8'; X.font='500 12px '+FONT;
+  X.fillText('press R or Space to run again', W/2, oy+196);
+}
+function roundRect(x,y,w,h,r){ X.beginPath(); X.moveTo(x+r,y); X.arcTo(x+w,y,x+w,y+h,r); X.arcTo(x+w,y+h,x,y+h,r); X.arcTo(x,y+h,x,y,r); X.arcTo(x,y,x+w,y,r); X.closePath(); }
+
+/* ---------- loop (fixed timestep + slow-mo) ---------- */
+function frame(now){ const real=Math.min(0.05,(now-tPrev)/1000); tPrev=now;
+  if(hintT>0) hintT-=real;
+  if(running){ acc += real*slow; let steps=0; while(acc>=DT && steps<6){ tick(currentSteer()); acc-=DT; steps++; if(!running)break; } }
+  render(); requestAnimationFrame(frame);
+}
+function currentSteer(){ return (keys.left?-1:0)+(keys.right?1:0); }
+
+/* ---------- input ---------- */
+const keys={left:false,right:false};
+function down(e){ const k=e.key.toLowerCase();
+  if(k==='arrowleft'||k==='a'){keys.left=true;e.preventDefault();}
+  else if(k==='arrowright'||k==='d'){keys.right=true;e.preventDefault();}
+  else if(k==='r'||k===' '){ if(over){reset();} actx(); e.preventDefault(); } else actx(); }
+function up(e){ const k=e.key.toLowerCase(); if(k==='arrowleft'||k==='a')keys.left=false; if(k==='arrowright'||k==='d')keys.right=false; }
+addEventListener('keydown',down); addEventListener('keyup',up);
+// touch: left/right halves
+function touch(e){ actx(); const t=e.touches[0]; if(!t)return; if(t.clientX<W/2){keys.left=true;keys.right=false;}else{keys.right=true;keys.left=false;} if(over)reset(); e.preventDefault(); }
+C.addEventListener('touchstart',touch,{passive:false});
+C.addEventListener('touchend',()=>{keys.left=keys.right=false;});
+
+/* ---------- toggles + buttons ---------- */
+function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1400); }
+const tCB=document.getElementById('tCB'),tSh=document.getElementById('tShake'),tG=document.getElementById('tGhost');
+tCB.onclick=()=>{CB=!CB;tCB.classList.toggle('on',CB);lsSet('whiptail_cb',CB?1:'');};
+tSh.onclick=()=>{SHAKE=!SHAKE;tSh.classList.toggle('on',SHAKE);lsSet('whiptail_shake',SHAKE?1:'');};
+tG.onclick=()=>{GHOSTON=!GHOSTON;tG.classList.toggle('on',GHOSTON);lsSet('whiptail_ghost',GHOSTON?1:''); if(GHOSTON)ghostReset(); else ghost=null;};
+CB=!!lsGet('whiptail_cb'); SHAKE=lsGet('whiptail_shake')===null?true:!!lsGet('whiptail_shake');
+GHOSTON=lsGet('whiptail_ghost')===null?true:!!lsGet('whiptail_ghost');
+tCB.classList.toggle('on',CB); tSh.classList.toggle('on',SHAKE); tG.classList.toggle('on',GHOSTON);
+document.getElementById('bRestart').onclick=()=>{reset();actx();};
+document.getElementById('bLink').onclick=()=>{ const u=location.href.split('#')[0]+'#'+SEED;
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(u).then(()=>toast('Link copied — same seed & mines')).catch(()=>toast(u)); }
+  else toast(u); };
+document.getElementById('bImg').onclick=()=>{ C.toBlob(b=>{ if(!b){toast('Copy failed');return;}
+  try{ navigator.clipboard.write([new ClipboardItem({'image/png':b})]).then(()=>toast('Image copied')).catch(()=>dl(b)); }catch(e){dl(b);} }); };
+function dl(b){ const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download='whiptail-'+SEED+'.png'; a.click(); toast('Image downloaded'); }
+
+reset(); requestAnimationFrame(frame);
+</script>
+</body>
+</html>

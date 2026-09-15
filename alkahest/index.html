@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Alkahest — a falling-sand alchemy sandbox</title>
+<style>
+  :root{
+    --bg:#161014;
+    --panel:#231a1e;
+    --panel2:#2c2126;
+    --edge:#3a2c30;
+    --ink:#e9dcc7;
+    --ink-dim:#a2917f;
+    --ember:#ff6a2b;
+    --ember-soft:#ffb066;
+    --gold:#e7c168;
+    --lock:#5a4a44;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:"Inter","Segoe UI",system-ui,sans-serif;overflow:hidden;-webkit-user-select:none;user-select:none}
+  #stage{position:fixed;inset:0}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block;image-rendering:pixelated;cursor:crosshair}
+
+  /* ---- Palette (bottom) ---- */
+  #palette{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);
+    display:flex;gap:6px;flex-wrap:wrap;justify-content:center;max-width:min(96vw,900px);
+    padding:8px 10px;background:rgba(35,26,30,.82);border:1px solid var(--edge);
+    border-radius:14px;backdrop-filter:blur(8px);z-index:20}
+  .el{display:flex;align-items:center;gap:7px;padding:6px 9px;border-radius:9px;
+    border:1px solid transparent;background:var(--panel2);cursor:pointer;transition:.12s}
+  .el:hover{border-color:var(--ember-soft)}
+  .el.sel{border-color:var(--ember);box-shadow:0 0 0 1px var(--ember),0 0 14px -2px var(--ember)}
+  .sw{width:16px;height:16px;border-radius:4px;border:1px solid rgba(0,0,0,.35)}
+  .el .nm{font-size:12.5px;font-weight:600;letter-spacing:.2px}
+  .el .kb{font-size:10px;color:var(--ink-dim);border:1px solid var(--edge);border-radius:4px;
+    padding:0 4px;line-height:15px;min-width:15px;text-align:center}
+
+  /* ---- Controls (top-left) ---- */
+  #bar{position:fixed;top:12px;left:12px;display:flex;align-items:center;gap:8px;z-index:20;
+    background:rgba(35,26,30,.82);border:1px solid var(--edge);border-radius:12px;
+    padding:8px 10px;backdrop-filter:blur(8px);flex-wrap:wrap;max-width:calc(100vw - 24px)}
+  #bar .title{font-weight:800;letter-spacing:.5px;color:var(--ember);margin-right:4px}
+  #bar .title small{font-weight:500;color:var(--ink-dim);letter-spacing:.3px}
+  button{font:inherit;font-size:12.5px;font-weight:600;color:var(--ink);background:var(--panel2);
+    border:1px solid var(--edge);border-radius:8px;padding:6px 10px;cursor:pointer;transition:.12s}
+  button:hover{border-color:var(--ember-soft)}
+  button.on{color:#1a1013;background:var(--ember);border-color:var(--ember)}
+  .stat{font-size:12px;color:var(--ink-dim)}
+  .stat b{color:var(--ink)}
+  #brushv{color:var(--gold);font-variant-numeric:tabular-nums}
+
+  /* ---- Codex (right) ---- */
+  #codex{position:fixed;top:12px;right:12px;width:246px;max-height:calc(100vh - 24px);
+    display:flex;flex-direction:column;background:rgba(35,26,30,.86);border:1px solid var(--edge);
+    border-radius:12px;backdrop-filter:blur(8px);z-index:20;overflow:hidden}
+  #codex.collapsed .cx-body{display:none}
+  .cx-head{display:flex;align-items:center;justify-content:space-between;gap:8px;
+    padding:10px 12px;cursor:pointer;border-bottom:1px solid var(--edge)}
+  .cx-head h2{margin:0;font-size:13px;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold)}
+  .cx-count{font-size:12px;color:var(--ink-dim);font-variant-numeric:tabular-nums}
+  .cx-count b{color:var(--ember-soft)}
+  .cx-body{overflow-y:auto;padding:6px}
+  .cx-body::-webkit-scrollbar{width:8px}
+  .cx-body::-webkit-scrollbar-thumb{background:var(--edge);border-radius:8px}
+  .rx{display:flex;align-items:center;gap:8px;padding:5px 7px;border-radius:7px;font-size:12px;color:var(--lock)}
+  .rx .dot{width:9px;height:9px;border-radius:50%;background:var(--lock);flex:none}
+  .rx.found{color:var(--ink)}
+  .rx.found .dot{background:var(--ember);box-shadow:0 0 8px -1px var(--ember)}
+  .rx .rname{font-weight:600}
+  .rx .rmix{margin-left:auto;font-size:10.5px;color:var(--ink-dim);text-align:right}
+  @keyframes pop{0%{background:rgba(255,106,43,.55);transform:scale(1.04)}100%{background:transparent;transform:none}}
+  .rx.flash{animation:pop .9s ease-out}
+
+  /* ---- Discovery toast ---- */
+  #toast{position:fixed;left:50%;top:22px;transform:translateX(-50%) translateY(-16px);
+    background:linear-gradient(180deg,#3a2620,#241619);border:1px solid var(--ember);
+    color:var(--ink);padding:10px 18px;border-radius:11px;font-weight:700;letter-spacing:.3px;
+    box-shadow:0 8px 30px -8px var(--ember);opacity:0;pointer-events:none;transition:.35s;z-index:40}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  #toast small{display:block;font-weight:500;font-size:11px;color:var(--ember-soft);letter-spacing:1px;text-transform:uppercase}
+
+  #hint{position:fixed;left:12px;bottom:14px;font-size:11px;color:var(--ink-dim);z-index:10;max-width:230px;line-height:1.5}
+  @media (max-width:720px){#codex{width:200px}#hint{display:none}}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c"></canvas></div>
+
+<div id="bar">
+  <span class="title">ALKAHEST <small>alchemy sandbox</small></span>
+  <button id="pause">Pause</button>
+  <button id="step">Step</button>
+  <button id="clear">Clear</button>
+  <span class="stat">brush <span id="brushv">3</span> <small>(wheel)</small></span>
+  <span class="stat">seed <b id="seedv">—</b></span>
+  <button id="reseed">New seed</button>
+</div>
+
+<div id="codex">
+  <div class="cx-head" id="cxToggle">
+    <h2>Codex</h2>
+    <span class="cx-count"><b id="cxFound">0</b> / <span id="cxTotal">0</span> discovered</span>
+  </div>
+  <div class="cx-body" id="cxBody"></div>
+</div>
+
+<div id="palette"></div>
+<div id="toast"></div>
+<div id="hint">Click & drag to paint. Number/letter keys pick elements. Scroll to size the brush. Space pauses, N steps, C clears. Discover reactions by making elements collide.</div>
+
+<script>
+"use strict";
+(() => {
+  // ---------------------------------------------------------------- grid
+  const W = 200, H = 150;
+  const N = W * H;
+  const grid = new Uint8Array(N);   // element id per cell
+  const aux  = new Uint8Array(N);   // life/heat counter (fire, gas, ember)
+  const tint = new Uint8Array(N);   // per-cell brightness jitter for texture
+  const moved = new Uint8Array(N);  // per-frame lock so a cell moves once
+
+  // ---------------------------------------------------------------- elements
+  const EMPTY=0, WALL=1, SAND=2, WATER=3, LAVA=4, OIL=5, FIRE=6, ACID=7,
+        PLANT=8, SALT=9, EMBER=10, ICE=11, STEAM=12, SMOKE=13, STONE=14,
+        OBSIDIAN=15, GLASS=16, ASH=17, METAL=18;
+
+  const T_SOLID=0, T_POWDER=1, T_LIQUID=2, T_GAS=3, T_ENERGY=4;
+
+  // [name, r,g,b, type, density, hotkey]  (density only used by liquids)
+  const E = {
+    [EMPTY]:   ["Eraser",   22, 16, 20, T_SOLID , 0, "0"],
+    [WALL]:    ["Wall",     92, 86, 80, T_SOLID , 0, "1"],
+    [SAND]:    ["Sand",    196,170,102, T_POWDER, 0, "2"],
+    [WATER]:   ["Water",    58,116,214, T_LIQUID, 3, "3"],
+    [OIL]:     ["Oil",      64, 54, 42, T_LIQUID, 2, "4"],
+    [LAVA]:    ["Lava",    226, 92, 34, T_LIQUID, 7, "5"],
+    [FIRE]:    ["Fire",    240,142, 42, T_ENERGY, 0, "6"],
+    [ACID]:    ["Acid",    150,216, 66, T_LIQUID, 4, "7"],
+    [PLANT]:   ["Plant",    66,162, 70, T_SOLID , 0, "8"],
+    [SALT]:    ["Salt",    228,228,222, T_POWDER, 0, "9"],
+    [EMBER]:   ["Ember",   214, 82, 40, T_POWDER, 0, "q"],
+    [ICE]:     ["Ice",     152,210,238, T_SOLID , 0, "w"],
+    [METAL]:   ["Metal",   152,160,170, T_SOLID , 0, "r"],
+    [STONE]:   ["Stone",   112,106,100, T_SOLID , 0, "t"],
+    // reaction products (not on the palette)
+    [STEAM]:   ["Steam",   202,204,212, T_GAS   , 0, null],
+    [SMOKE]:   ["Smoke",    92, 90, 94, T_GAS   , 0, null],
+    [OBSIDIAN]:["Obsidian", 42, 36, 54, T_SOLID , 0, null],
+    [GLASS]:   ["Glass",   174,208,218, T_SOLID , 0, null],
+    [ASH]:     ["Ash",     122,116,112, T_POWDER, 0, null],
+  };
+  const TYPE = new Uint8Array(64), DENS = new Uint8Array(64);
+  const CR = new Int16Array(64), CG = new Int16Array(64), CB = new Int16Array(64);
+  for (const k in E){ const e=E[k],id=+k; CR[id]=e[1];CG[id]=e[2];CB[id]=e[3];
+    TYPE[id]=e[4];DENS[id]=e[5]; }
+
+  const PALETTE = [EMPTY,WALL,SAND,WATER,OIL,LAVA,FIRE,ACID,PLANT,SALT,EMBER,ICE,METAL,STONE];
+
+  const isLiquid = id => TYPE[id]===T_LIQUID;
+  const isGas    = id => TYPE[id]===T_GAS;
+  const canSink  = id => id===EMPTY || isLiquid(id) || isGas(id);
+
+  // ---------------------------------------------------------------- reactions
+  // {a,b} collide -> a becomes toA, b becomes toB. p is per-tick chance.
+  const RX = [
+    {id:"obsidian", name:"Obsidian Forge", mix:"water + lava",  a:WATER,b:LAVA, toA:STEAM,toB:OBSIDIAN, p:0.50},
+    {id:"steam",    name:"Steam Burst",    mix:"water + fire",  a:WATER,b:FIRE, toA:STEAM,toB:EMPTY,    p:0.90},
+    {id:"quench",   name:"Quench",         mix:"water + ember", a:WATER,b:EMBER,toA:STEAM,toB:SMOKE,    p:0.60},
+    {id:"bloom",    name:"Bloom",          mix:"water + plant", a:WATER,b:PLANT,toA:PLANT,toB:PLANT,    p:0.02},
+    {id:"brine",    name:"Brine Melt",     mix:"salt + ice",    a:SALT, b:ICE,  toA:EMPTY,toB:WATER,    p:0.30},
+    {id:"blaze",    name:"Oil Blaze",      mix:"fire + oil",    a:FIRE, b:OIL,  toA:FIRE, toB:FIRE,     p:0.55},
+    {id:"wildfire", name:"Wildfire",       mix:"fire + plant",  a:FIRE, b:PLANT,toA:FIRE, toB:FIRE,     p:0.28},
+    {id:"corrode",  name:"Corrosion",      mix:"acid + metal",  a:ACID, b:METAL,toA:EMPTY,toB:SMOKE,    p:0.16},
+    {id:"flora",    name:"Dissolve Flora", mix:"acid + plant",  a:ACID, b:PLANT,toA:EMPTY,toB:SMOKE,    p:0.22},
+    {id:"etch",     name:"Etch",           mix:"acid + stone",  a:ACID, b:STONE,toA:EMPTY,toB:SMOKE,    p:0.08},
+    {id:"chill",    name:"Volcanic Chill", mix:"lava + ice",    a:LAVA, b:ICE,  toA:STONE,toB:WATER,    p:0.50},
+    {id:"thaw",     name:"Thaw",           mix:"fire + ice",    a:FIRE, b:ICE,  toA:FIRE, toB:WATER,    p:0.40},
+    {id:"scorch",   name:"Scorch",         mix:"lava + plant",  a:LAVA, b:PLANT,toA:LAVA, toB:FIRE,     p:0.40},
+    {id:"tarflare", name:"Tar Flare",      mix:"lava + oil",    a:LAVA, b:OIL,  toA:LAVA, toB:FIRE,     p:0.60},
+    {id:"emberoil", name:"Ember Ignition", mix:"ember + oil",   a:EMBER,b:OIL,  toA:EMBER,toB:FIRE,     p:0.30},
+    {id:"smolder",  name:"Smolder",        mix:"ember + plant", a:EMBER,b:PLANT,toA:EMBER,toB:FIRE,     p:0.15},
+    {id:"acidboil", name:"Acid Boil",      mix:"fire + acid",   a:FIRE, b:ACID, toA:FIRE, toB:SMOKE,    p:0.40},
+    {id:"acidthaw", name:"Acid Thaw",      mix:"acid + ice",    a:ACID, b:ICE,  toA:EMPTY,toB:WATER,    p:0.25},
+    {id:"smelt",    name:"Smelt",          mix:"lava + metal",  a:LAVA, b:METAL,toA:LAVA, toB:LAVA,     p:0.10},
+    {id:"vitrify",  name:"Vitrify",        mix:"lava + sand",   a:LAVA, b:SAND, toA:LAVA, toB:GLASS,    p:0.06},
+    {id:"reignite", name:"Reignite",       mix:"fire + ember",  a:FIRE, b:EMBER,toA:FIRE, toB:FIRE,     p:0.20},
+    {id:"frost",    name:"Ember Frost",    mix:"ember + ice",   a:EMBER,b:ICE,  toA:SMOKE,toB:WATER,    p:0.30},
+    {id:"flux",     name:"Salt Flux",      mix:"salt + lava",   a:SALT, b:LAVA, toA:STEAM,toB:LAVA,     p:0.20},
+    {id:"sublime",  name:"Sublimate",      mix:"acid + sand",   a:ACID, b:SAND, toA:EMPTY,toB:SMOKE,    p:0.05},
+    {id:"freeze",   name:"Deep Freeze",    mix:"ice + water",   a:ICE,  b:WATER,toA:ICE,  toB:ICE,      p:0.008},
+    {id:"condense", name:"Condense",       mix:"steam + ice",   a:STEAM,b:ICE,  toA:WATER,toB:ICE,      p:0.20},
+  ];
+  // lookup table: REACT[a][b] -> rule (both orderings, sharing one id)
+  const REACT = Array.from({length:64}, () => null);
+  for (const r of RX){
+    (REACT[r.a] ||= {})[r.b] = {toA:r.toA,toB:r.toB,p:r.p,id:r.id,name:r.name};
+    (REACT[r.b] ||= {})[r.a] = {toA:r.toB,toB:r.toA,p:r.p,id:r.id,name:r.name};
+  }
+
+  // ---------------------------------------------------------------- rng (seedable)
+  let seed = 0, rngState = 0;
+  function mulberry(){ rngState |= 0; rngState = (rngState + 0x6D2B79F5) | 0;
+    let t = Math.imul(rngState ^ (rngState >>> 15), 1 | rngState);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }
+  const rng = mulberry;
+  function setSeed(s){ seed = s >>> 0; rngState = seed; }
+
+  // ---------------------------------------------------------------- life spans
+  function lifeFor(id){
+    if (id===FIRE)  return 40 + (rng()*30|0);
+    if (id===STEAM) return 120 + (rng()*80|0);
+    if (id===SMOKE) return 90 + (rng()*60|0);
+    if (id===EMBER) return 200 + (rng()*120|0);
+    return 0;
+  }
+  function setCell(i, id){ grid[i]=id; tint[i]= id===EMPTY?0:(rng()*14|0); aux[i]=lifeFor(id); }
+  function moveSwap(i,j){
+    const g=grid[i];grid[i]=grid[j];grid[j]=g;
+    const a=aux[i];aux[i]=aux[j];aux[j]=a;
+    const t=tint[i];tint[i]=tint[j];tint[j]=t;
+    moved[i]=1; moved[j]=1;
+  }
+
+  // ---------------------------------------------------------------- codex
+  const discovered = new Set();
+  const cxBody = document.getElementById("cxBody");
+  const cxFound = document.getElementById("cxFound");
+  document.getElementById("cxTotal").textContent = RX.length;
+  const rxEls = {};
+  for (const r of RX){
+    const d = document.createElement("div");
+    d.className = "rx"; d.id = "cx-"+r.id;
+    d.innerHTML = `<span class="dot"></span><span class="rname">???</span><span class="rmix"></span>`;
+    cxBody.appendChild(d); rxEls[r.id] = d;
+  }
+  const toast = document.getElementById("toast");
+  let toastTimer = 0;
+  function discover(id, name){
+    if (discovered.has(id)) return;
+    discovered.add(id);
+    const r = RX.find(x=>x.id===id);
+    const el = rxEls[id];
+    el.classList.add("found","flash");
+    el.querySelector(".rname").textContent = name;
+    el.querySelector(".rmix").textContent = r.mix;
+    setTimeout(()=>el.classList.remove("flash"), 950);
+    cxFound.textContent = discovered.size;
+    toast.innerHTML = `<small>Reaction discovered</small>${name}`;
+    toast.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(()=>toast.classList.remove("show"), 1900);
+    chime();
+  }
+
+  // ---------------------------------------------------------------- audio blip
+  let actx = null;
+  function chime(){
+    try{
+      actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+      const t = actx.currentTime;
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = "triangle";
+      o.frequency.setValueAtTime(660, t);
+      o.frequency.exponentialRampToValueAtTime(1240, t+0.10);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.16, t+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t+0.32);
+      o.connect(g).connect(actx.destination);
+      o.start(t); o.stop(t+0.34);
+    }catch(e){/* audio optional */}
+  }
+
+  // ---------------------------------------------------------------- simulation
+  let frame = 0;
+
+  function tryReact(x, y, i, cur){
+    const row = REACT[cur];
+    if (!row) return false;
+    // 4-neighbour scan, order rotated by frame to avoid directional bias
+    const order = frame & 1 ? [[0,1],[0,-1],[-1,0],[1,0]] : [[0,-1],[0,1],[1,0],[-1,0]];
+    for (const [dx,dy] of order){
+      const nx=x+dx, ny=y+dy;
+      if (nx<0||nx>=W||ny<0||ny>=H) continue;
+      const ni = ny*W+nx;
+      const r = row[grid[ni]];
+      if (r && rng() < r.p){
+        setCell(i, r.toA); setCell(ni, r.toB);
+        moved[i]=1; moved[ni]=1;
+        discover(r.id, r.name);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function fall(x, y, i){ // powders / ember
+    if (y < H-1){
+      const di = i+W;
+      if (canSink(grid[di])){ moveSwap(i, di); return true; }
+      const dirs = rng()<0.5 ? [-1,1] : [1,-1];
+      for (const d of dirs){
+        const nx=x+d; if (nx<0||nx>=W) continue;
+        const ddi = di+d;
+        if (canSink(grid[ddi])){ moveSwap(i, ddi); return true; }
+      }
+    }
+    return false;
+  }
+
+  function updateLiquid(x, y, i, cur){
+    if (y < H-1){
+      const di = i+W, b = grid[di];
+      if (b===EMPTY || isGas(b)){ moveSwap(i, di); return; }
+      if (isLiquid(b) && DENS[b] < DENS[cur]){ moveSwap(i, di); return; }
+      const dirs = rng()<0.5 ? [-1,1] : [1,-1];
+      for (const d of dirs){
+        const nx=x+d; if (nx<0||nx>=W) continue;
+        const ddi = di+d, bb = grid[ddi];
+        if (bb===EMPTY || isGas(bb)){ moveSwap(i, ddi); return; }
+      }
+    }
+    // seek level
+    const dirs = rng()<0.5 ? [-1,1] : [1,-1];
+    for (const d of dirs){
+      const nx=x+d; if (nx<0||nx>=W) continue;
+      const si = i+d, bb = grid[si];
+      if (bb===EMPTY || isGas(bb)){ moveSwap(i, si); return; }
+    }
+    moved[i]=1;
+  }
+
+  function updateGas(x, y, i, cur){
+    let a = aux[i]-1; aux[i]=a;
+    if (a<=0){ setCell(i, (cur===STEAM && rng()<0.12) ? WATER : EMPTY); moved[i]=1; return; }
+    if (y>0){
+      const up = i-W, b = grid[up];
+      if (b===EMPTY || isLiquid(b)){ moveSwap(i, up); return; }
+      const dirs = rng()<0.5 ? [-1,1] : [1,-1];
+      for (const d of dirs){
+        const nx=x+d; if (nx<0||nx>=W) continue;
+        const ui = up+d, bb = grid[ui];
+        if (bb===EMPTY || isLiquid(bb)){ moveSwap(i, ui); return; }
+      }
+    }
+    const d = rng()<0.5 ? -1 : 1, nx = x+d;
+    if (nx>=0 && nx<W && grid[i+d]===EMPTY){ moveSwap(i, i+d); return; }
+    moved[i]=1;
+  }
+
+  function updateFire(x, y, i){
+    let a = aux[i]-1; aux[i]=a;
+    if (a<=0){ setCell(i, rng()<0.4 ? SMOKE : EMPTY); moved[i]=1; return; }
+    if (y>0 && grid[i-W]===EMPTY && rng()<0.35){ moveSwap(i, i-W); return; }
+    moved[i]=1;
+  }
+
+  function updateEmber(x, y, i){
+    let a = aux[i]-1; aux[i]=a;
+    if (a<=0){ setCell(i, ASH); moved[i]=1; return; }
+    if (y>0 && grid[i-W]===EMPTY && rng()<0.02) setCell(i-W, FIRE);
+    if (!fall(x, y, i)) moved[i]=1;
+  }
+
+  function step(){
+    moved.fill(0);
+    for (let y=H-1; y>=0; y--){
+      const l2r = ((frame + y) & 1) === 0;
+      for (let k=0; k<W; k++){
+        const x = l2r ? k : (W-1-k);
+        const i = y*W + x;
+        if (moved[i]) continue;
+        const cur = grid[i];
+        if (cur===EMPTY) continue;
+        if (tryReact(x, y, i, cur)) continue;
+        switch (TYPE[cur]){
+          case T_ENERGY: updateFire(x, y, i); break;
+          case T_GAS:    updateGas(x, y, i, cur); break;
+          case T_LIQUID: updateLiquid(x, y, i, cur); break;
+          case T_POWDER: (cur===EMBER) ? updateEmber(x,y,i) : (fall(x,y,i)||(moved[i]=1)); break;
+          default: /* solids stay put */ break;
+        }
+      }
+    }
+    frame++;
+  }
+
+  // ---------------------------------------------------------------- render
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d", { alpha:false });
+  const off = document.createElement("canvas");
+  off.width = W; off.height = H;
+  const octx = off.getContext("2d");
+  const img = octx.createImageData(W, H);
+  const buf = new Uint32Array(img.data.buffer);
+
+  function fit(){
+    const dpr = Math.min(window.devicePixelRatio||1, 2);
+    canvas.width = Math.floor(innerWidth*dpr);
+    canvas.height = Math.floor(innerHeight*dpr);
+    ctx.imageSmoothingEnabled = false;
+  }
+  window.addEventListener("resize", fit); fit();
+
+  function render(){
+    for (let i=0;i<N;i++){
+      const id = grid[i], t = tint[i];
+      let r = CR[id]-t, g = CG[id]-t, b = CB[id]-t;
+      if (id===FIRE || id===LAVA || id===EMBER){ // hot cells flicker brighter
+        const f = (aux[i] & 7);
+        r += f*4; g += f*2;
+      }
+      if (r<0)r=0; if (g<0)g=0; if (b<0)b=0;
+      buf[i] = (255<<24) | (b<<16) | (g<<8) | r;
+    }
+    octx.putImageData(img, 0, 0);
+    ctx.drawImage(off, 0, 0, W, H, 0, 0, canvas.width, canvas.height);
+  }
+
+  // ---------------------------------------------------------------- input
+  let selected = SAND, brush = 3, paused = false;
+  let drawing = false, lastGX = -1, lastGY = -1;
+
+  const brushv = document.getElementById("brushv");
+  const seedv  = document.getElementById("seedv");
+
+  function screenToGrid(ev){
+    const rect = canvas.getBoundingClientRect();
+    const px = (ev.clientX - rect.left) / rect.width;
+    const py = (ev.clientY - rect.top) / rect.height;
+    return [Math.floor(px*W), Math.floor(py*H)];
+  }
+  function paintAt(gx, gy){
+    const rad = brush, id = selected;
+    for (let dy=-rad; dy<=rad; dy++){
+      for (let dx=-rad; dx<=rad; dx++){
+        if (dx*dx+dy*dy > rad*rad) continue;
+        const x=gx+dx, y=gy+dy;
+        if (x<0||x>=W||y<0||y>=H) continue;
+        const i = y*W+x;
+        if (id===EMPTY){ setCell(i, EMPTY); continue; }
+        // sparse fill for gas/fire so it doesn't over-saturate; solid otherwise
+        if (id===EMPTY || grid[i]===EMPTY || rng()<0.6) setCell(i, id);
+      }
+    }
+  }
+  function strokeTo(gx, gy){ // interpolate between samples so fast drags stay solid
+    if (lastGX<0){ paintAt(gx,gy); }
+    else {
+      const dx=gx-lastGX, dy=gy-lastGY, steps=Math.max(Math.abs(dx),Math.abs(dy),1);
+      for (let s=0;s<=steps;s++) paintAt(Math.round(lastGX+dx*s/steps), Math.round(lastGY+dy*s/steps));
+    }
+    lastGX=gx; lastGY=gy;
+  }
+
+  canvas.addEventListener("pointerdown", ev=>{ drawing=true; lastGX=-1;
+    const [gx,gy]=screenToGrid(ev); strokeTo(gx,gy); canvas.setPointerCapture(ev.pointerId); });
+  canvas.addEventListener("pointermove", ev=>{ if(!drawing) return;
+    const [gx,gy]=screenToGrid(ev); strokeTo(gx,gy); });
+  window.addEventListener("pointerup", ()=>{ drawing=false; lastGX=-1; });
+
+  canvas.addEventListener("wheel", ev=>{ ev.preventDefault();
+    brush = Math.max(1, Math.min(24, brush + (ev.deltaY<0?1:-1)));
+    brushv.textContent = brush; syncHash();
+  }, {passive:false});
+
+  // ---------------------------------------------------------------- palette UI
+  const palette = document.getElementById("palette");
+  const elNodes = {};
+  function selectEl(id){
+    selected = id;
+    for (const k in elNodes) elNodes[k].classList.toggle("sel", +k===id);
+    syncHash();
+  }
+  for (const id of PALETTE){
+    const e = E[id];
+    const node = document.createElement("div");
+    node.className = "el";
+    const rgb = `rgb(${e[1]},${e[2]},${e[3]})`;
+    node.innerHTML = `<span class="sw" style="background:${id===EMPTY?'transparent':rgb};${id===EMPTY?'border-style:dashed':''}"></span>`+
+                     `<span class="nm">${e[0]}</span><span class="kb">${e[6].toUpperCase()}</span>`;
+    node.addEventListener("click", ()=>selectEl(id));
+    palette.appendChild(node); elNodes[id]=node;
+  }
+
+  const keyToEl = {};
+  for (const id of PALETTE) keyToEl[E[id][6]] = id;
+
+  // ---------------------------------------------------------------- controls
+  const pauseBtn = document.getElementById("pause");
+  function setPaused(p){ paused=p; pauseBtn.textContent = p?"Resume":"Pause"; pauseBtn.classList.toggle("on",p); }
+  pauseBtn.addEventListener("click", ()=>setPaused(!paused));
+  document.getElementById("step").addEventListener("click", ()=>{ setPaused(true); step(); });
+  document.getElementById("clear").addEventListener("click", ()=>{ grid.fill(0); aux.fill(0); tint.fill(0); });
+  document.getElementById("reseed").addEventListener("click", ()=>{ setSeed((Math.random()*1e9)|0); seedv.textContent=seed; syncHash(); });
+  document.getElementById("cxToggle").addEventListener("click", ()=>document.getElementById("codex").classList.toggle("collapsed"));
+
+  window.addEventListener("keydown", ev=>{
+    if (ev.repeat) return;
+    const k = ev.key.toLowerCase();
+    if (k===" "){ ev.preventDefault(); setPaused(!paused); return; }
+    if (k==="n"){ setPaused(true); step(); return; }
+    if (k==="c"){ grid.fill(0); aux.fill(0); tint.fill(0); return; }
+    if (k in keyToEl) selectEl(keyToEl[k]);
+  });
+
+  // ---------------------------------------------------------------- URL hash state
+  let hashLock = false;
+  function syncHash(){
+    if (hashLock) return;
+    location.replace(`#e=${selected}&b=${brush}&s=${seed}`);
+  }
+  function readHash(){
+    const h = new URLSearchParams(location.hash.slice(1));
+    const s = parseInt(h.get("s"),10);
+    setSeed(Number.isFinite(s) ? s : ((Math.random()*1e9)|0));
+    const b = parseInt(h.get("b"),10); if (b>=1 && b<=24) brush=b;
+    const e = parseInt(h.get("e"),10); if (E[e]!==undefined) selected=e;
+  }
+
+  // ---------------------------------------------------------------- boot
+  readHash();
+  brushv.textContent = brush;
+  seedv.textContent = seed;
+  selectEl(selected);
+
+  function loop(){
+    if (!paused) step();
+    render();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vigenere — Vigenère Cipher Encoder / Decoder</title>
+<meta name="description" content="Encode and decode text with the classic Vigenère cipher using a keyword. Preserves case and punctuation, skips non-letters. 100% offline, nothing leaves your browser.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('vigenere-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#7c3aed;
+    --bg:#f6f4fb; --card:#ffffff; --fg:#1a1626; --muted:#615a72; --line:#e8e3f2; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#0e0b16; --card:#181320; --fg:#efeaf8; --muted:#998fac; --line:#261f33; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:700px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#5b21b6);display:flex;align-items:center;justify-content:center;font-size:20px;color:#fff;font-weight:800}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:700px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  textarea,input{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  textarea{min-height:110px;resize:vertical;font-size:1.05rem;line-height:1.6}
+  input.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;letter-spacing:.1em;font-size:1.1rem;margin-top:0}
+  .modes{display:flex;gap:6px;margin:14px 0}
+  .modes button{flex:1;padding:9px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;cursor:pointer;font:inherit}
+  .modes button.active{background:var(--c);color:#fff;border-color:var(--c)}
+  .out{margin-top:6px;background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--c);border-radius:8px;padding:12px;min-height:48px;white-space:pre-wrap;word-break:break-word;font-size:1.05rem}
+  .copy{margin-top:10px;background:var(--c);color:#fff;border:0;border-radius:8px;padding:9px 16px;cursor:pointer;font:inherit}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px}
+  .keyrow{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end}
+  .swap{padding:10px 14px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;cursor:pointer;font:inherit;white-space:nowrap}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:700px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo mono">V</div>
+    <div><h1>Vigenere</h1><div class="sub">Vigenère cipher encoder / decoder</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="modes">
+      <button id="mEnc" class="active" type="button">Encode</button>
+      <button id="mDec" type="button">Decode</button>
+    </div>
+    <label for="key">Keyword (letters only)</label>
+    <input class="mono" id="key" value="LEMON" spellcheck="false">
+    <label for="text" style="margin-top:14px">Text</label>
+    <textarea id="text" spellcheck="false">Attack at dawn</textarea>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card">
+    <div class="keyrow">
+      <label>Result</label>
+      <button class="swap" id="swap" type="button">↑ Use as input</button>
+    </div>
+    <div class="out mono" id="out"></div>
+    <button class="copy" id="copyBtn" type="button">Copy</button>
+  </div>
+</main>
+<footer>
+  The Vigenère cipher shifts each letter by the corresponding letter of a repeating keyword. Case and punctuation are preserved; non-letters don't advance the key. A classic cipher — fun and educational, <strong>not secure</strong>. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/vigenere">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  function normalizeKey(key){
+    const k = String(key).toUpperCase().replace(/[^A-Z]/g, '');
+    if(!k) throw new Error('key must contain at least one letter');
+    return k;
+  }
+
+  // dir = +1 to encode, -1 to decode.
+  function transform(text, key, dir){
+    const k = normalizeKey(key);
+    let ki = 0, out = '';
+    for(const ch of String(text)){
+      const code = ch.charCodeAt(0);
+      let base = null;
+      if(code >= 65 && code <= 90) base = 65;        // A-Z
+      else if(code >= 97 && code <= 122) base = 97;  // a-z
+      if(base === null){ out += ch; continue; }      // leave non-letters, don't advance key
+      const shift = k.charCodeAt(ki % k.length) - 65;
+      const c = ((code - base) + dir * shift + 26) % 26;
+      out += String.fromCharCode(base + c);
+      ki++;
+    }
+    return out;
+  }
+
+  const encode = (text, key) => transform(text, key, 1);
+  const decode = (text, key) => transform(text, key, -1);
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('out')){
+    const $ = id => document.getElementById(id);
+    let mode = 'enc';
+
+    function render(){
+      try{
+        const fn = mode === 'enc' ? encode : decode;
+        $('out').textContent = fn($('text').value, $('key').value);
+        $('err').textContent = '';
+      }catch(e){ $('out').textContent = ''; $('err').textContent = e.message; }
+    }
+    function setMode(m){ mode = m; $('mEnc').classList.toggle('active', m === 'enc'); $('mDec').classList.toggle('active', m === 'dec'); render(); }
+    $('mEnc').addEventListener('click', () => setMode('enc'));
+    $('mDec').addEventListener('click', () => setMode('dec'));
+    ['text', 'key'].forEach(id => $(id).addEventListener('input', render));
+    $('swap').addEventListener('click', () => { $('text').value = $('out').textContent; setMode(mode === 'enc' ? 'dec' : 'enc'); });
+    $('copyBtn').addEventListener('click', () => {
+      navigator.clipboard?.writeText($('out').textContent);
+      $('copyBtn').textContent = 'Copied!'; setTimeout(() => $('copyBtn').textContent = 'Copy', 1200);
+    });
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('vigenere-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { normalizeKey, transform, encode, decode };
+</script>
+</body>
+</html>

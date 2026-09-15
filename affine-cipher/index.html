@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Affine Cipher — encrypt & decrypt (a·x + b mod 26)</title>
+<meta name="description" content="Encrypt and decrypt with the affine cipher E(x)=(a·x+b) mod 26. Validates the key, shows the modular inverse, preserves case. Offline, no tracking — great for CTFs and learning.">
+<style>
+  :root{
+    --c:#7c3aed;
+    --bg:#f7f5fc; --card:#ffffff; --fg:#191526; --muted:#6a6480;
+    --line:#e8e3f3; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#130f1d; --card:#1d1729; --fg:#efebf8; --muted:#a49bbb;
+    --line:#312a45; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:800px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:15px;font-weight:800;color:#fff;flex:0 0 auto;font-family:ui-monospace,monospace}
+  h1{font-size:1.4rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:800px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .mode{display:flex;gap:8px;margin-bottom:16px}
+  .mode button{flex:1;padding:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);
+    border-radius:10px;cursor:pointer;font-weight:600}
+  .mode button.on{background:var(--c);color:#fff;border-color:var(--c)}
+  .keys{display:flex;gap:16px;margin-bottom:14px}
+  .keys .k{flex:1}
+  label{display:block;font-size:.82rem;font-weight:600;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+  select,input,textarea{width:100%;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  textarea{min-height:90px;resize:vertical;font-family:ui-monospace,Menlo,Consolas,monospace}
+  input:focus,textarea:focus,select:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .out .txt{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:1.1rem;word-break:break-word;
+    background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px;min-height:24px;margin-top:6px}
+  .copy{margin-top:10px;background:var(--c);color:#fff;border:0;border-radius:10px;padding:9px 16px;cursor:pointer;font-weight:600}
+  .formula{font-family:ui-monospace,monospace;color:var(--muted);font-size:.9rem;margin-top:12px}
+  .formula b{color:var(--fg)}
+  .err{color:#dc2626;font-size:.9rem;margin-top:10px;display:none}
+  h2{font-size:1rem;margin:0 0 8px}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+  details{margin-top:6px}summary{cursor:pointer;color:var(--muted);font-size:.9rem}
+  details p{color:var(--muted);font-size:.9rem}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">ax+b</div>
+  <div>
+    <h1>Affine Cipher</h1>
+    <p>E(x) = (a·x + b) mod 26</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="mode">
+      <button id="mEnc" class="on">Encrypt</button>
+      <button id="mDec">Decrypt</button>
+    </div>
+    <div class="keys">
+      <div class="k">
+        <label for="a">Key a (coprime with 26)</label>
+        <select id="a"></select>
+      </div>
+      <div class="k">
+        <label for="b">Key b (0–25)</label>
+        <input type="number" id="b" value="8" min="0" max="25" step="1">
+      </div>
+    </div>
+    <label for="msg">Message</label>
+    <textarea id="msg" spellcheck="false">AFFINE CIPHER</textarea>
+    <div class="out">
+      <label>Result</label>
+      <div class="txt" id="out"></div>
+      <button class="copy" id="copy">Copy</button>
+    </div>
+    <div class="formula" id="formula"></div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>How it works</h2>
+    <details open>
+      <summary>The affine cipher</summary>
+      <p>Each letter is mapped to a number (A=0 … Z=25) and encrypted with <b>E(x) = (a·x + b) mod 26</b>. Decryption uses the modular inverse of <b>a</b>: <b>D(y) = a⁻¹·(y − b) mod 26</b>. The key <b>a</b> must be coprime with 26 (share no factors), otherwise the mapping isn't reversible — so a ∈ {1, 3, 5, 7, 9, 11, 15, 17, 19, 21, 23, 25}. With a = 1 it reduces to a Caesar shift of b. Non-letters and case are preserved.</p>
+    </details>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var M = 26;
+  function gcd(a, b){ a = Math.abs(a); b = Math.abs(b); while(b){ var t = b; b = a % b; a = t; } return a; }
+  function coprimeAs(){ var r = []; for(var a = 1; a < M; a++){ if(gcd(a, M) === 1) r.push(a); } return r; }
+  function modInverse(a, m){
+    a = ((a % m) + m) % m;
+    for(var x = 1; x < m; x++){ if((a * x) % m === 1) return x; }
+    throw new Error('no modular inverse — a must be coprime with ' + m);
+  }
+  function checkKey(a){
+    a = Number(a);
+    if(!Number.isInteger(a)) throw new Error('a must be an integer');
+    if(gcd(a, M) !== 1) throw new Error('a=' + a + ' is not coprime with 26 — pick a from 1,3,5,7,9,11,15,17,19,21,23,25');
+    return a;
+  }
+  function mapLetters(text, fn){
+    return String(text).replace(/[A-Za-z]/g, function(ch){
+      var upper = ch <= 'Z';
+      var x = ch.toUpperCase().charCodeAt(0) - 65;
+      var y = ((fn(x) % M) + M) % M;
+      var out = String.fromCharCode(y + 65);
+      return upper ? out : out.toLowerCase();
+    });
+  }
+  function encrypt(text, a, b){
+    a = checkKey(a); b = Number(b) || 0;
+    return mapLetters(text, function(x){ return a * x + b; });
+  }
+  function decrypt(text, a, b){
+    a = checkKey(a); b = Number(b) || 0;
+    var inv = modInverse(a, M);
+    return mapLetters(text, function(y){ return inv * (y - b); });
+  }
+
+  if(typeof module !== 'undefined') module.exports = {
+    gcd:gcd, coprimeAs:coprimeAs, modInverse:modInverse, checkKey:checkKey, encrypt:encrypt, decrypt:decrypt
+  };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var aSel=document.getElementById('a'), b=document.getElementById('b'), msg=document.getElementById('msg');
+    var out=document.getElementById('out'), formula=document.getElementById('formula'), err=document.getElementById('err');
+    var mEnc=document.getElementById('mEnc'), mDec=document.getElementById('mDec');
+    var mode='enc';
+    coprimeAs().forEach(function(a){
+      var o=document.createElement('option'); o.value=a; o.textContent=a; if(a===5) o.selected=true; aSel.appendChild(o);
+    });
+    function render(){
+      err.style.display='none';
+      try{
+        var a=Number(aSel.value), bb=Number(b.value);
+        var res=(mode==='enc'?encrypt:decrypt)(msg.value, a, bb);
+        out.textContent=res;
+        if(mode==='enc') formula.innerHTML='E(x) = (<b>'+a+'</b>·x + <b>'+bb+'</b>) mod 26';
+        else formula.innerHTML='D(y) = <b>'+modInverse(a,26)+'</b>·(y − <b>'+bb+'</b>) mod 26 &nbsp;(a⁻¹ = '+modInverse(a,26)+')';
+      }catch(e){ out.textContent=''; err.textContent=e.message; err.style.display='block'; }
+    }
+    [aSel,b,msg].forEach(function(el){ el.addEventListener('input', render); });
+    mEnc.addEventListener('click', function(){ mode='enc'; mEnc.classList.add('on'); mDec.classList.remove('on'); render(); });
+    mDec.addEventListener('click', function(){ mode='dec'; mDec.classList.add('on'); mEnc.classList.remove('on'); render(); });
+    document.getElementById('copy').addEventListener('click', function(){ if(navigator.clipboard) navigator.clipboard.writeText(out.textContent); });
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('affine-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('affine-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+
+    render();
+  }
+</script>
+</body>
+</html>

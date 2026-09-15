@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lariat — draw the one true loop</title>
+<style>
+  :root{
+    --bg:#efe7db; --card:#f7f2e9; --ink:#2c2a26; --muted:#8a8377;
+    --line:#d8cdb9; --rope:#c8763c; --gold:#e9b23a; --good:#3f9d5a; --bad:#cf4b3a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(1200px 700px at 50% -10%, #f6efe2, var(--bg));
+    color:var(--ink); font:15px/1.4 "Segoe UI",system-ui,sans-serif;
+    display:flex; flex-direction:column; align-items:center;
+    -webkit-user-select:none; user-select:none; padding:14px 10px 28px;
+  }
+  header{text-align:center; margin-bottom:6px}
+  h1{font-size:26px; margin:0; letter-spacing:.5px; color:var(--rope);
+     font-weight:800; text-shadow:0 1px 0 #fff}
+  .tag{color:var(--muted); font-size:12.5px; margin-top:2px}
+  .hud{display:flex; flex-wrap:wrap; gap:6px; justify-content:center;
+       align-items:center; margin:10px 0 6px; max-width:600px}
+  button,select{
+    font:600 13px/1 "Segoe UI",sans-serif; color:var(--ink);
+    background:var(--card); border:1px solid var(--line); border-radius:9px;
+    padding:8px 11px; cursor:pointer; box-shadow:0 1px 2px rgba(0,0,0,.06);
+    transition:transform .06s, background .15s;
+  }
+  button:hover,select:hover{background:#fffaf0}
+  button:active{transform:translateY(1px)}
+  button:focus-visible,select:focus-visible{outline:2px solid var(--rope); outline-offset:2px}
+  button.primary{background:var(--rope); color:#fff; border-color:#a85f2c;
+    box-shadow:0 2px 5px rgba(160,95,44,.3)}
+  button.primary:hover{background:#d3823f}
+  button.subtle{color:var(--muted)}
+  .info{display:flex; gap:16px; justify-content:center; color:var(--muted);
+        font-size:13px; margin:2px 0 8px; font-variant-numeric:tabular-nums}
+  .info b{color:var(--ink); font-weight:700}
+  #msg{min-height:18px; font-size:13px; font-weight:600; text-align:center;
+       color:var(--muted); max-width:560px}
+  .wrap{position:relative}
+  canvas{display:block; background:var(--card); border:1px solid var(--line);
+    border-radius:16px; box-shadow:0 10px 30px rgba(90,70,40,.14), inset 0 1px 0 #fff;
+    touch-action:none}
+  #win{position:absolute; inset:0; display:none; align-items:center;
+    justify-content:center; flex-direction:column; gap:8px;
+    background:rgba(247,242,233,.82); border-radius:16px; text-align:center}
+  #win.show{display:flex; animation:pop .4s ease}
+  @keyframes pop{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
+  #win h2{margin:0; color:var(--gold); font-size:30px; text-shadow:0 1px 0 #fff}
+  #win p{margin:0; color:var(--ink); font-size:16px}
+  #toast{position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+    background:var(--ink); color:#fff; padding:10px 16px; border-radius:10px;
+    font-size:13px; opacity:0; transition:opacity .3s; pointer-events:none}
+  #toast.show{opacity:1}
+  .foot{color:var(--muted); font-size:11.5px; margin-top:12px; text-align:center; max-width:520px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Lariat</h1>
+  <div class="tag">Draw one continuous closed loop. Numbers count the rope on their sides.</div>
+</header>
+<div class="hud">
+  <select id="diff" title="Difficulty">
+    <option value="easy">Easy 5×5</option>
+    <option value="medium" selected>Medium 7×7</option>
+    <option value="hard">Hard 8×8</option>
+    <option value="fiendish">Fiendish 10×10</option>
+  </select>
+  <button id="new" class="primary">New</button>
+  <button id="daily">Daily</button>
+  <button id="undo">Undo</button>
+  <button id="hint">Hint</button>
+  <button id="solve" class="subtle">Solve</button>
+  <button id="reset" class="subtle">Reset</button>
+  <button id="share">Share</button>
+</div>
+<div class="info"><span>⏱ <b id="time">0:00</b></span><span>moves <b id="mv">0</b></span><span id="lbl">Medium</span></div>
+<div id="msg">Left-drag lays rope · right-click / long-press marks an X.</div>
+<div class="wrap">
+  <canvas id="cv"></canvas>
+  <div id="win"><h2>Cinched!</h2><p id="winsub"></p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+      <button id="wnew" class="primary">New puzzle</button>
+      <button id="wshare">Share result</button>
+    </div></div>
+</div>
+<div id="toast"></div>
+<div class="foot">Every board is generated from a real loop and reduced so it stays solvable by pure logic — no guessing. Your puzzle &amp; progress live in the URL, so any link restores exactly what you see.</div>
+
+<script>
+"use strict";
+/* ---------- RNG ---------- */
+let rnd = Math.random;
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function setSeed(s){rnd=mulberry32(s>>>0);}
+
+/* ---------- grid state ---------- */
+const TIERS={easy:{W:5,H:5,frac:.6,lbl:"Easy"},medium:{W:7,H:7,frac:.8,lbl:"Medium"},
+  hard:{W:8,H:8,frac:.92,lbl:"Hard"},fiendish:{W:10,H:10,frac:1,lbl:"Fiendish"}};
+let W,H,E,ND,cellEdges,edgeCells,edgeDots,dotEdges;
+let clues,es,solutionEdges,inReg;
+let tier="medium",moves=0,startTime=0,started=false,won=false,winTime=0,undoStack=[];
+function elapsedMs(){ return started ? (won?winTime:performance.now())-startTime : 0; }
+
+function cidx(r,c){return r*W+c;}
+function hEdge(r,c){return r*W+c;}                         // r in[0,H], c in[0,W-1]
+function vEdge(r,c){return (H+1)*W + r*(W+1)+c;}           // r in[0,H-1], c in[0,W]
+function dot(r,c){return r*(W+1)+c;}
+
+function buildStructures(w,h){
+  W=w;H=h; E=(H+1)*W + H*(W+1); ND=(H+1)*(W+1);
+  cellEdges=[];edgeCells=new Array(E);edgeDots=new Array(E);dotEdges=[];
+  for(let d=0;d<ND;d++)dotEdges.push([]);
+  for(let r=0;r<=H;r++)for(let c=0;c<W;c++){const e=hEdge(r,c);
+    edgeDots[e]=[dot(r,c),dot(r,c+1)];
+    edgeCells[e]=[r>0?cidx(r-1,c):-1, r<H?cidx(r,c):-1];
+    dotEdges[dot(r,c)].push(e);dotEdges[dot(r,c+1)].push(e);}
+  for(let r=0;r<H;r++)for(let c=0;c<=W;c++){const e=vEdge(r,c);
+    edgeDots[e]=[dot(r,c),dot(r+1,c)];
+    edgeCells[e]=[c>0?cidx(r,c-1):-1, c<W?cidx(r,c):-1];
+    dotEdges[dot(r,c)].push(e);dotEdges[dot(r+1,c)].push(e);}
+  for(let r=0;r<H;r++)for(let c=0;c<W;c++)
+    cellEdges[cidx(r,c)]=[hEdge(r,c),hEdge(r+1,c),vEdge(r,c),vEdge(r,c+1)];
+}
+
+/* ---------- logic propagation (clue count + dot 0/2 rule) ---------- */
+function propagate(a,cl){
+  let changed=true;
+  while(changed){changed=false;
+    for(let c=0;c<W*H;c++){const q=cl[c]; if(q<0)continue;
+      const eg=cellEdges[c]; let on=0,und=0;
+      for(const e of eg){if(a[e]===1)on++;else if(a[e]===-1)und++;}
+      if(on>q||on+und<q)return false;
+      if(und){ if(on===q){for(const e of eg)if(a[e]===-1)a[e]=0;changed=true;}
+        else if(on+und===q){for(const e of eg)if(a[e]===-1)a[e]=1;changed=true;} }
+    }
+    for(let d=0;d<ND;d++){const eg=dotEdges[d]; let on=0,und=0,u1=-1;
+      for(const e of eg){if(a[e]===1)on++;else if(a[e]===-1){und++;u1=e;}}
+      if(on>2)return false;
+      if(on===2){ if(und){for(const e of eg)if(a[e]===-1)a[e]=0;changed=true;} }
+      else if(on===1){ if(und===0)return false; if(und===1){a[u1]=1;changed=true;} }
+      else if(und===1){ a[u1]=0;changed=true; }
+    }
+  }
+  return true;
+}
+function solveFull(cl){ const a=new Int8Array(E).fill(-1); propagate(a,cl);
+  const s=new Int8Array(E); for(let e=0;e<E;e++)s[e]=a[e]===1?1:0; return s; }
+function decidesToSolution(cl,sol){ const a=new Int8Array(E).fill(-1);
+  if(!propagate(a,cl))return false;
+  for(let e=0;e<E;e++)if(a[e]!==sol[e])return false; return true; }
+
+/* ---------- generator: grow a simply-connected region -> boundary loop ---------- */
+function neighbors(cell){const r=(cell/W)|0,c=cell%W,o=[];
+  if(r>0)o.push(cidx(r-1,c)); if(r<H-1)o.push(cidx(r+1,c));
+  if(c>0)o.push(cidx(r,c-1)); if(c<W-1)o.push(cidx(r,c+1)); return o;}
+function fillHoles(){ // fill non-region cells not reachable from the border
+  const reach=new Uint8Array(W*H),q=[];
+  for(let r=0;r<H;r++)for(let c=0;c<W;c++){const i=cidx(r,c);
+    if(!inReg[i]&&(r===0||c===0||r===H-1||c===W-1)&&!reach[i]){reach[i]=1;q.push(i);}}
+  while(q.length){const i=q.pop(); for(const n of neighbors(i))if(!inReg[n]&&!reach[n]){reach[n]=1;q.push(n);}}
+  let ch=false; for(let i=0;i<W*H;i++)if(!inReg[i]&&!reach[i]){inReg[i]=1;ch=true;} return ch;
+}
+function fixCheckers(){ // remove degree-4 crossings at interior dots
+  let ch=false;
+  for(let r=1;r<H;r++)for(let c=1;c<W;c++){
+    const TL=inReg[cidx(r-1,c-1)],TR=inReg[cidx(r-1,c)],BL=inReg[cidx(r,c-1)],BR=inReg[cidx(r,c)];
+    if(TL&&BR&&!TR&&!BL){inReg[cidx(r-1,c)]=1;ch=true;}
+    else if(TR&&BL&&!TL&&!BR){inReg[cidx(r-1,c-1)]=1;ch=true;}
+  } return ch;
+}
+function growRegion(){
+  inReg=new Uint8Array(W*H);
+  const target=Math.max(2,Math.floor((.35+rnd()*.3)*W*H));
+  let seed=Math.floor(rnd()*W*H); inReg[seed]=1; let size=1;
+  let fr=neighbors(seed).slice();
+  while(size<target&&fr.length){ const k=Math.floor(rnd()*fr.length),cell=fr.splice(k,1)[0];
+    if(inReg[cell])continue; inReg[cell]=1; size++; for(const n of neighbors(cell))if(!inReg[n])fr.push(n); }
+  let g=0; while(g++<500){ let ch=fillHoles(); if(fixCheckers())ch=true; if(!ch)break; }
+}
+function cluesFromRegion(){
+  const cl=new Int8Array(W*H), sol=new Int8Array(E);
+  for(let e=0;e<E;e++){const[a,b]=edgeCells[e]; const ia=a>=0&&inReg[a]===1, ib=b>=0&&inReg[b]===1;
+    sol[e]=(ia!==ib)?1:0;}
+  for(let c=0;c<W*H;c++){let n=0; for(const e of cellEdges[c])n+=sol[e]; cl[c]=n;}
+  return {cl,sol};
+}
+function minimize(cl,sol,frac){
+  const order=[]; for(let c=0;c<W*H;c++)order.push(c);
+  for(let i=order.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[order[i],order[j]]=[order[j],order[i]];}
+  const limit=Math.ceil(frac*order.length);
+  for(let k=0;k<limit;k++){const c=order[k]; const save=cl[c]; if(save<0)continue;
+    cl[c]=-1; if(!decidesToSolution(cl,sol))cl[c]=save;}
+}
+function generate(seed,t){
+  const T=TIERS[t]; buildStructures(T.W,T.H); if(seed!=null)setSeed(seed);
+  let best=null;
+  for(let att=0;att<80;att++){
+    growRegion(); const {cl,sol}=cluesFromRegion();
+    let bad=false; for(let c=0;c<W*H;c++)if(cl[c]>3){bad=true;break;}
+    if(bad)continue;
+    if(!decidesToSolution(cl,sol))continue;      // full board must be pure-logic solvable
+    minimize(cl,sol,T.frac);
+    best={cl,sol}; break;
+  }
+  if(!best){ const {cl,sol}=cluesFromRegion(); best={cl,sol}; } // fallback
+  clues=best.cl; solutionEdges=best.sol;
+}
+
+/* ---------- win / feedback checks ---------- */
+function ropeDegrees(){const deg=new Int16Array(ND);
+  for(let e=0;e<E;e++)if(es[e]===1){deg[edgeDots[e][0]]++;deg[edgeDots[e][1]]++;} return deg;}
+function winCheck(){
+  const deg=ropeDegrees(); let n=0;
+  for(let e=0;e<E;e++)if(es[e]===1)n++; if(!n)return false;
+  for(let d=0;d<ND;d++)if(deg[d]!==0&&deg[d]!==2)return false;
+  for(let c=0;c<W*H;c++){if(clues[c]<0)continue; let on=0;
+    for(const e of cellEdges[c])if(es[e]===1)on++; if(on!==clues[c])return false;}
+  let start=-1; for(let e=0;e<E;e++)if(es[e]===1){start=e;break;}
+  const seen=new Uint8Array(E),ds=[edgeDots[start][0]],dv=new Uint8Array(ND); dv[ds[0]]=1;
+  while(ds.length){const d=ds.pop(); for(const e of dotEdges[d])if(es[e]===1&&!seen[e]){seen[e]=1;
+    const o=edgeDots[e][0]===d?edgeDots[e][1]:edgeDots[e][0]; if(!dv[o]){dv[o]=1;ds.push(o);}}}
+  let cnt=0; for(let e=0;e<E;e++)if(seen[e])cnt++;
+  return cnt===n;
+}
+
+/* ---------- rope components (multi-colour tinting) ---------- */
+function components(){
+  const par=new Int32Array(E).map((_,i)=>i);
+  const find=x=>{while(par[x]!==x){par[x]=par[par[x]];x=par[x];}return x;};
+  for(let d=0;d<ND;d++){let first=-1;
+    for(const e of dotEdges[d])if(es[e]===1){ if(first<0)first=e; else par[find(e)]=find(first); }}
+  const map={},colId=[]; let next=0;
+  for(let e=0;e<E;e++){ if(es[e]!==1){colId[e]=-1;continue;}
+    const r=find(e); if(map[r]===undefined)map[r]=next++; colId[e]=map[r]; }
+  return {colId,count:next};
+}
+
+/* ---------- rendering ---------- */
+const cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+let cs=40,ox=24,oy=24,EG=[]; // per-edge geometry
+const COLORS=["#c8763c","#3f7fc0","#5aa35c","#b0568f","#c9a53a","#6f66c8","#c86b6b","#3fa79b"];
+function layout(){
+  const availW=Math.min(window.innerWidth-24,600);
+  const availH=Math.min(window.innerHeight-260,600);
+  cs=Math.max(24,Math.floor(Math.min(availW,availH)/Math.max(W,H)));
+  ox=oy=Math.round(cs*.7);
+  const pw=W*cs+ox*2, ph=H*cs+oy*2, dpr=window.devicePixelRatio||1;
+  cv.width=pw*dpr; cv.height=ph*dpr; cv.style.width=pw+"px"; cv.style.height=ph+"px";
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  EG=new Array(E);
+  for(let r=0;r<=H;r++)for(let c=0;c<W;c++)EG[hEdge(r,c)]=[ox+c*cs,oy+r*cs,ox+(c+1)*cs,oy+r*cs];
+  for(let r=0;r<H;r++)for(let c=0;c<=W;c++)EG[vEdge(r,c)]=[ox+c*cs,oy+r*cs,ox+c*cs,oy+(r+1)*cs];
+}
+let hoverE=-1;
+function draw(now){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  const deg=ropeDegrees();
+  // clues (with color + redundant non-color cue for colorblind readability)
+  ctx.textAlign="center";ctx.textBaseline="middle";
+  for(let c=0;c<W*H;c++){const q=clues[c]; if(q<0)continue;
+    const r=(c/W)|0,cc=c%W, x=ox+(cc+.5)*cs, y=oy+(r+.5)*cs;
+    let on=0; for(const e of cellEdges[c])if(es[e]===1)on++;
+    const sat=on===q, over=on>q;
+    if(sat){ // satisfied: ring behind the digit
+      ctx.beginPath();ctx.arc(x,y,cs*.32,0,7);
+      ctx.fillStyle="rgba(63,157,90,.15)";ctx.fill();
+      ctx.strokeStyle="rgba(63,157,90,.55)";ctx.lineWidth=Math.max(1.5,cs*.03);ctx.stroke();
+    }
+    ctx.font=(over?"bold ":"")+Math.round(cs*.5)+"px 'Segoe UI',sans-serif";
+    ctx.fillStyle = over?"#cf4b3a" : sat?"#3f9d5a" : "#3a352c";
+    ctx.fillText(q,x,y);
+    if(over){ // overshot: strike-through so state reads without hue
+      ctx.strokeStyle="#cf4b3a";ctx.lineWidth=Math.max(1.5,cs*.04);
+      ctx.beginPath();ctx.moveTo(x-cs*.2,y);ctx.lineTo(x+cs*.2,y);ctx.stroke();
+    }
+  }
+  // X marks
+  ctx.strokeStyle="#c26b5a";ctx.lineWidth=Math.max(2,cs*.06);ctx.lineCap="round";
+  for(let e=0;e<E;e++)if(es[e]===2){const[x1,y1,x2,y2]=EG[e];const mx=(x1+x2)/2,my=(y1+y2)/2,s=cs*.13;
+    ctx.beginPath();ctx.moveTo(mx-s,my-s);ctx.lineTo(mx+s,my+s);ctx.moveTo(mx+s,my-s);ctx.lineTo(mx-s,my+s);ctx.stroke();}
+  // hover hint segment
+  if(hoverE>=0&&es[hoverE]===0){const[x1,y1,x2,y2]=EG[hoverE];
+    ctx.strokeStyle="rgba(200,118,60,.28)";ctx.lineWidth=cs*.16;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();}
+  // rope
+  const {colId,count}=components();
+  const lw=Math.max(4,cs*.17);
+  let glow=0,pulse=1;
+  if(won){const t=Math.min(1,(now-winTime)/1100); glow=1; pulse=1+.28*Math.sin(t*Math.PI)*(1-t*.4);}
+  ctx.lineCap="round";ctx.lineJoin="round";
+  for(let pass=0;pass<2;pass++){
+    for(let e=0;e<E;e++)if(es[e]===1){const[x1,y1,x2,y2]=EG[e];
+      let col = won ? "#e9b23a" : COLORS[colId[e]%COLORS.length];
+      if(pass===0){ // shadow/base
+        ctx.strokeStyle=won?"rgba(233,178,58,.55)":"rgba(90,60,30,.22)";
+        ctx.lineWidth=lw*pulse+(won?8:3); ctx.shadowColor=won?"#e9b23a":"transparent";
+        ctx.shadowBlur=won?18:0;
+      } else { ctx.strokeStyle=col; ctx.lineWidth=lw*pulse; ctx.shadowBlur=0; }
+      ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+    }
+  }
+  ctx.shadowBlur=0;
+  // dots
+  for(let d=0;d<ND;d++){const r=(d/(W+1))|0,c=d%(W+1),x=ox+c*cs,y=oy+r*cs;
+    const bad=deg[d]>=3; ctx.beginPath();ctx.arc(x,y,bad?cs*.12:cs*.055,0,7);
+    ctx.fillStyle=bad?"#cf4b3a":"#6b6152"; ctx.fill();
+    if(bad){ctx.strokeStyle="rgba(207,75,58,"+(.4+.4*Math.sin(now/120))+")";ctx.lineWidth=3;
+      ctx.beginPath();ctx.arc(x,y,cs*.2,0,7);ctx.stroke();}}
+  if(won){ // celebratory ring
+    const t=Math.min(1,(now-winTime)/900);
+    if(t<1){ctx.strokeStyle="rgba(233,178,58,"+(.5*(1-t))+")";ctx.lineWidth=6;
+      ctx.beginPath();ctx.arc(ox+W*cs/2,oy+H*cs/2,t*Math.max(W,H)*cs*.7,0,7);ctx.stroke();}
+  }
+  updateStatus(deg);
+}
+function updateStatus(deg){
+  document.getElementById("time").textContent=fmt(elapsedMs());
+  document.getElementById("mv").textContent=moves;
+  if(won)return;
+  let over=false,dbad=false;
+  for(let c=0;c<W*H;c++){if(clues[c]<0)continue;let on=0;for(const e of cellEdges[c])if(es[e]===1)on++;if(on>clues[c])over=true;}
+  for(let d=0;d<ND;d++)if(deg[d]>=3)dbad=true;
+  let closed=false,anyRope=false; for(let e=0;e<E;e++)if(es[e]===1)anyRope=true;
+  if(anyRope){closed=true;for(let d=0;d<ND;d++)if(deg[d]===1){closed=false;break;}}
+  const m=document.getElementById("msg");
+  if(dbad){m.textContent="⚠ A dot has 3+ rope ends — a loop can't branch.";m.style.color="var(--bad)";}
+  else if(over){m.textContent="⚠ A number is overshot (too much rope around it).";m.style.color="var(--bad)";}
+  else if(closed){m.textContent="↺ That loop closed early — it doesn't use all the clues yet.";m.style.color="var(--rope)";}
+  else {m.textContent="Left-drag lays rope · right-click / long-press marks an X.";m.style.color="var(--muted)";}
+}
+function fmt(ms){ms=Math.max(0,ms/1000|0);return (ms/60|0)+":"+String(ms%60).padStart(2,"0");}
+
+/* ---------- input ---------- */
+function pseg(px,py,x1,y1,x2,y2){const dx=x2-x1,dy=y2-y1,l2=dx*dx+dy*dy;
+  let t=l2?((px-x1)*dx+(py-y1)*dy)/l2:0; t=Math.max(0,Math.min(1,t));
+  const ex=x1+t*dx-px,ey=y1+t*dy-py; return Math.hypot(ex,ey);}
+function pickEdge(px,py){let best=-1,bd=cs*.42;
+  for(let e=0;e<E;e++){const g=EG[e];const d=pseg(px,py,g[0],g[1],g[2],g[3]);if(d<bd){bd=d;best=e;}}return best;}
+function evtPos(ev){const r=cv.getBoundingClientRect();return[ev.clientX-r.left,ev.clientY-r.top];}
+let down=false,startE=-1,mode=null,paintVal=1,lastE=-1,longT=0,moved=false,sx=0,sy=0;
+function pushUndo(){undoStack.push(es.slice()); if(undoStack.length>400)undoStack.shift();}
+function setRope(e,v){if(e<0)return; if(es[e]!==v){es[e]=v;moves++;}}
+function toggleX(e){if(e<0)return; es[e]=es[e]===2?0:2;moves++;}
+function afterChange(){ if(!started&&moves>0){started=true;startTime=performance.now();}
+  scheduleHash(); if(!won&&winCheck()){won=true;winTime=performance.now();showWin();} }
+
+cv.addEventListener("pointerdown",ev=>{ if(won)return; ev.preventDefault();
+  const[px,py]=evtPos(ev); startE=pickEdge(px,py); if(startE<0)return;
+  down=true;moved=false;mode=null;sx=px;sy=py; cv.setPointerCapture(ev.pointerId);
+  pushUndo();
+  if(ev.button===2){mode="x";toggleX(startE);afterChange();return;}
+  longT=setTimeout(()=>{ if(!moved){mode="x";toggleX(startE);afterChange();draw(performance.now());} },440);
+});
+cv.addEventListener("pointermove",ev=>{ hoverE=won?-1:pickEdge(...evtPos(ev));
+  if(!down){draw(performance.now());return;}
+  const[px,py]=evtPos(ev); if(Math.hypot(px-sx,py-sy)>cs*.35)moved=true;
+  const e=pickEdge(px,py);
+  if(mode===null&&moved){ clearTimeout(longT); mode="rope"; paintVal=es[startE]===1?0:1; setRope(startE,paintVal); lastE=startE; afterChange(); }
+  if(mode==="rope"&&e>=0&&e!==lastE&&es[e]!==2){ setRope(e,paintVal); lastE=e; afterChange(); }
+});
+function endPtr(){ if(!down)return; clearTimeout(longT);
+  if(mode===null&&startE>=0){ setRope(startE,es[startE]===1?0:1); afterChange(); }
+  down=false;mode=null;lastE=-1; }
+cv.addEventListener("pointerup",endPtr);
+cv.addEventListener("pointercancel",endPtr);
+cv.addEventListener("contextmenu",e=>e.preventDefault());
+
+/* ---------- actions ---------- */
+function resetPlay(){es=new Int8Array(E);moves=0;won=false;started=false;startTime=0;undoStack=[];
+  document.getElementById("win").classList.remove("show");}
+function newGame(seed,t){ tier=t; document.getElementById("diff").value=t;
+  document.getElementById("lbl").textContent=TIERS[t].lbl+(seed!=null&&daily?" · Daily":"");
+  generate(seed,t); resetPlay(); layout(); scheduleHash(); }
+let daily=false;
+document.getElementById("new").onclick=()=>{daily=false;newGame((Math.random()*4294967296)>>>0,document.getElementById("diff").value);};
+document.getElementById("daily").onclick=()=>{daily=true;const d=new Date();
+  newGame((d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate())>>>0,"medium");
+  toast("Daily Lariat — same board for everyone today.");};
+document.getElementById("diff").onchange=e=>{daily=false;newGame((Math.random()*4294967296)>>>0,e.target.value);};
+document.getElementById("undo").onclick=()=>{ if(undoStack.length){es=undoStack.pop();won=false;
+  document.getElementById("win").classList.remove("show");scheduleHash();} };
+document.getElementById("reset").onclick=()=>{pushUndo();resetPlay();scheduleHash();};
+document.getElementById("solve").onclick=()=>{pushUndo();
+  for(let e=0;e<E;e++)es[e]=solutionEdges[e]?1:0; afterChange(); toast("Revealed the unique solution.");};
+document.getElementById("hint").onclick=()=>{ if(won)return;
+  let target=-1,rope=false;
+  for(let e=0;e<E;e++)if(solutionEdges[e]===1&&es[e]!==1){target=e;rope=true;break;}
+  if(target<0)for(let e=0;e<E;e++)if(solutionEdges[e]===0&&es[e]===1){target=e;rope=false;break;}
+  if(target<0)for(let e=0;e<E;e++)if(solutionEdges[e]===0&&es[e]===0){target=e;rope=false;break;}
+  if(target<0){toast("Nothing to hint — you're done!");return;}
+  pushUndo(); es[target]=rope?1:2; moves++;
+  const [a,b]=edgeCells[target]; const q=x=>x>=0?clues[x]:-1; const qa=q(a),qb=q(b);
+  let why; if(rope) why=(qa===3||qb===3)?"a 3 must have rope on that side":"the dots force this rope (each corner needs 0 or 2 ends)";
+  else why=(qa===0||qb===0)?"a 0 means none of its edges are rope":"forced empty — no valid loop can use it";
+  toast("Hint: "+why+"."); afterChange();
+};
+document.getElementById("share").onclick=()=>copyLink("Solve this Lariat: ");
+document.getElementById("wshare").onclick=()=>copyLink("");
+document.getElementById("wnew").onclick=()=>{daily=false;newGame((Math.random()*4294967296)>>>0,document.getElementById("diff").value);};
+
+/* ---------- win + share ---------- */
+function showWin(){ document.getElementById("win").classList.add("show");
+  document.getElementById("winsub").textContent=TIERS[tier].lbl+" solved in "+fmt(elapsedMs())+" · "+moves+" moves"; }
+function copyLink(prefix){ scheduleHash(true); const url=location.href;
+  let txt=url; if(won)txt=(prefix||"")+"Lariat "+TIERS[tier].lbl+" solved in "+fmt(elapsedMs())+" / "+moves+" moves — "+url;
+  else txt=(prefix||"")+url;
+  (navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject())
+    .then(()=>toast("Link copied to clipboard!"),()=>{prompt("Copy this link:",txt);});
+}
+function toast(t){const el=document.getElementById("toast");el.textContent=t;el.classList.add("show");
+  clearTimeout(toast._t);toast._t=setTimeout(()=>el.classList.remove("show"),2200);}
+
+/* ---------- URL hash serialize ---------- */
+let hashTimer=0;
+function scheduleHash(now){ clearTimeout(hashTimer);
+  if(now){writeHash();return;} hashTimer=setTimeout(writeHash,250); }
+function writeHash(){ let cl=""; for(let c=0;c<W*H;c++)cl+=clues[c]<0?".":clues[c];
+  let st=""; for(let e=0;e<E;e++)st+=es[e];
+  history.replaceState(null,"","#"+W+"x"+H+"!"+cl+"!"+st); }
+function loadHash(){ const h=decodeURIComponent(location.hash.slice(1));
+  const m=h.match(/^(\d+)x(\d+)!([0-3.]+)!([012]+)$/); if(!m)return false;
+  const w=+m[1],hh=+m[2]; if(w<3||hh<3||w>16||hh>16)return false;
+  buildStructures(w,hh); if(m[3].length!==W*H||m[4].length!==E)return false;
+  clues=new Int8Array(W*H); for(let c=0;c<W*H;c++)clues[c]=m[3][c]==="."?-1:+m[3][c];
+  solutionEdges=solveFull(clues);
+  // verify the reconstructed solution is a real single loop that satisfies every clue.
+  // A hand-edited/under-determined hash can leave solutionEdges incomplete; reject it
+  // so boot falls back to newGame() rather than loading an unsolvable board.
+  es=new Int8Array(E); for(let e=0;e<E;e++)es[e]=solutionEdges[e]?1:0;
+  if(!winCheck())return false;
+  es=new Int8Array(E); for(let e=0;e<E;e++)es[e]=+m[4][e];
+  moves=0;won=false;started=false;startTime=0;undoStack=[];tier="medium";
+  for(const k in TIERS)if(TIERS[k].W===w&&TIERS[k].H===hh)tier=k;
+  document.getElementById("diff").value=tier;
+  document.getElementById("lbl").textContent=TIERS[tier].lbl;
+  layout(); if(winCheck()){won=true;winTime=performance.now();startTime=winTime;started=true;showWin();} return true;
+}
+
+/* ---------- boot ---------- */
+window.addEventListener("resize",()=>layout());
+if(!loadHash()) newGame((Math.random()*4294967296)>>>0,"medium");
+(function frame(t){draw(t||performance.now());requestAnimationFrame(frame);})();
+</script>
+</body>
+</html>

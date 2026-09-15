@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Farflung — Postcards from places that were never there</title>
+<style>
+  :root{
+    --paper:#efe7d6; --ink:#3a3226; --accent:#b45b3e; --line:#cbbfa6;
+    --card-w:660px; --card-h:440px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    font-family:"Iowan Old Style","Palatino Linotype",Georgia,serif;
+    color:var(--ink);
+    background:
+      radial-gradient(1200px 800px at 50% -10%, #f6efe0, #e6dcc6 60%, #d8ccb0 100%);
+    min-height:100%;
+    display:flex; flex-direction:column; align-items:center;
+    padding:22px 14px 40px;
+  }
+  header{text-align:center;margin-bottom:14px}
+  h1{font-size:30px;letter-spacing:.5px;margin:0;color:var(--accent);
+     font-variant:small-caps}
+  .tag{margin:2px 0 0;font-size:14px;color:#7a6d55;font-style:italic}
+
+  .controls{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;
+    align-items:center;max-width:760px;margin:6px auto 4px}
+  #phrase{
+    flex:1 1 260px;min-width:220px;padding:9px 12px;font-size:15px;
+    font-family:inherit;color:var(--ink);
+    background:#fbf7ec;border:1px solid var(--line);border-radius:8px;outline:none;
+  }
+  #phrase:focus{border-color:var(--accent)}
+  button,.chip{
+    font-family:inherit;font-size:13.5px;cursor:pointer;
+    padding:8px 13px;border-radius:8px;border:1px solid var(--line);
+    background:#fbf7ec;color:var(--ink);transition:.15s;
+  }
+  button:hover,.chip:hover{background:#fff;border-color:var(--accent);color:var(--accent)}
+  button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  button.primary:hover{background:#9c4a30;color:#fff}
+  .row{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;align-items:center;
+    max-width:760px;margin:4px auto}
+  .light{display:flex;align-items:center;gap:8px;font-size:13px;color:#7a6d55}
+  #tod{width:150px;accent-color:var(--accent)}
+  .chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+  .stage{perspective:1600px;margin:16px auto 6px;width:var(--card-w);max-width:94vw}
+  .flip{position:relative;width:100%;transform-style:preserve-3d;
+    transition:transform .8s cubic-bezier(.4,.05,.2,1);cursor:pointer}
+  .flip.back{transform:rotateY(180deg)}
+  .face{
+    position:relative;width:100%;backface-visibility:hidden;
+    border-radius:6px;overflow:hidden;
+    box-shadow:0 12px 30px rgba(60,45,25,.32),0 2px 4px rgba(0,0,0,.18);
+  }
+  .face canvas{display:block;width:100%;height:auto}
+  .face.reverse{position:absolute;inset:0;transform:rotateY(180deg)}
+  .hint{text-align:center;font-size:12px;color:#8a7c62;margin-top:8px;font-style:italic}
+
+  .strip{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;
+    margin-top:22px;max-width:760px}
+  .strip figure{margin:0;cursor:pointer;width:150px;text-align:center;transition:.15s}
+  .strip figure:hover{transform:translateY(-3px)}
+  .strip canvas{width:150px;height:auto;border-radius:4px;
+    box-shadow:0 4px 12px rgba(60,45,25,.28);display:block}
+  .strip figcaption{font-size:11px;color:#7a6d55;margin-top:5px;font-style:italic;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .strip figure.active canvas{outline:2px solid var(--accent);outline-offset:2px}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+    background:var(--ink);color:#f6efe0;padding:9px 16px;border-radius:20px;
+    font-size:13px;opacity:0;transition:.3s;pointer-events:none}
+  .toast.show{opacity:1}
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+    overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+</style>
+</head>
+<body>
+  <header>
+    <h1>Farflung</h1>
+    <p class="tag">Postcards from places that were never there.</p>
+  </header>
+
+  <div class="controls">
+    <input id="phrase" type="text" maxlength="80" placeholder="a mood or a phrase — e.g. sleepy harbor at dusk" autocomplete="off" autofocus aria-label="Type a mood or phrase to generate a postcard">
+    <button class="primary" id="go">Send &rarr;</button>
+    <button id="surprise">Surprise me</button>
+  </div>
+  <div class="row">
+    <button id="flipBtn">Flip &#8635;</button>
+    <button id="dl">Download PNG</button>
+    <button id="copy">Copy link</button>
+    <span class="light">
+      Light
+      <input id="tod" type="range" min="0" max="1" step="0.01" value="0.15">
+    </span>
+    <span class="light" id="presets"></span>
+  </div>
+
+  <div class="stage">
+    <div class="flip" id="flip">
+      <div class="face front"><canvas id="front" role="img" aria-label="Postcard illustration"></canvas></div>
+      <div class="face reverse"><canvas id="back" role="img" aria-label="Addressed reverse side of the postcard"></canvas></div>
+    </div>
+  </div>
+  <p class="hint">Click the postcard to flip it over &middot; the whole card is sealed inside your words</p>
+
+  <div class="strip" id="strip"></div>
+  <div class="sr-only" id="live" aria-live="polite"></div>
+  <div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* ---------- seeded PRNG (string -> deterministic stream) ---------- */
+function xmur3(s){let h=1779033703^s.length;for(let i=0;i<s.length;i++){h=Math.imul(h^s.charCodeAt(i),3432918353);h=h<<13|h>>>19;}return()=>{h=Math.imul(h^h>>>16,2246822507);h=Math.imul(h^h>>>13,3266489909);h^=h>>>16;return h>>>0;};}
+function mulberry32(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function makeRng(str){const s=xmur3(str||" ");return mulberry32(s());}
+
+/* ---------- grammar tables ---------- */
+const CAP=s=>s[0].toUpperCase()+s.slice(1);
+const ONSET=["v","b","m","t","s","k","l","r","n","d","f","h","br","st","kl","sk","fj","gr","th","sh","w","p","g"];
+const VOWEL=["a","e","i","o","u","ae","ei","ou","au","y","oa","ee"];
+const CODA=["ll","rn","sk","st","lm","rk","nd","ng","ss","tt","dr","ff","n","r","l","m"];
+const SUFFIX=["mere","havn","fell","strand","by","holm","vik","wick","thwaite","gard","ness","dal","fjord","borg","stad","haven","reach","carrow"];
+const CONNECT=["-on-Sound","-by-the-Water","-under-Cloud"," Sands"," Reach","-in-the-Mist"," Hollow","-over-Fell"];
+const NATION=["Republic of","Kingdom of","Free State of","Duchy of","Isles of","Confederacy of","Margravate of","Old Dominion of"];
+const NCORE=["Osterhavn","Vallonia","Nordmark","Sable","Kelter","Marrowind","Suvanto","Aldrast","Thule","Brennig","Corvennes","Halgard","Merrivale","Estrenne","Windholt"];
+const UNIT=["öre","sen","centim","grosz","stang","piastre","kron","mark","skilling"];
+const MONTH=["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+const OPEN=["Arrived by the evening ferry.","The light here is impossible.","Slept late; the bells woke me.","Found the little café you'd love.","Rain all morning, then gold.","The harbour smells of salt and pine.","Everyone speaks in a soft, round tongue.","Bought oranges from a woman with kind eyes."];
+const MID=["The hills go on forever.","I keep forgetting the date.","There are more stars than sky.","No one is ever in a hurry.","I think I could stay.","The water is the colour of old glass.","A dog has adopted me.","I traded my watch for a boat ride."];
+const CLOSE=["Wish you were here.","Wish you were here — truly.","Come find me.","Send word soon.","Yours from the edge of the map.","Think of me at dusk."];
+const TOWHO=["A Traveller Unknown","Whoever Finds This","The One Who Stayed Home","My Dearest You","The Keeper of the Lamp","Anyone, Anywhere"];
+
+/* ---------- biomes: HSL palette roles + stamp motif ---------- */
+const BIOMES={
+  mistedCoast:{sky:[[205,42,80],[28,38,88]],hill:[200,22,46],water:true,shimmer:1,clouds:3,motif:"lighthouse",name:"Misted Coast"},
+  duneSea:{sky:[[38,62,80],[42,72,70]],hill:[36,55,58],water:false,shimmer:0,clouds:2,motif:"sun",name:"Dune Sea"},
+  alpineLake:{sky:[[210,50,78],[196,42,86]],hill:[214,20,52],water:true,shimmer:1,clouds:2,motif:"peak",name:"Alpine Lake"},
+  reedMarsh:{sky:[[54,40,80],[90,25,74]],hill:[96,28,40],water:true,shimmer:1,clouds:2,motif:"heron",name:"Reed Marsh"},
+  auroraTundra:{sky:[[230,45,42],[250,40,28]],hill:[220,25,30],water:true,shimmer:1,clouds:0,motif:"star",name:"Aurora Tundra",aurora:1}
+};
+const BKEYS=Object.keys(BIOMES);
+
+/* ---------- build a fully-deterministic recipe from a phrase ---------- */
+function syll(r){let w=pick(r,ONSET)+pick(r,VOWEL);if(r()<.5)w+=pick(r,CODA);return w;}
+function pick(r,a){return a[Math.floor(r()*a.length)];}
+function makeRecipe(phrase){
+  const seed=(phrase||"a quiet nowhere").trim().toLowerCase();
+  const r=makeRng(seed);
+  const bk=BKEYS[Math.floor(r()*BKEYS.length)];
+  const B=BIOMES[bk];
+  // place name
+  let base=CAP(syll(r))+(r()<.55?syll(r):"")+pick(r,SUFFIX);
+  if(base.length>13&&r()<.5)base=CAP(syll(r))+pick(r,SUFFIX);
+  const name=base+(r()<.45?pick(r,CONNECT):"");
+  const country=pick(r,NATION)+" "+pick(r,NCORE);
+  const value=(1+Math.floor(r()*40))+(r()<.4?"½":"")+" "+pick(r,UNIT);
+  const date=(1+Math.floor(r()*28))+" "+pick(r,MONTH)+" "+(1890+Math.floor(r()*78));
+  const note=pick(r,OPEN)+" "+pick(r,MID)+" "+pick(r,CLOSE);
+  const towho=pick(r,TOWHO);
+  // scene params (dimension-independent fractions)
+  const sun={x:.16+r()*.68,y:.16+r()*.24};
+  const layers=[];
+  const nL=3;
+  for(let i=0;i<nL;i++){
+    const oct=[];
+    for(let k=0;k<3;k++)oct.push({a:(.02+r()*.05)/(k+1),f:(1+k*1.6+r()*1.5)*Math.PI*2,p:r()*Math.PI*2});
+    layers.push({base:.42+i*.11+r()*.03,oct,lift:i});
+  }
+  const clouds=[];for(let i=0;i<B.clouds;i++)clouds.push({x:r(),y:.1+r()*.3,s:.5+r()*1.1,sp:.006+r()*.02});
+  const stars=[];for(let i=0;i<70;i++)stars.push({x:r(),y:r()*.6,b:.3+r()*.7,ph:r()*6.28});
+  const auroraB=[];for(let i=0;i<3;i++)auroraB.push({y:.16+i*.07+r()*.03,a:.03+r()*.04,p:r()*6.28,h:120+r()*80});
+  const grain=[];for(let i=0;i<900;i++)grain.push([r(),r(),r()*.5]);
+  return {phrase:seed,bk,B,name,country,value,date,note,towho,sun,layers,clouds,stars,auroraB,grain,r0:r()};
+}
+
+/* ---------- colour helpers with time-of-day lighting ---------- */
+function lit([h,s,l],n){
+  const w=Math.sin(Math.min(Math.max(n,0),1)*Math.PI); // dusk warmth
+  const hh=h+(25-h)*0.22*w;
+  const ss=Math.max(0,Math.min(100,s+18*w-6*n));
+  const ll=Math.max(2,Math.min(100,l*(1-0.62*n)+3*w));
+  return `hsl(${hh},${ss}%,${ll}%)`;
+}
+function lerp(a,b,t){return a+(b-a)*t;}
+
+/* ---------- renderer ---------- */
+function renderFront(cv,R,tod,t){
+  const dpr=cv._dpr||2, W=cv.width/dpr, H=cv.height/dpr;
+  const g=cv.getContext("2d");g.save();g.scale(dpr,dpr);g.clearRect(0,0,W,H);
+  const B=R.B, n=tod;
+  // sky
+  const sky=g.createLinearGradient(0,0,0,H*.78);
+  sky.addColorStop(0,lit(B.sky[0],n));sky.addColorStop(1,lit(B.sky[1],n));
+  g.fillStyle=sky;g.fillRect(0,0,W,H);
+  // stars
+  if(n>0.42){const sa=(n-0.42)/0.58;g.fillStyle="#fff";R.stars.forEach(s=>{const tw=0.5+0.5*Math.sin(t*2+s.ph);g.globalAlpha=sa*s.b*tw*0.9;g.fillRect(s.x*W,s.y*H*.78,1.6,1.6);});g.globalAlpha=1;}
+  // aurora
+  if(B.aurora){R.auroraB.forEach(a=>{const grad=g.createLinearGradient(0,(a.y-.06)*H,0,(a.y+.1)*H);const al=(0.25+0.55*n)*(0.6+0.4*Math.sin(t*0.8+a.p));grad.addColorStop(0,`hsla(${a.h},80%,60%,0)`);grad.addColorStop(.5,`hsla(${a.h},80%,62%,${al})`);grad.addColorStop(1,`hsla(${a.h+40},80%,55%,0)`);g.fillStyle=grad;g.beginPath();g.moveTo(0,H);for(let x=0;x<=W;x+=8){const y=(a.y+Math.sin(x/W*6.28*2+a.p+t*0.5)*a.a)*H;g.lineTo(x,y);}g.lineTo(W,0);g.lineTo(0,0);g.fill();});}
+  // sun / moon
+  const sx=R.sun.x*W, sy=R.sun.y*H, rad=Math.min(W,H)*0.075;
+  const disc=n>0.6?`hsl(210,20%,${lerp(88,80,n)}%)`:lit([46,85,72],n*0.5);
+  const glow=g.createRadialGradient(sx,sy,0,sx,sy,rad*3.4);
+  glow.addColorStop(0,n>0.6?"rgba(220,225,240,.5)":"rgba(255,225,150,.55)");
+  glow.addColorStop(1,"rgba(255,225,150,0)");
+  g.fillStyle=glow;g.beginPath();g.arc(sx,sy,rad*3.4,0,6.29);g.fill();
+  g.fillStyle=disc;g.beginPath();g.arc(sx,sy,rad,0,6.29);g.fill();
+  if(n>0.6){g.fillStyle=lit(B.sky[0],n);g.globalAlpha=.7;g.beginPath();g.arc(sx+rad*.5,sy-rad*.35,rad*.85,0,6.29);g.fill();g.globalAlpha=1;}
+  // clouds (drift)
+  g.fillStyle=`rgba(255,250,240,${0.5-0.45*n})`;
+  R.clouds.forEach(c=>{let cx=((c.x+t*c.sp)%1.3-0.15)*W, cy=c.y*H, s=c.s*Math.min(W,H)*0.05;
+    for(let k=-2;k<=2;k++){g.beginPath();g.ellipse(cx+k*s*0.9,cy+Math.abs(k)*s*0.25,s*(1.1-Math.abs(k)*0.18),s*(0.7-Math.abs(k)*0.12),0,0,6.29);g.fill();}});
+  // hills
+  const horizon=B.water? H*0.70 : H*0.62;
+  R.layers.forEach((L,i)=>{
+    const col=lit([B.hill[0],B.hill[1]-i*3,B.hill[2]-(2-i)*12+i*6],n);
+    g.fillStyle=col;g.beginPath();g.moveTo(0,H);
+    const by=lerp(H*0.30,horizon,L.base/0.75);
+    for(let x=0;x<=W;x+=5){let y=by;L.oct.forEach(o=>y+=o.a*H*Math.sin(x/W*o.f/6.28*3+o.p));g.lineTo(x,y);}
+    g.lineTo(W,H);g.closePath();g.fill();
+  });
+  // water band with reflection + shimmer
+  if(B.water){
+    const wt=horizon;
+    const wg=g.createLinearGradient(0,wt,0,H);
+    wg.addColorStop(0,lit([B.hill[0],40,54],n));wg.addColorStop(1,lit([B.hill[0]+6,44,40],n));
+    g.fillStyle=wg;g.fillRect(0,wt,W,H-wt);
+    // mirrored last hill, faint
+    g.save();g.beginPath();g.rect(0,wt,W,H-wt);g.clip();
+    g.globalAlpha=0.22;g.translate(0,2*wt);g.scale(1,-1);
+    const L=R.layers[R.layers.length-1];const by=lerp(H*0.30,horizon,L.base/0.75);
+    g.fillStyle=lit([B.hill[0],B.hill[1],B.hill[2]+6],n);g.beginPath();g.moveTo(0,H);
+    for(let x=0;x<=W;x+=6){let y=by;L.oct.forEach(o=>y+=o.a*H*Math.sin(x/W*o.f/6.28*3+o.p));g.lineTo(x,y);}
+    g.lineTo(W,H);g.closePath();g.fill();g.restore();
+    // shimmer lines
+    g.strokeStyle=`rgba(255,250,235,${0.10-0.05*n})`;g.lineWidth=1;
+    for(let i=0;i<7;i++){const y=wt+((H-wt)*(i+1)/8);g.beginPath();for(let x=0;x<=W;x+=6){g.lineTo(x,y+Math.sin(x/26+t*1.4+i)*1.4);}g.stroke();}
+    // sun glint
+    if(n<0.6){g.fillStyle="rgba(255,235,180,0.25)";g.beginPath();g.ellipse(sx,wt+(H-wt)*0.35,rad*0.9,(H-wt)*0.3,0,0,6.29);g.fill();}
+  }else{
+    // dune foreground ripples
+    g.fillStyle=lit([B.hill[0],B.hill[1]+6,B.hill[2]-6],n);g.fillRect(0,horizon,W,H-horizon);
+    g.strokeStyle=`rgba(120,90,50,${0.12})`;g.lineWidth=1;
+    for(let i=0;i<6;i++){const y=horizon+((H-horizon)*(i+1)/7);g.beginPath();for(let x=0;x<=W;x+=6)g.lineTo(x,y+Math.sin(x/40+i)*3);g.stroke();}
+  }
+  // grain + vignette
+  g.globalAlpha=0.05;R.grain.forEach(p=>{g.fillStyle=p[2]>0.25?"#fff":"#000";g.fillRect(p[0]*W,p[1]*H,1,1);});g.globalAlpha=1;
+  const vg=g.createRadialGradient(W/2,H/2,H*0.3,W/2,H/2,H*0.85);
+  vg.addColorStop(0,"rgba(0,0,0,0)");vg.addColorStop(1,"rgba(40,25,10,0.34)");
+  g.fillStyle=vg;g.fillRect(0,0,W,H);
+  // warm paper wash
+  g.fillStyle="rgba(232,210,160,0.12)";g.fillRect(0,0,W,H);
+  // stamp + postmark on the front corner
+  drawStamp(g,R,W-W*0.19,H*0.055,W*0.14);
+  drawPostmark(g,R,W-W*0.135,H*0.14,W*0.085);
+  // frame
+  g.strokeStyle="rgba(255,250,240,0.85)";g.lineWidth=W*0.018;g.strokeRect(g.lineWidth/2,g.lineWidth/2,W-g.lineWidth,H-g.lineWidth);
+  g.restore();
+}
+
+/* ---------- stamp ---------- */
+function drawStamp(g,R,x,y,w){
+  const h=w*1.24;g.save();g.translate(x,y);g.rotate((R.r0-0.5)*0.14);
+  // perforated white base
+  g.fillStyle="#fbf6ea";g.fillRect(0,0,w,h);
+  g.fillStyle=g.canvas._pf||"#efe7d6";const d=w*0.055;
+  for(let i=0;i<=w;i+=d*1.7){g.beginPath();g.arc(i,0,d,0,6.29);g.fill();g.beginPath();g.arc(i,h,d,0,6.29);g.fill();}
+  for(let i=0;i<=h;i+=d*1.7){g.beginPath();g.arc(0,i,d,0,6.29);g.fill();g.beginPath();g.arc(w,i,d,0,6.29);g.fill();}
+  const pad=w*0.09;
+  const inner=g.createLinearGradient(0,pad,0,h-pad);
+  inner.addColorStop(0,lit(R.B.sky[0],0.1));inner.addColorStop(1,lit(R.B.hill,0.05));
+  g.fillStyle=inner;g.fillRect(pad,pad,w-2*pad,h-2*pad);
+  // motif
+  g.save();g.translate(w/2,h*0.46);drawMotif(g,R.B.motif,w*0.5);g.restore();
+  // text
+  g.fillStyle="rgba(255,255,255,0.92)";g.textAlign="center";
+  g.font=`600 ${w*0.11}px "Iowan Old Style",Georgia,serif`;
+  g.fillText(R.value,w/2,h-pad-w*0.06);
+  g.font=`${w*0.085}px Georgia,serif`;
+  const cc=R.country.replace(/^.*of /,"");
+  g.fillText(cc.length>13?cc.slice(0,12)+"…":cc,w/2,pad+w*0.12);
+  g.restore();
+}
+function drawMotif(g,m,s){
+  g.strokeStyle="rgba(255,255,255,0.95)";g.fillStyle="rgba(255,255,255,0.95)";g.lineWidth=s*0.05;g.lineCap="round";
+  if(m==="lighthouse"){g.beginPath();g.moveTo(-s*0.13,s*0.22);g.lineTo(-s*0.08,-s*0.16);g.lineTo(s*0.08,-s*0.16);g.lineTo(s*0.13,s*0.22);g.closePath();g.fill();g.fillRect(-s*0.11,-s*0.24,s*0.22,s*0.09);g.strokeStyle="rgba(255,240,180,0.9)";for(let a=-1;a<=1;a++){g.beginPath();g.moveTo(0,-s*0.19);g.lineTo(a*s*0.3,-s*0.34);g.stroke();}}
+  else if(m==="sun"){g.beginPath();g.arc(0,0,s*0.14,0,6.29);g.fill();for(let i=0;i<12;i++){const a=i/12*6.29;g.beginPath();g.moveTo(Math.cos(a)*s*0.2,Math.sin(a)*s*0.2);g.lineTo(Math.cos(a)*s*0.3,Math.sin(a)*s*0.3);g.stroke();}}
+  else if(m==="peak"){g.beginPath();g.moveTo(-s*0.24,s*0.2);g.lineTo(0,-s*0.26);g.lineTo(s*0.24,s*0.2);g.closePath();g.stroke();g.beginPath();g.moveTo(-s*0.08,-s*0.09);g.lineTo(0,-s*0.26);g.lineTo(s*0.08,-s*0.09);g.closePath();g.fill();}
+  else if(m==="heron"){g.beginPath();g.moveTo(-s*0.2,s*0.22);g.quadraticCurveTo(-s*0.02,s*0.02,s*0.02,-s*0.22);g.stroke();g.beginPath();g.moveTo(s*0.02,-s*0.22);g.lineTo(s*0.14,-s*0.28);g.stroke();g.beginPath();g.moveTo(-s*0.2,s*0.22);g.quadraticCurveTo(s*0.1,s*0.12,s*0.22,s*0.24);g.stroke();}
+  else{const pts=[];for(let i=0;i<5;i++){const a=-1.57+i/5*6.29;pts.push([Math.cos(a)*s*0.26,Math.sin(a)*s*0.26]);const b=a+0.628;pts.push([Math.cos(b)*s*0.1,Math.sin(b)*s*0.1]);}g.beginPath();pts.forEach((p,i)=>i?g.lineTo(p[0],p[1]):g.moveTo(p[0],p[1]));g.closePath();g.fill();}
+}
+
+/* ---------- postmark cancellation ---------- */
+function drawPostmark(g,R,x,y,r){
+  g.save();g.translate(x,y);g.rotate((R.r0-0.5)*0.3);
+  g.strokeStyle="rgba(60,40,25,0.55)";g.fillStyle="rgba(60,40,25,0.55)";g.lineWidth=r*0.05;
+  g.beginPath();g.arc(0,0,r,0,6.29);g.stroke();
+  g.beginPath();g.arc(0,0,r*0.82,0,6.29);g.stroke();
+  arcText(g,R.name.toUpperCase().replace(/[^A-Z ]/g,""),r*0.91,-1.57,2.1,false,r*0.16);
+  arcText(g,R.date,r*0.91,1.57,1.9,true,r*0.14);
+  g.font=`${r*0.2}px Georgia,serif`;g.textAlign="center";g.textBaseline="middle";
+  g.fillText("★",0,0);
+  // radiating cancel bars to the right
+  g.lineWidth=r*0.09;g.lineCap="round";
+  for(let i=0;i<5;i++){const yy=(-2+i)*r*0.16;g.beginPath();g.moveTo(r*1.15,yy);g.lineTo(r*2.5,yy);g.stroke();}
+  g.restore();
+}
+function arcText(g,txt,rad,center,span,flip,fs){
+  g.font=`600 ${fs}px Georgia,serif`;g.textAlign="center";g.textBaseline="middle";
+  const n=txt.length;if(!n)return;
+  for(let i=0;i<n;i++){
+    const frac=(i+0.5)/n;const a=center+(flip?1:-1)*(span/2-span*frac);
+    g.save();g.translate(Math.cos(a)*rad,Math.sin(a)*rad);
+    g.rotate(a+(flip?-1.57:1.57));g.fillText(txt[i],0,0);g.restore();
+  }
+}
+
+/* ---------- back (address side) ---------- */
+function renderBack(cv,R,tod){
+  const dpr=cv._dpr||2,W=cv.width/dpr,H=cv.height/dpr;
+  const g=cv.getContext("2d");g.save();g.scale(dpr,dpr);g.clearRect(0,0,W,H);
+  g.fillStyle="#f2ead8";g.fillRect(0,0,W,H);
+  // aged wash
+  const wash=g.createRadialGradient(W*0.3,H*0.4,H*0.1,W*0.5,H*0.5,W*0.7);
+  wash.addColorStop(0,"rgba(255,250,235,0.5)");wash.addColorStop(1,"rgba(190,160,110,0.28)");
+  g.fillStyle=wash;g.fillRect(0,0,W,H);
+  g.globalAlpha=0.05;R.grain.forEach(p=>{g.fillStyle=p[2]>0.25?"#fff":"#000";g.fillRect(p[0]*W,p[1]*H,1,1);});g.globalAlpha=1;
+  // header
+  g.fillStyle="rgba(90,70,45,0.55)";g.textAlign="center";
+  g.font=`${W*0.02}px Georgia,serif`;g.fillText("• P O S T C A R D •  ·  UNION POSTALE UNIVERSELLE",W/2,H*0.07);
+  // divider
+  g.strokeStyle="rgba(90,70,45,0.5)";g.lineWidth=1.5;
+  g.beginPath();g.moveTo(W*0.5,H*0.14);g.lineTo(W*0.5,H*0.9);g.stroke();
+  // left: handwritten note
+  g.fillStyle="#39322a";g.textAlign="left";
+  const cursive=`'Segoe Script','Bradley Hand','Snell Roundhand','Comic Sans MS',cursive`;
+  g.font=`${W*0.036}px ${cursive}`;
+  wrapHand(g,R.note,W*0.06,H*0.24,W*0.36,W*0.062,R);
+  g.font=`${W*0.03}px ${cursive}`;
+  jitterLine(g,"— from "+R.name.split(/[-,]/)[0],W*0.08,H*0.82,R,3);
+  // right: address lines
+  const ax=W*0.56,aw=W*0.38;g.strokeStyle="rgba(90,70,45,0.4)";g.lineWidth=1;
+  const lines=[R.towho,"Poste Restante","No. "+(10+Math.floor(R.r0*89))+" Harbourside",R.name.split(/[-,]/)[0],R.country];
+  for(let i=0;i<5;i++){const y=H*0.28+i*H*0.12;g.beginPath();g.moveTo(ax,y+6);g.lineTo(ax+aw,y+6);g.stroke();
+    g.fillStyle="#39322a";g.font=`${W*0.03}px ${cursive}`;jitterLine(g,lines[i]||"",ax+6,y,R,2);}
+  // stamp + postmark top-right of back too
+  drawStamp(g,R,W-aw*0.5,H*0.05,W*0.13);
+  drawPostmark(g,R,W-aw*0.55,H*0.13,W*0.08);
+  g.strokeStyle="rgba(150,120,80,0.5)";g.lineWidth=W*0.014;g.strokeRect(g.lineWidth/2,g.lineWidth/2,W-g.lineWidth,H-g.lineWidth);
+  g.restore();
+}
+function jitterLine(g,txt,x,y,R,amp){let cx=x;const rr=makeRng(txt+R.phrase);for(const ch of txt){const dy=(rr()-0.5)*amp;g.save();g.translate(cx,y+dy);g.rotate((rr()-0.5)*0.05);g.fillText(ch,0,0);g.restore();cx+=g.measureText(ch).width*1.0;}}
+function wrapHand(g,txt,x,y,maxw,lh,R){const words=txt.split(" ");let line="",yy=y;words.forEach(w=>{if(g.measureText(line+w).width>maxw){jitterLine(g,line.trim(),x,yy,R,3);yy+=lh;line=w+" ";}else line+=w+" ";});jitterLine(g,line.trim(),x,yy,R,3);}
+
+/* ---------- canvas sizing ---------- */
+function sizeCanvas(cv,w,h){const dpr=Math.min(window.devicePixelRatio||1,2);cv._dpr=dpr;cv.width=w*dpr;cv.height=h*dpr;cv._pf="#efe7d6";}
+
+/* ---------- app state ---------- */
+const CW=1320,CH=880; // internal logical (2x of css ~660x440)
+const front=document.getElementById("front"),back=document.getElementById("back");
+sizeCanvas(front,CW/2,CH/2);sizeCanvas(back,CW/2,CH/2);
+let R=null,tod=0.15,raf=0,root=null,stripCells=[],stripRaf=0;
+const REDUCE=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function draw(t){renderFront(front,R,tod,t);}
+function loop(now){const t=now/1000;draw(t);raf=requestAnimationFrame(loop);}
+// honour prefers-reduced-motion: render the frozen base frame and skip the rAF loop
+function startLoop(){cancelAnimationFrame(raf);if(REDUCE){draw(0);return;}raf=requestAnimationFrame(loop);}
+
+// setInput=false leaves the user's own typed text untouched; rootPhrase keeps
+// the journey strip fixed while navigating between its legs.
+function build(phrase,push,rootPhrase,setInput){
+  R=makeRecipe(phrase);
+  root=(rootPhrase==null?phrase:rootPhrase);
+  if(setInput!==false)document.getElementById("phrase").value=R.phrase;
+  renderBack(back,R,tod);
+  draw(0);startLoop();
+  buildStrip(root);
+  announce();
+  if(todEl){todEl.value=tod;setPresetChips(tod);}
+  if(push!==false)writeHash(R.phrase,tod);
+}
+
+/* announce the generated card to assistive tech */
+function announce(){
+  const el=document.getElementById("live");
+  if(el&&R)el.textContent=`Postcard from ${R.name}, ${R.country} — ${R.date}. Note: ${R.note}`;
+}
+
+/* seed for leg i (0-based) of a journey rooted at rootPhrase */
+function legSeed(rootPhrase,i){return i?rootPhrase+" · leg "+["ii","iii","iv"][i-1]:rootPhrase;}
+
+/* collection strip: a fixed 4-leg journey derived from the immutable root */
+function buildStrip(rootPhrase){
+  const strip=document.getElementById("strip");strip.innerHTML="";stripCells=[];
+  for(let i=0;i<4;i++){
+    const seed=legSeed(rootPhrase,i);
+    const rec=makeRecipe(seed);
+    const fig=document.createElement("figure");if(rec.phrase===R.phrase)fig.className="active";
+    const c=document.createElement("canvas");sizeCanvas(c,300,200);
+    renderFront(c,rec,tod,0);
+    const cap=document.createElement("figcaption");cap.textContent=rec.name.split(/[-,]/)[0];
+    fig.appendChild(c);fig.appendChild(cap);
+    fig.onclick=()=>build(seed,true,rootPhrase);
+    strip.appendChild(fig);
+    stripCells.push({c,rec});
+  }
+}
+
+/* re-tint the existing strip thumbnails for a new light value (no recipe rebuild) */
+function relightStrip(t){stripCells.forEach(({c,rec})=>renderFront(c,rec,t,0));}
+function scheduleStripRelight(){if(stripRaf)return;stripRaf=requestAnimationFrame(()=>{stripRaf=0;relightStrip(tod);});}
+
+/* ---------- hash sharing ---------- */
+function writeHash(p,t){location.hash="#"+encodeURIComponent(p)+"~"+t.toFixed(2);}
+function readHash(){const h=decodeURIComponent(location.hash.replace(/^#/,""));if(!h)return null;const i=h.lastIndexOf("~");if(i>0){const t=parseFloat(h.slice(i+1));if(!isNaN(t)){tod=t;return h.slice(0,i);}}return h;}
+
+/* ---------- controls ---------- */
+function toast(m){const el=document.getElementById("toast");el.textContent=m;el.classList.add("show");setTimeout(()=>el.classList.remove("show"),1600);}
+// user-typed phrases: don't rewrite their input with the normalized seed
+document.getElementById("go").onclick=()=>{const v=document.getElementById("phrase").value||"a quiet nowhere";build(v,true,v,false);};
+document.getElementById("phrase").addEventListener("keydown",e=>{if(e.key==="Enter"){const v=e.target.value||"a quiet nowhere";build(v,true,v,false);}});
+const PROMPTS=["sleepy harbor at dusk","the cold bright north","lavender fields after rain","a lighthouse nobody visits","summer at the edge of the map","where the reeds whisper","last ferry to nowhere","aurora over black water","the town that forgot time","warm stones and cold sea"];
+document.getElementById("surprise").onclick=()=>build(PROMPTS[Math.floor(Math.random()*PROMPTS.length)]);
+const flip=document.getElementById("flip");
+function toggleFlip(){flip.classList.toggle("back");}
+flip.onclick=toggleFlip;document.getElementById("flipBtn").onclick=e=>{e.stopPropagation();toggleFlip();};
+const todEl=document.getElementById("tod");
+const pc=document.getElementById("presets");
+// preset light values -> chip active state
+const PRE=[["Dawn",0.0],["Day",0.15],["Dusk",0.5],["Nocturne",0.9]];
+function setPresetChips(v){pc.querySelectorAll(".chip").forEach(c=>c.classList.toggle("on",parseFloat(c.dataset.v)===v));}
+// relight: the front card rides the rAF loop, so only the back (when shown) and
+// the strip need work here — and the strip is debounced + recipe-cached.
+function relight(){if(REDUCE)draw(0);if(flip.classList.contains("back"))renderBack(back,R,tod);scheduleStripRelight();writeHash(R.phrase,tod);}
+todEl.oninput=e=>{tod=parseFloat(e.target.value);setPresetChips(tod);relight();};
+PRE.forEach(([lab,v])=>{const b=document.createElement("button");b.className="chip";b.textContent=lab;b.dataset.v=v;b.onclick=()=>{tod=v;todEl.value=v;setPresetChips(v);relight();};pc.appendChild(b);});
+// download: render a frozen base frame (t=0) so it matches the seed exactly
+document.getElementById("dl").onclick=()=>{const showingBack=flip.classList.contains("back");const cv=showingBack?back:front;if(!showingBack)renderFront(front,R,tod,0);const a=document.createElement("a");a.download="farflung-"+R.name.replace(/[^A-Za-z]/g,"").slice(0,18)+(showingBack?"-back":"")+".png";a.href=cv.toDataURL("image/png");a.click();if(!showingBack)startLoop();toast("Saved PNG");};
+document.getElementById("copy").onclick=()=>{writeHash(R.phrase,tod);const u=location.href;(navigator.clipboard?navigator.clipboard.writeText(u):Promise.reject()).then(()=>toast("Link copied — same words, same card")).catch(()=>{const t=document.createElement("textarea");t.value=u;document.body.appendChild(t);t.select();document.execCommand("copy");t.remove();toast("Link copied");});};
+window.addEventListener("hashchange",()=>{
+  const prevPhrase=R?R.phrase:null,prevTod=tod;
+  const p=readHash(); // side effect: updates global tod from the hash
+  if(p==null)return;
+  if(p!==prevPhrase){build(p,false);}      // build re-syncs slider + chips
+  else if(tod!==prevTod){                  // same place, only the light changed
+    todEl.value=tod;setPresetChips(tod);
+    renderBack(back,R,tod);if(REDUCE)draw(0);scheduleStripRelight();
+  }
+});
+
+/* ---------- boot ---------- */
+const initial=readHash();
+todEl.value=tod;
+build(initial||PROMPTS[Math.floor(Math.random()*PROMPTS.length)],!initial);
+</script>
+</body>
+</html>

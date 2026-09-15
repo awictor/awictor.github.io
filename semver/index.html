@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Semver — Semantic Version Comparator & Range Checker</title>
+<meta name="description" content="Compare two semantic versions, check a version against an npm-style range (^, ~, x-ranges, ||), sort a list, and see the release-level diff. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('semver-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#6366f1;
+    --bg:#f5f5fb; --card:#ffffff; --fg:#1a1a22; --muted:#666; --line:#e5e5ef; --shadow:0 1px 3px rgba(0,0,0,.08);
+    --ok:#16a34a; --no:#dc2626;
+  }
+  [data-theme="dark"]{
+    --bg:#0e0e16; --card:#191922; --fg:#eeeef6; --muted:#9494a5; --line:#292933; --shadow:0 1px 3px rgba(0,0,0,.5);
+    --ok:#4ade80; --no:#f87171;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:720px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:20px;color:#fff;font-weight:800}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:720px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  h2{font-size:.95rem;margin:0 0 12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  input.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  .row{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:end}
+  .rel{font-size:1.6rem;font-weight:800;color:var(--c);text-align:center;padding-bottom:6px}
+  .res{margin-top:12px;font-size:1.05rem}
+  .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:.85rem;font-weight:700}
+  .badge.ok{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
+  .badge.no{background:color-mix(in srgb,var(--no) 18%,transparent);color:var(--no)}
+  .pair{display:grid;grid-template-columns:2fr 1fr;gap:12px}
+  .hint{color:var(--muted);font-size:.8rem;margin-top:8px}
+  .hint code{background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+  .sorted{margin-top:10px;line-height:1.9}
+  .sorted span{display:inline-block;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:3px 9px;margin:0 6px 2px 0}
+  .err{color:var(--no);font-size:.85rem;margin-top:8px}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo mono">^v</div>
+    <div><h1>Semver</h1><div class="sub">Compare versions · check ranges · sort</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <h2>Compare</h2>
+    <div class="row">
+      <div><label for="a">Version A</label><input class="mono" id="a" value="1.2.3" spellcheck="false"></div>
+      <div class="rel" id="rel">?</div>
+      <div><label for="b">Version B</label><input class="mono" id="b" value="1.10.0" spellcheck="false"></div>
+    </div>
+    <div class="res" id="cmpRes"></div>
+    <div class="err" id="cmpErr"></div>
+  </div>
+
+  <div class="card">
+    <h2>Range check</h2>
+    <div class="pair">
+      <div><label for="rv">Version</label><input class="mono" id="rv" value="1.4.0" spellcheck="false"></div>
+      <div><label for="rr">Range</label><input class="mono" id="rr" value="^1.2.0" spellcheck="false"></div>
+    </div>
+    <div class="res" id="satRes"></div>
+    <div class="err" id="satErr"></div>
+    <div class="hint">Supports <code>^1.2.3</code>, <code>~1.2</code>, <code>&gt;=1.0.0 &lt;2.0.0</code>, <code>1.2.x</code>, <code>1.x</code>, <code>*</code>, and <code>||</code> unions.</div>
+  </div>
+
+  <div class="card">
+    <h2>Sort a list</h2>
+    <label for="list">Versions (comma or space separated)</label>
+    <input class="mono" id="list" value="2.0.0, 1.0.0-rc.1, 1.0.0, 1.0.0-alpha, 1.2.0" spellcheck="false">
+    <div class="sorted mono" id="sorted"></div>
+    <div class="err" id="listErr"></div>
+  </div>
+</main>
+<footer>
+  Semantic Versioning 2.0.0 precedence &amp; npm-style ranges. 100% offline, nothing leaves your browser. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/semver">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  function parse(v){
+    const m = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$/.exec(String(v).trim());
+    if(!m) throw new Error('invalid version: ' + v);
+    return { major:+m[1], minor:+m[2], patch:+m[3], prerelease: m[4] ? m[4].split('.') : [], build: m[5] || '' };
+  }
+
+  // compare prerelease identifier arrays per SemVer §11
+  function cmpIds(a, b){
+    if(a.length === 0 && b.length === 0) return 0;
+    if(a.length === 0) return 1;   // a release outranks a prerelease
+    if(b.length === 0) return -1;
+    const len = Math.min(a.length, b.length);
+    for(let i = 0; i < len; i++){
+      const x = a[i], y = b[i];
+      const xn = /^\d+$/.test(x), yn = /^\d+$/.test(y);
+      if(xn && yn){ const d = +x - +y; if(d) return d < 0 ? -1 : 1; }
+      else if(xn) return -1;       // numeric identifiers < alphanumeric
+      else if(yn) return 1;
+      else { if(x < y) return -1; if(x > y) return 1; }
+    }
+    return a.length === b.length ? 0 : (a.length < b.length ? -1 : 1);
+  }
+
+  function compare(a, b){
+    const pa = parse(a), pb = parse(b);
+    for(const k of ['major', 'minor', 'patch']) if(pa[k] !== pb[k]) return pa[k] < pb[k] ? -1 : 1;
+    return cmpIds(pa.prerelease, pb.prerelease);
+  }
+
+  // release level that differs between two versions
+  function diff(a, b){
+    const pa = parse(a), pb = parse(b);
+    if(pa.major !== pb.major) return 'major';
+    if(pa.minor !== pb.minor) return 'minor';
+    if(pa.patch !== pb.patch) return 'patch';
+    if(cmpIds(pa.prerelease, pb.prerelease) !== 0) return 'prerelease';
+    return '';
+  }
+
+  function sort(list){ return [...list].sort(compare); }
+
+  // ---- range parsing ----
+  function pieces(str){
+    const m = /^v?(\d+|x|X|\*)?(?:\.(\d+|x|X|\*))?(?:\.(\d+|x|X|\*))?(?:-([0-9A-Za-z.-]+))?$/.exec(String(str).trim());
+    if(!m) return null;
+    const wild = s => s === undefined || s === 'x' || s === 'X' || s === '*';
+    return {
+      major: wild(m[1]) ? null : +m[1],
+      minor: wild(m[2]) ? null : +m[2],
+      patch: wild(m[3]) ? null : +m[3],
+      pre: m[4] ? ('-' + m[4]) : ''
+    };
+  }
+
+  function caret(t){
+    const p = pieces(t); if(!p || p.major === null) throw new Error('invalid ^ range: ' + t);
+    const M = p.major, mn = p.minor, pt = p.patch;
+    const lower = `${M}.${mn || 0}.${pt || 0}${p.pre}`;
+    let upper;
+    if(M > 0 || mn === null) upper = `${M + 1}.0.0`;
+    else if(mn > 0 || pt === null) upper = `${M}.${mn + 1}.0`;
+    else upper = `${M}.${mn}.${pt + 1}`;
+    return [{ op:'>=', v:lower }, { op:'<', v:upper }];
+  }
+
+  function tilde(t){
+    const p = pieces(t); if(!p || p.major === null) throw new Error('invalid ~ range: ' + t);
+    const M = p.major, mn = p.minor, pt = p.patch;
+    if(mn === null) return [{ op:'>=', v:`${M}.0.0` }, { op:'<', v:`${M + 1}.0.0` }];
+    return [{ op:'>=', v:`${M}.${mn}.${pt || 0}${p.pre}` }, { op:'<', v:`${M}.${mn + 1}.0` }];
+  }
+
+  function expand(token){
+    token = token.trim();
+    if(token === '' || token === '*' || token === 'x' || token === 'X') return [];
+    if(token[0] === '^') return caret(token.slice(1));
+    if(token[0] === '~') return tilde(token.slice(1));
+    let op = '=';
+    const opm = /^(>=|<=|>|<|=)/.exec(token);
+    if(opm){ op = opm[1]; token = token.slice(opm[1].length).trim(); }
+    const p = pieces(token);
+    if(!p) throw new Error('invalid range token: ' + token);
+    if(op === '='){
+      if(p.major === null) return [];
+      if(p.minor === null) return [{ op:'>=', v:`${p.major}.0.0` }, { op:'<', v:`${p.major + 1}.0.0` }];
+      if(p.patch === null) return [{ op:'>=', v:`${p.major}.${p.minor}.0` }, { op:'<', v:`${p.major}.${p.minor + 1}.0` }];
+      return [{ op:'=', v:`${p.major}.${p.minor}.${p.patch}${p.pre}` }];
+    }
+    return [{ op, v:`${p.major || 0}.${p.minor || 0}.${p.patch || 0}${p.pre}` }];
+  }
+
+  function testComp(version, comp){
+    const c = compare(version, comp.v);
+    switch(comp.op){
+      case '=':  return c === 0;
+      case '>':  return c > 0;
+      case '>=': return c >= 0;
+      case '<':  return c < 0;
+      case '<=': return c <= 0;
+    }
+    return false;
+  }
+
+  function satisfies(version, range){
+    parse(version);                       // validate the version up front
+    range = String(range).trim();
+    if(range === '' || range === '*') return true;
+    return range.split('||').some(group => {
+      const comps = group.trim().split(/\s+/).filter(Boolean).flatMap(expand);
+      return comps.every(c => testComp(version, c));
+    });
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('rel')){
+    const $ = id => document.getElementById(id);
+    const RELS = { '-1': 'A &lt; B', '0': 'A = B', '1': 'A &gt; B' };
+
+    function doCompare(){
+      try{
+        const c = compare($('a').value, $('b').value);
+        $('rel').innerHTML = c < 0 ? '&lt;' : c > 0 ? '&gt;' : '=';
+        const d = diff($('a').value, $('b').value);
+        $('cmpRes').innerHTML = RELS[c] + (d ? ` &middot; differ at <b>${d}</b>` : ' &middot; identical');
+        $('cmpErr').textContent = '';
+      }catch(e){ $('rel').textContent = '?'; $('cmpRes').textContent = ''; $('cmpErr').textContent = e.message; }
+    }
+
+    function doSat(){
+      try{
+        const ok = satisfies($('rv').value, $('rr').value);
+        $('satRes').innerHTML = ok
+          ? `<span class="badge ok">✓ satisfies</span>`
+          : `<span class="badge no">✗ does not satisfy</span>`;
+        $('satErr').textContent = '';
+      }catch(e){ $('satRes').textContent = ''; $('satErr').textContent = e.message; }
+    }
+
+    function doSort(){
+      try{
+        const list = $('list').value.split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
+        const out = sort(list);
+        $('sorted').innerHTML = out.map(v => `<span>${v}</span>`).join('');
+        $('listErr').textContent = '';
+      }catch(e){ $('sorted').textContent = ''; $('listErr').textContent = e.message; }
+    }
+
+    ['a', 'b'].forEach(id => $(id).addEventListener('input', doCompare));
+    ['rv', 'rr'].forEach(id => $(id).addEventListener('input', doSat));
+    $('list').addEventListener('input', doSort);
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('semver-theme', cur); }catch(e){}
+    });
+    doCompare(); doSat(); doSort();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { parse, compare, cmpIds, diff, sort, satisfies };
+</script>
+</body>
+</html>

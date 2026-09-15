@@ -1,0 +1,1369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="theme-color" content="#05060c" />
+<meta name="description" content="Starwheel — a real-time procedural spiral galaxy rendered from density-wave physics in a single HTML file with raw WebGL." />
+<title>Starwheel — a living procedural spiral galaxy</title>
+<style>
+  :root{
+    --bg:#05060c;
+    --panel:rgba(12,14,24,0.72);
+    --panel-solid:#0b0d18;
+    --line:rgba(150,170,255,0.14);
+    --text:#e8ecff;
+    --muted:#8a93b8;
+    --accent:#7fb3ff;
+    --accent2:#ff8ac4;
+    --warm:#ffcf8a;
+    --radius:14px;
+    font-synthesis:none;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+    font-family:"Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+    overflow:hidden;overscroll-behavior:none;}
+  #glcanvas{position:fixed;inset:0;width:100vw;height:100vh;display:block;touch-action:none;cursor:grab;}
+  #glcanvas.dragging{cursor:grabbing;}
+
+  /* ---- No-WebGL fallback ---- */
+  #fallback{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;
+    text-align:center;padding:32px;gap:14px;background:radial-gradient(ellipse at center,#0d1024,#05060c 70%);}
+  #fallback h1{font-size:26px;margin:0;letter-spacing:.5px;}
+  #fallback p{max-width:520px;color:var(--muted);line-height:1.55;margin:0;}
+  #fallback .glyph{font-size:64px;filter:drop-shadow(0 0 20px rgba(127,179,255,.5));}
+
+  /* ---- Control panel ---- */
+  #panel{position:fixed;top:14px;left:14px;width:288px;max-height:calc(100vh - 28px);
+    background:var(--panel);backdrop-filter:blur(14px) saturate(1.3);-webkit-backdrop-filter:blur(14px) saturate(1.3);
+    border:1px solid var(--line);border-radius:var(--radius);padding:0;
+    box-shadow:0 12px 40px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.05);
+    display:flex;flex-direction:column;overflow:hidden;z-index:10;
+    transition:transform .35s cubic-bezier(.2,.8,.2,1),opacity .35s;}
+  #panel.collapsed{transform:translateX(calc(-100% + 46px));}
+  #panel-head{display:flex;align-items:center;gap:10px;padding:13px 14px;cursor:pointer;user-select:none;
+    border-bottom:1px solid var(--line);}
+  #panel-head .mark{width:22px;height:22px;flex:0 0 auto;border-radius:50%;
+    background:radial-gradient(circle at 35% 35%,#fff,#ffd89a 20%,#ff8ac4 55%,#4a63d8 90%,transparent);
+    box-shadow:0 0 14px rgba(255,160,210,.55);animation:spin 26s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #panel-head h1{font-size:15px;margin:0;font-weight:650;letter-spacing:.6px;flex:1;}
+  #panel-head .caret{color:var(--muted);font-size:12px;transition:transform .35s;}
+  #panel.collapsed #panel-head .caret{transform:rotate(180deg);}
+  #panel-body{overflow-y:auto;overflow-x:hidden;padding:12px 14px 16px;scrollbar-width:thin;
+    scrollbar-color:rgba(150,170,255,.3) transparent;}
+  #panel-body::-webkit-scrollbar{width:8px;}
+  #panel-body::-webkit-scrollbar-thumb{background:rgba(150,170,255,.25);border-radius:8px;}
+  .section{margin:14px 0 4px;font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted);
+    display:flex;align-items:center;gap:8px;}
+  .section::after{content:"";flex:1;height:1px;background:var(--line);}
+  .section:first-child{margin-top:2px;}
+
+  .ctrl{margin:9px 0;}
+  .ctrl label{display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px;color:#c7cef0;}
+  .ctrl label .val{color:var(--accent);font-variant-numeric:tabular-nums;font-weight:600;}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:4px;
+    background:linear-gradient(90deg,var(--accent),var(--accent2));outline:none;cursor:pointer;}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;
+    background:#fff;border:2px solid #2a3358;box-shadow:0 0 8px rgba(127,179,255,.7);cursor:pointer;}
+  input[type=range]::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:#fff;border:2px solid #2a3358;
+    box-shadow:0 0 8px rgba(127,179,255,.7);cursor:pointer;}
+
+  .btnrow{display:flex;flex-wrap:wrap;gap:6px;}
+  button{font-family:inherit;font-size:12px;color:var(--text);background:rgba(255,255,255,.05);
+    border:1px solid var(--line);border-radius:9px;padding:7px 10px;cursor:pointer;
+    transition:background .15s,border-color .15s,transform .1s;flex:1;min-width:0;}
+  button:hover{background:rgba(127,179,255,.16);border-color:rgba(127,179,255,.4);}
+  button:active{transform:translateY(1px);}
+  button.primary{background:linear-gradient(120deg,rgba(127,179,255,.22),rgba(255,138,196,.22));
+    border-color:rgba(127,179,255,.45);}
+  .preset-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+  .preset-grid button{font-size:11.5px;padding:8px 6px;line-height:1.2;}
+
+  .toggle{display:flex;align-items:center;justify-content:space-between;font-size:12.5px;margin:8px 0;color:#c7cef0;}
+  .switch{position:relative;width:38px;height:20px;flex:0 0 auto;}
+  .switch input{opacity:0;width:0;height:0;}
+  .slider-sw{position:absolute;inset:0;background:rgba(255,255,255,.12);border-radius:20px;transition:.2s;
+    border:1px solid var(--line);}
+  .slider-sw::before{content:"";position:absolute;width:14px;height:14px;left:3px;top:2px;background:#fff;
+    border-radius:50%;transition:.2s;}
+  .switch input:checked + .slider-sw{background:linear-gradient(90deg,var(--accent),var(--accent2));}
+  .switch input:checked + .slider-sw::before{transform:translateX(18px);}
+
+  .seedrow{display:flex;gap:6px;align-items:center;}
+  .seedrow input[type=text]{flex:1;min-width:0;font-family:"Consolas",monospace;font-size:12px;color:var(--text);
+    background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:9px;padding:7px 9px;outline:none;}
+  .seedrow input[type=text]:focus{border-color:rgba(127,179,255,.5);}
+
+  #toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);
+    background:var(--panel-solid);border:1px solid var(--line);border-radius:11px;padding:11px 18px;font-size:13px;
+    opacity:0;pointer-events:none;transition:opacity .3s,transform .3s;z-index:30;
+    box-shadow:0 10px 30px rgba(0,0,0,.5);}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+  #hud{position:fixed;bottom:12px;right:14px;font-size:11px;color:var(--muted);text-align:right;z-index:9;
+    font-variant-numeric:tabular-nums;line-height:1.5;text-shadow:0 1px 3px #000;pointer-events:none;}
+  #hint{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);font-size:11.5px;color:var(--muted);
+    z-index:9;text-shadow:0 1px 3px #000;pointer-events:none;transition:opacity .6s;text-align:center;
+    background:rgba(5,6,12,.4);padding:4px 12px;border-radius:20px;}
+  a.link{color:var(--accent);text-decoration:none;border-bottom:1px dotted rgba(127,179,255,.5);}
+  @media (max-width:520px){
+    #panel{width:calc(100vw - 24px);top:10px;left:12px;}
+    #panel.collapsed{transform:translateY(calc(-100% + 48px));}
+    /* keep the hint visible on touch; the text is swapped to a touch variant in JS */
+  }
+</style>
+</head>
+<body>
+<canvas id="glcanvas"></canvas>
+
+<div id="fallback">
+  <div class="glyph">🌌</div>
+  <h1>Starwheel needs WebGL</h1>
+  <p>Your browser or device couldn't start a WebGL context, so the galaxy can't be rendered.
+     Try a recent version of Chrome, Firefox, Edge, or Safari, enable hardware acceleration,
+     or open this file on a device with GPU support. Everything runs locally — no network needed.</p>
+</div>
+
+<div id="panel">
+  <div id="panel-head" title="Show / hide controls">
+    <span class="mark"></span>
+    <h1>Starwheel</h1>
+    <span class="caret">◀</span>
+  </div>
+  <div id="panel-body">
+    <div class="section">Presets</div>
+    <div class="preset-grid" id="presets"></div>
+
+    <div class="section">Structure</div>
+    <div id="structure-ctrls"></div>
+
+    <div class="section">Light &amp; dust</div>
+    <div id="light-ctrls"></div>
+
+    <div class="section">Camera</div>
+    <div class="toggle"><span>Guided tour</span>
+      <label class="switch"><input type="checkbox" id="tg-tour"><span class="slider-sw"></span></label></div>
+    <div class="toggle"><span>Auto-rotate</span>
+      <label class="switch"><input type="checkbox" id="tg-rotate"><span class="slider-sw"></span></label></div>
+    <div class="toggle"><span>Bloom glow</span>
+      <label class="switch"><input type="checkbox" id="tg-bloom" checked><span class="slider-sw"></span></label></div>
+
+    <div class="section">Galaxy seed</div>
+    <div class="seedrow">
+      <input type="text" id="seed-input" spellcheck="false" />
+      <button id="btn-reroll" style="flex:0 0 auto" title="Reroll a whole new galaxy">🎲</button>
+    </div>
+
+    <div class="section">Share &amp; export</div>
+    <div class="btnrow">
+      <button id="btn-share" class="primary">🔗 Copy link</button>
+      <button id="btn-png" class="primary">🖼 Export PNG</button>
+    </div>
+    <div class="btnrow" style="margin-top:6px;">
+      <button id="btn-reset">Reset defaults</button>
+    </div>
+    <p style="font-size:10.5px;color:var(--muted);line-height:1.5;margin:14px 0 2px;">
+      Drag to orbit · wheel or pinch to dive toward the core · right-drag / shift-drag to pan.
+      Arms form from <a class="link" href="https://en.wikipedia.org/wiki/Density_wave_theory" target="_blank" rel="noopener">density-wave</a> orbits computed live on the GPU.
+    </p>
+  </div>
+</div>
+
+<div id="hint">Drag to orbit · scroll to zoom · pick a preset to explore</div>
+<div id="hud"></div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* ============================================================================
+   STARWHEEL — a real-time procedural spiral galaxy in one file, raw WebGL.
+   No dependencies, no build step, no network. Density-wave model: every star's
+   animated position is derived analytically in the vertex shader from a compact
+   per-star seed buffer + a single time uniform. 100k+ additive point sprites.
+   ========================================================================== */
+
+(function(){
+
+/* -------------------------------------------------------------------------- */
+/*  Small deterministic RNG (mulberry32) + string→seed hashing                */
+/* -------------------------------------------------------------------------- */
+function xmur3(str){
+  let h = 1779033703 ^ str.length;
+  for(let i=0;i<str.length;i++){
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  return function(){
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    h ^= h >>> 16;
+    return h >>> 0;
+  };
+}
+function mulberry32(a){
+  return function(){
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function makeRng(seedStr){
+  const seed = xmur3(String(seedStr))();
+  return mulberry32(seed);
+}
+/* approx standard-normal via sum of uniforms (Irwin–Hall) */
+function randn(rng){ return (rng()+rng()+rng()+rng()-2) * 0.8660254; }
+
+/* -------------------------------------------------------------------------- */
+/*  4x4 matrix helpers (column-major, WebGL layout)                            */
+/* -------------------------------------------------------------------------- */
+const M4 = {
+  perspective(out, fovy, aspect, near, far){
+    const f = 1/Math.tan(fovy/2), nf = 1/(near-far);
+    out[0]=f/aspect; out[1]=0; out[2]=0; out[3]=0;
+    out[4]=0; out[5]=f; out[6]=0; out[7]=0;
+    out[8]=0; out[9]=0; out[10]=(far+near)*nf; out[11]=-1;
+    out[12]=0; out[13]=0; out[14]=2*far*near*nf; out[15]=0;
+    return out;
+  },
+  lookAt(out, eye, center, up){
+    let z0=eye[0]-center[0], z1=eye[1]-center[1], z2=eye[2]-center[2];
+    let len = Math.hypot(z0,z1,z2) || 1; z0/=len; z1/=len; z2/=len;
+    let x0=up[1]*z2-up[2]*z1, x1=up[2]*z0-up[0]*z2, x2=up[0]*z1-up[1]*z0;
+    len = Math.hypot(x0,x1,x2);
+    if(len){ x0/=len; x1/=len; x2/=len; } else { x0=x1=x2=0; }
+    let y0=z1*x2-z2*x1, y1=z2*x0-z0*x2, y2=z0*x1-z1*x0;
+    out[0]=x0; out[1]=y0; out[2]=z0; out[3]=0;
+    out[4]=x1; out[5]=y1; out[6]=z1; out[7]=0;
+    out[8]=x2; out[9]=y2; out[10]=z2; out[11]=0;
+    out[12]=-(x0*eye[0]+x1*eye[1]+x2*eye[2]);
+    out[13]=-(y0*eye[0]+y1*eye[1]+y2*eye[2]);
+    out[14]=-(z0*eye[0]+z1*eye[1]+z2*eye[2]);
+    out[15]=1;
+    return out;
+  }
+};
+
+/* -------------------------------------------------------------------------- */
+/*  Parameter model + presets                                                  */
+/* -------------------------------------------------------------------------- */
+const DEFAULTS = {
+  starCount: 110000,
+  armCount:  2,
+  winding:   6.4,   // spiral tightness (radians of wind over the disk)
+  ecc:       0.34,  // orbital eccentricity → density-wave arm sharpness
+  armWidth:  0.55,  // angular scatter across arm crests
+  precession:0.045, // pattern rotation speed
+  coreRadius:0.16,  // bulge fraction
+  dust:      0.6,   // dust-lane density
+  tempBias:  0.0,   // color-temperature shift (-warm .. +cool)
+  exposure:  1.0,   // overall brightness
+  starSize:  1.55,  // point-sprite size
+  bloom:     1.15   // bloom intensity
+};
+
+// Each preset supplies galaxy params + a flattering camera + a seed.
+const PRESETS = [
+  { name:"Milky Way", p:{armCount:4, winding:5.6, ecc:0.26, armWidth:0.7, precession:0.04,
+      coreRadius:0.2, dust:0.72, tempBias:-0.04, exposure:1.0, starSize:1.5, bloom:1.15, starCount:120000},
+    seed:"milky-way-9", cam:{az:0.6, el:0.42, dist:2.55} },
+  { name:"Grand Design", p:{armCount:2, winding:7.4, ecc:0.4, armWidth:0.42, precession:0.05,
+      coreRadius:0.14, dust:0.55, tempBias:0.02, exposure:1.12, starSize:1.6, bloom:1.35, starCount:120000},
+    seed:"m51-grand", cam:{az:0.0, el:1.02, dist:2.35} },
+  { name:"Flocculent", p:{armCount:6, winding:3.8, ecc:0.16, armWidth:1.0, precession:0.035,
+      coreRadius:0.18, dust:0.5, tempBias:0.06, exposure:1.0, starSize:1.45, bloom:1.05, starCount:130000},
+    seed:"flocculent-42", cam:{az:1.1, el:0.35, dist:2.6} },
+  { name:"Tight Ring", p:{armCount:2, winding:12.5, ecc:0.1, armWidth:0.5, precession:0.03,
+      coreRadius:0.22, dust:0.42, tempBias:-0.08, exposure:1.05, starSize:1.5, bloom:1.2, starCount:110000},
+    seed:"ringed-sombrero", cam:{az:0.3, el:0.16, dist:2.75} }
+];
+
+let params = Object.assign({}, DEFAULTS);
+let seedStr = "starwheel";
+
+/* Slider definitions for the two control groups */
+const STRUCTURE_CTRLS = [
+  {k:"starCount", label:"Star count", min:10000, max:220000, step:5000, fmt:v=>Math.round(v/1000)+"k", regen:true},
+  {k:"armCount",  label:"Arm count",  min:1, max:8, step:1, fmt:v=>String(v)},
+  {k:"winding",   label:"Spiral pitch", min:1.5, max:16, step:0.1, fmt:v=>v.toFixed(1)},
+  {k:"ecc",       label:"Eccentricity", min:0, max:0.6, step:0.01, fmt:v=>v.toFixed(2)},
+  {k:"armWidth",  label:"Arm width", min:0.15, max:1.6, step:0.01, fmt:v=>v.toFixed(2)},
+  {k:"precession",label:"Precession", min:0, max:0.18, step:0.005, fmt:v=>v.toFixed(3)},
+  {k:"coreRadius",label:"Bulge size", min:0.05, max:0.35, step:0.01, fmt:v=>v.toFixed(2)}
+];
+const LIGHT_CTRLS = [
+  {k:"dust",     label:"Dust lanes", min:0, max:1, step:0.01, fmt:v=>v.toFixed(2)},
+  {k:"tempBias", label:"Color temp", min:-0.35, max:0.35, step:0.01, fmt:v=>(v>0?"+":"")+v.toFixed(2)},
+  {k:"exposure", label:"Exposure", min:0.4, max:2.0, step:0.01, fmt:v=>v.toFixed(2)},
+  {k:"starSize", label:"Star size", min:0.6, max:3.2, step:0.05, fmt:v=>v.toFixed(2)},
+  {k:"bloom",    label:"Bloom", min:0, max:2.5, step:0.05, fmt:v=>v.toFixed(2)}
+];
+
+/* Documented [min,max] per param, used to sanitize hand-edited/truncated hashes */
+const PARAM_RANGES = {};
+STRUCTURE_CTRLS.concat(LIGHT_CTRLS).forEach(d=>{ PARAM_RANGES[d.k] = [d.min, d.max]; });
+
+/* -------------------------------------------------------------------------- */
+/*  WebGL bootstrap                                                            */
+/* -------------------------------------------------------------------------- */
+const canvas = document.getElementById("glcanvas");
+let gl = null;
+try {
+  const opts = { alpha:false, antialias:false, depth:false, stencil:false,
+    premultipliedAlpha:false, preserveDrawingBuffer:false, powerPreference:"high-performance" };
+  gl = canvas.getContext("webgl", opts) || canvas.getContext("experimental-webgl", opts);
+} catch(e){ gl = null; }
+
+if(!gl){
+  document.getElementById("panel").style.display = "none";
+  document.getElementById("hint").style.display = "none";
+  document.getElementById("fallback").style.display = "flex";
+  return;
+}
+
+/* Adaptive capability clamps for weaker GPUs / mobile */
+const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+const lowCores = (navigator.hardwareConcurrency || 4) <= 4;
+const MAX_DPR  = isMobile ? 1.6 : 2.0;
+if(isMobile || lowCores){
+  DEFAULTS.starCount = 60000;
+  params.starCount = 60000;
+}
+
+/* Hardware point-size cap. WebGL only guarantees a max point size of 1px, and
+   many mobile / Apple GPUs cap well below the sizes the star + core sprites
+   request; clamp gl_PointSize to this so the signature glow renders consistently. */
+const psRange = gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE);
+const MAX_PT = (psRange && psRange[1] > 1) ? psRange[1] : 64.0;
+
+/* -------------------------------------------------------------------------- */
+/*  Shader utilities                                                           */
+/* -------------------------------------------------------------------------- */
+function compile(type, src){
+  const sh = gl.createShader(type);
+  gl.shaderSource(sh, src);
+  gl.compileShader(sh);
+  if(!gl.getShaderParameter(sh, gl.COMPILE_STATUS)){
+    console.error(gl.getShaderInfoLog(sh), src);
+    throw new Error("Shader compile failed");
+  }
+  return sh;
+}
+function program(vs, fs){
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if(!gl.getProgramParameter(p, gl.LINK_STATUS)){
+    console.error(gl.getProgramInfoLog(p));
+    throw new Error("Program link failed");
+  }
+  // cache uniform + attrib locations lazily
+  p._u = {}; p._a = {};
+  p.u = name => (p._u[name] !== undefined ? p._u[name] : (p._u[name] = gl.getUniformLocation(p, name)));
+  p.a = name => (p._a[name] !== undefined ? p._a[name] : (p._a[name] = gl.getAttribLocation(p, name)));
+  return p;
+}
+
+/* Shared GLSL: blackbody-ish stellar color ramp */
+const GLSL_BLACKBODY = `
+vec3 blackbody(float t){
+  // t: 0 = cool red giant, 1 = hot blue-white O star
+  vec3 warm = vec3(1.00, 0.62, 0.34);
+  vec3 mid  = vec3(1.00, 0.96, 0.90);
+  vec3 cool = vec3(0.66, 0.78, 1.00);
+  t = clamp(t, 0.0, 1.0);
+  return t < 0.5 ? mix(warm, mid, t*2.0) : mix(mid, cool, (t-0.5)*2.0);
+}`;
+
+/* ---- STAR shader: analytic density-wave orbits ---- */
+const STAR_VS = `
+precision highp float;
+attribute vec4 aSeed;   // a(radius), armKey, spread(gauss), phase
+attribute vec4 aSeed2;  // zGauss, temp, sizeRand, typeFlag
+uniform mat4 uView, uProj;
+uniform float uTime, uArmCount, uWinding, uEcc, uArmWidth, uPrecession;
+uniform float uCoreRadius, uDust, uSize, uTempBias, uExposure, uDpr, uViewHeight, uMaxPtSize;
+varying vec3 vColor; varying float vBright;
+${GLSL_BLACKBODY}
+void main(){
+  float a = aSeed.x;                       // normalized radius 0..1
+  // --- density-wave arm placement -----------------------------------------
+  float arm = floor(aSeed.y * uArmCount);
+  float armStep = 6.28318530718 / max(uArmCount, 1.0);
+  // logarithmic-spiral crest: base arm angle + winding that grows with radius
+  float crest = arm * armStep + a * uWinding;
+  // arm scatter narrows toward the core, widens outward
+  float widthScale = uArmWidth * (0.06 + a * 0.9);
+  float spread = aSeed.z * widthScale;
+  float azimuth = crest + spread + uTime * uPrecession;
+
+  // --- precessing elliptical orbit → radial oscillation (the "wave") -------
+  float ecc = uEcc * smoothstep(0.02, 0.22, a) * (1.0 - 0.45*smoothstep(0.62,1.0,a));
+  float phase = aSeed.w + uTime * 0.2;      // coherent orbital advance keeps arms crisp
+  float r = a * (1.0 - ecc * cos(phase) * 0.55);
+
+  // --- bulge: rounder, thicker, more centrally scattered -------------------
+  float bulge = 1.0 - smoothstep(0.0, uCoreRadius, a);
+  vec3 pos;
+  pos.x = cos(azimuth) * r;
+  pos.z = sin(azimuth) * r;
+  float thick = mix(0.02, 0.11, bulge) + 0.008;
+  pos.y = aSeed2.x * thick;
+
+  // --- color: blackbody, warmer & brighter in the bulge --------------------
+  float temp = clamp(aSeed2.y + uTempBias, 0.0, 1.0);
+  vec3 col = blackbody(temp);
+  col = mix(col, vec3(1.0, 0.82, 0.55), bulge * 0.7);
+  float bright = 0.55 + 0.7 * aSeed2.z;
+  bright *= 1.0 + bulge * 1.7;
+  float psize = uSize * (0.55 + aSeed2.z * 1.25);
+
+  // --- special populations along arm crests --------------------------------
+  float type = aSeed2.w;
+  if(type > 0.5 && type < 1.5){          // OB association: hot blue clusters
+    col = vec3(0.62, 0.76, 1.0); bright *= 2.4; psize *= 1.9;
+  } else if(type > 1.5){                 // HII region: pink emission glow
+    col = vec3(1.0, 0.42, 0.72); bright *= 1.7; psize *= 2.6;
+  }
+
+  // --- procedural dust lanes: darken inner edge of the arms ----------------
+  float dustBand = 0.5 + 0.5 * sin(a * 46.0 + arm * 1.7);
+  float dust = 1.0 - uDust * clamp(0.55 - aSeed.z * 0.5, 0.0, 1.0) * dustBand;
+  bright *= clamp(dust, 0.12, 1.0);
+
+  vColor = col;
+  vBright = bright * uExposure;
+
+  vec4 viewPos = uView * vec4(pos, 1.0);
+  gl_Position = uProj * viewPos;
+  float dist = max(-viewPos.z, 0.05);
+  // perspective-correct point size, scaled by viewport height for DPR stability
+  gl_PointSize = clamp(psize * (uViewHeight / 900.0) * (1.9 / dist), 1.0, min(70.0 * uDpr, uMaxPtSize));
+}`;
+
+const STAR_FS = `
+precision highp float;
+varying vec3 vColor; varying float vBright;
+void main(){
+  vec2 d = gl_PointCoord - 0.5;
+  float r2 = dot(d, d);
+  if(r2 > 0.25) discard;
+  float glow = exp(-r2 * 9.0);          // soft outer halo
+  float core = exp(-r2 * 42.0) * 0.7;   // tight bright center
+  vec3 c = vColor * vBright * (glow + core);
+  gl_FragColor = vec4(c, 1.0);
+}`;
+
+/* ---- BACKGROUND parallax starfield ---- */
+const BG_VS = `
+precision highp float;
+attribute vec3 aPos; attribute vec2 aInfo; // aInfo: phase, brightness
+uniform mat4 uView, uProj; uniform float uTime, uDpr, uViewHeight;
+varying float vTw; varying float vB;
+void main(){
+  vec4 viewPos = uView * vec4(aPos, 1.0);
+  gl_Position = uProj * viewPos;
+  vTw = 0.6 + 0.4 * sin(uTime * 1.7 + aInfo.x * 30.0);
+  vB = aInfo.y;
+  gl_PointSize = clamp(aInfo.y * 2.6 * uDpr, 1.0, 4.0 * uDpr);
+}`;
+const BG_FS = `
+precision highp float;
+varying float vTw; varying float vB;
+void main(){
+  vec2 d = gl_PointCoord - 0.5;
+  float r2 = dot(d, d);
+  if(r2 > 0.25) discard;
+  float a = exp(-r2 * 10.0);
+  vec3 c = vec3(0.7, 0.78, 1.0) * vB * vTw * a * 0.9;
+  gl_FragColor = vec4(c, 1.0);
+}`;
+
+/* ---- CORE bulge accent + accretion shimmer (single big sprite) ---- */
+const CORE_VS = `
+precision highp float;
+attribute float aDummy;
+uniform mat4 uView, uProj; uniform float uViewHeight, uDpr, uMaxPtSize;
+void main(){
+  vec4 viewPos = uView * vec4(0.0, 0.0, 0.0, 1.0);
+  gl_Position = uProj * viewPos;
+  gl_Position.x += aDummy * 0.0;   // reference aDummy so it isn't optimized out
+  float dist = max(-viewPos.z, 0.05);
+  gl_PointSize = clamp((uViewHeight * 0.55) / dist, 8.0, min(uViewHeight, uMaxPtSize));
+}`;
+const CORE_FS = `
+precision highp float;
+uniform float uTime, uExposure;
+void main(){
+  vec2 d = gl_PointCoord - 0.5;
+  float r = length(d) * 2.0;
+  if(r > 1.0) discard;
+  float halo = pow(1.0 - r, 2.4);
+  // subtle accretion shimmer
+  float ang = atan(d.y, d.x);
+  float shimmer = 0.85 + 0.15 * sin(ang * 5.0 + uTime * 1.3) * (1.0 - r);
+  vec3 warm = mix(vec3(1.0, 0.95, 0.82), vec3(1.0, 0.7, 0.4), r);
+  gl_FragColor = vec4(warm * halo * shimmer * 0.55 * uExposure, 1.0);
+}`;
+
+/* ---- Fullscreen passes (nebula base, bright, blur, composite) ---- */
+const QUAD_VS = `
+precision highp float;
+attribute vec2 aPos; varying vec2 vUv;
+void main(){ vUv = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+const NEBULA_FS = `
+precision highp float;
+varying vec2 vUv;
+uniform vec2 uRes; uniform float uTime, uSeedX, uSeedY;
+float blob(vec2 uv, vec2 c, float s){ return exp(-dot(uv-c, uv-c) / (s*s)); }
+void main(){
+  vec2 uv = vUv;
+  vec2 p = (uv - 0.5); p.x *= uRes.x / uRes.y;
+  // deep-space base with a gentle central lift
+  vec3 col = vec3(0.008, 0.010, 0.020);
+  col += vec3(0.02, 0.03, 0.06) * exp(-dot(p,p) * 1.6);
+  // a few slowly drifting nebular clouds (very faint)
+  float t = uTime * 0.02;
+  col += vec3(0.10, 0.05, 0.16) * blob(p, vec2(sin(t+uSeedX)*0.35, cos(t*0.8+uSeedY)*0.28), 0.34) * 0.35;
+  col += vec3(0.04, 0.12, 0.14) * blob(p, vec2(cos(t*1.1+uSeedY)*0.42, sin(t+uSeedX)*0.32), 0.28) * 0.28;
+  col += vec3(0.14, 0.08, 0.05) * blob(p, vec2(-0.3+sin(t*0.7)*0.1, 0.25), 0.22) * 0.2;
+  // faint vignette
+  col *= 1.0 - 0.35 * dot(p, p);
+  gl_FragColor = vec4(max(col, 0.0), 1.0);
+}`;
+
+const BRIGHT_FS = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uTex; uniform float uThreshold;
+void main(){
+  vec3 c = texture2D(uTex, vUv).rgb;
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  float k = smoothstep(uThreshold, uThreshold + 0.7, l);
+  gl_FragColor = vec4(c * k, 1.0);
+}`;
+
+const BLUR_FS = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uTex; uniform vec2 uDir; // texel-sized step in one axis
+void main(){
+  // 9-tap gaussian
+  vec3 sum = texture2D(uTex, vUv).rgb * 0.227027;
+  sum += texture2D(uTex, vUv + uDir * 1.3846).rgb * 0.316216;
+  sum += texture2D(uTex, vUv - uDir * 1.3846).rgb * 0.316216;
+  sum += texture2D(uTex, vUv + uDir * 3.2308).rgb * 0.070270;
+  sum += texture2D(uTex, vUv - uDir * 3.2308).rgb * 0.070270;
+  gl_FragColor = vec4(sum, 1.0);
+}`;
+
+const COMPOSITE_FS = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uScene; uniform sampler2D uBloom;
+uniform float uBloomAmt; uniform float uHasBloom;
+void main(){
+  vec3 scene = texture2D(uScene, vUv).rgb;
+  vec3 bloom = texture2D(uBloom, vUv).rgb * uHasBloom;
+  vec3 hdr = scene + bloom * uBloomAmt;
+  // Reinhard tonemap + gamma
+  vec3 mapped = hdr / (hdr + vec3(1.0));
+  mapped = pow(mapped, vec3(1.0/2.2));
+  gl_FragColor = vec4(mapped, 1.0);
+}`;
+
+/* -------------------------------------------------------------------------- */
+/*  Build programs                                                             */
+/* -------------------------------------------------------------------------- */
+const progStar = program(STAR_VS, STAR_FS);
+const progBg   = program(BG_VS, BG_FS);
+const progCore = program(CORE_VS, CORE_FS);
+const progNeb  = program(QUAD_VS, NEBULA_FS);
+const progBright = program(QUAD_VS, BRIGHT_FS);
+const progBlur   = program(QUAD_VS, BLUR_FS);
+const progComp   = program(QUAD_VS, COMPOSITE_FS);
+
+/* Fullscreen triangle */
+const quadBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+
+/* Core sprite dummy buffer */
+const coreBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, coreBuf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0]), gl.STATIC_DRAW);
+
+/* -------------------------------------------------------------------------- */
+/*  Star + background buffer generation                                        */
+/* -------------------------------------------------------------------------- */
+const starBufA = gl.createBuffer();  // aSeed
+const starBufB = gl.createBuffer();  // aSeed2
+let starCountActual = 0;
+
+function regenStars(){
+  const rng = makeRng(seedStr + "|" + Math.round(params.starCount));
+  const n = params.starCount | 0;
+  const A = new Float32Array(n * 4);
+  const B = new Float32Array(n * 4);
+  for(let i=0;i<n;i++){
+    // radius distribution: dense bulge + extended disk
+    let a;
+    const u = rng();
+    if(u < 0.28){
+      a = Math.pow(rng(), 2.0) * 0.32;            // bulge
+    } else {
+      a = 0.04 + 0.96 * Math.pow(rng(), 0.62);    // disk
+    }
+    const armKey = rng();                          // → arm bucket in shader
+    let spread = randn(rng);                       // gaussian scatter across arm
+    const phase = rng() * 6.2831853;               // orbital phase
+    const z = randn(rng);
+    // temperature: cooler/varied in disk, correlated slight blue on arms
+    let temp = 0.28 + 0.55 * rng();
+    const sizeRand = rng();
+    let type = 0.0;
+
+    // young populations concentrate on arm crests (small scatter, mid-disk)
+    if(a > 0.18 && a < 0.92 && Math.abs(spread) < 0.9){
+      const roll = rng();
+      if(roll < 0.030){ type = 1.0; spread *= 0.35; }        // OB blue cluster
+      else if(roll < 0.052){ type = 2.0; spread *= 0.4; }    // HII pink region
+    }
+
+    A[i*4+0] = a;
+    A[i*4+1] = armKey;
+    A[i*4+2] = spread;
+    A[i*4+3] = phase;
+    B[i*4+0] = z;
+    B[i*4+1] = temp;
+    B[i*4+2] = sizeRand;
+    B[i*4+3] = type;
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, starBufA);
+  gl.bufferData(gl.ARRAY_BUFFER, A, gl.STATIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, starBufB);
+  gl.bufferData(gl.ARRAY_BUFFER, B, gl.STATIC_DRAW);
+  starCountActual = n;
+}
+
+/* Background parallax starfield on a large sphere */
+const bgBuf = gl.createBuffer();
+let bgCount = 0;
+function regenBg(){
+  const rng = makeRng("bg|" + seedStr);
+  const n = 1600;
+  const arr = new Float32Array(n * 5);
+  for(let i=0;i<n;i++){
+    // uniform point on sphere
+    const uu = rng()*2-1, th = rng()*6.2831853;
+    const rr = Math.sqrt(1-uu*uu);
+    const R = 9.0;
+    arr[i*5+0] = Math.cos(th)*rr*R;
+    arr[i*5+1] = uu*R;
+    arr[i*5+2] = Math.sin(th)*rr*R;
+    arr[i*5+3] = rng();                 // phase
+    arr[i*5+4] = 0.3 + 0.7*Math.pow(rng(),2.0); // brightness (mostly faint)
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, bgBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW);
+  bgCount = n;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Render targets (FBOs) for the bloom pipeline                               */
+/* -------------------------------------------------------------------------- */
+function makeTarget(w, h){
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const fb = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return { tex, fb, w, h, ok };
+}
+
+let targets = null;      // {scene, brightA, brightB} at current render size
+let fboSupported = true;
+let renderW = 1, renderH = 1;
+
+function allocTargets(w, h){
+  if(targets){
+    gl.deleteTexture(targets.scene.tex); gl.deleteFramebuffer(targets.scene.fb);
+    gl.deleteTexture(targets.brightA.tex); gl.deleteFramebuffer(targets.brightA.fb);
+    gl.deleteTexture(targets.brightB.tex); gl.deleteFramebuffer(targets.brightB.fb);
+  }
+  const bw = Math.max(1, w >> 2), bh = Math.max(1, h >> 2); // quarter-res bloom
+  const scene   = makeTarget(w, h);
+  const brightA = makeTarget(bw, bh);
+  const brightB = makeTarget(bw, bh);
+  targets = { scene, brightA, brightB, bw, bh };
+  fboSupported = scene.ok && brightA.ok && brightB.ok;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Camera                                                                     */
+/* -------------------------------------------------------------------------- */
+const cam = {
+  az: 0.6, el: 0.42, dist: 2.55,        // current (smoothed)
+  taz: 0.6, tel: 0.42, tdist: 2.55,     // target
+  panX: 0, panY: 0, tpanX: 0, tpanY: 0
+};
+const EL_MIN = -1.45, EL_MAX = 1.45, DIST_MIN = 0.35, DIST_MAX = 6.0;
+
+function setCamera(c){
+  if(c.az !== undefined){ cam.az = cam.taz = c.az; }
+  if(c.el !== undefined){ cam.el = cam.tel = c.el; }
+  if(c.dist !== undefined){ cam.dist = cam.tdist = c.dist; }
+}
+
+const viewM = new Float32Array(16);
+const projM = new Float32Array(16);
+
+function updateCamera(dt){
+  // smooth toward targets (inertia)
+  const k = 1 - Math.pow(0.0016, dt);
+  cam.az   += (cam.taz - cam.az) * k;
+  cam.el   += (cam.tel - cam.el) * k;
+  cam.dist += (cam.tdist - cam.dist) * k;
+  cam.panX += (cam.tpanX - cam.panX) * k;
+  cam.panY += (cam.tpanY - cam.panY) * k;
+
+  const ce = Math.cos(cam.el), se = Math.sin(cam.el);
+  const ca = Math.cos(cam.az), sa = Math.sin(cam.az);
+  // orbit target with pan offset in the view plane
+  const cx = cam.panX, cy = cam.panY, cz = 0;
+  const eye = [
+    cx + cam.dist * ce * sa,
+    cy + cam.dist * se,
+    cz + cam.dist * ce * ca
+  ];
+  M4.lookAt(viewM, eye, [cx, cy, cz], [0,1,0]);
+  const aspect = renderW / renderH;
+  M4.perspective(projM, 0.9, aspect, 0.02, 40.0);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Guided tour autopilot                                                      */
+/* -------------------------------------------------------------------------- */
+let tourEnabled = true;
+let autoRotate = false;
+let bloomEnabled = true;
+let tourTime = 0;
+
+function updateTour(dt){
+  if(!tourEnabled) return;
+  tourTime += dt;
+  // eased cinematic path: slow orbit + gentle dolly + drifting elevation
+  const t = tourTime;
+  const orbit = t * 0.06;
+  // dolly between near and far with a smooth ease
+  const dollyPhase = (Math.sin(t * 0.05) * 0.5 + 0.5);
+  const ease = dollyPhase * dollyPhase * (3 - 2 * dollyPhase);
+  cam.tdist = 1.15 + ease * 1.9;
+  cam.taz = orbit;
+  cam.tel = 0.28 + Math.sin(t * 0.035) * 0.55;
+  cam.tpanX = 0; cam.tpanY = 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Resize                                                                     */
+/* -------------------------------------------------------------------------- */
+let dpr = 1;
+function resize(){
+  dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+  // lower DPR when pushing many stars to protect fill rate
+  if(params.starCount > 150000) dpr = Math.min(dpr, 1.5);
+  const w = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+  const h = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+  if(w === renderW && h === renderH) return;
+  renderW = w; renderH = h;
+  canvas.width = w; canvas.height = h;
+  allocTargets(w, h);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Draw helpers                                                               */
+/* -------------------------------------------------------------------------- */
+function drawFullscreen(prog){
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  const loc = prog.a("aPos");
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+// Render the galaxy scene (nebula + bg + core + stars) into a framebuffer.
+function renderScene(fb, w, h, time){
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.viewport(0, 0, w, h);
+  gl.disable(gl.BLEND);
+  gl.disable(gl.DEPTH_TEST);
+  gl.clearColor(0, 0, 0, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  // 1) nebula / deep-space base (opaque)
+  gl.useProgram(progNeb);
+  gl.uniform2f(progNeb.u("uRes"), w, h);
+  gl.uniform1f(progNeb.u("uTime"), time);
+  gl.uniform1f(progNeb.u("uSeedX"), nebSeedX);
+  gl.uniform1f(progNeb.u("uSeedY"), nebSeedY);
+  drawFullscreen(progNeb);
+
+  // additive from here on
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE);
+
+  // 2) parallax background starfield
+  gl.useProgram(progBg);
+  gl.uniformMatrix4fv(progBg.u("uView"), false, viewM);
+  gl.uniformMatrix4fv(progBg.u("uProj"), false, projM);
+  gl.uniform1f(progBg.u("uTime"), time);
+  gl.uniform1f(progBg.u("uDpr"), dpr);
+  gl.uniform1f(progBg.u("uViewHeight"), h);
+  gl.bindBuffer(gl.ARRAY_BUFFER, bgBuf);
+  let la = progBg.a("aPos"), lb = progBg.a("aInfo");
+  gl.enableVertexAttribArray(la); gl.vertexAttribPointer(la, 3, gl.FLOAT, false, 20, 0);
+  gl.enableVertexAttribArray(lb); gl.vertexAttribPointer(lb, 2, gl.FLOAT, false, 20, 12);
+  gl.drawArrays(gl.POINTS, 0, bgCount);
+
+  // 3) central bulge glow + accretion shimmer
+  gl.useProgram(progCore);
+  gl.uniformMatrix4fv(progCore.u("uView"), false, viewM);
+  gl.uniformMatrix4fv(progCore.u("uProj"), false, projM);
+  gl.uniform1f(progCore.u("uViewHeight"), h);
+  gl.uniform1f(progCore.u("uDpr"), dpr);
+  gl.uniform1f(progCore.u("uMaxPtSize"), MAX_PT);
+  gl.uniform1f(progCore.u("uTime"), time);
+  gl.uniform1f(progCore.u("uExposure"), params.exposure);
+  gl.bindBuffer(gl.ARRAY_BUFFER, coreBuf);
+  const lc = progCore.a("aDummy");
+  if(lc >= 0){ gl.enableVertexAttribArray(lc); gl.vertexAttribPointer(lc, 1, gl.FLOAT, false, 0, 0); }
+  gl.drawArrays(gl.POINTS, 0, 1);
+
+  // 4) the galaxy — analytic density-wave stars
+  gl.useProgram(progStar);
+  gl.uniformMatrix4fv(progStar.u("uView"), false, viewM);
+  gl.uniformMatrix4fv(progStar.u("uProj"), false, projM);
+  gl.uniform1f(progStar.u("uTime"), time);
+  gl.uniform1f(progStar.u("uArmCount"), params.armCount);
+  gl.uniform1f(progStar.u("uWinding"), params.winding);
+  gl.uniform1f(progStar.u("uEcc"), params.ecc);
+  gl.uniform1f(progStar.u("uArmWidth"), params.armWidth);
+  gl.uniform1f(progStar.u("uPrecession"), params.precession);
+  gl.uniform1f(progStar.u("uCoreRadius"), params.coreRadius);
+  gl.uniform1f(progStar.u("uDust"), params.dust);
+  gl.uniform1f(progStar.u("uSize"), params.starSize);
+  gl.uniform1f(progStar.u("uTempBias"), params.tempBias);
+  gl.uniform1f(progStar.u("uExposure"), params.exposure);
+  gl.uniform1f(progStar.u("uDpr"), dpr);
+  gl.uniform1f(progStar.u("uViewHeight"), h);
+  gl.uniform1f(progStar.u("uMaxPtSize"), MAX_PT);
+  gl.bindBuffer(gl.ARRAY_BUFFER, starBufA);
+  const sa = progStar.a("aSeed");
+  gl.enableVertexAttribArray(sa); gl.vertexAttribPointer(sa, 4, gl.FLOAT, false, 0, 0);
+  gl.bindBuffer(gl.ARRAY_BUFFER, starBufB);
+  const sb = progStar.a("aSeed2");
+  gl.enableVertexAttribArray(sb); gl.vertexAttribPointer(sb, 4, gl.FLOAT, false, 0, 0);
+  gl.drawArrays(gl.POINTS, 0, starCountActual);
+}
+
+// Bloom bright-pass + separable blur; leaves result in targets.brightA.tex
+function renderBloom(){
+  const bw = targets.bw, bh = targets.bh;
+  gl.disable(gl.BLEND);
+  // bright pass: scene → brightA
+  gl.bindFramebuffer(gl.FRAMEBUFFER, targets.brightA.fb);
+  gl.viewport(0, 0, bw, bh);
+  gl.useProgram(progBright);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, targets.scene.tex);
+  gl.uniform1i(progBright.u("uTex"), 0);
+  gl.uniform1f(progBright.u("uThreshold"), 0.55);
+  drawFullscreen(progBright);
+
+  // blur H: brightA → brightB
+  gl.bindFramebuffer(gl.FRAMEBUFFER, targets.brightB.fb);
+  gl.useProgram(progBlur);
+  gl.bindTexture(gl.TEXTURE_2D, targets.brightA.tex);
+  gl.uniform1i(progBlur.u("uTex"), 0);
+  gl.uniform2f(progBlur.u("uDir"), 1.0 / bw, 0.0);
+  drawFullscreen(progBlur);
+
+  // blur V: brightB → brightA
+  gl.bindFramebuffer(gl.FRAMEBUFFER, targets.brightA.fb);
+  gl.bindTexture(gl.TEXTURE_2D, targets.brightB.tex);
+  gl.uniform1i(progBlur.u("uTex"), 0);
+  gl.uniform2f(progBlur.u("uDir"), 0.0, 1.0 / bh);
+  drawFullscreen(progBlur);
+}
+
+// Composite scene (+ bloom) to a destination framebuffer with tonemap.
+function composite(destFb, w, h){
+  gl.bindFramebuffer(gl.FRAMEBUFFER, destFb);
+  gl.viewport(0, 0, w, h);
+  gl.disable(gl.BLEND);
+  gl.useProgram(progComp);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, targets.scene.tex);
+  gl.uniform1i(progComp.u("uScene"), 0);
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, targets.brightA.tex);
+  gl.uniform1i(progComp.u("uBloom"), 1);
+  gl.uniform1f(progComp.u("uBloomAmt"), params.bloom);
+  gl.uniform1f(progComp.u("uHasBloom"), (bloomEnabled && fboSupported) ? 1.0 : 0.0);
+  drawFullscreen(progComp);
+  gl.activeTexture(gl.TEXTURE0);
+}
+
+/* Nebula seed for deterministic cloud placement */
+let nebSeedX = 1.7, nebSeedY = 3.1;
+function updateNebSeed(){
+  const r = makeRng("neb|" + seedStr);
+  nebSeedX = r() * 6.28; nebSeedY = r() * 6.28;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Main loop                                                                  */
+/* -------------------------------------------------------------------------- */
+let simTime = 0;
+let lastT = performance.now();
+let frames = 0, fpsAccum = 0, fps = 0;
+const hud = document.getElementById("hud");
+
+function frame(now){
+  const dt = Math.min((now - lastT) / 1000, 0.05);
+  lastT = now;
+  simTime += dt;
+
+  resize();
+  updateTour(dt);
+  updateCamera(dt);
+
+  if(fboSupported){
+    renderScene(targets.scene.fb, renderW, renderH, simTime);
+    if(bloomEnabled) renderBloom();
+    composite(null, renderW, renderH);
+  } else {
+    // fallback: draw straight to the screen, no tonemap / bloom
+    renderScene(null, renderW, renderH, simTime);
+  }
+
+  // HUD / FPS
+  frames++; fpsAccum += dt;
+  if(fpsAccum >= 0.5){ fps = Math.round(frames / fpsAccum); frames = 0; fpsAccum = 0; }
+  hud.textContent = `${(starCountActual/1000)|0}k stars · ${params.armCount} arms · ${fps} fps${fboSupported?"":" · no-FBO mode"}`;
+
+  requestAnimationFrame(frame);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Input: mouse + touch orbit / zoom / pan                                    */
+/* -------------------------------------------------------------------------- */
+let dragging = false, panMode = false, lastX = 0, lastY = 0;
+
+function pauseTourForUser(){
+  if(tourEnabled){
+    tourEnabled = false;
+    document.getElementById("tg-tour").checked = false;
+  }
+}
+
+canvas.addEventListener("pointerdown", e=>{
+  dragging = true;
+  panMode = (e.button === 2) || e.shiftKey;
+  lastX = e.clientX; lastY = e.clientY;
+  canvas.classList.add("dragging");
+  canvas.setPointerCapture(e.pointerId);
+  pauseTourForUser();
+  hideHint();
+});
+canvas.addEventListener("pointermove", e=>{
+  if(!dragging) return;
+  const dx = e.clientX - lastX, dy = e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+  if(panMode){
+    const s = cam.dist * 0.0016;
+    cam.tpanX -= dx * s; cam.tpanY += dy * s;
+  } else {
+    cam.taz -= dx * 0.006;
+    cam.tel = Math.max(EL_MIN, Math.min(EL_MAX, cam.tel + dy * 0.006));
+  }
+});
+function endDrag(e){
+  dragging = false; canvas.classList.remove("dragging");
+  try{ canvas.releasePointerCapture(e.pointerId); }catch(_){}
+}
+canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointercancel", endDrag);
+canvas.addEventListener("contextmenu", e=>e.preventDefault());
+
+canvas.addEventListener("wheel", e=>{
+  e.preventDefault();
+  const f = Math.exp(e.deltaY * 0.0011);
+  cam.tdist = Math.max(DIST_MIN, Math.min(DIST_MAX, cam.tdist * f));
+  pauseTourForUser();
+  hideHint();
+}, { passive:false });
+
+/* pinch zoom */
+let pinchDist = 0;
+canvas.addEventListener("touchstart", e=>{
+  if(e.touches.length === 2){
+    pinchDist = touchDist(e);
+    // a two-finger pinch also fires pointerdown for the first finger; suspend
+    // single-finger orbit so the view doesn't spin while the user is zooming
+    dragging = false;
+    canvas.classList.remove("dragging");
+    pauseTourForUser();
+  }
+}, { passive:true });
+canvas.addEventListener("touchmove", e=>{
+  if(e.touches.length === 2){
+    e.preventDefault();
+    const d = touchDist(e);
+    if(pinchDist > 0){
+      const f = pinchDist / d;
+      cam.tdist = Math.max(DIST_MIN, Math.min(DIST_MAX, cam.tdist * f));
+    }
+    pinchDist = d;
+  }
+}, { passive:false });
+function touchDist(e){
+  const a = e.touches[0], b = e.touches[1];
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+}
+
+function hideHint(){
+  const h = document.getElementById("hint");
+  h.style.opacity = "0";
+}
+
+/* -------------------------------------------------------------------------- */
+/*  URL-hash serialization (full state → one link)                             */
+/* -------------------------------------------------------------------------- */
+const HASH_KEYS = ["starCount","armCount","winding","ecc","armWidth","precession",
+  "coreRadius","dust","tempBias","exposure","starSize","bloom"];
+
+function encodeState(){
+  const parts = [];
+  parts.push("s=" + encodeURIComponent(seedStr));
+  HASH_KEYS.forEach(k=>{
+    let v = params[k];
+    v = (k === "starCount" || k === "armCount") ? Math.round(v) : Math.round(v*1000)/1000;
+    parts.push(k + "=" + v);
+  });
+  parts.push("caz=" + (Math.round(cam.taz*1000)/1000));
+  parts.push("cel=" + (Math.round(cam.tel*1000)/1000));
+  parts.push("cd="  + (Math.round(cam.tdist*1000)/1000));
+  parts.push("tour=" + (tourEnabled?1:0));
+  parts.push("rotate=" + (autoRotate?1:0));
+  parts.push("bloom=" + (bloomEnabled?1:0));
+  return parts.join("&");
+}
+function writeHash(){
+  history.replaceState(null, "", "#" + encodeState());
+}
+let hashTimer = null;
+function scheduleHash(){
+  clearTimeout(hashTimer);
+  hashTimer = setTimeout(writeHash, 350);
+}
+function decodeState(hash){
+  if(!hash || hash.length < 2) return false;
+  const q = new URLSearchParams(hash.replace(/^#/, ""));
+  let any = false;
+  if(q.has("s")){ seedStr = q.get("s"); any = true; }
+  HASH_KEYS.forEach(k=>{
+    if(q.has(k)){
+      let v = parseFloat(q.get(k));
+      if(!isNaN(v)){
+        // clamp to the documented slider range so a bad/edited link can't
+        // crash init (e.g. starCount<=0 or huge → Float32Array RangeError/OOM)
+        const r = PARAM_RANGES[k];
+        if(r){ v = Math.min(Math.max(v, r[0]), r[1]); }
+        if(k === "starCount" || k === "armCount"){ v = Math.round(v); }
+        params[k] = v; any = true;
+      }
+    }
+  });
+  if(q.has("caz")){ const v = parseFloat(q.get("caz")); if(!isNaN(v)){ cam.taz = cam.az = v; } }
+  if(q.has("cel")){ const v = parseFloat(q.get("cel")); if(!isNaN(v)){ cam.tel = cam.el = Math.min(Math.max(v, EL_MIN), EL_MAX); } }
+  if(q.has("cd")){ const v = parseFloat(q.get("cd")); if(!isNaN(v)){ cam.tdist = cam.dist = Math.min(Math.max(v, DIST_MIN), DIST_MAX); } }
+  if(q.has("tour")) tourEnabled = q.get("tour") === "1";
+  if(q.has("rotate")) autoRotate = q.get("rotate") === "1";
+  if(q.has("bloom")) bloomEnabled = q.get("bloom") === "1";
+  return any;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  PNG export (offscreen render at chosen scale → download)                   */
+/* -------------------------------------------------------------------------- */
+function exportPNG(scale){
+  scale = scale || 1;
+  // offscreen render + readback needs complete framebuffers; the live view
+  // avoids them on low-capability GPUs, so bail with a clear message here.
+  if(!fboSupported){
+    toast("PNG export needs framebuffer support");
+    return;
+  }
+  // cap to a sensible maximum to avoid GPU allocation failure, clamping the
+  // scale uniformly so the export keeps the on-screen aspect ratio
+  const maxDim = 4096;
+  const k = Math.min(scale, maxDim / Math.max(renderW, renderH));
+  let w = Math.floor(renderW * k);
+  let h = Math.floor(renderH * k);
+  w = Math.max(2, w & ~1); h = Math.max(2, h & ~1);
+
+  const savedW = renderW, savedH = renderH, savedTargets = targets;
+  const savedProj = projM.slice();
+  targets = null;                 // force fresh allocation at export size
+  allocTargets(w, h);
+  renderW = w; renderH = h;
+  updateCamera(0);                // rebuild proj at export aspect (same as screen)
+
+  const outFb = makeTarget(w, h);
+  renderScene(targets.scene.fb, w, h, simTime);
+  if(bloomEnabled && fboSupported) renderBloom();
+  composite(outFb.fb, w, h);
+
+  const pixels = new Uint8Array(w * h * 4);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, outFb.fb);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+  // flip vertically into a 2D canvas
+  const oc = document.createElement("canvas");
+  oc.width = w; oc.height = h;
+  const ctx = oc.getContext("2d");
+  const img = ctx.createImageData(w, h);
+  const row = w * 4;
+  for(let y=0; y<h; y++){
+    const src = y * row;
+    const dst = (h - 1 - y) * row;
+    img.data.set(pixels.subarray(src, src + row), dst);
+  }
+  ctx.putImageData(img, 0, 0);
+
+  // cleanup export targets, restore screen targets
+  gl.deleteTexture(outFb.tex); gl.deleteFramebuffer(outFb.fb);
+  gl.deleteTexture(targets.scene.tex); gl.deleteFramebuffer(targets.scene.fb);
+  gl.deleteTexture(targets.brightA.tex); gl.deleteFramebuffer(targets.brightA.fb);
+  gl.deleteTexture(targets.brightB.tex); gl.deleteFramebuffer(targets.brightB.fb);
+  targets = savedTargets; renderW = savedW; renderH = savedH;
+  projM.set(savedProj);
+
+  oc.toBlob(blob=>{
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "starwheel-" + seedStr.replace(/[^a-z0-9]/gi,"_") + "-" + w + "x" + h + ".png";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 4000);
+    toast("Saved " + w + "×" + h + " PNG");
+  }, "image/png");
+}
+
+/* -------------------------------------------------------------------------- */
+/*  UI wiring                                                                  */
+/* -------------------------------------------------------------------------- */
+const sliderEls = {};      // key → {input, valEl}
+
+function buildSliders(container, defs){
+  defs.forEach(def=>{
+    const wrap = document.createElement("div");
+    wrap.className = "ctrl";
+    const label = document.createElement("label");
+    const name = document.createElement("span"); name.textContent = def.label;
+    const val = document.createElement("span"); val.className = "val";
+    label.appendChild(name); label.appendChild(val);
+    const input = document.createElement("input");
+    input.type = "range"; input.min = def.min; input.max = def.max; input.step = def.step;
+    input.value = params[def.k];
+    input.addEventListener("input", ()=>{
+      params[def.k] = parseFloat(input.value);
+      val.textContent = def.fmt(params[def.k]);
+      if(def.regen){ regenScheduled = true; }
+      scheduleHash();
+    });
+    wrap.appendChild(label); wrap.appendChild(input);
+    container.appendChild(wrap);
+    sliderEls[def.k] = { input, valEl: val, def };
+    val.textContent = def.fmt(params[def.k]);
+  });
+}
+buildSliders(document.getElementById("structure-ctrls"), STRUCTURE_CTRLS);
+buildSliders(document.getElementById("light-ctrls"), LIGHT_CTRLS);
+
+// debounce star regeneration so dragging the count slider stays smooth
+let regenScheduled = false;
+setInterval(()=>{ if(regenScheduled){ regenScheduled = false; regenStars(); } }, 220);
+
+function syncSliders(){
+  Object.keys(sliderEls).forEach(k=>{
+    const s = sliderEls[k];
+    s.input.value = params[k];
+    s.valEl.textContent = s.def.fmt(params[k]);
+  });
+}
+
+// Preset buttons
+const presetContainer = document.getElementById("presets");
+PRESETS.forEach(preset=>{
+  const b = document.createElement("button");
+  b.textContent = preset.name;
+  b.addEventListener("click", ()=>{
+    Object.assign(params, DEFAULTS, preset.p);
+    seedStr = preset.seed;
+    document.getElementById("seed-input").value = seedStr;
+    setCamera(preset.cam);
+    cam.panX = cam.panY = cam.tpanX = cam.tpanY = 0;   // deterministic preset framing
+    // presets take over the view: stop the tour so the framing sticks
+    tourEnabled = false; document.getElementById("tg-tour").checked = false;
+    updateNebSeed();
+    regenStars(); regenBg();
+    syncSliders();
+    writeHash();
+    hideHint();
+    toast(preset.name + " galaxy");
+  });
+  presetContainer.appendChild(b);
+});
+
+// Toggles
+document.getElementById("tg-tour").addEventListener("change", e=>{
+  tourEnabled = e.target.checked;
+  if(tourEnabled) tourTime = 0;
+  scheduleHash();
+});
+document.getElementById("tg-rotate").addEventListener("change", e=>{
+  autoRotate = e.target.checked;
+  // auto-rotate is suppressed while the tour drives the camera; turning it on
+  // ends the tour so the toggle always has a visible effect
+  if(autoRotate && tourEnabled){
+    tourEnabled = false;
+    document.getElementById("tg-tour").checked = false;
+  }
+  scheduleHash();
+});
+document.getElementById("tg-bloom").addEventListener("change", e=>{
+  bloomEnabled = e.target.checked;
+  scheduleHash();
+});
+
+// simple auto-rotate driver (independent of the cinematic tour)
+setInterval(()=>{ if(autoRotate && !tourEnabled && !dragging){ cam.taz -= 0.012; } }, 16);
+
+// Seed input + reroll
+const seedInput = document.getElementById("seed-input");
+seedInput.addEventListener("change", ()=>{
+  seedStr = seedInput.value.trim() || "starwheel";
+  updateNebSeed(); regenStars(); regenBg(); writeHash();
+  toast("Seed: " + seedStr);
+});
+document.getElementById("btn-reroll").addEventListener("click", ()=>{
+  seedStr = Math.random().toString(36).slice(2, 10);
+  seedInput.value = seedStr;
+  updateNebSeed(); regenStars(); regenBg(); writeHash();
+  toast("New galaxy: " + seedStr);
+});
+
+// Share
+document.getElementById("btn-share").addEventListener("click", ()=>{
+  writeHash();
+  const url = location.href;
+  const done = ()=>toast("Link copied to clipboard");
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).then(done).catch(()=>fallbackCopy(url, done));
+  } else fallbackCopy(url, done);
+});
+function fallbackCopy(text, cb){
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand("copy"); cb(); }
+  catch(_){ toast("Copy failed — URL is in the address bar"); }
+  ta.remove();
+}
+
+// Export
+document.getElementById("btn-png").addEventListener("click", ()=>{
+  toast("Rendering PNG…");
+  // let the toast paint before the (synchronous) capture
+  setTimeout(()=>exportPNG(2), 30);
+});
+
+// Reset
+document.getElementById("btn-reset").addEventListener("click", ()=>{
+  Object.assign(params, DEFAULTS);
+  seedStr = "starwheel"; seedInput.value = seedStr;
+  setCamera({az:0.6, el:0.42, dist:2.55});
+  cam.panX = cam.panY = cam.tpanX = cam.tpanY = 0;   // also restore framing
+  tourEnabled = true; document.getElementById("tg-tour").checked = true; tourTime = 0;
+  autoRotate = false; document.getElementById("tg-rotate").checked = false;
+  bloomEnabled = true; document.getElementById("tg-bloom").checked = true;
+  updateNebSeed(); regenStars(); regenBg(); syncSliders(); writeHash();
+  toast("Reset to defaults");
+});
+
+// Panel collapse
+document.getElementById("panel-head").addEventListener("click", ()=>{
+  document.getElementById("panel").classList.toggle("collapsed");
+});
+
+// Toast helper
+let toastTimer = null;
+function toast(msg){
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>t.classList.remove("show"), 2200);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Boot                                                                       */
+/* -------------------------------------------------------------------------- */
+const hadHash = decodeState(location.hash);
+// always reflect boot state in the toggles, hash or not, so the switches match
+// what the scene is actually doing (e.g. the tour runs on by default)
+document.getElementById("tg-tour").checked = tourEnabled;
+document.getElementById("tg-rotate").checked = autoRotate;
+document.getElementById("tg-bloom").checked = bloomEnabled;
+if(isMobile){
+  document.getElementById("hint").textContent = "Drag to orbit · pinch to zoom · tap a preset";
+}
+seedInput.value = seedStr;
+syncSliders();
+resize();
+updateNebSeed();
+try {
+  regenStars();
+} catch(err){
+  // a hostile/edited hash could still produce an unbuildable star count;
+  // fall back to defaults rather than leaving the page permanently blank
+  console.error("Star generation failed, falling back to defaults", err);
+  params.starCount = DEFAULTS.starCount;
+  regenStars();
+}
+regenBg();
+if(!hadHash){ writeHash(); }
+
+requestAnimationFrame(frame);
+
+// keep hint from lingering forever
+setTimeout(hideHint, 9000);
+
+})();
+</script>
+</body>
+</html>

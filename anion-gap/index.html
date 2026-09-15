@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AnionGap — Serum Anion Gap Calculator</title>
+<meta name="description" content="Calculate the serum anion gap from sodium, chloride and bicarbonate, with albumin correction and interpretation. 100% offline, informational only.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('aniongap-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#0369a1;
+    --bg:#f1f6fb; --card:#ffffff; --fg:#111a22; --muted:#556571; --line:#dce8f0; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#07131c; --card:#0f1c26; --fg:#e7f1f8; --muted:#849aa8; --line:#1a2b37; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:640px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#075985);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:640px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.78rem;color:var(--muted);margin-bottom:5px;font-weight:600}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .field{margin-bottom:14px}
+  input{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem}
+  .out{text-align:center}
+  .big{font-size:3rem;font-weight:800;color:var(--c);line-height:1}
+  .unit{color:var(--muted);font-size:.85rem}
+  .cat{display:inline-block;margin-top:10px;padding:5px 16px;border-radius:999px;color:#fff;font-weight:700}
+  .corr{margin-top:12px;color:var(--muted);font-size:.95rem}
+  .corr b{color:var(--fg)}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:640px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.8rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🧪</div>
+    <div><h1>AnionGap</h1><div class="sub">Serum anion gap</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div class="field"><label for="na">Sodium Na⁺ (mmol/L)</label><input type="number" id="na" value="140" step="1"></div>
+      <div class="field"><label for="cl">Chloride Cl⁻ (mmol/L)</label><input type="number" id="cl" value="104" step="1"></div>
+    </div>
+    <div class="grid">
+      <div class="field"><label for="hco3">Bicarbonate HCO₃⁻ (mmol/L)</label><input type="number" id="hco3" value="24" step="1"></div>
+      <div class="field"><label for="alb">Albumin (g/dL, optional)</label><input type="number" id="alb" value="4.0" step="0.1"></div>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card out">
+    <div class="big" id="ag">—</div>
+    <div class="unit">anion gap (mmol/L)</div>
+    <div><span class="cat" id="cat"></span></div>
+    <div class="corr" id="corr"></div>
+  </div>
+</main>
+<footer>
+  Anion gap = Na⁺ − (Cl⁻ + HCO₃⁻); typical reference range ≈ 8–12 mmol/L. Albumin correction adds 2.5 per g/dL below 4.0, since low albumin masks a true gap. Informational only — <strong>not medical advice</strong>. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/anion-gap">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  // Serum anion gap (bicarbonate-based, without potassium).
+  function anionGap(na, cl, hco3){
+    const n = Number(na), c = Number(cl), h = Number(hco3);
+    if(![n, c, h].every(Number.isFinite)) throw new Error('enter numbers for Na, Cl and HCO₃');
+    return n - (c + h);
+  }
+
+  // Correct the anion gap for hypoalbuminemia: +2.5 per g/dL of albumin below 4.0.
+  function correctedAnionGap(ag, albumin){
+    const a = Number(albumin);
+    if(!Number.isFinite(Number(ag)) || !Number.isFinite(a)) throw new Error('enter numbers');
+    if(a <= 0) throw new Error('albumin must be > 0');
+    return Number(ag) + 2.5 * (4.0 - a);
+  }
+
+  // Interpretation against the 8–12 mmol/L reference range.
+  const CATS = [
+    { max: 8,        name: 'Low',    color: '#0891b2' },
+    { max: 12.0001,  name: 'Normal', color: '#16a34a' },
+    { max: Infinity, name: 'High (elevated anion gap)', color: '#dc2626' }
+  ];
+  function category(ag){ return CATS.find(c => Number(ag) < c.max); }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('ag')){
+    const $ = id => document.getElementById(id);
+    const r1 = n => Math.round(n * 10) / 10;
+
+    function render(){
+      try{
+        const ag = anionGap($('na').value, $('cl').value, $('hco3').value);
+        const cat = category(ag);
+        $('ag').textContent = r1(ag);
+        $('cat').textContent = cat.name;
+        $('cat').style.background = cat.color;
+        const albStr = $('alb').value.trim();
+        if(albStr !== ''){
+          const cag = correctedAnionGap(ag, albStr);
+          const ccat = category(cag);
+          $('corr').innerHTML = `Albumin-corrected: <b>${r1(cag)}</b> mmol/L (${ccat.name})`;
+        }else $('corr').textContent = '';
+        $('err').textContent = '';
+      }catch(e){ $('ag').textContent = '—'; $('cat').textContent = ''; $('corr').textContent = ''; $('err').textContent = e.message; }
+    }
+    [...document.querySelectorAll('input')].forEach(el => el.addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('aniongap-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { anionGap, correctedAnionGap, category };
+</script>
+</body>
+</html>

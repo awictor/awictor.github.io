@@ -1,0 +1,1263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ticktape — a tiny Turing-machine studio</title>
+<style>
+  :root{
+    --bg:#f6f5f2; --panel:#ffffff; --panel-2:#f0eee9; --ink:#1b1f24; --muted:#6b7280;
+    --line:#e2ddd4; --accent:#ff6100; --accent-2:#2563eb; --ok:#15803d; --bad:#b91c1c;
+    --cell:#ffffff; --cell-line:#d8d2c6; --head:#ff6100; --tape-blank:#b8b2a6;
+    --grid-shadow:rgba(30,30,30,.08); --node:#eef1f6; --node-line:#c9cfda; --edge:#b7bccb;
+    --heat-bg:#faf9f6; --mono:'SFMono-Regular',ui-monospace,'Cascadia Code','Menlo',monospace;
+  }
+  body.dark{
+    --bg:#0e1116; --panel:#161b22; --panel-2:#1c222c; --ink:#e6e9ef; --muted:#8b96a6;
+    --line:#2a313c; --accent:#ff7a2b; --accent-2:#5aa2ff; --ok:#4ade80; --bad:#f87171;
+    --cell:#1c222c; --cell-line:#333b48; --head:#ff7a2b; --tape-blank:#4b5563;
+    --grid-shadow:rgba(0,0,0,.4); --node:#1e2530; --node-line:#39424f; --edge:#3a4453; --heat-bg:#0b0e12;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    font-size:14px; line-height:1.45; transition:background .25s,color .25s;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent-2)}
+  header{
+    display:flex; align-items:baseline; gap:14px; flex-wrap:wrap;
+    padding:16px 22px 12px; border-bottom:1px solid var(--line);
+  }
+  header h1{font-size:22px;margin:0;letter-spacing:-.5px}
+  header h1 .tt{color:var(--accent)}
+  header .tag{color:var(--muted);font-size:13px;flex:1 1 320px;min-width:200px}
+  .topbtns{display:flex;gap:8px;flex-wrap:wrap}
+  button, .btn{
+    font:inherit; cursor:pointer; border:1px solid var(--line); background:var(--panel);
+    color:var(--ink); padding:7px 12px; border-radius:9px; transition:background .12s,border-color .12s,transform .05s;
+    user-select:none;
+  }
+  button:hover{border-color:var(--accent)}
+  button:active{transform:translateY(1px)}
+  button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent-2);outline-offset:2px}
+  button.primary{background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600}
+  button.primary:hover{filter:brightness(1.05)}
+  button.on{background:var(--accent-2);border-color:var(--accent-2);color:#fff}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .wrap{max-width:1220px;margin:0 auto;padding:18px 22px 60px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:18px;box-shadow:0 1px 3px var(--grid-shadow)}
+  .panel h2{font-size:13px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin:0 0 12px}
+  /* Tape */
+  #tapeViewport{position:relative;height:96px;overflow:hidden;border-radius:12px;
+    background:linear-gradient(var(--panel-2),var(--panel-2));border:1px solid var(--line)}
+  #tapeStrip{position:absolute;top:22px;left:0;height:52px;will-change:transform;
+    transition:transform .18s cubic-bezier(.34,1.4,.5,1)}
+  .cell{position:absolute;top:0;width:44px;height:52px;display:flex;align-items:center;justify-content:center;
+    background:var(--cell);border:1px solid var(--cell-line);border-radius:8px;
+    font-family:var(--mono);font-size:20px;font-weight:600}
+  .cell.blank{color:var(--tape-blank);font-weight:400}
+  .cell .idx{position:absolute;bottom:-18px;left:0;right:0;text-align:center;font-size:9px;color:var(--muted);font-weight:400}
+  #headMarker{position:absolute;left:50%;top:6px;transform:translateX(-50%);z-index:5;pointer-events:none;
+    display:flex;flex-direction:column;align-items:center}
+  #headMarker .arrow{width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-top:12px solid var(--head)}
+  #headMarker .box{position:absolute;top:16px;width:46px;height:56px;border:2px solid var(--head);border-radius:9px;
+    box-shadow:0 0 0 3px rgba(255,97,0,.22);
+    box-shadow:0 0 0 3px color-mix(in srgb,var(--head) 22%, transparent)}
+  #headMarker .st{margin-top:74px;font:600 11px var(--mono);color:var(--head);background:var(--panel);
+    padding:1px 7px;border-radius:20px;border:1px solid var(--head)}
+  /* transport */
+  .transport{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px}
+  .transport .spacer{flex:1}
+  .speedbox{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+  input[type=range]{accent-color:var(--accent);cursor:pointer}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:14px}
+  .stat{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:8px 11px}
+  .stat .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+  .stat .v{font:600 18px/1.1 var(--mono);margin-top:3px}
+  .verdict{font-weight:700}
+  .verdict.run{color:var(--accent-2)} .verdict.halt{color:var(--ok)} .verdict.div{color:var(--bad)}
+  .record-line{margin-top:10px;font-size:12px;color:var(--muted)}
+  .record-line b{color:var(--ink)}
+  #turboProgress{height:6px;background:var(--panel-2);border-radius:4px;overflow:hidden;margin-top:10px;display:none}
+  #turboProgress > i{display:block;height:100%;width:0;background:var(--accent);transition:width .1s}
+  /* two-col */
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:860px){.cols{grid-template-columns:1fr}}
+  #diagram{width:100%;height:340px;display:block}
+  #heatWrap{position:relative}
+  #heatmap{width:100%;height:340px;display:block;background:var(--heat-bg);border-radius:10px;image-rendering:pixelated}
+  .heat-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;font-size:11px;color:var(--muted);align-items:center}
+  .swatch{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:-1px;margin-right:4px}
+  /* editor */
+  .editor-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  .editor-toolbar label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px}
+  select,input[type=text]{font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink)}
+  table.ttable{border-collapse:separate;border-spacing:4px}
+  table.ttable th{font:600 12px var(--mono);color:var(--muted);padding:4px 8px;text-align:center}
+  table.ttable th.sym{color:var(--accent)}
+  table.ttable td{padding:0}
+  .staterow input.sname{width:52px;text-align:center;font:700 14px var(--mono);color:var(--accent-2)}
+  .cellinput{width:64px;text-align:center;font:600 14px var(--mono);letter-spacing:.5px}
+  .cellinput.invalid{border-color:var(--bad);background:rgba(185,28,28,.12);background:color-mix(in srgb,var(--bad) 12%,var(--panel))}
+  .cellinput.empty{color:var(--muted)}
+  .rowdel{cursor:pointer;color:var(--muted);padding:0 6px;font-size:16px;border:none;background:none}
+  .rowdel:hover{color:var(--bad)}
+  .hint{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.6}
+  .hint code{font-family:var(--mono);background:var(--panel-2);padding:1px 5px;border-radius:5px}
+  /* gallery */
+  .gallery{display:flex;gap:8px;flex-wrap:wrap}
+  .gallery button{display:flex;flex-direction:column;align-items:flex-start;min-width:132px;text-align:left;gap:2px}
+  .gallery button .num{font:700 11px var(--mono);color:var(--accent)}
+  .gallery button .gname{font-weight:600}
+  .gallery button .gsub{font-size:11px;color:var(--muted)}
+  .gallery button.sel{border-color:var(--accent);box-shadow:0 0 0 2px rgba(255,97,0,.25);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 25%,transparent)}
+  .kbd{font:600 11px var(--mono);background:var(--panel-2);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+  #recDot{display:none;width:9px;height:9px;border-radius:50%;background:var(--bad);animation:pulse 1s infinite}
+  @keyframes pulse{50%{opacity:.25}}
+  #flourish{position:fixed;inset:0;pointer-events:none;z-index:40}
+  #banner{position:fixed;left:50%;top:70px;transform:translateX(-50%) translateY(-30px);opacity:0;
+    background:var(--ok);color:#fff;font-weight:700;padding:12px 22px;border-radius:12px;z-index:50;
+    box-shadow:0 8px 30px rgba(0,0,0,.25);transition:transform .35s,opacity .35s;pointer-events:none;max-width:90vw;text-align:center}
+  #banner.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  #banner.bad{background:var(--bad)}
+  .footer-note{color:var(--muted);font-size:12px;margin-top:26px;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="tt">Tick</span>tape</h1>
+  <span class="tag">A tiny Turing-machine studio — watch computation crawl across an infinite tape.</span>
+  <div class="topbtns">
+    <button id="btnShare" title="Copy a link that reproduces this exact machine">🔗 Share / Fork</button>
+    <button id="btnRecord" title="Record the stage to a WebM clip"><span id="recDot"></span> <span id="recLabel">● Record</span></button>
+    <button id="btnMute" title="Toggle audio ticks (m)">🔇 Sound</button>
+    <button id="btnTheme" title="Toggle light / dark">🌓 Theme</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <!-- STAGE -->
+  <div class="panel">
+    <h2>Tape</h2>
+    <div id="tapeViewport">
+      <div id="tapeStrip"></div>
+      <div id="headMarker">
+        <div class="arrow"></div><div class="box"></div><div class="st" id="headState">A</div>
+      </div>
+    </div>
+
+    <div class="transport">
+      <button id="btnReset" title="Reset to step 0 (R)">⏮ Reset</button>
+      <button id="btnStepB" title="Step backward (←)">◀︎ Back</button>
+      <button id="btnPlay" class="primary" title="Play / Pause (space)">▶ Play</button>
+      <button id="btnStepF" title="Step forward (→)">Step ▶︎</button>
+      <button id="btnTurbo" title="Run to halt in a background worker">⚡ Run&nbsp;to&nbsp;halt</button>
+      <div class="spacer"></div>
+      <div class="speedbox">
+        <span>slow</span>
+        <input type="range" id="speed" min="0" max="100" value="45" style="width:180px">
+        <span>fast</span>
+        <span id="speedLabel" style="min-width:88px;text-align:right;font-family:var(--mono);color:var(--ink)">10 st/s</span>
+      </div>
+    </div>
+
+    <div id="turboProgress"><i></i></div>
+
+    <div class="stats">
+      <div class="stat"><div class="k">Steps</div><div class="v" id="stSteps">0</div></div>
+      <div class="stat"><div class="k">Ones on tape</div><div class="v" id="stOnes">0</div></div>
+      <div class="stat"><div class="k">States visited</div><div class="v" id="stVisited">1</div></div>
+      <div class="stat"><div class="k">Head</div><div class="v" id="stHead">0</div></div>
+      <div class="stat"><div class="k">State</div><div class="v" id="stState">A</div></div>
+      <div class="stat"><div class="k">Verdict</div><div class="v verdict run" id="stVerdict">running</div></div>
+    </div>
+    <div class="record-line" id="recordLine"></div>
+  </div>
+
+  <!-- DIAGRAM + HEATMAP -->
+  <div class="cols">
+    <div class="panel">
+      <h2>State diagram — the firing rule lights up</h2>
+      <svg id="diagram" viewBox="0 0 460 340" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+    <div class="panel">
+      <h2>Space-time trace — head position over time</h2>
+      <div id="heatWrap"><canvas id="heatmap" width="480" height="340"></canvas></div>
+      <div class="heat-legend" id="heatLegend"></div>
+    </div>
+  </div>
+
+  <!-- EDITOR -->
+  <div class="panel">
+    <h2>Transition table — (state, read) → write, move, next</h2>
+    <div class="editor-toolbar">
+      <label>Machine name <input type="text" id="mName" style="width:180px"></label>
+      <label>Blank
+        <select id="mBlank"></select>
+      </label>
+      <label>Start state
+        <select id="mStart"></select>
+      </label>
+      <label>Initial tape <input type="text" id="mTape" style="width:170px;font-family:var(--mono)"></label>
+      <button id="btnAddState">+ state</button>
+      <button id="btnAddSymbol">+ symbol</button>
+    </div>
+    <div style="overflow:auto"><div id="tableHost"></div></div>
+    <div class="hint">
+      Read each cell as <code>write&nbsp;move&nbsp;next</code>. Example: <code>1RB</code> = write <b>1</b>,
+      move <b>Right</b>, go to state <b>B</b>. Use <code>L</code> / <code>R</code> for direction and
+      <code>H</code> as the halt state. An empty cell means "halt (no rule)". Everything you edit is saved
+      into the URL — copy the link to share or fork the exact machine.
+    </div>
+  </div>
+
+  <!-- GALLERY -->
+  <div class="panel">
+    <h2>Gallery — one click to load (number keys 1–8)</h2>
+    <div class="gallery" id="gallery"></div>
+    <div class="footer-note">
+      Keyboard: <span class="kbd">space</span> play/pause &nbsp;
+      <span class="kbd">→</span>/<span class="kbd">←</span> step &nbsp;
+      <span class="kbd">↑</span>/<span class="kbd">↓</span> speed &nbsp;
+      <span class="kbd">R</span> reset &nbsp;
+      <span class="kbd">T</span> run to halt &nbsp;
+      <span class="kbd">M</span> mute &nbsp;
+      <span class="kbd">1–8</span> load gallery
+    </div>
+  </div>
+</div>
+
+<canvas id="flourish"></canvas>
+<div id="banner"></div>
+<canvas id="recCanvas" width="960" height="420" style="display:none"></canvas>
+
+<script>
+"use strict";
+/* ============================================================================
+   Ticktape — zero-dependency Turing-machine studio.
+   Sections: (1) machine defs  (2) parsing  (3) TM engine + Trace
+             (4) rendering: tape / diagram / heatmap / stats
+             (5) transport + turbo worker  (6) editor  (7) hash + recording + audio
+   ========================================================================== */
+
+/* ---------- (1) Gallery machines -------------------------------------------- */
+// A machine: {name, blank, start, startIndex, tape, table:{state:{sym:"wDn"}}}
+const GALLERY = [
+  { key:"binc", name:"Binary increment", sub:"add 1 to a binary number",
+    machine:{ name:"Binary increment", blank:"_", start:"R", startIndex:0, tape:"1011",
+      table:{ R:{"0":"0RR","1":"1RR","_":"_LC"}, C:{"0":"1RH","1":"0LC","_":"1RH"} } } },
+  { key:"uadd", name:"Unary addition", sub:"111 0 11 → 11111",
+    machine:{ name:"Unary addition", blank:"_", start:"S", startIndex:0, tape:"111011",
+      table:{ S:{"1":"1RS","0":"1RX","_":"_LH"}, X:{"1":"1RX","0":"0RX","_":"_LD"}, D:{"1":"_RH"} } } },
+  { key:"pal", name:"Palindrome check", sub:"accept(Y) / reject(N)",
+    machine:{ name:"Palindrome check", blank:"_", start:"A", startIndex:0, tape:"1001",
+      table:{
+        A:{"_":"_RY","0":"_RC","1":"_RD"},
+        C:{"0":"0RC","1":"1RC","_":"_LE"},
+        D:{"0":"0RD","1":"1RD","_":"_LF"},
+        E:{"0":"_LG","1":"1RN","_":"_RY"},
+        F:{"1":"_LG","0":"0RN","_":"_RY"},
+        G:{"0":"0LG","1":"1LG","_":"_RA"}
+      } } },
+  { key:"copy", name:"Copy (unary)", sub:"1110 → 1110111",
+    machine:{ name:"Copy (unary)", blank:"_", start:"A", startIndex:0, tape:"1110",
+      table:{
+        A:{"1":"XRB","0":"0LF","X":"XRA"},
+        B:{"1":"1RB","0":"0RB","_":"1LD"},
+        D:{"1":"1LD","0":"0LD","X":"XRA"},
+        F:{"X":"1LF","1":"1LF","_":"_RH"}
+      } } },
+  { key:"bb2", name:"Busy Beaver BB(2)", sub:"halts: 6 steps · 4 ones",
+    record:{n:2,steps:6,ones:4},
+    machine:{ name:"Busy Beaver BB(2)", blank:"0", start:"A", startIndex:0, tape:"",
+      table:{ A:{"0":"1RB","1":"1LB"}, B:{"0":"1LA","1":"1RH"} } } },
+  { key:"bb3", name:"Busy Beaver BB(3)", sub:"halts: 14 steps · 6 ones",
+    record:{n:3,steps:14,ones:6},
+    machine:{ name:"Busy Beaver BB(3)", blank:"0", start:"A", startIndex:0, tape:"",
+      table:{ A:{"0":"1RB","1":"1RH"}, B:{"0":"0RC","1":"1RB"}, C:{"0":"1LC","1":"1LA"} } } },
+  { key:"bb4", name:"Busy Beaver BB(4)", sub:"halts: 107 steps · 13 ones",
+    record:{n:4,steps:107,ones:13},
+    machine:{ name:"Busy Beaver BB(4)", blank:"0", start:"A", startIndex:0, tape:"",
+      table:{ A:{"0":"1RB","1":"1LB"}, B:{"0":"1LA","1":"0LC"}, C:{"0":"1RH","1":"1LD"}, D:{"0":"1RD","1":"0RA"} } } },
+  { key:"bb5", name:"Busy Beaver BB(5)", sub:"halts: 47,176,870 · 4098 ones",
+    record:{n:5,steps:47176870,ones:4098},
+    machine:{ name:"Busy Beaver BB(5)", blank:"0", start:"A", startIndex:0, tape:"",
+      table:{
+        A:{"0":"1RB","1":"1LC"}, B:{"0":"1RC","1":"1RB"}, C:{"0":"1RD","1":"0LE"},
+        D:{"0":"1LA","1":"1LD"}, E:{"0":"1RH","1":"0LA"} } } },
+];
+
+const STATE_COLORS = ["#ff6100","#2563eb","#15803d","#9333ea","#0891b2","#dc2626","#ca8a04","#db2777","#4f46e5","#059669"];
+
+/* ---------- (2) parsing helpers -------------------------------------------- */
+function parseAction(raw){
+  if(raw==null) return null;
+  const s = String(raw).replace(/\s+/g,"");
+  if(s==="" || s==="-" || s==="...") return null;
+  const m = /^(.)([LRlr])([A-Za-z0-9])$/.exec(s);
+  if(!m) return null;
+  return { write:m[1], move:(m[2].toUpperCase()==="R")?1:-1, next:m[3] };
+}
+function machineStates(machine){
+  const set = [];
+  const seen = new Set();
+  const add = s => { if(!seen.has(s)){ seen.add(s); set.push(s); } };
+  add(machine.start);
+  for(const st of Object.keys(machine.table)) add(st);
+  return set;
+}
+function machineAlphabet(machine){
+  const set = new Set([machine.blank]);
+  // explicitly declared extra symbols (columns with no transition yet)
+  if(Array.isArray(machine.symbols)) for(const s of machine.symbols) set.add(s);
+  for(const st of Object.keys(machine.table)){
+    for(const sym of Object.keys(machine.table[st])){
+      set.add(sym);
+      const a = parseAction(machine.table[st][sym]);
+      if(a) set.add(a.write);
+    }
+  }
+  const arr = [...set];
+  // blank first, then rest sorted
+  arr.sort((a,b)=> a===machine.blank ? -1 : b===machine.blank ? 1 : (a<b?-1:a>b?1:0));
+  return arr;
+}
+function isHaltTarget(machine, next){
+  if(next==null) return true;
+  if(next==="H"||next==="h") return true;
+  return !(next in machine.table) && next!==machine.start;
+}
+// Diagram/engine node name for a halt target: fold the generic halt (null / "h" / "H") to "H",
+// but keep NAMED halt states (e.g. palindrome's accept "Y" / reject "N") distinct.
+function haltNodeName(next){ return (next==null||next==="H"||next==="h") ? "H" : next; }
+function clone(o){ return JSON.parse(JSON.stringify(o)); }
+
+/* ---------- (3) Trace (adaptive downsampled) + TM engine ------------------- */
+class Trace{
+  constructor(maxRows=4200){ this.maxRows=maxRows; this.reset(); }
+  reset(){ this.rows=[]; this.stride=1; this._c=0; }
+  push(head,state,sym){
+    if(this._c % this.stride === 0) this.rows.push([head,state,sym]);
+    this._c++;
+    if(this.rows.length > this.maxRows){
+      const nr=[]; for(let i=0;i<this.rows.length;i+=2) nr.push(this.rows[i]);
+      this.rows=nr; this.stride*=2;
+    }
+  }
+}
+
+class TM{
+  constructor(machine){ this.m = machine; this.HISTORY_CAP = 40000; this.reset(); }
+  reset(){
+    this.tape = new Map();
+    const t = this.m.tape || "";
+    for(let i=0;i<t.length;i++) if(t[i] !== this.m.blank) this.tape.set(i, t[i]);
+    this.head = this.m.startIndex|0;
+    this.state = this.m.start;
+    this.steps = 0;
+    this.halted = false; this.diverged = false; this.haltReason = "";
+    this.history = [];
+    this.visited = new Set([this.state]);
+    this._visitedCount = null; // clear any turbo-run count so visitedCount() falls back to live set
+    this.last = null;
+    this._ones = this._countOnes();
+    this.trace = new Trace();
+    this.trace.push(this.head, this.state, this.read());
+  }
+  read(){ return this.tape.get(this.head) ?? this.m.blank; }
+  get(i){ return this.tape.get(i) ?? this.m.blank; }
+  set(i,v){ if(v===this.m.blank) this.tape.delete(i); else this.tape.set(i,v); }
+  _countOnes(){ let n=0; for(const v of this.tape.values()) if(v==="1") n++; return n; }
+  ones(){ return this._ones; }
+  bounds(){
+    let lo=this.head, hi=this.head;
+    for(const k of this.tape.keys()){ if(k<lo)lo=k; if(k>hi)hi=k; }
+    return [lo,hi];
+  }
+  stepF(){
+    if(this.halted || this.diverged) return false;
+    const s=this.state, r=this.read();
+    const row=this.m.table[s];
+    const a=row?parseAction(row[r]):null;
+    if(!a){ this.halted=true; this.haltReason="no-rule (state "+s+")"; return false; }
+    const before=r;
+    this.history.push([this.head, before, s]);
+    if(this.history.length>this.HISTORY_CAP) this.history.shift();
+    // ones bookkeeping
+    if(before==="1") this._ones--;
+    if(a.write==="1") this._ones++;
+    this.set(this.head, a.write);
+    this.last={from:s, read:r, write:a.write, move:a.move, next:a.next};
+    this.head += a.move;
+    this.steps++;
+    if(isHaltTarget(this.m, a.next)){ this.state=haltNodeName(a.next); this.halted=true; this.haltReason="halt"; }
+    else { this.state=a.next; this.visited.add(this.state); }
+    this.trace.push(this.head, this.state, this.get(this.head));
+    return true;
+  }
+  stepB(){
+    if(this.history.length===0) return false;
+    const [h,prev,st]=this.history.pop();
+    const cur=this.get(h);
+    if(cur==="1") this._ones--;
+    if(prev==="1") this._ones++;
+    this.set(h, prev);
+    this.head=h; this.state=st; this.steps--;
+    this.halted=false; this.diverged=false; this.haltReason="";
+    // recompute last for highlight from new tail
+    const tail=this.history[this.history.length-1];
+    this.last = tail ? this._reconstructLast() : null;
+    if(this.trace.rows.length) this.trace.rows.pop();
+    return true;
+  }
+  _reconstructLast(){
+    // re-derive the transition that produced the current config (best-effort for highlight)
+    const s=this.state, r=this.read();
+    const row=this.m.table[s]; const a=row?parseAction(row[r]):null;
+    return a ? {from:s, read:r, write:a.write, move:a.move, next:a.next} : null;
+  }
+  // load a final configuration produced by the turbo worker
+  loadFinal(tapeStr, offset, head, finalState, steps, ones, visitedCount, halted, diverged, haltReason){
+    this.tape=new Map();
+    for(let i=0;i<tapeStr.length;i++){ const c=tapeStr[i]; if(c!==this.m.blank) this.tape.set(offset+i, c); }
+    this.head=head; this.state=finalState; this.steps=steps; this._ones=ones;
+    this.halted=halted; this.diverged=diverged; this.haltReason=haltReason||"";
+    this.history=[]; // turbo runs are not reversible
+    this.visited=new Set(); this._visitedCount=visitedCount;
+    this.last=this._reconstructLast();
+  }
+  visitedCount(){ return this._visitedCount!=null ? this._visitedCount : this.visited.size; }
+}
+
+/* ---------- global app state ----------------------------------------------- */
+let M = clone(GALLERY[0].machine);
+let selectedKey = GALLERY[0].key;
+let E = new TM(M);
+let playing=false, playDir=1;
+let lastFrame=0, stepAcc=0;
+let audioOn=false, audioCtx=null;
+let recording=false, mediaRecorder=null, recChunks=[], recRAF=0;
+
+/* ---------- DOM refs -------------------------------------------------------- */
+const $ = id => document.getElementById(id);
+const strip=$("tapeStrip"), viewport=$("tapeViewport"), headState=$("headState");
+const svg=$("diagram"), heat=$("heatmap"), heatLegend=$("heatLegend");
+const recCanvas=$("recCanvas");
+
+/* ---------- (4a) tape rendering with springy slide ------------------------- */
+const CELLW=44, GAP=6, STEP=CELLW+GAP;
+let builtMin=null, builtMax=null;
+const cellEls=new Map();
+function ensureRange(center){
+  const need=[center-40, center+40];
+  if(builtMin!==null && need[0]>=builtMin && need[1]<=builtMax) return;
+  const lo=center-60, hi=center+60;
+  strip.innerHTML=""; cellEls.clear();
+  for(let i=lo;i<=hi;i++){
+    const c=document.createElement("div");
+    c.className="cell";
+    c.style.left=((i-lo)*STEP)+"px";
+    const idx=document.createElement("span"); idx.className="idx"; idx.textContent=i;
+    c.appendChild(document.createTextNode("")); c.appendChild(idx);
+    strip.appendChild(c); cellEls.set(i,c);
+  }
+  builtMin=lo; builtMax=hi;
+}
+function renderTape(animate=true){
+  ensureRange(E.head);
+  for(let i=builtMin;i<=builtMax;i++){
+    const el=cellEls.get(i); if(!el) continue;
+    const v=E.get(i);
+    el.firstChild.nodeValue = v;
+    el.classList.toggle("blank", v===M.blank);
+  }
+  const vpW=viewport.clientWidth||900;
+  const headLeft=(E.head-builtMin)*STEP;
+  const tx = vpW/2 - (headLeft + CELLW/2);
+  strip.style.transition = animate ? "transform .18s cubic-bezier(.34,1.4,.5,1)" : "none";
+  strip.style.transform=`translateX(${tx}px)`;
+  headState.textContent=E.state;
+}
+
+/* ---------- (4b) state diagram --------------------------------------------- */
+function svgEl(tag,attrs){ const e=document.createElementNS("http://www.w3.org/2000/svg",tag);
+  for(const k in attrs) e.setAttribute(k,attrs[k]); return e; }
+let nodePos={}, edgeGroups=new Map(), stateColorMap={};
+function buildDiagram(){
+  svg.innerHTML="";
+  const states=machineStates(M).slice();
+  // include halt targets as nodes
+  const nodes=[...states];
+  const seen=new Set(nodes);
+  for(const st of Object.keys(M.table)) for(const sym of Object.keys(M.table[st])){
+    const a=parseAction(M.table[st][sym]); if(!a) continue;
+    const tgt=isHaltTarget(M,a.next)?haltNodeName(a.next):a.next;
+    if(!seen.has(tgt)){ seen.add(tgt); nodes.push(tgt); }
+  }
+  stateColorMap={};
+  states.forEach((s,i)=> stateColorMap[s]=STATE_COLORS[i%STATE_COLORS.length]);
+  // any halt-target node not already colored (H and named accept/reject states) reads as neutral grey
+  nodes.forEach(s=>{ if(!(s in stateColorMap)) stateColorMap[s]="#64748b"; });
+
+  const W=460,H=340,cx=W/2,cy=H/2, R=Math.min(W,H)/2-52, r=22;
+  nodePos={};
+  const N=nodes.length;
+  nodes.forEach((s,i)=>{
+    const ang=(-Math.PI/2)+(i*2*Math.PI/N);
+    nodePos[s]={x:cx+R*Math.cos(ang), y:cy+R*Math.sin(ang), ang};
+  });
+
+  // defs: arrow markers per color
+  const defs=svgEl("defs",{});
+  const colors=[...new Set([...Object.values(stateColorMap),"#b7bccb"])];
+  colors.forEach((col,i)=>{
+    const mk=svgEl("marker",{id:"arw"+i,viewBox:"0 0 10 10",refX:"9",refY:"5",markerWidth:"7",markerHeight:"7",orient:"auto-start-reverse"});
+    mk.appendChild(svgEl("path",{d:"M0,0 L10,5 L0,10 z",fill:col})); defs.appendChild(mk);
+  });
+  svg.appendChild(defs);
+  const arwId=col=>"arw"+colors.indexOf(col);
+
+  // group transitions by from->to
+  const groups=new Map();
+  for(const st of Object.keys(M.table)) for(const sym of Object.keys(M.table[st])){
+    const a=parseAction(M.table[st][sym]); if(!a) continue;
+    const tgt=isHaltTarget(M,a.next)?haltNodeName(a.next):a.next;
+    const key=st+"->"+tgt;
+    if(!groups.has(key)) groups.set(key,{from:st,to:tgt,labels:[],syms:[]});
+    groups.get(key).labels.push(`${sym}→${a.write},${a.move>0?"R":"L"}`);
+    groups.get(key).syms.push(sym);
+  }
+  edgeGroups=new Map();
+  const edgeLayer=svgEl("g",{}); svg.appendChild(edgeLayer);
+
+  groups.forEach((g,key)=>{
+    const from=nodePos[g.from], to=nodePos[g.to];
+    const col=stateColorMap[g.from]||"#b7bccb";
+    const grp=svgEl("g",{}); grp.dataset.key=key;
+    let labelX,labelY,path;
+    if(g.from===g.to){ // self loop
+      const a0=from.ang;
+      const ox=from.x+ (34)*Math.cos(a0), oy=from.y+(34)*Math.sin(a0);
+      const p1x=from.x+r*Math.cos(a0-0.5), p1y=from.y+r*Math.sin(a0-0.5);
+      const p2x=from.x+r*Math.cos(a0+0.5), p2y=from.y+r*Math.sin(a0+0.5);
+      path=svgEl("path",{d:`M${p1x},${p1y} C${ox+22*Math.cos(a0-0.9)},${oy+22*Math.sin(a0-0.9)} ${ox+22*Math.cos(a0+0.9)},${oy+22*Math.sin(a0+0.9)} ${p2x},${p2y}`,
+        fill:"none",stroke:col,"stroke-width":"1.6","marker-end":`url(#${arwId(col)})`});
+      labelX=from.x+52*Math.cos(a0); labelY=from.y+52*Math.sin(a0);
+    } else {
+      const dx=to.x-from.x, dy=to.y-from.y, d=Math.hypot(dx,dy)||1;
+      const ux=dx/d, uy=dy/d;
+      const sx=from.x+ux*r, sy=from.y+uy*r, ex=to.x-ux*r, ey=to.y-uy*r;
+      // curve offset so opposite edges don't overlap
+      const mx=(sx+ex)/2, my=(sy+ey)/2;
+      const nx=-uy, ny=ux; const bend=22;
+      const cxp=mx+nx*bend, cyp=my+ny*bend;
+      path=svgEl("path",{d:`M${sx},${sy} Q${cxp},${cyp} ${ex},${ey}`,fill:"none",stroke:col,"stroke-width":"1.6","marker-end":`url(#${arwId(col)})`});
+      labelX=cxp+nx*8; labelY=cyp+ny*8;
+    }
+    path.style.transition="stroke-width .1s, stroke .1s, opacity .1s";
+    grp.appendChild(path);
+    const txt=svgEl("text",{x:labelX,y:labelY,"text-anchor":"middle","font-size":"9","font-family":"var(--mono)","fill":"var(--muted)"});
+    g.labels.slice(0,4).forEach((l,i)=>{ const ts=svgEl("tspan",{x:labelX,dy:(i===0?0:10)}); ts.textContent=l; txt.appendChild(ts); });
+    if(g.labels.length>4){ const ts=svgEl("tspan",{x:labelX,dy:10}); ts.textContent="…"; txt.appendChild(ts); }
+    grp.appendChild(txt);
+    edgeLayer.appendChild(grp);
+    edgeGroups.set(key,{grp,path,txt,syms:g.syms,col});
+  });
+
+  // nodes on top
+  nodes.forEach(s=>{
+    const p=nodePos[s];
+    const col=stateColorMap[s]||"#64748b";
+    const g=svgEl("g",{}); g.dataset.node=s;
+    const circle=svgEl("circle",{cx:p.x,cy:p.y,r:r,fill:"var(--node)",stroke:col,"stroke-width":(s==="H"?"2.4":"2")});
+    circle.style.transition="fill .12s, stroke-width .12s, filter .12s";
+    g.appendChild(circle);
+    const t=svgEl("text",{x:p.x,y:p.y+5,"text-anchor":"middle","font-size":"15","font-weight":"700","font-family":"var(--mono)",fill:col});
+    t.textContent=s; g.appendChild(t);
+    if(s===M.start){ const st=svgEl("text",{x:p.x,y:p.y-r-6,"text-anchor":"middle","font-size":"9",fill:"var(--muted)"}); st.textContent="start"; g.appendChild(st); }
+    svg.appendChild(g);
+  });
+  highlightDiagram();
+}
+function highlightDiagram(){
+  // reset
+  edgeGroups.forEach(e=>{ e.path.setAttribute("stroke-width","1.6"); e.path.setAttribute("opacity","0.55"); });
+  svg.querySelectorAll("[data-node]").forEach(g=>{
+    const s=g.dataset.node; const col=stateColorMap[s]||"#64748b";
+    const c=g.querySelector("circle"); c.setAttribute("fill","var(--node)"); c.style.filter="none";
+    c.setAttribute("stroke-width", s==="H"?"2.4":"2");
+  });
+  // active node
+  const active=svg.querySelector(`[data-node="${cssEsc(E.state)}"]`);
+  if(active){ const c=active.querySelector("circle"); const col=stateColorMap[E.state]||"#64748b";
+    c.setAttribute("fill", col); c.style.filter="drop-shadow(0 0 6px "+col+")"; c.setAttribute("stroke-width","3");
+    active.querySelector("text").setAttribute("fill","#fff"); }
+  // active edge
+  if(E.last){
+    const tgt=isHaltTarget(M,E.last.next)?haltNodeName(E.last.next):E.last.next;
+    const key=E.last.from+"->"+tgt;
+    const e=edgeGroups.get(key);
+    if(e){ e.path.setAttribute("stroke-width","3.4"); e.path.setAttribute("opacity","1");
+      e.path.setAttribute("stroke", stateColorMap[E.last.from]||e.col); }
+  }
+}
+function cssEsc(s){ return String(s).replace(/["\\]/g,"\\$&"); }
+
+/* ---------- (4c) space-time heatmap ---------------------------------------- */
+function renderHeat(){
+  const rows=E.trace.rows;
+  const ctx=heat.getContext("2d");
+  const W=heat.width, H=heat.height;
+  ctx.fillStyle=getComputedStyle(document.body).getPropertyValue("--heat-bg")||"#faf9f6";
+  ctx.fillRect(0,0,W,H);
+  if(rows.length<2){ drawHeatLegend(); return; }
+  let lo=Infinity, hi=-Infinity;
+  for(const r of rows){ if(r[0]<lo)lo=r[0]; if(r[0]>hi)hi=r[0]; }
+  const span=Math.max(1,hi-lo);
+  const colW=Math.max(1, W/(span+1));
+  const rowH=Math.max(1, H/rows.length);
+  for(let i=0;i<rows.length;i++){
+    const [head,st,sym]=rows[i];
+    const x=Math.floor((head-lo)/(span+1)*W);
+    const y=Math.floor(i/rows.length*H);
+    const col=stateColorMap[st]||"#64748b";
+    ctx.fillStyle = sym==="1" ? col : hexA(col,0.32);
+    ctx.fillRect(x, y, Math.ceil(colW), Math.ceil(rowH));
+  }
+  drawHeatLegend();
+}
+function hexA(hex,a){
+  const m=/^#?([0-9a-f]{6})$/i.exec(hex); if(!m) return hex;
+  const n=parseInt(m[1],16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+}
+function drawHeatLegend(){
+  const states=machineStates(M);
+  heatLegend.innerHTML="";
+  const info=document.createElement("span");
+  const stride=E.trace.stride;
+  info.textContent = stride>1 ? `rows sampled every ${stride} steps · bright = wrote 1` : `1 row = 1 step · bright = wrote 1`;
+  heatLegend.appendChild(info);
+  states.forEach(s=>{
+    const sp=document.createElement("span");
+    sp.innerHTML=`<span class="swatch" style="background:${stateColorMap[s]||"#64748b"}"></span>${s}`;
+    heatLegend.appendChild(sp);
+  });
+}
+
+/* ---------- (4d) stats ------------------------------------------------------ */
+function updateStats(){
+  $("stSteps").textContent=E.steps.toLocaleString();
+  $("stOnes").textContent=E.ones().toLocaleString();
+  $("stVisited").textContent=E.visitedCount();
+  $("stHead").textContent=E.head;
+  $("stState").textContent=E.state;
+  const v=$("stVerdict");
+  if(E.diverged){ v.textContent="diverged"; v.className="v verdict div"; }
+  else if(E.halted){ v.textContent="halted"; v.className="v verdict halt"; }
+  else { v.textContent="running"; v.className="v verdict run"; }
+  // record line
+  const gal=GALLERY.find(g=>g.key===selectedKey);
+  const rl=$("recordLine");
+  if(gal && gal.record){
+    const rec=gal.record;
+    const okS=E.steps===rec.steps, okO=E.ones()===rec.ones;
+    rl.innerHTML=`Busy Beaver champion record for BB(${rec.n}): <b>${rec.steps.toLocaleString()}</b> steps · <b>${rec.ones.toLocaleString()}</b> ones. `+
+      (E.halted ? `You hit <b>${E.steps.toLocaleString()}</b> / <b>${E.ones().toLocaleString()}</b> — ${(okS&&okO)?"✅ matches the champion!":"(keep running)"}` : `Press ⚡ Run to halt to chase it.`);
+  } else { rl.textContent=""; }
+}
+
+/* ---------- full render ----------------------------------------------------- */
+function render(animate=true){
+  renderTape(animate);
+  highlightDiagram();
+  renderHeat();
+  updateStats();
+}
+
+/* ---------- (5) transport --------------------------------------------------- */
+function speedFromSlider(){ // 0..100 -> ~1..5000 steps/sec (log)
+  const t=(+$("speed").value)/100;
+  return Math.max(1, Math.round(Math.pow(10, 0.3 + t*3.4))); // ~2 .. 5000
+}
+function updateSpeedLabel(){ const s=speedFromSlider(); $("speedLabel").textContent = s>=1000?(s/1000).toFixed(1)+"k st/s":s+" st/s"; }
+
+function doStepF(){
+  const moved=E.stepF();
+  if(moved){ tick(); if(E.halted){ onHalt(); } }
+  else if(E.halted){ onHalt(); }
+  render();
+  return moved;
+}
+function doStepB(){ const moved=E.stepB(); render(); return moved; }
+
+function setPlaying(on,dir=1){
+  playing=on; playDir=dir;
+  $("btnPlay").textContent = (on&&dir>0) ? "⏸ Pause" : "▶ Play";
+  $("btnPlay").classList.toggle("on", on&&dir>0);
+  if(on){ lastFrame=performance.now(); stepAcc=0; requestAnimationFrame(playLoop); }
+}
+function playLoop(now){
+  if(!playing) return;
+  const dt=(now-lastFrame)/1000; lastFrame=now;
+  const sps=speedFromSlider();
+  stepAcc += sps*dt;
+  let budget=Math.min(stepAcc|0, 6000); // cap per frame to keep UI alive
+  let did=false;
+  while(budget-- > 0){
+    stepAcc-=1;
+    if(playDir>0){ if(!E.stepF()){ setPlaying(false); onHalt(); break; } did=true; if(E.halted){ setPlaying(false); onHalt(); break; } }
+    else { if(!E.stepB()){ setPlaying(false); break; } did=true; }
+  }
+  if(did && audioOn && sps<=90) tick(); // one representative tick per frame at teaching speeds
+  render(sps<220);
+  if(playing) requestAnimationFrame(playLoop);
+}
+
+function resetRun(){ setPlaying(false); E.reset(); builtMin=null; render(false); }
+
+/* ---------- (5b) turbo worker ---------------------------------------------- */
+function tmWorker(){
+  self.onmessage = function(ev){
+    const {machine, maxSteps, maxLoopCheck} = ev.data;
+    // ---- parse ----
+    function parseAction(raw){
+      if(raw==null) return null;
+      const s=String(raw).replace(/\s+/g,"");
+      if(s===""||s==="-") return null;
+      const m=/^(.)([LRlr])([A-Za-z0-9])$/.exec(s);
+      if(!m) return null;
+      return {write:m[1],move:(m[2].toUpperCase()==="R")?1:-1,next:m[3]};
+    }
+    // symbols + states
+    const symSet=new Set([machine.blank]);
+    const stateNames=[]; const stSeen=new Set();
+    const addState=s=>{ if(!stSeen.has(s)){stSeen.add(s);stateNames.push(s);} };
+    addState(machine.start);
+    for(const st of Object.keys(machine.table)){ addState(st);
+      for(const sym of Object.keys(machine.table[st])){ symSet.add(sym); const a=parseAction(machine.table[st][sym]); if(a) symSet.add(a.write); } }
+    const symbols=[...symSet];
+    const symCode={}; symbols.forEach((c,i)=>symCode[c]=i);
+    const nSym=symbols.length, nSt=stateNames.length;
+    const stIdx={}; stateNames.forEach((s,i)=>stIdx[s]=i);
+    const blankCode=symCode[machine.blank];
+    const oneCode = symCode["1"]!=null ? symCode["1"] : -1;
+    // transition tables
+    const def=new Uint8Array(nSt*nSym), tw=new Int32Array(nSt*nSym), tm=new Int8Array(nSt*nSym), tn=new Int32Array(nSt*nSym);
+    const haltName=new Array(nSt*nSym).fill(null); // preserve named halt targets (e.g. accept "Y" / reject "N")
+    for(let si=0; si<nSt; si++){ const row=machine.table[stateNames[si]]; if(!row) continue;
+      for(const sym of Object.keys(row)){ const a=parseAction(row[sym]); if(!a) continue;
+        const idx=si*nSym+symCode[sym]; def[idx]=1; tw[idx]=symCode[a.write]!=null?symCode[a.write]:blankCode; tm[idx]=a.move;
+        const isHalt=(a.next==="H"||a.next==="h")|| (!(a.next in machine.table) && a.next!==machine.start);
+        tn[idx]= isHalt ? -1 : (stIdx[a.next]!=null?stIdx[a.next]:-1);
+        if(isHalt) haltName[idx]=(a.next==null||a.next==="H"||a.next==="h")?"H":a.next;
+      } }
+    // tape
+    let size=1<<16;
+    let arr=new Int16Array(size).fill(blankCode);
+    let base=-(size>>1); // logical position at index 0
+    let head=machine.startIndex|0;
+    const init=machine.tape||"";
+    for(let i=0;i<init.length;i++){ const c=init[i]; arr[i-base]= symCode[c]!=null?symCode[c]:blankCode; }
+    let state=stIdx[machine.start];
+    let steps=0, ones=0, minH=head, maxH=head, halted=false, diverged=false, haltReason="", finalHaltName="H";
+    const visited=new Uint8Array(nSt); visited[state]=1;
+    // count initial ones
+    if(oneCode>=0) for(let i=0;i<init.length;i++) if((symCode[init[i]]??blankCode)===oneCode) ones++;
+    // trace (adaptive)
+    let traceRows=[], stride=1, tc=0; const maxRows=4200;
+    function tracepush(h,st,sym){ if(tc%stride===0) traceRows.push([h,st,sym]); tc++;
+      if(traceRows.length>maxRows){ const nr=[]; for(let i=0;i<traceRows.length;i+=2) nr.push(traceRows[i]); traceRows=nr; stride*=2; } }
+    tracepush(head, state, arr[head-base]);
+    // loop detection structures
+    const seen=new Map();
+    let progressAt=1e6;
+    let lastPost=Date.now();
+
+    while(steps<maxSteps){
+      let ptr=head-base;
+      if(ptr<2||ptr>size-3){ // grow
+        const ns=size*2; const na=new Int16Array(ns).fill(blankCode);
+        const nb=head-(ns>>1); for(let i=0;i<size;i++){ na[(base+i)-nb]=arr[i]; } arr=na; size=ns; base=nb; ptr=head-base;
+      }
+      const rc=arr[ptr];
+      const idx=state*nSym+rc;
+      if(!def[idx]){ halted=true; haltReason="no-rule"; break; }
+      const w=tw[idx];
+      if(oneCode>=0){ if(rc===oneCode) ones--; if(w===oneCode) ones++; }
+      arr[ptr]=w;
+      head += tm[idx];
+      if(head<minH)minH=head; if(head>maxH)maxH=head;
+      steps++;
+      const nx=tn[idx];
+      if(nx<0){ state=-1; halted=true; haltReason="halt"; finalHaltName=haltName[idx]||"H"; tracepush(head, finalHaltName, arr[head-base]); break; }
+      state=nx; visited[state]=1;
+      tracepush(head, state, arr[head-base]);
+      // loop detection (bounded)
+      if(steps<=maxLoopCheck){
+        const width=maxH-minH;
+        if(width<260){
+          let sig=state+"|"+(head-minH)+"|";
+          for(let i=minH;i<=maxH;i++) sig+=arr[i-base];
+          if(seen.has(sig)){ diverged=true; haltReason="loop"; break; }
+          seen.set(sig,steps);
+          if(seen.size>400000) seen.clear();
+        }
+      }
+      if(steps>=progressAt){ progressAt+= (steps<2e7?1e6:5e6);
+        const nowt=Date.now();
+        if(nowt-lastPost>40){ lastPost=nowt; self.postMessage({type:"progress",steps,ones}); }
+      }
+    }
+    if(steps>=maxSteps && !halted && !diverged){ haltReason="step-cap"; }
+    // build final tape string over used range
+    let lo=minH, hi=maxH;
+    // trim blanks at edges
+    while(lo<hi && arr[lo-base]===blankCode) lo++;
+    while(hi>lo && arr[hi-base]===blankCode) hi--;
+    let tapeStr="";
+    if(!(lo===hi && arr[lo-base]===blankCode)){
+      for(let i=lo;i<=hi;i++) tapeStr+=symbols[arr[i-base]];
+    } else lo=head;
+    // visited count
+    let vc=0; for(let i=0;i<nSt;i++) if(visited[i]) vc++;
+    const finalState = halted && haltReason==="halt" ? finalHaltName : (state>=0?stateNames[state]:"H");
+    // map trace state indices back to names (halt rows already carry a string name)
+    const outTrace=traceRows.map(r=>[r[0], (typeof r[1]==="number")?(r[1]>=0?stateNames[r[1]]:"H"):r[1], symbols[r[2]] ]);
+    self.postMessage({type:"done", steps, ones, halted, diverged, haltReason, tapeStr, offset:lo, head, finalState, visitedCount:vc, trace:outTrace, stride});
+  };
+}
+let workerURL=null, turboWorker=null;
+function getWorker(){
+  if(!workerURL){ const blob=new Blob(["("+tmWorker.toString()+")()"],{type:"application/javascript"}); workerURL=URL.createObjectURL(blob); }
+  return new Worker(workerURL);
+}
+function runTurbo(){
+  setPlaying(false);
+  E.reset();
+  const btn=$("btnTurbo");
+  const prog=$("turboProgress");
+  const rec=(GALLERY.find(g=>g.key===selectedKey)||{}).record;
+  const maxSteps = rec ? Math.min(rec.steps*2+1000, 200000000) : 20000000;
+  // Construct the worker FIRST — Blob-URL workers can be blocked under file:// or a strict CSP.
+  if(turboWorker){ try{ turboWorker.terminate(); }catch(e){} turboWorker=null; }
+  try{
+    turboWorker=getWorker();
+  }catch(err){
+    turboWorker=null;
+    prog.style.display="none";
+    showBanner("Turbo needs a Web Worker — blocked here; try serving over http:// instead of opening the file directly.", true);
+    return;
+  }
+  // Worker exists: now it's safe to lock the button into the running state.
+  btn.disabled=true; btn.textContent="⚡ Running…";
+  prog.style.display="block"; prog.firstElementChild.style.width="0%";
+  const t0=performance.now();
+  turboWorker.onerror=()=>{
+    btn.disabled=false; btn.textContent="⚡ Run to halt";
+    prog.style.display="none";
+    if(turboWorker){ try{ turboWorker.terminate(); }catch(e){} turboWorker=null; }
+    showBanner("Turbo worker failed to run — try serving over http://.", true);
+  };
+  turboWorker.onmessage=(ev)=>{
+    const d=ev.data;
+    if(d.type==="progress"){
+      const frac = rec ? Math.min(1, d.steps/rec.steps) : Math.min(1, d.steps/maxSteps);
+      prog.firstElementChild.style.width=(frac*100).toFixed(1)+"%";
+      $("stSteps").textContent=d.steps.toLocaleString();
+      $("stOnes").textContent=d.ones.toLocaleString();
+      return;
+    }
+    if(d.type==="done"){
+      prog.firstElementChild.style.width="100%";
+      E.trace.rows=d.trace; E.trace.stride=d.stride;
+      E.loadFinal(d.tapeStr, d.offset, d.head, d.finalState, d.steps, d.ones, d.visitedCount, d.halted, d.diverged, d.haltReason);
+      builtMin=null;
+      render(false);
+      btn.disabled=false; btn.textContent="⚡ Run to halt";
+      setTimeout(()=>{ prog.style.display="none"; },600);
+      const elapsed=((performance.now()-t0)/1000).toFixed(2);
+      onHalt(elapsed);
+      turboWorker.terminate(); turboWorker=null;
+    }
+  };
+  try{
+    turboWorker.postMessage({machine:M, maxSteps, maxLoopCheck:120000});
+  }catch(err){
+    btn.disabled=false; btn.textContent="⚡ Run to halt";
+    prog.style.display="none";
+    if(turboWorker){ try{ turboWorker.terminate(); }catch(e){} turboWorker=null; }
+    showBanner("Turbo couldn't start — try serving over http://.", true);
+  }
+}
+
+/* ---------- halt / flourish ------------------------------------------------- */
+function onHalt(elapsed){
+  if(!E.halted && !E.diverged) return;
+  const gal=GALLERY.find(g=>g.key===selectedKey);
+  let msg, bad=false;
+  if(E.diverged){ msg=`Diverged — repeated configuration detected (never halts). ${E.steps.toLocaleString()} steps.`; bad=true; }
+  else if(gal && gal.record){
+    const ok = E.steps===gal.record.steps && E.ones()===gal.record.ones;
+    msg = ok ? `🏆 HALTED — matches the BB(${gal.record.n}) champion! ${E.steps.toLocaleString()} steps, ${E.ones()} ones${elapsed?` in ${elapsed}s`:""}.`
+             : `Halted after ${E.steps.toLocaleString()} steps with ${E.ones()} ones.`;
+    if(ok) confetti();
+  } else { msg=`Halted after ${E.steps.toLocaleString()} steps — ${E.ones()} ones on tape.`; }
+  showBanner(msg, bad);
+}
+function showBanner(text, bad){
+  const b=$("banner"); b.textContent=text; b.classList.toggle("bad",!!bad); b.classList.add("show");
+  clearTimeout(showBanner._t); showBanner._t=setTimeout(()=>b.classList.remove("show"),4200);
+}
+function confetti(){
+  const cv=$("flourish"); cv.width=innerWidth; cv.height=innerHeight;
+  const ctx=cv.getContext("2d");
+  const P=[]; for(let i=0;i<160;i++) P.push({x:innerWidth/2+(Math.random()-.5)*200,y:120,vx:(Math.random()-.5)*9,vy:Math.random()*-11-4,
+    c:STATE_COLORS[i%STATE_COLORS.length],r:3+Math.random()*4,a:1,rot:Math.random()*6});
+  let frames=0;
+  (function anim(){ frames++; ctx.clearRect(0,0,cv.width,cv.height);
+    for(const p of P){ p.vy+=0.42; p.x+=p.vx; p.y+=p.vy; p.a-=0.008; p.rot+=0.2;
+      ctx.globalAlpha=Math.max(0,p.a); ctx.fillStyle=p.c;
+      ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot); ctx.fillRect(-p.r,-p.r,p.r*2,p.r*2); ctx.restore(); }
+    ctx.globalAlpha=1;
+    if(frames<160) requestAnimationFrame(anim); else ctx.clearRect(0,0,cv.width,cv.height);
+  })();
+}
+
+/* ---------- audio ----------------------------------------------------------- */
+function tick(){
+  if(!audioOn) return;
+  try{
+    if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    const states=machineStates(M); const idx=Math.max(0,states.indexOf(E.state));
+    const freq=180*Math.pow(2, idx/6);
+    const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+    o.type=(E.read()==="1")?"triangle":"sine"; o.frequency.value=freq;
+    g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.10, audioCtx.currentTime+0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime+0.07);
+    o.connect(g).connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+0.08);
+  }catch(e){}
+}
+
+/* ---------- (6) editor ------------------------------------------------------ */
+function buildEditor(){
+  $("mName").value=M.name||"";
+  const alpha=machineAlphabet(M);
+  const states=machineStates(M);
+  // blank + start selects
+  const bl=$("mBlank"); bl.innerHTML=""; alpha.forEach(s=>{ const o=document.createElement("option"); o.value=s;o.textContent=(s===" "?"(space)":s); if(s===M.blank)o.selected=true; bl.appendChild(o); });
+  const stSel=$("mStart"); stSel.innerHTML=""; states.forEach(s=>{ const o=document.createElement("option"); o.value=s;o.textContent=s; if(s===M.start)o.selected=true; stSel.appendChild(o); });
+  $("mTape").value=M.tape||"";
+  // table
+  const host=$("tableHost"); host.innerHTML="";
+  const tbl=document.createElement("table"); tbl.className="ttable";
+  const thead=document.createElement("tr");
+  thead.appendChild(th("state"));
+  alpha.forEach(sym=>{ const t=th(sym===" "?"·":sym); t.className="sym"; thead.appendChild(t); });
+  thead.appendChild(th(""));
+  tbl.appendChild(thead);
+  states.forEach(st=>{
+    const tr=document.createElement("tr"); tr.className="staterow";
+    const nameTd=document.createElement("td");
+    const nameIn=document.createElement("input"); nameIn.type="text"; nameIn.className="sname"; nameIn.value=st; nameIn.maxLength=1;
+    nameIn.addEventListener("change",()=>renameState(st,nameIn.value.trim()||st));
+    nameTd.appendChild(nameIn); tr.appendChild(nameTd);
+    alpha.forEach(sym=>{
+      const td=document.createElement("td");
+      const inp=document.createElement("input"); inp.type="text"; inp.className="cellinput"; inp.maxLength=3;
+      inp.dataset.state=st; inp.dataset.sym=sym;
+      inp.placeholder=M.blank+"R"+M.start; // inline write-move-next format cue
+      const val=(M.table[st]&&M.table[st][sym])||"";
+      inp.value=val; validateCell(inp,val);
+      inp.addEventListener("input",()=>onCellEdit(st,sym,inp));
+      td.appendChild(inp); tr.appendChild(td);
+    });
+    const delTd=document.createElement("td");
+    const del=document.createElement("button"); del.className="rowdel"; del.textContent="×"; del.title="delete state";
+    del.addEventListener("click",()=>deleteState(st));
+    delTd.appendChild(del); tr.appendChild(delTd);
+    tbl.appendChild(tr);
+  });
+  host.appendChild(tbl);
+}
+function th(t){ const e=document.createElement("th"); e.textContent=t; return e; }
+function validateCell(inp,val){
+  if(!val.trim()){ inp.classList.remove("invalid"); inp.classList.add("empty"); return; }
+  inp.classList.remove("empty");
+  const a=parseAction(val);
+  const ok = a && (a.next==="H"||a.next==="h"|| (a.next in M.table) || a.next===M.start);
+  inp.classList.toggle("invalid", !ok);
+}
+function onCellEdit(st,sym,inp){
+  const v=inp.value;
+  if(!M.table[st]) M.table[st]={};
+  if(v.trim()==="") delete M.table[st][sym]; else M.table[st][sym]=v;
+  validateCell(inp,v);
+  afterEdit(false);
+}
+function renameState(oldName,newName){
+  if(newName===oldName) return;
+  const nt={};
+  for(const s of Object.keys(M.table)){ nt[s===oldName?newName:s]=M.table[s]; }
+  M.table=nt;
+  // update transitions targeting oldName
+  for(const s of Object.keys(M.table)) for(const sym of Object.keys(M.table[s])){
+    const a=parseAction(M.table[s][sym]); if(a && a.next===oldName) M.table[s][sym]=a.write+(a.move>0?"R":"L")+newName;
+  }
+  if(M.start===oldName) M.start=newName;
+  afterEdit(true);
+}
+function deleteState(st){
+  if(machineStates(M).length<=1) return;
+  delete M.table[st];
+  if(M.start===st) M.start=Object.keys(M.table)[0]||"A";
+  afterEdit(true);
+}
+function addState(){
+  // find unused single letter
+  const used=new Set(machineStates(M));
+  let name="A"; for(let c=65;c<91;c++){ if(!used.has(String.fromCharCode(c))){ name=String.fromCharCode(c); break; } }
+  M.table[name]={}; afterEdit(true);
+}
+function addSymbol(){
+  const alpha=machineAlphabet(M); let sym="2";
+  const cand=["2","3","4","5","a","b","c","x","y","z","#","*"];
+  for(const c of cand){ if(!alpha.includes(c)){ sym=c; break; } }
+  // Declare the symbol so machineAlphabet() renders an empty, editable column — no phantom transition rule.
+  if(!Array.isArray(M.symbols)) M.symbols=[];
+  if(!M.symbols.includes(sym)) M.symbols.push(sym);
+  afterEdit(true);
+  // focus the first cell of the new column so the user can start typing immediately
+  const first=machineStates(M)[0];
+  requestAnimationFrame(()=>{ const inp=document.querySelector(`.cellinput[data-state="${cssEsc(first)}"][data-sym="${cssEsc(sym)}"]`); if(inp) inp.focus(); });
+}
+function afterEdit(rebuildTable){
+  M.name=$("mName").value;
+  buildDiagram();
+  resetRun();
+  if(rebuildTable) buildEditor();
+  syncHash();
+}
+
+/* ---------- (7) hash serialization ------------------------------------------ */
+function encodeMachine(){
+  const obj={n:M.name,b:M.blank,s:M.start,h:M.startIndex||0,t:M.tape||"",tb:M.table,sp:+$("speed").value,sel:selectedKey};
+  if(Array.isArray(M.symbols)&&M.symbols.length) obj.sy=M.symbols;
+  try{ return btoa(unescape(encodeURIComponent(JSON.stringify(obj)))); }catch(e){ return ""; }
+}
+function decodeMachine(hash){
+  try{
+    const obj=JSON.parse(decodeURIComponent(escape(atob(hash))));
+    return obj;
+  }catch(e){ return null; }
+}
+let hashTimer=null, lastEncoded="";
+function writeHash(){
+  lastEncoded=encodeMachine();
+  const frag="#"+lastEncoded;
+  try{ history.replaceState(null,"",frag); }
+  catch(e){ // replaceState can throw a SecurityError under file://; fall back to same-document hash
+    try{ location.hash=lastEncoded; }catch(e2){}
+  }
+}
+function syncHash(){
+  clearTimeout(hashTimer);
+  hashTimer=setTimeout(writeHash,250);
+}
+function shareURL(){
+  // Prefer the live address bar, but guarantee a correct link even if replaceState was blocked.
+  if(!lastEncoded) lastEncoded=encodeMachine();
+  const base=location.href.split("#")[0];
+  return base+"#"+lastEncoded;
+}
+function loadFromHash(){
+  const h=location.hash.replace(/^#/,"");
+  if(!h) return false;
+  const obj=decodeMachine(h);
+  if(!obj || !obj.tb) return false;
+  M={name:obj.n||"Custom machine", blank:obj.b||"0", start:obj.s||Object.keys(obj.tb)[0]||"A",
+     startIndex:obj.h||0, tape:obj.t||"", table:obj.tb};
+  if(Array.isArray(obj.sy)) M.symbols=obj.sy;
+  selectedKey=obj.sel||null;
+  if(obj.sp!=null) $("speed").value=obj.sp;
+  return true;
+}
+
+/* ---------- load a machine -------------------------------------------------- */
+function loadMachine(machine, key){
+  M=clone(machine); selectedKey=key||null;
+  E=new TM(M);
+  builtMin=null;
+  buildDiagram(); buildEditor(); render(false);
+  markGallery();
+  updateSpeedLabel();
+  syncHash();
+}
+function markGallery(){
+  document.querySelectorAll("#gallery button").forEach(b=>b.classList.toggle("sel", b.dataset.key===selectedKey));
+}
+
+/* ---------- gallery UI ------------------------------------------------------ */
+function buildGallery(){
+  const g=$("gallery"); g.innerHTML="";
+  GALLERY.forEach((item,i)=>{
+    const b=document.createElement("button"); b.dataset.key=item.key;
+    b.innerHTML=`<span class="num">${i+1}</span><span class="gname">${item.name}</span><span class="gsub">${item.sub}</span>`;
+    b.addEventListener("click",()=>loadMachine(item.machine,item.key));
+    g.appendChild(b);
+  });
+}
+
+/* ---------- (7b) recording -------------------------------------------------- */
+function drawRecFrame(){
+  const ctx=recCanvas.getContext("2d");
+  const W=recCanvas.width, H=recCanvas.height;
+  const dark=document.body.classList.contains("dark");
+  ctx.fillStyle=dark?"#0e1116":"#f6f5f2"; ctx.fillRect(0,0,W,H);
+  // ---- tape strip (top) ----
+  const cw=52, mid=W/2, ty=40, th=64;
+  ctx.font="600 24px "+"monospace"; ctx.textAlign="center"; ctx.textBaseline="middle";
+  for(let d=-9;d<=9;d++){
+    const i=E.head+d; const x=mid+d*cw - cw/2;
+    ctx.fillStyle=dark?"#1c222c":"#fff"; ctx.strokeStyle=dark?"#333b48":"#d8d2c6";
+    roundRect(ctx,x,ty,cw-6,th,8); ctx.fill(); ctx.stroke();
+    const v=E.get(i);
+    ctx.fillStyle=(v===M.blank)?(dark?"#4b5563":"#b8b2a6"):(dark?"#e6e9ef":"#1b1f24");
+    ctx.fillText(v, x+(cw-6)/2, ty+th/2);
+  }
+  // head marker
+  ctx.fillStyle="#ff6100";
+  ctx.beginPath(); ctx.moveTo(mid-9,ty-14); ctx.lineTo(mid+9,ty-14); ctx.lineTo(mid,ty-2); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle="#ff6100"; ctx.lineWidth=2.5; roundRect(ctx,mid-cw/2,ty-3,cw-6,th+6,9); ctx.stroke(); ctx.lineWidth=1;
+  ctx.fillStyle="#ff6100"; ctx.font="600 14px monospace";
+  ctx.fillText("state "+E.state+"   step "+E.steps+"   ones "+E.ones(), W/2, ty+th+30);
+  // ---- state diagram (bottom) ----
+  const gcx=W/2, gcy=H-150, gr=Math.min(W,300)/2-70;
+  const nodes=Object.keys(nodePos);
+  // edges
+  ctx.lineWidth=2;
+  edgeGroups.forEach((e,key)=>{
+    const [from,to]=key.split("->");
+    if(!nodePos[from]||!nodePos[to]) return;
+    const active = E.last && (E.last.from===from) && ((isHaltTarget(M,E.last.next)?haltNodeName(E.last.next):E.last.next)===to);
+    const p=diagToRec(nodePos[from],gcx,gcy,gr), q=diagToRec(nodePos[to],gcx,gcy,gr);
+    ctx.strokeStyle=active?(stateColorMap[from]||"#ff6100"):(dark?"#3a4453":"#c9cfda");
+    ctx.lineWidth=active?4:1.5;
+    ctx.beginPath();
+    if(from===to){ ctx.arc(p.x, p.y-26, 16, 0, Math.PI*2); }
+    else { ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); }
+    ctx.stroke();
+  });
+  ctx.lineWidth=1;
+  nodes.forEach(s=>{
+    const p=diagToRec(nodePos[s],gcx,gcy,gr);
+    const col=stateColorMap[s]||"#64748b"; const active=s===E.state;
+    ctx.beginPath(); ctx.arc(p.x,p.y,18,0,Math.PI*2);
+    ctx.fillStyle=active?col:(dark?"#1e2530":"#eef1f6"); ctx.fill();
+    ctx.strokeStyle=col; ctx.lineWidth=active?3:2; ctx.stroke(); ctx.lineWidth=1;
+    ctx.fillStyle=active?"#fff":col; ctx.font="700 15px monospace"; ctx.fillText(s,p.x,p.y);
+  });
+  ctx.fillStyle=dark?"#8b96a6":"#6b7280"; ctx.font="600 13px monospace"; ctx.textAlign="left";
+  ctx.fillText("Ticktape — "+(M.name||"machine"), 16, H-14);
+}
+function diagToRec(p,cx,cy,r){ // remap 460x340 diagram coords into recCanvas graph area
+  return { x:cx + (p.x-230)/230*r, y:cy + (p.y-170)/170*r };
+}
+function roundRect(ctx,x,y,w,h,r){ ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+function toggleRecord(){
+  if(recording){ stopRecord(); return; }
+  if(!recCanvas.captureStream || typeof MediaRecorder==="undefined"){ showBanner("Recording not supported in this browser.",true); return; }
+  let mime="video/webm";
+  if(MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported("video/webm;codecs=vp9")) mime="video/webm;codecs=vp9";
+  else if(MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported("video/webm;codecs=vp8")) mime="video/webm;codecs=vp8";
+  const stream=recCanvas.captureStream(30);
+  try{ mediaRecorder=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:4000000}); }
+  catch(e){ mediaRecorder=new MediaRecorder(stream); }
+  recChunks=[];
+  mediaRecorder.ondataavailable=e=>{ if(e.data.size) recChunks.push(e.data); };
+  mediaRecorder.onstop=()=>{
+    const blob=new Blob(recChunks,{type:"video/webm"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a"); a.href=url; a.download=(M.name||"ticktape").replace(/\W+/g,"_")+".webm";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),4000);
+    showBanner("Saved recording → your downloads.",false);
+  };
+  mediaRecorder.start();
+  recording=true; $("recDot").style.display="inline-block"; $("btnRecord").classList.add("on");
+  $("recLabel").textContent="■ Stop";
+  (function loop(){ if(!recording) return; drawRecFrame(); recRAF=requestAnimationFrame(loop); })();
+}
+function stopRecord(){
+  recording=false; cancelAnimationFrame(recRAF);
+  if(mediaRecorder && mediaRecorder.state!=="inactive") mediaRecorder.stop();
+  $("btnRecord").classList.remove("on"); $("recDot").style.display="none"; $("recLabel").textContent="● Record";
+}
+
+/* ---------- events ---------------------------------------------------------- */
+function bind(){
+  $("btnStepF").onclick=()=>{ setPlaying(false); doStepF(); };
+  $("btnStepB").onclick=()=>{ setPlaying(false); doStepB(); };
+  $("btnPlay").onclick=()=>{ if(E.halted){ resetRun(); } setPlaying(!playing || playDir<0, 1); };
+  $("btnReset").onclick=resetRun;
+  $("btnTurbo").onclick=runTurbo;
+  $("speed").oninput=()=>{ updateSpeedLabel(); syncHash(); };
+  $("btnTheme").onclick=()=>{ const dark=document.body.classList.toggle("dark");
+    try{ localStorage.setItem("ticktape-theme", dark?"dark":"light"); }catch(e){}
+    render(false); };
+  $("btnMute").onclick=()=>{ audioOn=!audioOn; $("btnMute").textContent=audioOn?"🔊 Sound on":"🔇 Sound"; $("btnMute").classList.toggle("on",audioOn);
+    if(audioOn && !audioCtx){ try{audioCtx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } };
+  $("btnShare").onclick=()=>{ writeHash(); const url=shareURL();
+    if(navigator.clipboard) navigator.clipboard.writeText(url).then(()=>showBanner("Link copied — share or fork this machine!",false),()=>showBanner("Copy failed; URL is in the address bar.",true));
+    else showBanner("URL is in the address bar — copy it to share.",false); };
+  $("btnRecord").onclick=toggleRecord;
+  $("btnAddState").onclick=addState;
+  $("btnAddSymbol").onclick=addSymbol;
+  $("mName").oninput=()=>{ M.name=$("mName").value; syncHash(); };
+  $("mBlank").onchange=()=>{ M.blank=$("mBlank").value; afterEdit(true); };
+  $("mStart").onchange=()=>{ M.start=$("mStart").value; afterEdit(false); };
+  $("mTape").oninput=()=>{ M.tape=$("mTape").value; resetRun(); syncHash(); };
+
+  window.addEventListener("keydown",(e)=>{
+    if(/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+    if(e.key===" "){ e.preventDefault(); if(E.halted) resetRun(); setPlaying(!playing||playDir<0,1); }
+    else if(e.key==="ArrowRight"){ e.preventDefault(); setPlaying(false); doStepF(); }
+    else if(e.key==="ArrowLeft"){ e.preventDefault(); setPlaying(false); doStepB(); }
+    else if(e.key==="ArrowUp"){ e.preventDefault(); $("speed").value=Math.min(100,+$("speed").value+5); updateSpeedLabel(); syncHash(); }
+    else if(e.key==="ArrowDown"){ e.preventDefault(); $("speed").value=Math.max(0,+$("speed").value-5); updateSpeedLabel(); syncHash(); }
+    else if(e.key==="r"||e.key==="R"){ resetRun(); }
+    else if(e.key==="t"||e.key==="T"){ runTurbo(); }
+    else if(e.key==="m"||e.key==="M"){ $("btnMute").click(); }
+    else if(/^[1-8]$/.test(e.key)){ const item=GALLERY[+e.key-1]; if(item) loadMachine(item.machine,item.key); }
+  });
+  window.addEventListener("resize",()=>{ builtMin=null; render(false); });
+}
+
+/* ---------- theme (persisted, OS-aware) ------------------------------------- */
+function applyInitialTheme(){
+  let pref=null;
+  try{ pref=localStorage.getItem("ticktape-theme"); }catch(e){}
+  if(pref==null){
+    try{ if(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) pref="dark"; }catch(e){}
+  }
+  if(pref==="dark") document.body.classList.add("dark");
+}
+
+/* ---------- init ------------------------------------------------------------ */
+function init(){
+  applyInitialTheme();
+  buildGallery();
+  bind();
+  if(loadFromHash()){ E=new TM(M); buildDiagram(); buildEditor(); render(false); markGallery(); updateSpeedLabel(); }
+  else { loadMachine(GALLERY[0].machine, GALLERY[0].key); }
+  updateSpeedLabel();
+}
+init();
+</script>
+</body>
+</html>

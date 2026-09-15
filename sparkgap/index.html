@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sparkgap — Morse Telegraph Station</title>
+<style>
+  :root{
+    --ink:#241a12; --brass:#b8863b; --brass-lt:#e6c37a; --paper:#f2e6cf;
+    --panel:#2b2018; --panel-2:#38291d; --wire:#5a4632; --amber:#ffb347;
+    --lamp:#ff7a2f; --grn:#7fdc7f; --red:#e8746a; --yel:#e8c66a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    font-family:"Courier New",Courier,monospace; color:var(--paper);
+    background:radial-gradient(circle at 50% 0%,#3a2c1f,#1c140d 70%);
+    display:flex;justify-content:center;padding:18px;min-height:100%;
+  }
+  .station{width:min(920px,100%);}
+  header{display:flex;align-items:baseline;gap:14px;border-bottom:2px solid var(--brass);
+    padding-bottom:8px;margin-bottom:14px}
+  h1{font-family:Georgia,"Times New Roman",serif;color:var(--brass-lt);margin:0;
+    font-size:30px;letter-spacing:3px;text-shadow:0 1px 0 #000}
+  .tag{color:#c9b48c;font-size:12.5px;font-style:italic}
+  .panel{background:linear-gradient(180deg,var(--panel-2),var(--panel));
+    border:1px solid var(--wire);border-radius:8px;padding:14px;margin-bottom:14px;
+    box-shadow:inset 0 1px 0 #4c3a29, 0 4px 12px rgba(0,0,0,.4)}
+  label{font-size:12px;color:#d8c7a4;display:block;margin-bottom:4px;letter-spacing:.5px}
+  textarea{width:100%;height:64px;resize:vertical;background:#1a130c;color:var(--amber);
+    border:1px solid var(--wire);border-radius:6px;padding:9px;font:15px "Courier New",monospace;
+    letter-spacing:1px}
+  .glyphs{margin-top:10px;min-height:42px;background:#140e08;border:1px solid var(--wire);
+    border-radius:6px;padding:9px;color:var(--brass-lt);font-size:20px;letter-spacing:2px;
+    line-height:1.5;word-break:break-word}
+  .glyphs .ch{margin-right:12px;white-space:nowrap}
+  .glyphs .prosign{text-decoration:overline;color:var(--yel)}
+  .glyphs .cur{background:rgba(255,179,71,.18);border-radius:3px}
+  .glyphs .wsp{color:#6a563c;margin-right:12px}
+  .controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px 20px}
+  .ctl{display:flex;flex-direction:column}
+  .ctl .val{color:var(--brass-lt);font-weight:bold}
+  input[type=range]{width:100%;accent-color:var(--brass)}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}
+  button{background:linear-gradient(180deg,var(--brass-lt),var(--brass));color:#2a1d0e;
+    border:1px solid #6b4f22;border-radius:6px;padding:9px 15px;font:bold 13px "Courier New",monospace;
+    cursor:pointer;letter-spacing:.5px;box-shadow:0 2px 0 #5a4020}
+  button:hover{filter:brightness(1.08)} button:active{transform:translateY(1px);box-shadow:0 1px 0 #5a4020}
+  button:focus-visible,.modeseg button:focus-visible,.keybtn:focus-visible,
+  input:focus-visible,select:focus-visible,textarea:focus-visible{
+    outline:2px solid var(--amber);outline-offset:2px}
+  button.ghost{background:#2a2016;color:var(--brass-lt);border-color:var(--wire);box-shadow:none}
+  button.idle{opacity:.45;pointer-events:none}
+  button.on{background:linear-gradient(180deg,#ffcf87,var(--lamp));color:#2a1d0e}
+  .scopewrap{position:relative}
+  canvas{width:100%;height:150px;display:block;background:#0c0a07;border:1px solid var(--wire);
+    border-radius:6px}
+  .lamp{width:26px;height:26px;border-radius:50%;background:#3a2a1c;
+    box-shadow:inset 0 0 6px #000;border:2px solid #1a120b;transition:none}
+  .lamp.lit{background:radial-gradient(circle at 35% 30%,#fff2d0,var(--lamp));
+    box-shadow:0 0 18px 4px var(--lamp),inset 0 0 6px #fff6}
+  .lampbox{display:flex;align-items:center;gap:10px;margin-left:auto}
+  .keybox{display:flex;gap:12px;align-items:stretch;flex-wrap:wrap}
+  .keybtn{flex:1;min-width:120px;min-height:74px;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;background:#241a11;border:2px solid var(--wire);
+    border-radius:8px;color:var(--brass-lt);user-select:none;cursor:pointer;font-size:13px;
+    letter-spacing:1px;transition:background .04s}
+  .keybtn small{color:#9c845d;font-size:10.5px;margin-top:3px}
+  .keybtn.press{background:linear-gradient(180deg,var(--lamp),#c9531e);color:#1a120b;border-color:var(--amber)}
+  .modeseg{display:inline-flex;border:1px solid var(--wire);border-radius:6px;overflow:hidden}
+  .modeseg button{border:none;border-radius:0;box-shadow:none;background:#2a2016;color:#c9b48c}
+  .modeseg button.sel{background:var(--brass);color:#2a1d0e}
+  .decoded{margin-top:10px;background:#140e08;border:1px solid var(--wire);border-radius:6px;
+    padding:9px;min-height:40px;font-size:19px;letter-spacing:1px;line-height:1.5}
+  .el{padding:0 1px;border-radius:2px}
+  .hint{font-size:11.5px;color:#9c845d;margin-top:8px;line-height:1.5}
+  .legend{display:flex;gap:14px;font-size:11px;color:#9c845d;margin-top:6px;flex-wrap:wrap}
+  .sw{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:middle;margin-right:4px}
+  .flash{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--brass);
+    color:#2a1d0e;padding:9px 18px;border-radius:6px;font-weight:bold;opacity:0;transition:opacity .3s;
+    pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.5)}
+  .flash.show{opacity:1}
+  a.link{color:var(--amber)}
+</style>
+</head>
+<body>
+<div class="station">
+  <header>
+    <h1>SPARKGAP</h1>
+    <span class="tag">type it · hear it · key it · share it</span>
+  </header>
+
+  <div class="panel">
+    <label for="msg">MESSAGE  (use &lt;AR&gt; &lt;SK&gt; &lt;BT&gt; &lt;KN&gt; &lt;SOS&gt; for prosigns)</label>
+    <textarea id="msg" spellcheck="false" placeholder="CQ CQ DE SPARKGAP  K">CQ DE SPARKGAP &lt;AR&gt;</textarea>
+    <div id="glyphs" class="glyphs"></div>
+    <div class="row">
+      <button id="play">▶ SEND</button>
+      <button id="stop" class="ghost idle">■ STOP</button>
+      <button id="copy" class="ghost">🔗 COPY REPLAY LINK</button>
+      <button id="wav" class="ghost">⬇ EXPORT WAV</button>
+      <div class="lampbox"><span id="lamp" class="lamp"></span><span style="font-size:11px;color:#9c845d">SIGNAL</span></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="scopewrap"><canvas id="scope"></canvas></div>
+    <div class="legend">
+      <span><span class="sw" style="background:#7fdc7f"></span>high confidence</span>
+      <span><span class="sw" style="background:#e8c66a"></span>marginal</span>
+      <span><span class="sw" style="background:#e8746a"></span>low confidence</span>
+      <span><span class="sw" style="background:#4aa3ff"></span>dit len est</span>
+      <span><span class="sw" style="background:#b8863b"></span>dit/dah &amp; gap thresholds</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="controls">
+      <div class="ctl"><label>SPEED <span id="wpmV" class="val">18</span> WPM</label>
+        <input id="wpm" type="range" min="5" max="40" value="18"></div>
+      <div class="ctl"><label>SIDETONE <span id="pitchV" class="val">650</span> Hz</label>
+        <input id="pitch" type="range" min="300" max="1000" value="650"></div>
+      <div class="ctl"><label>KEYER WEIGHT <span id="wtV" class="val">50</span>%</label>
+        <input id="wt" type="range" min="35" max="65" value="50"></div>
+      <div class="ctl"><label>OPTIONS</label>
+        <div class="row" style="margin-top:0;gap:16px">
+          <label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="fw"> Farnsworth</label>
+          <label style="display:flex;gap:6px;align-items:center;margin:0">Keyer <select id="keyer" style="background:#1a130c;color:var(--amber);border:1px solid var(--wire);border-radius:4px"><option>A</option><option>B</option></select></label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="row" style="margin:0 0 12px">
+      <span style="font-size:12px;color:#d8c7a4;letter-spacing:1px">KEY MODE</span>
+      <span class="modeseg" id="modeseg">
+        <button data-m="straight" class="sel">STRAIGHT KEY</button>
+        <button data-m="paddle">IAMBIC PADDLE</button>
+      </span>
+      <button id="clr" class="ghost" style="margin-left:auto">CLEAR DECODE</button>
+    </div>
+    <div class="keybox" id="keybox"></div>
+    <label style="margin-top:12px">DECODED</label>
+    <div id="decoded" class="decoded"></div>
+    <div class="hint" id="hint"></div>
+  </div>
+</div>
+<div id="flash" class="flash"></div>
+
+<script>
+"use strict";
+// ---------- ITU Morse table + prosigns ----------
+const M = {A:".-",B:"-...",C:"-.-.",D:"-..",E:".",F:"..-.",G:"--.",H:"....",I:"..",J:".---",
+K:"-.-",L:".-..",M:"--",N:"-.",O:"---",P:".--.",Q:"--.-",R:".-.",S:"...",T:"-",U:"..-",
+V:"...-",W:".--",X:"-..-",Y:"-.--",Z:"--..",
+"0":"-----","1":".----","2":"..---","3":"...--","4":"....-","5":".....","6":"-....",
+"7":"--...","8":"---..","9":"----.",
+".":".-.-.-",",":"--..--","?":"..--..","'":".----.","!":"-.-.--","/":"-..-.","(":"-.--.",
+")":"-.--.-","&":".-...",":":"---...",";":"-.-.-.","=":"-...-","+":".-.-.","-":"-....-",
+"_":"..--.-",'"':".-..-.","$":"...-..-","@":".--.-."};
+const PROSIGN = {AR:".-.-.",SK:"...-.-",BT:"-...-",KN:"-.--.",SOS:"...---...",CT:"-.-.-",AS:".-...",VE:"...-."};
+const REV = {}; for(const k in M) REV[M[k]]=k;
+
+// ---------- audio ----------
+let ctx=null, osc=null, gate=null, ana=null, data=null;
+function audio(){
+  if(ctx) return;
+  ctx=new (window.AudioContext||window.webkitAudioContext)();
+  osc=ctx.createOscillator(); gate=ctx.createGain(); ana=ctx.createAnalyser();
+  ana.fftSize=2048; data=new Uint8Array(ana.fftSize);
+  osc.type="sine"; osc.frequency.value=+pitch.value; gate.gain.value=0;
+  osc.connect(gate); gate.connect(ana); ana.connect(ctx.destination); osc.start();
+}
+function resume(){ if(!ctx) audio(); if(ctx.state==="suspended") ctx.resume(); }
+const RAMP=0.006, VOL=0.28;
+function keyOn(t){ const g=gate.gain; g.cancelScheduledValues(t); g.setValueAtTime(g.value,t);
+  g.linearRampToValueAtTime(VOL,t+RAMP); }
+function keyOff(t){ const g=gate.gain; g.cancelScheduledValues(t); g.setValueAtTime(g.value,t);
+  g.linearRampToValueAtTime(0,t+RAMP); }
+
+// ---------- timing ----------
+const $=id=>document.getElementById(id);
+const wpm=$("wpm"),pitch=$("pitch"),wt=$("wt"),fw=$("fw"),keyer=$("keyer");
+function ditMs(){ return 1200/(+wpm.value); }
+function gapUnit(){ return fw.checked ? 1200/Math.min(+wpm.value,10) : ditMs(); }
+
+// ---------- parse text -> tokens ----------
+function tokens(text){
+  const t=text.toUpperCase(), out=[]; let i=0;
+  while(i<t.length){
+    const c=t[i];
+    if(c==="<"){ const j=t.indexOf(">",i); if(j>0){ const name=t.slice(i+1,j).replace(/[^A-Z]/g,"");
+      let code=PROSIGN[name]; if(!code) code=[...name].map(x=>M[x]||"").join("");
+      if(code) out.push({t:"prosign",label:name,code}); i=j+1; continue; } }
+    if(c===" "){ out.push({t:"space"}); i++; continue; }
+    if(M[c]) out.push({t:"char",label:c,code:M[c]});
+    i++;
+  }
+  return out;
+}
+
+// ---------- glyph render ----------
+function renderGlyphs(){
+  const tks=tokens(msg.value); let h="";
+  for(const k of tks){
+    if(k.t==="space"){ h+='<span class="wsp">/</span>'; continue; }
+    const g=k.code.replace(/\./g,"·").replace(/-/g,"–");
+    h+=`<span class="ch ${k.t==="prosign"?"prosign":""}" title="${k.label}">${g}</span>`;
+  }
+  glyphs.innerHTML=h||'<span style="color:#6a563c">…</span>';
+}
+
+// ---------- schedule playback + capture on-intervals ----------
+let playing=false, ivals=[], endT=0;
+function buildTimeline(){
+  const tks=tokens(msg.value), d=ditMs()/1000, gu=gapUnit()/1000, segs=[]; let cur=0;
+  const push=(dur)=>{ segs.push([cur,cur+dur]); cur+=dur; };
+  tks.forEach((k,idx)=>{
+    if(k.t==="space"){ cur+=7*gu; return; }
+    const els=k.code.split("");
+    els.forEach((e,ei)=>{ push(e==="."?d:3*d); if(ei<els.length-1) cur+=d; });
+    // inter-char gap unless next is space or end
+    const nxt=tks[idx+1];
+    if(nxt && nxt.t!=="space") cur+=3*gu;
+  });
+  return {segs,total:cur};
+}
+function send(){
+  resume(); stop(); if(!msg.value.trim()){ flashMsg("Type a message to send"); return; }
+  const {segs,total}=buildTimeline(); const t0=ctx.currentTime+0.08;
+  segs.forEach(([a,b])=>{ keyOn(t0+a); keyOff(t0+b); });
+  ivals=segs.map(([a,b])=>[t0+a,t0+b]); endT=t0+total+0.1; playing=true;
+  play.classList.add("on"); $("stop").classList.remove("idle");
+}
+function stop(){
+  playing=false; ivals=[]; play.classList.remove("on"); $("stop").classList.add("idle");
+  if(gate){ const t=ctx.currentTime; gate.gain.cancelScheduledValues(t);
+    gate.gain.setValueAtTime(gate.gain.value,t); gate.gain.linearRampToValueAtTime(0,t+RAMP); }
+}
+
+// ---------- live keying (straight key + paddle share the gate) ----------
+let liveDown=false;
+function liveOn(){ resume(); if(liveDown) return; liveDown=true; keyOn(ctx.currentTime); }
+function liveOff(){ if(!liveDown) return; liveDown=false; keyOff(ctx.currentTime); }
+
+// ---------- adaptive straight-key decoder ----------
+const dec={ dit:ditMs(), downT:0, lastUp:0, buf:"", els:[], flushTimer:null };
+function classifyPress(dur){
+  const thr=2*dec.dit;               // dit/dah split = 2 units
+  const type=dur<thr?".":"-";
+  const target=type==="."?dec.dit:dec.dit*3;
+  // confidence: closeness to the class centre vs threshold
+  const conf=Math.max(0,Math.min(1,1-Math.abs(dur-target)/(1.6*dec.dit)));
+  // adapt running dit estimate (clamp to keyable range)
+  const obs=type==="."?dur:dur/3;
+  dec.dit=Math.max(40,Math.min(600,dec.dit*0.7+obs*0.3));
+  return {type,conf};
+}
+function pushEl(type,conf){
+  dec.buf+=type; dec.els.push({type,conf,t:performance.now()});
+  if(dec.els.length>40) dec.els.shift();
+  renderDecoded();
+}
+function flushChar(addWord){
+  if(dec.buf){ const c=REV[dec.buf]||"…"; dec.out=(dec.out||"")+c; dec.buf=""; }
+  if(addWord && dec.out && !dec.out.endsWith(" ")) dec.out+=" ";
+  renderDecoded();
+}
+function skDown(){
+  const now=performance.now();
+  if(dec.lastUp){ const gap=now-dec.lastUp;
+    if(gap>5*dec.dit){ flushChar(true); } else if(gap>2*dec.dit){ flushChar(false); } }
+  clearTimeout(dec.flushTimer); dec.downT=now; liveOn();
+}
+function skUp(){
+  if(!liveDown) return;
+  const now=performance.now(); liveOff();
+  const dur=now-dec.downT; if(dur<15) return;
+  const {type,conf}=classifyPress(dur); pushEl(type,conf); dec.lastUp=now;
+  clearTimeout(dec.flushTimer);
+  dec.flushTimer=setTimeout(()=>flushChar(false),3*dec.dit);
+  dec.flushTimer2&&clearTimeout(dec.flushTimer2);
+  dec.flushTimer2=setTimeout(()=>flushChar(true),7*dec.dit);
+}
+function renderDecoded(){
+  hint.textContent=`dit est ≈ ${dec.dit|0} ms · dit/dah split ${(2*dec.dit)|0} ms · char gap ${(2*dec.dit)|0} ms · word gap ${(5*dec.dit)|0} ms`;
+  if(!dec.out && !dec.buf && !dec.els.length){
+    decoded.innerHTML='<div style="color:#6a563c">Hold SPACE (straight key) or ◄/► arrows (paddle) to decode…</div>';
+    return;
+  }
+  let h="";
+  for(const e of dec.els){ const col=e.conf>0.66?"var(--grn)":e.conf>0.4?"var(--yel)":"var(--red)";
+    h+=`<span class="el" style="color:${col}">${e.type==="."?"·":"–"}</span>`; }
+  const txt=(dec.out||"")+ (dec.buf?` [${dec.buf.replace(/\./g,"·").replace(/-/g,"–")}]`:"");
+  decoded.innerHTML=`<div style="color:var(--amber)">${txt||"&nbsp;"}</div>`+
+    (h?`<div style="margin-top:6px;font-size:16px">${h}</div>`:"");
+}
+
+// ---------- iambic paddle keyer (Mode A/B) ----------
+let paddle={dit:false,dah:false}, keyerRun=false, lastEl=null, memo=false;
+function keyerLoop(){
+  if(mode!=="paddle"){ keyerRun=false; return; }
+  if(!paddle.dit && !paddle.dah && !memo){ keyerRun=false; return; }
+  keyerRun=true;
+  let next;
+  if(memo){ next=memo; memo=false; }
+  else if(paddle.dit && paddle.dah){ next=(lastEl==="."?"-":"."); }   // squeeze -> alternate
+  else next=paddle.dit?".":"-";
+  lastEl=next;
+  const unit=ditMs(), weight=(+wt.value)/50;               // 1.0 = even
+  const onMs=(next==="."?unit:unit*3)*weight;              // mark: weight shifts mark/space split
+  const offMs=unit*(2-weight);                             // inter-element space (period stays constant)
+  const t=ctx.currentTime; keyOn(t); keyOff(t+onMs/1000);
+  // decode our own keyer output too
+  pushEl(next, 0.95); dec.lastUp=performance.now();
+  clearTimeout(dec.flushTimer); clearTimeout(dec.flushTimer2);
+  dec.flushTimer=setTimeout(()=>flushChar(false),3*ditMs());
+  dec.flushTimer2=setTimeout(()=>flushChar(true),7*ditMs());
+  // Mode B: if both were held during the element, remember opposite for one extra element
+  setTimeout(()=>{
+    if(keyer.value==="B" && paddle.dit && paddle.dah) memo=(next==="."?"-":".");
+    keyerLoop();
+  }, onMs+offMs); // schedule next after mark + inter-element space
+}
+function startKeyer(){ resume(); if(!keyerRun) keyerLoop(); }
+
+// ---------- mode + keys ----------
+let mode="straight";
+function buildKeys(){
+  if(mode==="straight"){
+    keybox.innerHTML=`<div class="keybtn" id="sk" tabindex="0"><b>STRAIGHT KEY</b><small>hold SPACE or press &amp; hold</small></div>`;
+    const b=$("sk");
+    const dn=e=>{e.preventDefault();b.classList.add("press");skDown();};
+    const up=e=>{e.preventDefault();b.classList.remove("press");skUp();};
+    b.addEventListener("mousedown",dn); b.addEventListener("touchstart",dn,{passive:false});
+    b.addEventListener("touchend",up,{passive:false});
+  } else {
+    keybox.innerHTML=`<div class="keybtn" id="pd" tabindex="0"><b>DIT (·)</b><small>◄ Left arrow</small></div>
+      <div class="keybtn" id="pa" tabindex="0"><b>DAH (–)</b><small>Right arrow ►</small></div>`;
+    bindPaddle($("pd"),"dit"); bindPaddle($("pa"),"dah");
+  }
+}
+// Release handling lives on window so a mouseup/touch anywhere ends the press.
+// Registered ONCE (below) and guarded by mode so listeners never accumulate and
+// never fire cross-mode.
+function releaseAll(){
+  if(mode==="straight"){ const b=$("sk"); if(b) b.classList.remove("press"); skUp(); }
+  else { paddle.dit=false; paddle.dah=false;
+    const p=$("pd"),a=$("pa"); if(p)p.classList.remove("press"); if(a)a.classList.remove("press"); }
+}
+window.addEventListener("mouseup",releaseAll);
+function bindPaddle(el,which){
+  const dn=e=>{e.preventDefault();el.classList.add("press");paddle[which]=true;startKeyer();};
+  const up=e=>{e.preventDefault();el.classList.remove("press");paddle[which]=false;};
+  el.addEventListener("mousedown",dn); el.addEventListener("touchstart",dn,{passive:false});
+  el.addEventListener("touchend",up,{passive:false});
+}
+modeseg.querySelectorAll("button").forEach(b=>b.onclick=()=>{
+  mode=b.dataset.m; modeseg.querySelectorAll("button").forEach(x=>x.classList.toggle("sel",x===b));
+  paddle={dit:false,dah:false}; liveOff(); buildKeys();
+});
+// keyboard (edge-only, ignore auto-repeat)
+window.addEventListener("keydown",e=>{
+  if(e.target.tagName==="TEXTAREA"||e.target.tagName==="INPUT"||e.target.tagName==="SELECT") return;
+  if(e.repeat) return;
+  if(mode==="straight" && e.code==="Space"){ e.preventDefault(); $("sk").classList.add("press"); skDown(); }
+  else if(mode==="paddle" && e.code==="ArrowLeft"){ e.preventDefault(); paddle.dit=true; $("pd").classList.add("press"); startKeyer(); }
+  else if(mode==="paddle" && e.code==="ArrowRight"){ e.preventDefault(); paddle.dah=true; $("pa").classList.add("press"); startKeyer(); }
+});
+window.addEventListener("keyup",e=>{
+  if(mode==="straight" && e.code==="Space"){ const b=$("sk"); if(b){b.classList.remove("press");} skUp(); }
+  else if(e.code==="ArrowLeft"){ paddle.dit=false; const b=$("pd"); if(b)b.classList.remove("press"); }
+  else if(e.code==="ArrowRight"){ paddle.dah=false; const b=$("pa"); if(b)b.classList.remove("press"); }
+});
+
+// ---------- oscilloscope + confidence overlay ----------
+const scope=$("scope"), sc=scope.getContext("2d");
+function fit(){ const r=scope.getBoundingClientRect(), dpr=devicePixelRatio||1;
+  scope.width=r.width*dpr; scope.height=r.height*dpr; sc.setTransform(dpr,0,0,dpr,0,0); }
+addEventListener("resize",fit); fit();
+function draw(){
+  const W=scope.clientWidth,H=scope.clientHeight;
+  sc.clearRect(0,0,W,H); sc.fillStyle="#0c0a07"; sc.fillRect(0,0,W,H);
+  // grid
+  sc.strokeStyle="#20180f"; sc.lineWidth=1; sc.beginPath();
+  for(let x=0;x<W;x+=W/12){sc.moveTo(x,0);sc.lineTo(x,H);} for(let y=0;y<H;y+=H/4){sc.moveTo(0,y);sc.lineTo(W,y);} sc.stroke();
+  // waveform
+  if(ana){ ana.getByteTimeDomainData(data);
+    sc.strokeStyle="#ffb347"; sc.lineWidth=1.6; sc.beginPath();
+    for(let i=0;i<data.length;i+=2){ const x=i/data.length*W, y=(data[i]/255)*H;
+      i?sc.lineTo(x,y):sc.moveTo(x,y); } sc.stroke(); }
+  // lamp sync during scheduled send
+  if(playing){ const now=ctx.currentTime; let lit=false;
+    for(const [a,b] of ivals) if(now>=a&&now<=b){lit=true;break;}
+    lamp.classList.toggle("lit",lit); if(now>endT) stop(); }
+  else lamp.classList.toggle("lit",liveDown);
+  // ---- decode confidence overlay (timing markers scaled to canvas) ----
+  const scale=W/(8*Math.max(dec.dit,40));    // px per ms so ~8 dit fills width
+  const mk=(ms,col,lbl)=>{ const x=ms*scale; if(x>W) return;
+    sc.strokeStyle=col; sc.setLineDash([4,4]); sc.beginPath(); sc.moveTo(x,0); sc.lineTo(x,H); sc.stroke();
+    sc.setLineDash([]); sc.fillStyle=col; sc.font="10px 'Courier New'"; sc.fillText(lbl,x+3,12); };
+  mk(dec.dit,"#4aa3ff","dit"); mk(2*dec.dit,"#b8863b","dit/dah · char"); mk(5*dec.dit,"#b8863b","word");
+  // recent element bars along bottom, coloured by confidence
+  const n=dec.els.length;
+  if(n){ const bw=Math.min(16,(W-8)/n);
+    dec.els.forEach((e,i)=>{ const h=(e.type==="."?0.28:0.62)*H;
+      sc.fillStyle=e.conf>0.66?"#7fdc7f":e.conf>0.4?"#e8c66a":"#e8746a";
+      sc.fillRect(4+i*bw, H-4-h, bw-2, h); }); }
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+
+// ---------- WAV export ----------
+function renderWav(){
+  const sr=8000, {segs,total}=buildTimeline(), N=Math.ceil((total+0.1)*sr);
+  const buf=new Float32Array(N), f=+pitch.value, ramp=Math.floor(RAMP*sr);
+  for(const [a,b] of segs){ const s=Math.floor(a*sr), e=Math.floor(b*sr);
+    for(let i=s;i<e && i<N;i++){ let env=1;
+      if(i-s<ramp) env=(i-s)/ramp; if(e-i<ramp) env=Math.min(env,(e-i)/ramp);
+      buf[i]+=Math.sin(2*Math.PI*f*i/sr)*VOL*env; } }
+  // encode 16-bit PCM WAV
+  const bytes=44+N*2, ab=new ArrayBuffer(bytes), v=new DataView(ab);
+  const ws=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i));};
+  ws(0,"RIFF");v.setUint32(4,36+N*2,true);ws(8,"WAVE");ws(12,"fmt ");
+  v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);
+  v.setUint32(24,sr,true);v.setUint32(28,sr*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);
+  ws(36,"data");v.setUint32(40,N*2,true);
+  for(let i=0;i<N;i++){ let s=Math.max(-1,Math.min(1,buf[i])); v.setInt16(44+i*2,s*32767,true); }
+  return new Blob([ab],{type:"audio/wav"});
+}
+
+// ---------- share ----------
+// replaceState (not location.hash=) so per-keystroke updates don't spam browser history.
+function toHash(){ try{ history.replaceState(null,"","#m="+encodeURIComponent(msg.value)); }
+  catch(e){ location.hash="m="+encodeURIComponent(msg.value); } }
+function fromHash(){ const m=/m=([^&]*)/.exec(location.hash.slice(1));
+  if(m){ try{ msg.value=decodeURIComponent(m[1]); }catch(e){} } }
+function flashMsg(t){ flash.textContent=t; flash.classList.add("show");
+  setTimeout(()=>flash.classList.remove("show"),1600); }
+
+// ---------- wiring ----------
+const msg=$("msg"),glyphs=$("glyphs"),lamp=$("lamp"),decoded=$("decoded"),hint=$("hint"),
+  keybox=$("keybox"),flash=$("flash"),play=$("play");
+msg.addEventListener("input",()=>{renderGlyphs();toHash();});
+wpm.addEventListener("input",()=>{wpmV.textContent=wpm.value; dec.dit=ditMs();});
+pitch.addEventListener("input",()=>{pitchV.textContent=pitch.value; if(osc)osc.frequency.value=+pitch.value;});
+wt.addEventListener("input",()=>wtV.textContent=wt.value);
+play.onclick=send; $("stop").onclick=stop;
+$("copy").onclick=()=>{ toHash();
+  const done=()=>flashMsg("Replay link copied");
+  const fail=()=>flashMsg("Copy failed — URL is in the address bar");
+  try{
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(location.href).then(done).catch(fail);
+    } else fail();
+  }catch(e){ fail(); }
+};
+$("wav").onclick=()=>{ const b=renderWav(), u=URL.createObjectURL(b), a=document.createElement("a");
+  a.href=u; a.download="sparkgap.wav"; a.click(); setTimeout(()=>URL.revokeObjectURL(u),3000); flashMsg("WAV exported"); };
+$("clr").onclick=()=>{ dec.out=""; dec.buf=""; dec.els=[]; renderDecoded(); };
+
+fromHash(); dec.dit=ditMs(); renderGlyphs(); buildKeys(); renderDecoded();
+</script>
+</body>
+</html>

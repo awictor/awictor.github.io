@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AvgCost — Average Cost & Dollar-Cost Averaging Calculator</title>
+<meta name="description" content="Compute your weighted average cost per share across buy lots, unrealized profit/loss at the current price, and how many shares to average down to a target. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('avg-cost-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#15803d;
+    --bg:#f5f7f5; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e2e6e2; --shadow:0 1px 3px rgba(0,0,0,.08); --up:#16a34a; --down:#dc2626;
+  }
+  [data-theme="dark"]{
+    --bg:#0f130f; --card:#181d18; --fg:#eef4ee; --muted:#93a293; --line:#26302a; --shadow:0 1px 3px rgba(0,0,0,.5); --up:#4ade80; --down:#f87171;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:760px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#166534);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:760px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  h2{font-size:1rem;margin:0 0 12px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  .lot{display:grid;grid-template-columns:1fr 1fr auto;gap:10px;margin-bottom:10px;align-items:end}
+  .lot button{border:1px solid var(--line);background:var(--bg);color:var(--muted);border-radius:8px;padding:9px 12px;cursor:pointer;font:inherit}
+  .add{background:var(--c);color:#fff;border:0;border-radius:8px;padding:9px 15px;cursor:pointer;font:inherit;font-weight:600}
+  .res{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:8px}
+  @media(max-width:520px){.res{grid-template-columns:1fr}}
+  .stat{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+  .stat span{display:block;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .stat b{font-size:1.3rem;font-variant-numeric:tabular-nums}
+  .pl{margin-top:14px;text-align:center;font-size:1.05rem}
+  .up{color:var(--up)} .down{color:var(--down)}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+  @media(max-width:520px){.grid3{grid-template-columns:1fr}}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:760px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">📊</div>
+    <div><h1>AvgCost</h1><div class="sub">Average share cost, P/L &amp; averaging down</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <h2>Your buy lots</h2>
+    <div id="lots"></div>
+    <button class="add" id="add" type="button">+ Add lot</button>
+    <div class="res" style="margin-top:16px">
+      <div class="stat"><span>Total shares</span><b id="tShares">—</b></div>
+      <div class="stat"><span>Total invested</span><b id="tCost">—</b></div>
+      <div class="stat"><span>Avg cost / share</span><b id="tAvg">—</b></div>
+    </div>
+    <div style="margin-top:16px">
+      <label for="cur">Current price (optional) — unrealized P/L</label>
+      <input type="number" id="cur" step="any" placeholder="e.g. 18.50">
+    </div>
+    <div class="pl" id="pl"></div>
+  </div>
+
+  <div class="card">
+    <h2>Average down to a target</h2>
+    <div class="grid3">
+      <div><label for="adBuy">Buy price</label><input type="number" id="adBuy" step="any" value="10"></div>
+      <div><label for="adTarget">Target avg</label><input type="number" id="adTarget" step="any" value="15"></div>
+      <div><label>Shares needed</label><input id="adOut" readonly></div>
+    </div>
+    <div class="sub" id="adNote" style="margin-top:8px"></div>
+  </div>
+</main>
+<footer>
+  Estimates only — not financial advice. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/avg-cost">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  function averageCost(lots){
+    if(!Array.isArray(lots) || lots.length === 0) throw new Error('need at least one lot');
+    let totalShares = 0, totalCost = 0;
+    for(const lot of lots){
+      const shares = Number(lot.shares), price = Number(lot.price);
+      if(!(shares > 0) || !(price >= 0)) throw new Error('each lot needs positive shares and non-negative price');
+      totalShares += shares;
+      totalCost += shares * price;
+    }
+    return { totalShares, totalCost, avgPrice: totalCost / totalShares };
+  }
+
+  function profitLoss(lots, currentPrice){
+    const { totalShares, totalCost } = averageCost(lots);
+    if(!(currentPrice >= 0)) throw new Error('current price must be non-negative');
+    const value = totalShares * currentPrice;
+    const gain = value - totalCost;
+    return { value, cost: totalCost, gain, gainPct: totalCost === 0 ? 0 : gain / totalCost * 100 };
+  }
+
+  // shares of `buyPrice` needed to move the average from `avg` to `target`
+  function sharesToReach(shares, avg, buyPrice, target){
+    if(!(shares > 0)) throw new Error('current shares must be positive');
+    if(target === buyPrice) throw new Error('target cannot equal the buy price');
+    const x = shares * (avg - target) / (target - buyPrice);
+    return x;
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('lots')){
+    const $ = id => document.getElementById(id);
+    const money = n => n.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+
+    function addLot(price = '', shares = ''){
+      const row = document.createElement('div');
+      row.className = 'lot';
+      row.innerHTML =
+        `<div><label>Price</label><input type="number" step="any" class="p" value="${price}" placeholder="price"></div>` +
+        `<div><label>Shares</label><input type="number" step="any" class="s" value="${shares}" placeholder="shares"></div>` +
+        `<button type="button" class="rm">✕</button>`;
+      row.querySelector('.rm').addEventListener('click', () => { row.remove(); render(); });
+      row.querySelectorAll('input').forEach(i => i.addEventListener('input', render));
+      $('lots').appendChild(row);
+    }
+
+    function currentLots(){
+      return [...$('lots').querySelectorAll('.lot')].map(r => ({
+        price: r.querySelector('.p').value,
+        shares: r.querySelector('.s').value
+      })).filter(l => l.price !== '' && l.shares !== '');
+    }
+
+    function render(){
+      const lots = currentLots();
+      let stats;
+      try{ stats = averageCost(lots); }
+      catch(e){ $('tShares').textContent = '—'; $('tCost').textContent = '—'; $('tAvg').textContent = '—'; $('pl').textContent = ''; renderAvgDown(null); return; }
+      $('tShares').textContent = stats.totalShares.toLocaleString(undefined, { maximumFractionDigits: 4 });
+      $('tCost').textContent = money(stats.totalCost);
+      $('tAvg').textContent = money(stats.avgPrice);
+
+      const cur = $('cur').value;
+      if(cur !== '' && Number(cur) >= 0){
+        const pl = profitLoss(lots, Number(cur));
+        const cls = pl.gain >= 0 ? 'up' : 'down';
+        const sign = pl.gain >= 0 ? '+' : '';
+        $('pl').innerHTML = `Value ${money(pl.value)} · <span class="${cls}">${sign}${money(pl.gain)} (${sign}${pl.gainPct.toFixed(2)}%)</span>`;
+      }else $('pl').textContent = '';
+      renderAvgDown(stats);
+    }
+
+    function renderAvgDown(stats){
+      if(!stats){ $('adOut').value = ''; $('adNote').textContent = 'Add lots above to use this.'; return; }
+      const buy = Number($('adBuy').value), target = Number($('adTarget').value);
+      try{
+        const x = sharesToReach(stats.totalShares, stats.avgPrice, buy, target);
+        if(x < 0){ $('adOut').value = 'not possible'; $('adNote').textContent = `Buying at ${money(buy)} can't reach an average of ${money(target)} from ${money(stats.avgPrice)}.`; }
+        else { $('adOut').value = x.toLocaleString(undefined, { maximumFractionDigits: 2 }); $('adNote').textContent = `Buy ${x.toFixed(2)} shares at ${money(buy)} to move your average to ${money(target)}.`; }
+      }catch(e){ $('adOut').value = ''; $('adNote').textContent = e.message; }
+    }
+
+    $('add').addEventListener('click', () => { addLot(); });
+    ['cur', 'adBuy', 'adTarget'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('avg-cost-theme', cur); }catch(e){}
+    });
+
+    addLot(10, 10); addLot(20, 10);
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { averageCost, profitLoss, sharesToReach };
+</script>
+</body>
+</html>

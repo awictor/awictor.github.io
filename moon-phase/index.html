@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MoonPhase — Moon Phase, Age &amp; Illumination for Any Date</title>
+<meta name="description" content="See the moon phase, its age in days, and the illuminated fraction for any date, with a live moon graphic. 100% offline, nothing leaves your browser.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('moon-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#6366f1;
+    --bg:#f4f4fb; --card:#ffffff; --fg:#161826; --muted:#5f6172; --line:#e5e5f1; --shadow:0 1px 3px rgba(0,0,0,.08);
+    --moon:#e8e4c9; --sky:#e9e9f4;
+  }
+  [data-theme="dark"]{
+    --bg:#0a0a14; --card:#14141f; --fg:#eeeef7; --muted:#9092a8; --line:#22222f; --shadow:0 1px 3px rgba(0,0,0,.5);
+    --moon:#e8e4c9; --sky:#0f1020;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:600px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#4338ca);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:600px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem}
+  .out{text-align:center}
+  .disc{width:150px;height:150px;border-radius:50%;margin:6px auto 14px;background:var(--sky);position:relative;overflow:hidden;box-shadow:inset 0 0 0 1px var(--line)}
+  .disc .lit{position:absolute;inset:0;background:var(--moon)}
+  .name{font-size:1.6rem;font-weight:800;color:var(--c)}
+  .metrics{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+  .metric{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .metric .v{font-size:1.4rem;font-weight:800}
+  .metric .k{color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:600px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.8rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🌙</div>
+    <div><h1>MoonPhase</h1><div class="sub">Phase, age &amp; illumination</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="date">Date</label>
+    <input type="date" id="date">
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card out">
+    <div class="disc" id="disc"><div class="lit" id="lit"></div></div>
+    <div class="name" id="name">—</div>
+    <div class="metrics">
+      <div class="metric"><div class="v" id="age">—</div><div class="k">Moon age (days)</div></div>
+      <div class="metric"><div class="v" id="illum">—</div><div class="k">Illuminated</div></div>
+    </div>
+  </div>
+</main>
+<footer>
+  Uses the mean synodic month (29.53 days) from a known new-moon epoch — accurate to about a day, great for calendars and planning (not precise eclipse timing). 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/moon-phase">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  const SYNODIC = 29.530588853;        // mean synodic month (days)
+  const NEW_MOON_JD = 2451550.1;       // reference new moon: 2000-01-06 18:14 UTC
+
+  const jdFromMs = ms => ms / 86400000 + 2440587.5;
+
+  // Moon age in days since the last new moon (0 … SYNODIC).
+  function moonAge(dateMs){
+    const ms = Number(dateMs);
+    if(!Number.isFinite(ms)) throw new Error('invalid date');
+    const days = jdFromMs(ms) - NEW_MOON_JD;
+    return ((days % SYNODIC) + SYNODIC) % SYNODIC;
+  }
+
+  // Illuminated fraction (0 = new, 1 = full).
+  function illumination(age){
+    return (1 - Math.cos(2 * Math.PI * (Number(age) / SYNODIC))) / 2;
+  }
+
+  const PHASES = [
+    { max: 0.02, name: 'New Moon' },
+    { max: 0.22, name: 'Waxing Crescent' },
+    { max: 0.28, name: 'First Quarter' },
+    { max: 0.47, name: 'Waxing Gibbous' },
+    { max: 0.53, name: 'Full Moon' },
+    { max: 0.72, name: 'Waning Gibbous' },
+    { max: 0.78, name: 'Last Quarter' },
+    { max: 0.98, name: 'Waning Crescent' },
+    { max: 1.01, name: 'New Moon' }
+  ];
+  function phaseName(age){
+    const f = Number(age) / SYNODIC;
+    return PHASES.find(p => f < p.max).name;
+  }
+
+  function phase(dateMs){
+    const age = moonAge(dateMs);
+    return { age, illumination: illumination(age), name: phaseName(age), waxing: age < SYNODIC / 2 };
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('disc')){
+    const $ = id => document.getElementById(id);
+    $('date').value = new Date().toISOString().slice(0, 10);
+
+    function render(){
+      try{
+        const ms = new Date($('date').value + 'T12:00:00Z').getTime();
+        const p = phase(ms);
+        $('name').textContent = p.name;
+        $('age').textContent = p.age.toFixed(1);
+        $('illum').textContent = Math.round(p.illumination * 100) + '%';
+        // simple lit-fraction graphic: reveal a horizontal slice from the correct side
+        const pctLit = p.illumination * 100;
+        const side = p.waxing ? 'right' : 'left';
+        $('lit').style.clipPath = side === 'right'
+          ? `inset(0 0 0 ${100 - pctLit}%)`
+          : `inset(0 ${100 - pctLit}% 0 0)`;
+        $('err').textContent = '';
+      }catch(e){ $('name').textContent = '—'; $('age').textContent = '—'; $('illum').textContent = '—'; $('err').textContent = e.message; }
+    }
+    $('date').addEventListener('input', render);
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('moon-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { SYNODIC, NEW_MOON_JD, jdFromMs, moonAge, illumination, phaseName, phase };
+</script>
+</body>
+</html>

@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Riffle — living pool caustics</title>
+<style>
+  html,body{margin:0;height:100%;background:#04121c;overflow:hidden;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#dff}
+  #c{position:fixed;inset:0;width:100%;height:100%;display:block;cursor:crosshair;touch-action:none}
+  #ui{position:fixed;left:0;right:0;bottom:0;padding:12px 14px 14px;
+    display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;
+    background:linear-gradient(to top,rgba(2,10,18,.72),rgba(2,10,18,0));
+    -webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);user-select:none;pointer-events:none}
+  #ui>*{pointer-events:auto}
+  .chip{border:1px solid rgba(150,220,255,.28);background:rgba(10,30,44,.55);color:#cfefff;
+    font-size:12px;letter-spacing:.02em;padding:7px 12px;border-radius:999px;cursor:pointer;
+    transition:background .15s,border-color .15s,transform .1s;white-space:nowrap}
+  .chip:hover{background:rgba(24,64,90,.8);border-color:rgba(150,220,255,.6)}
+  .chip:active{transform:translateY(1px)}
+  .chip.on{background:rgba(70,180,230,.28);border-color:rgba(150,220,255,.85);color:#eaffff}
+  #hint{position:fixed;top:12px;left:14px;font-size:12px;line-height:1.5;color:rgba(200,235,255,.72);
+    text-shadow:0 1px 3px rgba(0,0,0,.6);pointer-events:none;max-width:52vw;
+    transition:opacity 1s ease}
+  #hint b{color:#8fe6ff;font-weight:600}
+  #title{position:fixed;top:12px;right:16px;text-align:right;pointer-events:none;
+    text-shadow:0 1px 4px rgba(0,0,0,.6)}
+  #title h1{margin:0;font-size:20px;font-weight:700;letter-spacing:.06em;color:#bff0ff}
+  #title span{font-size:11px;color:rgba(180,225,255,.66);letter-spacing:.04em}
+  #toast{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(.9);
+    background:rgba(8,24,36,.92);border:1px solid rgba(150,220,255,.4);color:#eaffff;
+    padding:10px 18px;border-radius:10px;font-size:13px;opacity:0;pointer-events:none;
+    transition:opacity .25s,transform .25s}
+  #toast.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
+  .sep{width:1px;height:20px;background:rgba(150,220,255,.22);margin:0 2px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hint"><b>Click</b> to drop a stone · <b>Drag</b> to swing the sun · <b>Scroll</b> for depth</div>
+<div id="title"><h1>RIFFLE</h1><span>refracted-sunlight caustics</span></div>
+<div id="ui">
+  <div class="chip" data-preset="dawn">Calm Dawn</div>
+  <div class="chip" data-preset="midday">Midday Shimmer</div>
+  <div class="chip" data-preset="storm">Storm</div>
+  <div class="sep"></div>
+  <div class="chip" id="rain">Rain: off</div>
+  <div class="chip" id="view">View: pool</div>
+  <div class="sep"></div>
+  <div class="chip" id="perma">Copy link</div>
+  <div class="chip" id="snap">Save PNG</div>
+</div>
+<div id="toast"></div>
+<script>
+"use strict";
+(function(){
+const N = 176;                       // simulation grid (N x N)
+const M = N*N;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const off = document.createElement('canvas'); off.width = off.height = N;
+const octx = off.getContext('2d');
+const img = octx.createImageData(N, N), PIX = img.data;
+
+// --- buffers -------------------------------------------------------------
+const H = new Float32Array(M);                       // heightfield
+const aR = new Float32Array(M), aG = new Float32Array(M), aB = new Float32Array(M); // splat accum
+const sR = new Float32Array(M), sG = new Float32Array(M), sB = new Float32Array(M); // blurred
+const bloom = new Float32Array(M), btmp = new Float32Array(M), tmp = new Float32Array(M);
+const tileVar = new Float32Array(M);                 // per-pixel tile shading
+
+// --- scene state (serialized in URL hash) --------------------------------
+const S = { az: 0.6, el: 0.55, amp: 1.0, speed: 1.0, depth: 1.0, drops: [] };
+let view = 0, rainOn = false;        // view: 0 pool, 1 caustics-only
+const coarse = matchMedia('(pointer:coarse)').matches;         // touch device
+const reduceMQ = matchMedia('(prefers-reduced-motion: reduce)');
+let reduce = reduceMQ.matches;       // freeze ambient motion when set
+reduceMQ.addEventListener?.('change', e=>{ reduce=e.matches; });
+
+// --- utilities -----------------------------------------------------------
+function hash1(n){ const x = Math.sin(n*127.1+311.7)*43758.5453; return x-Math.floor(x); }
+function clamp(v,a,b){ return v<a?a:v>b?b:v; }
+function toast(t){ const el=document.getElementById('toast'); el.textContent=t; el.classList.add('show');
+  clearTimeout(toast._t); toast._t=setTimeout(()=>el.classList.remove('show'),1400); }
+
+// precompute tile shading so grout lines stay stable
+const TILES = 7;
+for(let i=0;i<N;i++)for(let j=0;j<N;j++){
+  const u=(j/N)*TILES, v=(i/N)*TILES, ti=Math.floor(u), tj=Math.floor(v);
+  const fu=u-ti, fv=v-tj;
+  const gw=0.06, grout = Math.min(smooth(fu,gw),smooth(1-fu,gw),smooth(fv,gw),smooth(1-fv,gw));
+  tileVar[i*N+j] = (0.9 + 0.14*hash1(ti*7.3+tj*3.1)) * (0.5+0.5*grout);
+}
+function smooth(x,e){ x=clamp(x/e,0,1); return x*x*(3-2*x); }
+
+// --- heightfield ---------------------------------------------------------
+function buildHeight(t){
+  const gust = 0.55 + 0.45*Math.sin(t*0.11) * Math.sin(t*0.047+1.3); // slow wind cycle
+  const A = S.amp*(0.5+0.5*gust), sp = S.speed;
+  const wx = Math.cos(t*0.05)*0.9, wy = Math.sin(t*0.05)*0.9;         // drifting wind dir
+  const drops = S.drops;
+  for(let i=0;i<N;i++){
+    const y = i/N;
+    for(let j=0;j<N;j++){
+      const x = j/N, idx=i*N+j;
+      // ambient wind-wave field: a few travelling sinusoids
+      let h =  Math.sin((x*7.2+y*2.1)*1.0 + t*1.7*sp + wx) * 0.55
+             + Math.sin((x*3.1-y*6.4)     - t*1.3*sp + wy) * 0.45
+             + Math.sin((x*11.3+y*9.7)    + t*2.6*sp)      * 0.22;
+      h *= A;
+      // expanding decaying ripple rings
+      for(let k=0;k<drops.length;k++){
+        const d=drops[k], age=t-d.t; if(age<0) continue;
+        const dx=x-d.x, dy=y-d.y, r=Math.sqrt(dx*dx+dy*dy);
+        const front = age*0.42*sp;
+        const env = Math.exp(-((r-front)*(r-front))*70.0);
+        if(env<0.002) continue;
+        h += d.str * Math.exp(-age*0.85) * Math.sin((r-front)*46.0) * env * 2.4;
+      }
+      H[idx]=h;
+    }
+  }
+}
+
+// separable box blur (radius r) src->dst using tmp
+function blur(src,dst,r){
+  const inv=1/(2*r+1);
+  for(let i=0;i<N;i++){ let acc=0; const row=i*N;
+    for(let j=-r;j<=r;j++) acc+=src[row+clamp(j,0,N-1)];
+    for(let j=0;j<N;j++){ tmp[row+j]=acc*inv;
+      acc+=src[row+clamp(j+r+1,0,N-1)]-src[row+clamp(j-r,0,N-1)]; } }
+  for(let j=0;j<N;j++){ let acc=0;
+    for(let i=-r;i<=r;i++) acc+=tmp[clamp(i,0,N-1)*N+j];
+    for(let i=0;i<N;i++){ dst[i*N+j]=acc*inv;
+      acc+=tmp[clamp(i+r+1,0,N-1)*N+j]-tmp[clamp(i-r,0,N-1)*N+j]; } }
+}
+
+// splat one channel's ray onto floor accum (nearest, energy-conserving)
+function splat(acc,idx,tx,ty){
+  const xi=tx|0, yi=ty|0;
+  if(xi<0||yi<0||xi>=N||yi>=N) return;
+  acc[yi*N+xi] += 1;
+}
+
+// --- caustics: displace downward rays by surface gradient ----------------
+function caustics(){
+  aR.fill(0); aG.fill(0); aB.fill(0);
+  // sun lateral push: low sun (small el) => longer, stretched filaments
+  const low = 1-Math.sin(S.el);
+  const push = S.depth*(2.2 + 8.5*low);
+  const sxL = Math.cos(S.az)*push, syL = Math.sin(S.az)*push;
+  const g = S.depth*(3.0 + 5.0*low);          // gradient displacement scale
+  // chromatic dispersion: R bends most, B least
+  const dR=g*1.10, dG=g*1.0, dB=g*0.90;
+  for(let i=1;i<N-1;i++){
+    for(let j=1;j<N-1;j++){
+      const idx=i*N+j;
+      const gx=H[idx+1]-H[idx-1], gy=H[idx+N]-H[idx-N];
+      const bx=j+sxL, by=i+syL;
+      splat(aR,idx, bx+gx*dR, by+gy*dR);
+      splat(aG,idx, bx+gx*dG, by+gy*dG);
+      splat(aB,idx, bx+gx*dB, by+gy*dB);
+    }
+  }
+  blur(aR,sR,1); blur(aG,sG,1); blur(aB,sB,1);
+  for(let p=0;p<M;p++) btmp[p]=sR[p]+sG[p]+sB[p];
+  blur(btmp,bloom,3);                          // wide additive glow
+}
+
+// --- render --------------------------------------------------------------
+function render(t){
+  // sun direction (3D) for specular glints on the surface
+  const se=Math.sin(S.el), sc=Math.cos(S.el);
+  const Sx=Math.cos(S.az)*sc, Sy=Math.sin(S.az)*sc, Sz=se;
+  const Hx=Sx, Hy=Sy, Hz=Sz+1, Hl=1/Math.hypot(Hx,Hy,Hz); // half-vector w/ up (0,0,1)
+  const hx=Hx*Hl, hy=Hy*Hl, hz=Hz*Hl;
+  const dfac = Math.exp(-S.depth*0.8);          // depth attenuation
+  const causticOnly = view===1;
+  const exp = 0.85, glowExp = 0.5;
+  for(let i=0;i<N;i++){
+    for(let j=0;j<N;j++){
+      const idx=i*N+j, o=idx*4;
+      // caustic core (tonemapped chromatic)
+      const cr=1-Math.exp(-sR[idx]*exp), cg=1-Math.exp(-sG[idx]*exp), cb=1-Math.exp(-sB[idx]*exp);
+      const bg=1-Math.exp(-bloom[idx]*glowExp);
+      let r,g,b;
+      if(causticOnly){
+        r=cr+bg*0.5; g=cg+bg*0.6; b=cb+bg*0.9;
+      }else{
+        // pool-tile floor with depth (deeper => dimmer + bluer)
+        const tv=tileVar[idx];
+        let fr=0.16*tv*dfac + 0.02*(1-dfac);
+        let fg=0.42*tv*dfac + 0.10*(1-dfac);
+        let fb=0.52*tv*dfac + 0.22*(1-dfac);
+        // add caustics (attenuated by depth), with chromatic fringe + bloom
+        const ca = 0.55+0.45*dfac;
+        r = fr + cr*1.15*ca + bg*0.35;
+        g = fg + cg*1.30*ca + bg*0.55;
+        b = fb + cb*1.40*ca + bg*0.85;
+        // thin water surface: Fresnel blue tint + animated specular sun glint
+        const gx=(H[clamp(j+1,0,N-1)+i*N]-H[clamp(j-1,0,N-1)+i*N]);
+        const gy=(H[i<N-1?idx+N:idx]-H[i>0?idx-N:idx]);
+        const nl=1/Math.hypot(gx,gy,1), nx=-gx*nl, ny=-gy*nl, nz=nl;
+        const spec=Math.max(0,nx*hx+ny*hy+nz*hz);
+        const glint=Math.pow(spec,42)* (0.6+0.5*se);
+        r += glint*0.9;  g += glint*0.95; b += glint*1.0;
+        // faint surface color layer
+        r=r*0.94+0.02; g=g*0.94+0.06; b=b*0.94+0.10;
+      }
+      PIX[o]  =clamp(Math.sqrt(clamp(r,0,1))*255,0,255);   // gamma-ish lift
+      PIX[o+1]=clamp(Math.sqrt(clamp(g,0,1))*255,0,255);
+      PIX[o+2]=clamp(Math.sqrt(clamp(b,0,1))*255,0,255);
+      PIX[o+3]=255;
+    }
+  }
+  octx.putImageData(img,0,0);
+  ctx.imageSmoothingEnabled=true;
+  ctx.drawImage(off,0,0,N,N,0,0,cv.width,cv.height);
+}
+
+// --- main loop -----------------------------------------------------------
+// `clock` is the sim time in seconds. It advances freely unless the user
+// prefers reduced motion, in which case it only advances while something is
+// actively happening (a ripple still playing, rain on, or a live drag) so the
+// pool sits still by default but a dropped stone still ripples and settles.
+let clock=0, lastNow=performance.now();
+function frame(now){
+  let dt=(now-lastNow)/1000; lastNow=now;
+  if(dt>0.1) dt=0.1;                                  // clamp after tab-switch
+  const rippling = S.drops.some(d=> (clock-d.t) < 6);
+  const active = rainOn || rippling || down;
+  if(!reduce || active) clock+=dt;
+  const t=clock;
+  // cull expired drops
+  if(S.drops.length) S.drops = S.drops.filter(d=> (t-d.t) < 14);
+  if(rainOn && Math.random()<0.06) addDrop(Math.random(),Math.random(),0.5+Math.random()*0.5,t);
+  buildHeight(t); caustics(); render(t);
+  requestAnimationFrame(frame);
+}
+function addDrop(x,y,str,t){ S.drops.push({x,y,str,t}); if(S.drops.length>26) S.drops.shift(); }
+
+// --- interaction ---------------------------------------------------------
+function resize(){ cv.width=innerWidth*devicePixelRatio|0; cv.height=innerHeight*devicePixelRatio|0; }
+addEventListener('resize',resize); resize();
+
+const pts=new Map(); let pinch0=0, depth0=0;   // pointer tracking for pinch
+let down=false, moved=false, px=0, py=0, baseAz=0, baseEl=0;
+const hint=document.getElementById('hint');
+if(coarse && hint) hint.innerHTML='<b>Tap</b> to drop a stone · <b>Drag</b> to swing the sun · <b>Pinch</b> for depth';
+function dismissHint(){ if(hint) hint.style.opacity=0; }
+setTimeout(dismissHint, 7000);                 // auto-fade if never touched
+
+cv.addEventListener('pointerdown',e=>{ dismissHint();
+  // only the first pointer starts a sun-drag; a second finger begins a pinch
+  // and must NOT reset the drag origin (which would scramble the sun).
+  if(pts.size===0){ down=true; moved=false; px=e.clientX; py=e.clientY;
+    baseAz=S.az; baseEl=S.el; cv.style.cursor='grabbing'; cv.setPointerCapture(e.pointerId); }
+  pts.set(e.pointerId,e);
+  if(pts.size===2){ const a=[...pts.values()];
+    pinch0=Math.hypot(a[0].clientX-a[1].clientX,a[0].clientY-a[1].clientY); depth0=S.depth; }});
+
+cv.addEventListener('pointermove',e=>{
+  if(pts.has(e.pointerId)) pts.set(e.pointerId,e);
+  if(pts.size>=2){                              // two fingers => pinch depth only
+    const a=[...pts.values()]; const d=Math.hypot(a[0].clientX-a[1].clientX,a[0].clientY-a[1].clientY);
+    if(pinch0>0){ S.depth=clamp(depth0*pinch0/d,0.35,3.0); clearPreset(); } moved=true; return; }
+  if(!down) return;                             // single-pointer => swing the sun
+  const dx=e.clientX-px, dy=e.clientY-py;
+  if(Math.abs(dx)+Math.abs(dy)>5) moved=true;
+  if(moved){ S.az=baseAz+dx*0.006; S.el=clamp(baseEl-dy*0.004,0.12,1.45); clearPreset(); } });
+
+function endPointer(e){
+  const wasSingle = pts.size<=1;
+  pts.delete(e.pointerId); if(pts.size<2) pinch0=0;
+  if(pts.size>0) return;                         // wait for all fingers up
+  down=false; cv.style.cursor='crosshair';
+  if(!moved && wasSingle){ addDrop(e.clientX/innerWidth, e.clientY/innerHeight, 1.0, clock); }
+  save();
+}
+cv.addEventListener('pointerup',endPointer); cv.addEventListener('pointercancel',endPointer);
+cv.addEventListener('wheel',e=>{ e.preventDefault();
+  S.depth=clamp(S.depth*(e.deltaY>0?1.08:0.925),0.35,3.0); clearPreset(); save(); },{passive:false});
+
+// --- chips ---------------------------------------------------------------
+const presets={
+  dawn:  {az:0.35, el:0.22, amp:0.6, speed:0.6, depth:1.1},
+  midday:{az:0.9,  el:1.25, amp:1.0, speed:1.0, depth:0.9},
+  storm: {az:0.5,  el:0.3,  amp:2.1, speed:1.8, depth:1.6}
+};
+const presetChips=[...document.querySelectorAll('[data-preset]')];
+function clearPreset(){ presetChips.forEach(c=>c.classList.remove('on')); }
+presetChips.forEach(el=>el.addEventListener('click',()=>{
+  Object.assign(S,presets[el.dataset.preset]);
+  clearPreset(); el.classList.add('on');       // persistent selected feedback
+  save(); toast(el.textContent);
+}));
+const rainBtn=document.getElementById('rain');
+rainBtn.addEventListener('click',()=>{ rainOn=!rainOn; rainBtn.textContent='Rain: '+(rainOn?'on':'off');
+  rainBtn.classList.toggle('on',rainOn); });
+const viewBtn=document.getElementById('view');
+viewBtn.addEventListener('click',()=>{ view=view?0:1; viewBtn.textContent='View: '+(view?'caustics':'pool');
+  viewBtn.classList.toggle('on',view===1); });
+document.getElementById('perma').addEventListener('click',()=>{ save();
+  const u=location.href; if(navigator.clipboard) navigator.clipboard.writeText(u).then(()=>toast('Link copied'),()=>toast('Link in URL bar'));
+  else toast('Link in URL bar'); });
+document.getElementById('snap').addEventListener('click',()=>{
+  const a=document.createElement('a'); a.download='riffle.png'; a.href=cv.toDataURL('image/png'); a.click();
+  toast('PNG saved'); });
+
+// --- URL hash serialize / restore ----------------------------------------
+function save(){
+  const t=(performance.now()-t0)/1000;
+  const d=S.drops.map(x=>[r2(x.x),r2(x.y),r2(x.str),r2(t-x.t)].join(',')).join(';');
+  const q=`az=${r2(S.az)}&el=${r2(S.el)}&amp=${r2(S.amp)}&sp=${r2(S.speed)}&dp=${r2(S.depth)}&d=${d}`;
+  history.replaceState(null,'','#'+q);
+}
+function r2(v){ return Math.round(v*100)/100; }
+function load(){
+  const h=location.hash.slice(1); if(!h) return;
+  const p=new URLSearchParams(h);
+  // only accept finite numbers; a corrupted link falls back to defaults
+  const num=(k,lo,hi)=>{ const v=+p.get(k); return Number.isFinite(v)?clamp(v,lo,hi):null; };
+  const set=(k,prop,lo,hi)=>{ if(p.has(k)){ const v=num(k,lo,hi); if(v!==null) S[prop]=v; } };
+  set('az','az',-100,100); set('el','el',0.12,1.45); set('amp','amp',0,4);
+  set('sp','speed',0,4);   set('dp','depth',0.35,3.0);
+  const d=p.get('d');
+  if(d){ S.drops = d.split(';').filter(Boolean).map(s=>{
+      const a=s.split(',').map(Number);
+      if(a.length<4 || !a.every(Number.isFinite)) return null;   // reject junk
+      return {x:a[0],y:a[1],str:a[2],t:-a[3]};   // negative t => already aged at start
+    }).filter(Boolean); }
+}
+load();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Postern — the bidirectional chmod workbench</title>
+<style>
+  :root{
+    --bg:#f4f1ea; --panel:#fffdf7; --ink:#1f2430; --dim:#6b7280; --line:#d9d3c6;
+    --accent:#c2410c; --accent2:#0d7d74; --on:#0d7d74; --off:#d9d3c6;
+    --warn:#b45309; --crit:#b91c1c; --info:#2563eb; --ok:#15803d;
+    --mono:'SFMono-Regular',ui-monospace,'Cascadia Code','Consolas','Menlo',monospace;
+  }
+  [data-theme=dark]{
+    --bg:#0f1216; --panel:#171b22; --ink:#e6e6e6; --dim:#8b93a1; --line:#2a3038;
+    --accent:#fb923c; --accent2:#2dd4bf; --on:#2dd4bf; --off:#2a3038;
+    --warn:#fbbf24; --crit:#f87171; --info:#60a5fa; --ok:#4ade80;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--mono);font-size:14px;line-height:1.5;padding:18px}
+  a{color:var(--accent)}
+  .wrap{max-width:960px;margin:0 auto}
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+  h1{font-size:22px;margin:0;color:var(--accent);letter-spacing:.5px}
+  h1 .p{color:var(--dim);font-weight:400;font-size:12px}
+  .tag{color:var(--dim);font-size:12px;margin:0 0 16px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+  .row{display:flex;gap:16px;flex-wrap:wrap}
+  .col{flex:1 1 300px;min-width:280px}
+  label.f{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);margin-bottom:4px}
+  input[type=text]{width:100%;background:transparent;border:1px solid var(--line);border-radius:6px;color:var(--ink);
+    font-family:var(--mono);font-size:16px;padding:8px 10px}
+  input[type=text]:focus{outline:none;border-color:var(--accent)}
+  input.bad{border-color:var(--crit)}
+  .grid{border-collapse:collapse;width:100%;max-width:360px}
+  .grid th{color:var(--dim);font-weight:400;font-size:12px;padding:4px 8px;text-align:center}
+  .grid td:first-child{color:var(--dim);text-align:left;padding-right:10px;font-size:12px}
+  .cell{width:46px;height:40px;border:1px solid var(--line);border-radius:6px;background:transparent;color:var(--dim);
+    font-family:var(--mono);font-size:15px;cursor:pointer;transition:.08s}
+  .cell:hover{border-color:var(--accent)}
+  .cell:focus{outline:2px solid var(--accent);outline-offset:1px}
+  .cell.on{background:var(--on);color:#fff;border-color:var(--on);font-weight:700}
+  [data-theme=dark] .cell.on{color:#04211d}
+  td{padding:3px}
+  .spec{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .spec .cell{width:auto;padding:0 12px}
+  .btn{background:transparent;border:1px solid var(--line);border-radius:6px;color:var(--ink);font-family:var(--mono);
+    font-size:12px;padding:6px 10px;cursor:pointer}
+  .btn:hover{border-color:var(--accent);color:var(--accent)}
+  .chip{background:transparent;border:1px solid var(--line);border-radius:20px;color:var(--ink);font-family:var(--mono);
+    font-size:12px;padding:5px 12px;cursor:pointer;transition:.08s}
+  .chip:hover{border-color:var(--accent2);color:var(--accent2)}
+  .chips{display:flex;gap:8px;flex-wrap:wrap}
+  .chip b{color:var(--accent)}
+  .prompt{font-size:15px;background:#0b0e12;color:#e6e6e6;border-radius:8px;padding:12px 14px;display:flex;
+    align-items:center;gap:10px;flex-wrap:wrap;overflow-x:auto}
+  .prompt .ps{color:#2dd4bf}
+  .prompt code{color:#fbbf24;white-space:nowrap}
+  .prompt .cp{margin-left:auto;border:1px solid #2a3038;color:#8b93a1}
+  .prompt .cp:hover{color:#fbbf24;border-color:#fbbf24}
+  .explain b{color:var(--accent2)}
+  .lint{list-style:none;padding:0;margin:8px 0 0}
+  .lint li{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px dashed var(--line)}
+  .lint li:first-child{border-top:none}
+  .sev{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:2px 7px;border-radius:4px;
+    flex:none;margin-top:2px}
+  .sev.crit{background:var(--crit);color:#fff}
+  .sev.warn{background:var(--warn);color:#fff}
+  .sev.info{background:var(--info);color:#fff}
+  .sev.ok{background:var(--ok);color:#fff}
+  .muted{color:var(--dim)}
+  .hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .hdr h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);margin:0}
+  .toggle{display:flex;gap:6px;align-items:center}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .seg button{background:transparent;border:none;color:var(--dim);font-family:var(--mono);font-size:12px;padding:5px 12px;cursor:pointer}
+  .seg button.sel{background:var(--accent);color:#fff}
+  .diffgrid{font-size:13px}
+  .diffgrid .add{color:var(--ok)}
+  .diffgrid .rem{color:var(--crit)}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);
+    color:var(--bg);padding:8px 16px;border-radius:8px;opacity:0;transition:.2s;pointer-events:none;font-size:13px}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .tests{font-size:12px}
+  .tests .t{padding:2px 0;color:var(--dim)}
+  .tests .t.pass::before{content:"\2713 ";color:var(--ok)}
+  .tests .t.fail{color:var(--crit)}
+  .tests .t.fail::before{content:"\2717 ";color:var(--crit)}
+  kbd{font-family:var(--mono);background:var(--line);border-radius:4px;padding:1px 5px;font-size:11px}
+  .hint{font-size:11px;color:var(--dim);margin-top:6px}
+  details summary{cursor:pointer;color:var(--dim);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Postern <span class="p">// bidirectional chmod workbench</span></h1>
+    <div class="toggle">
+      <div class="seg" id="ftype">
+        <button data-t="file" class="sel">file</button>
+        <button data-t="dir">directory</button>
+      </div>
+      <button class="btn" id="theme">◐ theme</button>
+    </div>
+  </header>
+  <p class="tag">Toggle the grid, type an octal mode, edit the <code>ls -l</code> string, or apply real symbolic chmod — every surface stays in sync. State lives in the URL.</p>
+
+  <div class="panel">
+    <div class="chips" id="presets"></div>
+  </div>
+
+  <div class="row">
+    <div class="panel col">
+      <div class="hdr"><h2>Permission matrix</h2><span class="muted" id="modelbl"></span></div>
+      <table class="grid">
+        <thead><tr><th></th><th>read</th><th>write</th><th>exec</th></tr></thead>
+        <tbody id="gridbody"></tbody>
+      </table>
+      <div class="spec" id="specbody"></div>
+      <div class="hint">Click cells, or focus one and use <kbd>←↑↓→</kbd> to move, <kbd>space</kbd> to toggle, <kbd>r</kbd>/<kbd>w</kbd>/<kbd>x</kbd> hotkeys.</div>
+    </div>
+
+    <div class="panel col">
+      <div class="hdr"><h2>Surfaces</h2></div>
+      <label class="f" for="octal">Octal mode</label>
+      <input type="text" id="octal" spellcheck="false" autocomplete="off" inputmode="numeric">
+      <div class="hint" id="octmsg"></div>
+      <label class="f" for="ls" style="margin-top:12px">ls -l permission string</label>
+      <input type="text" id="ls" spellcheck="false" autocomplete="off">
+      <div class="hint" id="lsmsg"></div>
+      <label class="f" for="sym" style="margin-top:12px">Symbolic chmod (applied to current mode — Enter)</label>
+      <input type="text" id="sym" spellcheck="false" autocomplete="off" placeholder="u+rwx,go-w,a+X,+t">
+      <div class="hint" id="symmsg">e.g. <code>go-w</code>, <code>a+X</code>, <code>u=rwx</code>, <code>+t</code></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="hdr"><h2>Generated commands</h2></div>
+    <div class="prompt"><span class="ps">$</span><code id="cmdOct"></code>
+      <button class="btn cp" data-copy="cmdOct">copy</button></div>
+    <div class="prompt" style="margin-top:8px"><span class="ps">$</span><code id="cmdSym"></code>
+      <button class="btn cp" data-copy="cmdSym">copy</button></div>
+  </div>
+
+  <div class="panel explain">
+    <div class="hdr"><h2>Plain English</h2></div>
+    <div id="english"></div>
+  </div>
+
+  <div class="panel">
+    <div class="hdr"><h2>Safety linter</h2></div>
+    <ul class="lint" id="lint"></ul>
+  </div>
+
+  <div class="panel">
+    <div class="hdr"><h2>Compare / remediate</h2>
+      <div class="muted">before → after</div></div>
+    <div class="row">
+      <div class="col" style="flex:0 0 auto">
+        <label class="f" for="before">before</label>
+        <input type="text" id="before" spellcheck="false" style="max-width:140px" value="0644">
+      </div>
+      <div class="col" style="flex:0 0 auto">
+        <label class="f">after</label>
+        <input type="text" id="after" spellcheck="false" style="max-width:140px" readonly title="current mode above">
+      </div>
+      <div class="col diffgrid" id="diffout"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <details><summary id="testsum">Self-test matrix</summary>
+      <div class="tests" id="tests" style="margin-top:8px"></div>
+    </details>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+// ---- constants -------------------------------------------------------------
+var SUID=0o4000, SGID=0o2000, SVTX=0o1000;
+var CLASSES=[["Owner","u",6],["Group","g",3],["Others","o",0]];
+
+// ---- core: single source of truth = 12-bit int -----------------------------
+var state={mode:0o644,isDir:false};
+
+// ---- formatters ------------------------------------------------------------
+function octalString(m){ return (m>>>0 & 0o7777).toString(8).padStart(4,"0"); }
+
+function lsTriple(nib,special,sc){
+  var s=(nib&4?"r":"-")+(nib&2?"w":"-");
+  var x=nib&1, last;
+  if(special) last = x ? sc.toLowerCase() : sc.toUpperCase();
+  else last = x ? "x" : "-";
+  return s+last;
+}
+function lsString(m,isDir){
+  return (isDir?"d":"-")
+    + lsTriple((m>>6)&7, m&SUID, "s")
+    + lsTriple((m>>3)&7, m&SGID, "s")
+    + lsTriple( m     &7, m&SVTX, "t");
+}
+
+// ---- parsers ---------------------------------------------------------------
+function parseOctal(str){
+  var t=str.trim();
+  if(!/^[0-7]{1,4}$/.test(t)) throw new Error("Octal must be 1–4 digits 0–7");
+  return parseInt(t,8) & 0o7777;
+}
+function parseLs(str){
+  var t=str.trim();
+  if(!/^[-dlbcps][-rwxsStT]{9}$/.test(t)) throw new Error("Need 10 chars like -rwxr-xr-x");
+  var isDir=t[0]==="d", m=0;
+  var trip=[[1,6,SUID],[4,3,SGID],[7,0,SVTX]];
+  for(var i=0;i<3;i++){
+    var start=trip[i][0], sh=trip[i][1], sbit=trip[i][2], nib=0;
+    if(t[start]==="r")nib|=4;
+    if(t[start+1]==="w")nib|=2;
+    var xc=t[start+2];
+    if(xc==="x"){nib|=1;}
+    else if(xc==="s"||xc==="t"){nib|=1; m|=sbit;}
+    else if(xc==="S"||xc==="T"){m|=sbit;}
+    m |= nib<<sh;
+  }
+  return {mode:m & 0o7777, isDir:isDir};
+}
+
+// apply ONE symbolic clause to mode (chmod semantics)
+function applyClause(mode,clause,isDir){
+  var m=/^([ugoa]*)([+\-=])([rwxXstugo]*)$/.exec(clause.trim());
+  if(!m) throw new Error('Invalid clause: "'+clause.trim()+'"');
+  var who=m[1], op=m[2], perms=m[3];
+  if(who===""||who.indexOf("a")>=0) who="ugo";
+  var whoSet=[]; ["u","g","o"].forEach(function(c){ if(who.indexOf(c)>=0) whoSet.push(c); });
+  var r=false,w=false,x=false,s=false,t=false;
+  var anyExec=(mode&0o111)!==0;
+  for(var i=0;i<perms.length;i++){
+    var ch=perms[i];
+    if(ch==="r")r=true; else if(ch==="w")w=true; else if(ch==="x")x=true;
+    else if(ch==="X"){ if(isDir||anyExec) x=true; }
+    else if(ch==="s")s=true; else if(ch==="t")t=true;
+    else { // copy source u/g/o
+      var sh=ch==="u"?6:ch==="g"?3:0, nib=(mode>>sh)&7;
+      if(nib&4)r=true; if(nib&2)w=true; if(nib&1)x=true;
+    }
+  }
+  var addMask=0;
+  whoSet.forEach(function(cls){
+    var sh=cls==="u"?6:cls==="g"?3:0, b=0;
+    if(r)b|=4; if(w)b|=2; if(x)b|=1;
+    addMask|= b<<sh;
+  });
+  var special=0;
+  if(s){ if(whoSet.indexOf("u")>=0)special|=SUID; if(whoSet.indexOf("g")>=0)special|=SGID; }
+  if(t) special|=SVTX;
+  if(op==="+") mode|= addMask|special;
+  else if(op==="-") mode&= ~(addMask|special);
+  else { // "=" : clear the targeted classes' rwx + assoc special, then set
+    whoSet.forEach(function(cls){
+      var sh=cls==="u"?6:cls==="g"?3:0;
+      mode&= ~(7<<sh);
+      if(cls==="u")mode&=~SUID;
+      if(cls==="g")mode&=~SGID;
+      if(cls==="o")mode&=~SVTX;
+    });
+    mode|= addMask|special;
+  }
+  return mode & 0o7777;
+}
+function applySymbolic(base,expr,isDir){
+  return expr.split(",").filter(function(c){return c.trim();})
+    .reduce(function(m,c){ return applyClause(m,c,isDir); }, base);
+}
+
+// ---- absolute symbolic form (u=rwx,g=rx,...) -------------------------------
+function absSymbolic(m){
+  function nib(v){ return (v&4?"r":"")+(v&2?"w":"")+(v&1?"x":""); }
+  var u=nib((m>>6)&7), g=nib((m>>3)&7), o=nib(m&7);
+  if(m&SUID) u="s"+u; if(m&SGID) g="s"+g; if(m&SVTX) o="t"+o;
+  return "u="+u+",g="+g+",o="+o;
+}
+
+// ---- minimal symbolic diff (remediation) -----------------------------------
+function minimalSymbolic(before,after){
+  var clauses=[], addG={}, remG={};
+  ["u","g","o"].forEach(function(cls){
+    var sh=cls==="u"?6:cls==="g"?3:0;
+    var b=(before>>sh)&7, a=(after>>sh)&7, add=a&~b, rem=b&~a;
+    function L(v){ return (v&4?"r":"")+(v&2?"w":"")+(v&1?"x":""); }
+    if(add){ (addG[L(add)]=addG[L(add)]||[]).push(cls); }
+    if(rem){ (remG[L(rem)]=remG[L(rem)]||[]).push(cls); }
+  });
+  Object.keys(addG).forEach(function(k){ clauses.push(addG[k].join("")+"+"+k); });
+  Object.keys(remG).forEach(function(k){ clauses.push(remG[k].join("")+"-"+k); });
+  [[SUID,"u","s"],[SGID,"g","s"],[SVTX,"","t"]].forEach(function(sp){
+    var bit=sp[0], who=sp[1], ch=sp[2];
+    if((after&bit)&&!(before&bit)) clauses.push(who+"+"+ch);
+    else if((before&bit)&&!(after&bit)) clauses.push(who+"-"+ch);
+  });
+  return clauses.length ? clauses.join(",") : "(identical)";
+}
+
+// ---- plain-English explainer -----------------------------------------------
+function words(nib){
+  var v=[]; if(nib&4)v.push("read"); if(nib&2)v.push("write"); if(nib&1)v.push("execute");
+  if(!v.length) return "no access";
+  if(v.length===1) return v[0];
+  if(v.length===2) return v[0]+" and "+v[1];
+  return v[0]+", "+v[1]+", and "+v[2];
+}
+function englishHTML(m,isDir){
+  var out=CLASSES.map(function(c){
+    var nib=(m>>c[2])&7, verb=(nib===0?"cannot access":"can "+words(nib));
+    var noun=isDir?"list, and traverse into ":"";
+    return "<div><b>"+c[0]+"</b> "+verb+(isDir&&(nib&1)?" (traverse the directory)":"")+".</div>";
+  });
+  var extra=[];
+  if(m&SUID) extra.push("<b>setuid</b>: runs with the file owner's privileges when executed.");
+  if(m&SGID) extra.push(isDir?"<b>setgid</b>: new files inherit the directory's group.":"<b>setgid</b>: runs with the file group's privileges.");
+  if(m&SVTX) extra.push(isDir?"<b>sticky</b>: only a file's owner can delete or rename it here.":"<b>sticky</b>: legacy on a file, effectively no-op on modern systems.");
+  if(extra.length) out.push("<div style='margin-top:8px'>"+extra.join("<br>")+"</div>");
+  return out.join("");
+}
+
+// ---- safety linter ---------------------------------------------------------
+function lint(m,isDir){
+  var f=[], other=m&7;
+  if((m&0o777)===0o777)
+    f.push(["crit","0777 grants everyone full read/write/execute — never use on shared systems."]);
+  if(other&2){
+    if(isDir && !(m&SVTX))
+      f.push(["crit","World-writable directory without the sticky bit lets anyone delete others' files (add +t)."]);
+    else
+      f.push(["warn","World-writable"+(isDir?" directory":" file")+": any user can modify the contents."]);
+  }
+  if(m&SUID) f.push(["warn","setuid bit set — a bug in this binary can escalate to the owner's privileges."]);
+  if((m&SGID)&&!isDir) f.push(["warn","setgid on a file grants the file's group privileges on execution — audit carefully."]);
+  if((m&SVTX)&&!isDir) f.push(["info","Sticky bit on a file has no effect on modern Unix; it only matters on directories."]);
+  if((m&SGID)&&!isDir&&!(m&0o111)) f.push(["info","setgid without any execute bit does nothing on a regular file."]);
+  if(isDir && !(m&0o100)) f.push(["warn","Owner has no execute bit — you won't be able to cd into or traverse this directory."]);
+  if(!isDir && (m&0o111) && (m&0o044)===0 && (m&0o100))
+    f.push(["info","Executable but not readable by group/other — fine for setuid helpers, unusual otherwise."]);
+  if(!f.length) f.push(["ok","No dangerous patterns detected for a "+(isDir?"directory":"file")+"."]);
+  return f;
+}
+
+// ---- rendering -------------------------------------------------------------
+var gridCells=[]; // 3x3 buttons
+function buildGrid(){
+  var body=document.getElementById("gridbody");
+  CLASSES.forEach(function(c,ri){
+    var tr=document.createElement("tr");
+    tr.innerHTML="<td>"+c[0]+"</td>";
+    [4,2,1].forEach(function(bit,ci){
+      var td=document.createElement("td");
+      var b=document.createElement("button");
+      b.className="cell"; b.dataset.shift=c[2]; b.dataset.bit=bit;
+      b.addEventListener("click",function(){ toggleBit(c[2],bit); });
+      td.appendChild(b); tr.appendChild(td);
+      gridCells.push(b);
+    });
+    body.appendChild(tr);
+  });
+  var spec=document.getElementById("specbody");
+  [["setuid",SUID],["setgid",SGID],["sticky",SVTX]].forEach(function(s){
+    var b=document.createElement("button");
+    b.className="cell"; b.dataset.special=s[1]; b.textContent=s[0];
+    b.addEventListener("click",function(){ state.mode^=s[1]; sync("grid"); });
+    spec.appendChild(b);
+  });
+}
+function toggleBit(shift,bit){ state.mode ^= (bit<<shift); sync("grid"); }
+
+function render(active){
+  var m=state.mode;
+  gridCells.forEach(function(b){
+    var on=(m>>(+b.dataset.shift))&(+b.dataset.bit);
+    b.classList.toggle("on",!!on);
+    b.textContent = on ? ({4:"r",2:"w",1:"x"}[+b.dataset.bit]) : "·";
+  });
+  document.querySelectorAll("#specbody .cell").forEach(function(b){
+    b.classList.toggle("on",!!(m&(+b.dataset.special)));
+  });
+  document.getElementById("modelbl").textContent=octalString(m)+" · "+lsString(m,state.isDir);
+  document.getElementById("octmsg").textContent="";
+  document.getElementById("lsmsg").textContent="";
+  set("octal",octalString(m),active);
+  set("ls",lsString(m,state.isDir),active);
+  document.getElementById("cmdOct").textContent="chmod "+octalString(m)+" "+(state.isDir?"mydir":"myfile");
+  document.getElementById("cmdSym").textContent="chmod "+absSymbolic(m)+" "+(state.isDir?"mydir":"myfile");
+  document.getElementById("english").innerHTML=englishHTML(m,state.isDir);
+  var ul=document.getElementById("lint"); ul.innerHTML="";
+  lint(m,state.isDir).forEach(function(x){
+    var li=document.createElement("li");
+    li.innerHTML="<span class='sev "+x[0]+"'>"+x[0]+"</span><span>"+x[1]+"</span>";
+    ul.appendChild(li);
+  });
+  document.querySelectorAll("#ftype button").forEach(function(b){ b.classList.toggle("sel",b.dataset.t===(state.isDir?"dir":"file")); });
+  renderDiff();
+}
+function set(id,val,active){ var el=document.getElementById(id); if(active!==id) el.value=val; el.classList.remove("bad"); }
+
+function renderDiff(){
+  var el=document.getElementById("before"), out=document.getElementById("diffout");
+  document.getElementById("after").value=octalString(state.mode);
+  var b;
+  try{ b=parseOctal(el.value); el.classList.remove("bad"); }
+  catch(e){ el.classList.add("bad"); out.innerHTML="<span class='muted'>enter a valid octal 'before' mode</span>"; return; }
+  var after=state.mode;
+  if(b===after){ out.innerHTML="<span class='muted'>before and after are identical.</span>"; return; }
+  var min=minimalSymbolic(b,after);
+  var secWorse = ((after&7&2)&&!(b&7&2)) || (after&SUID&&!(b&SUID)) || (after&SGID&&!(b&SGID));
+  var secBetter = (!(after&7&2)&&(b&7&2)) || (!(after&SUID)&&(b&SUID)) || (!(after&SGID)&&(b&SGID));
+  var delta = secWorse ? "<span class='rem'>⚠ widens exposure</span>"
+            : secBetter ? "<span class='add'>✓ tightens security</span>"
+            : "<span class='muted'>no change to exposure surface</span>";
+  out.innerHTML="<div>"+lsString(b,state.isDir)+" → "+lsString(after,state.isDir)+"</div>"
+    +"<div style='margin-top:4px'>minimal: <b style='color:var(--accent)'>chmod "+min+"</b></div>"
+    +"<div style='margin-top:4px'>"+delta+"</div>";
+}
+
+// ---- input wiring ----------------------------------------------------------
+function sync(active){ writeHash(); render(active); }
+function bindField(id,parse,msgId){
+  var el=document.getElementById(id), msg=document.getElementById(msgId);
+  el.addEventListener("input",function(){
+    try{ var r=parse(el.value); el.classList.remove("bad"); msg.textContent="";
+      if(typeof r==="object"){ state.mode=r.mode; state.isDir=r.isDir; } else state.mode=r;
+      sync(id);
+    }catch(e){ el.classList.add("bad"); msg.innerHTML="<span style='color:var(--crit)'>"+e.message+"</span>"; }
+  });
+}
+bindField("octal",parseOctal,"octmsg");
+bindField("ls",parseLs,"lsmsg");
+document.getElementById("sym").addEventListener("keydown",function(e){
+  if(e.key!=="Enter") return;
+  var el=e.target, msg=document.getElementById("symmsg");
+  try{ state.mode=applySymbolic(state.mode,el.value,state.isDir); el.classList.remove("bad");
+    msg.innerHTML="Applied → <b>"+octalString(state.mode)+"</b> ("+lsString(state.mode,state.isDir)+")"; sync();
+  }catch(err){ el.classList.add("bad"); msg.innerHTML="<span style='color:var(--crit)'>"+err.message+"</span>"; }
+});
+document.getElementById("before").addEventListener("input",renderDiff);
+
+// file/dir toggle
+document.querySelectorAll("#ftype button").forEach(function(b){
+  b.addEventListener("click",function(){ state.isDir=b.dataset.t==="dir"; sync(); });
+});
+
+// theme
+function setTheme(t){ document.documentElement.dataset.theme=t; localStorage.setItem("postern-theme",t); }
+document.getElementById("theme").addEventListener("click",function(){
+  setTheme(document.documentElement.dataset.theme==="dark"?"light":"dark");
+});
+setTheme(localStorage.getItem("postern-theme") || (matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light"));
+
+// copy buttons + toast
+function toast(msg){ var t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show");
+  clearTimeout(toast._); toast._=setTimeout(function(){ t.classList.remove("show"); },1400); }
+function execCopy(txt){
+  try{
+    var ta=document.createElement("textarea"); ta.value=txt;
+    ta.style.position="fixed"; ta.style.top="-1000px"; ta.style.opacity="0";
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    var ok=document.execCommand("copy"); document.body.removeChild(ta); return ok;
+  }catch(e){ return false; }
+}
+function copyText(txt){
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    return navigator.clipboard.writeText(txt).then(function(){return true;},function(){return execCopy(txt);});
+  }
+  return Promise.resolve(execCopy(txt));
+}
+document.querySelectorAll(".cp").forEach(function(b){
+  b.addEventListener("click",function(){
+    var txt=document.getElementById(b.dataset.copy).textContent;
+    copyText(txt).then(function(ok){ toast(ok?"Copied: "+txt:"Copy failed — select and copy manually"); });
+  });
+});
+
+// presets
+var PRESETS=[
+  ["0644","file","regular file — owner writes, everyone reads"],
+  ["0755","dir","script or directory — owner writes, all execute/traverse"],
+  ["0600","file","SSH private key — owner only, no group/other"],
+  ["1777","dir","/tmp sticky dir — all write, only owner deletes own"],
+  ["4755","file","setuid binary — runs as its owner (e.g. passwd)"],
+  ["2755","dir","setgid dir — new files inherit the group"],
+  ["0640","file","group-readable config — owner writes, group reads"]
+];
+(function(){
+  var box=document.getElementById("presets");
+  PRESETS.forEach(function(p){
+    var c=document.createElement("button"); c.className="chip";
+    c.innerHTML="<b>"+p[0]+"</b> "+p[2];
+    c.title=p[2];
+    c.addEventListener("click",function(){ state.mode=parseInt(p[0],8); state.isDir=p[1]==="dir"; sync(); });
+    box.appendChild(c);
+  });
+})();
+
+// keyboard flow on grid
+document.addEventListener("keydown",function(e){
+  var i=gridCells.indexOf(document.activeElement);
+  if(i<0) return;
+  var r=i/3|0, c=i%3;
+  if(e.key==="ArrowRight"){ c=(c+1)%3; }
+  else if(e.key==="ArrowLeft"){ c=(c+2)%3; }
+  else if(e.key==="ArrowDown"){ r=(r+1)%3; }
+  else if(e.key==="ArrowUp"){ r=(r+2)%3; }
+  else if(e.key==="r"||e.key==="w"||e.key==="x"){
+    var bit={r:4,w:2,x:1}[e.key]; toggleBit(+gridCells[i].dataset.shift,bit); e.preventDefault(); return;
+  } else return;
+  e.preventDefault(); gridCells[r*3+c].focus();
+});
+
+// ---- URL hash persistence --------------------------------------------------
+function writeHash(){ location.replace("#"+(state.isDir?"d":"")+octalString(state.mode)); }
+function readHash(){
+  var h=(location.hash||"").replace(/^#/,"");
+  var d=/^d/.test(h); if(d)h=h.slice(1);
+  if(/^[0-7]{1,4}$/.test(h)){ state.mode=parseInt(h,8)&0o7777; state.isDir=d; return true; }
+  return false;
+}
+// Only re-render on EXTERNAL hash navigation. writeHash() rewrites the hash to
+// the current state on every edit; that self-triggered hashchange parses back to
+// the same mode, so we skip it and never clobber the field being edited.
+window.addEventListener("hashchange",function(){
+  var pm=state.mode, pd=state.isDir;
+  if(readHash() && (state.mode!==pm || state.isDir!==pd)) render();
+});
+
+// ---- self-test matrix ------------------------------------------------------
+function runTests(){
+  var T=[], pass=0;
+  function eq(name,got,want){ var ok=String(got)===String(want); if(ok)pass++;
+    T.push([ok,name+" → "+got+(ok?"":" (expected "+want+")")]); }
+  eq("ls 4755 setuid+x",              lsString(0o4755,false),"-rwsr-xr-x");
+  eq("ls 4644 setuid no-x (S)",       lsString(0o4644,false),"-rwSr--r--");
+  eq("ls 1777 sticky dir (t)",        lsString(0o1777,true), "drwxrwxrwt");
+  eq("ls 1774 sticky no-x (T)",       lsString(0o1774,false),"-rwxrwxr-T");
+  eq("ls 2755 setgid dir",            lsString(0o2755,true), "drwxr-sr-x");
+  eq("sym u+x on 0644",               octalString(applySymbolic(0o644,"u+x",false)),"0744");
+  eq("sym a+X on file (no exec)",     octalString(applySymbolic(0o644,"a+X",false)),"0644");
+  eq("sym a+X on dir",                octalString(applySymbolic(0o644,"a+X",true)), "0755");
+  eq("sym go+X when owner has x",     octalString(applySymbolic(0o700,"go+X",false)),"0711");
+  eq("sym = clears bits (u=r)",       octalString(applySymbolic(0o777,"u=r",false)),"0477");
+  eq("sym clause order u+rwx,go-w,+t",octalString(applySymbolic(0o000,"u+rwx,go-w,+t",false)),"1700");
+  eq("sym u+s sets setuid",           octalString(applySymbolic(0o755,"u+s",false)),"4755");
+  eq("parse ls roundtrip -rwsr-xr-x", parseLs("-rwsr-xr-x").mode.toString(8),(0o4755).toString(8));
+  eq("minimal 0755→0644",             minimalSymbolic(0o755,0o644),"ugo-x");
+  eq("minimal 0644→1644 sticky",      minimalSymbolic(0o644,0o1644),"+t");
+  eq("minimal 0666→0644 (go-w)",      minimalSymbolic(0o666,0o644),"go-w");
+  eq("absSymbolic 0755",              absSymbolic(0o755),"u=rwx,g=rx,o=rx");
+  var el=document.getElementById("tests");
+  el.innerHTML=T.map(function(x){ return "<div class='t "+(x[0]?"pass":"fail")+"'>"+x[1]+"</div>"; }).join("");
+  document.getElementById("testsum").textContent="Self-test matrix — "+pass+"/"+T.length+" passing";
+  return pass===T.length;
+}
+
+// ---- boot ------------------------------------------------------------------
+buildGrid();
+readHash();
+render();
+var allPass=runTests();
+console.log("[Postern] self-tests "+(allPass?"ALL PASS":"FAILURES — see panel"));
+</script>
+</body>
+</html>

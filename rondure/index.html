@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rondure — a Masyu pearl-loop puzzler</title>
+<style>
+  :root{
+    --bg:#0e1220; --panel:#161c30; --ink:#e8ecf6; --muted:#8b93ad;
+    --accent:#5ad1c8; --gold:#f4c95d; --branch:#ef4444; --breach:#f59e0b;
+    --line:#7fe3da;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(1200px 800px at 50% -10%,#1b2340,#0e1220 60%);
+    color:var(--ink); font-family:"Segoe UI",system-ui,Arial,sans-serif;
+    display:flex; flex-direction:column; align-items:center; min-height:100%;
+    -webkit-user-select:none; user-select:none; padding:18px 12px 40px;
+  }
+  header{text-align:center;margin-bottom:6px}
+  h1{margin:0;font-size:30px;letter-spacing:.14em;font-weight:700}
+  h1 span{color:var(--accent)}
+  .tag{color:var(--muted);font-size:13px;margin-top:4px}
+  .controls{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:12px 0;max-width:600px}
+  button,select{
+    background:var(--panel);color:var(--ink);border:1px solid #2a3350;border-radius:9px;
+    padding:8px 12px;font-size:13px;cursor:pointer;transition:.15s;font-weight:600;
+  }
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button:active{transform:translateY(1px)}
+  button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  button.primary{background:linear-gradient(180deg,#2a6f6a,#1d4f4b);border-color:#3aa8a0}
+  button:disabled{opacity:.4;cursor:default}
+  select{padding:8px 8px}
+  .meta{display:flex;gap:18px;justify-content:center;color:var(--muted);font-size:14px;margin-bottom:8px}
+  .meta b{color:var(--ink);font-variant-numeric:tabular-nums}
+  #wrap{position:relative}
+  canvas{border-radius:14px;background:linear-gradient(160deg,#141a2e,#10152400);touch-action:none;
+    max-width:100%;box-shadow:0 12px 40px rgba(0,0,0,.45),inset 0 0 0 1px #212a45}
+  #status{min-height:22px;margin-top:12px;font-size:14px;color:var(--muted);text-align:center;max-width:560px}
+  #status.win{color:var(--gold);font-weight:700}
+  #status.err{color:var(--breach)}
+  .legend{display:flex;gap:16px;justify-content:center;font-size:11.5px;color:var(--muted);margin-top:10px;flex-wrap:wrap}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+  a.help{color:var(--accent);font-size:12px;text-decoration:none;border-bottom:1px dotted var(--accent);cursor:pointer}
+  a.help:hover{color:var(--line)}
+  #help{max-width:520px;background:var(--panel);border:1px solid #2a3350;border-radius:12px;
+    padding:14px 18px;margin:8px 0 2px;font-size:13px;color:var(--ink);line-height:1.5}
+  #help[hidden]{display:none}
+  #help h2{margin:0 0 6px;font-size:14px;color:var(--accent)}
+  #help b{color:var(--gold)}
+  #help ul{margin:6px 0 0;padding-left:18px}
+  @media (prefers-reduced-motion: reduce){*{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<header>
+  <h1>RON<span>DURE</span></h1>
+  <div class="tag">Draw one closed loop through every pearl. Click or drag along edges to draw; click a segment again to erase. <a class="help" id="helpLink">How to play</a></div>
+</header>
+
+<div id="help" hidden>
+  <h2>How to play</h2>
+  Draw one single closed loop that never crosses or branches. It must obey every pearl:
+  <ul>
+    <li><b>White pearl:</b> the loop passes <b>straight</b> through it, and must <b>turn</b> in at least one of the two cells immediately beside it.</li>
+    <li><b>Black pearl:</b> the loop makes a <b>right-angle turn</b> on it, and must go <b>straight</b> through the next cell out along both arms of that turn.</li>
+  </ul>
+  Click or drag along the edges between cells to lay a segment; click a segment again to erase it. Use <b>Check</b> to surface rule breaks, <b>Hint</b> for one forced segment, and <b>Undo</b>/<b>Redo</b> to step through edits.
+</div>
+
+<div class="controls">
+  <button class="primary" id="newBtn">New</button>
+  <button id="dailyBtn">Daily</button>
+  <select id="sizeSel" title="Grid size">
+    <option value="6" selected>6 × 6</option>
+    <option value="7">7 × 7 (slower)</option>
+  </select>
+  <select id="diffSel" title="Difficulty">
+    <option value="easy">Easy</option>
+    <option value="med" selected>Medium</option>
+    <option value="hard">Hard</option>
+  </select>
+  <button id="checkBtn">Check</button>
+  <button id="hintBtn">Hint</button>
+  <button id="undoBtn">Undo</button>
+  <button id="redoBtn">Redo</button>
+  <button id="shareBtn">Share</button>
+</div>
+
+<div class="meta">
+  <span>Time <b id="timer">0:00</b></span>
+  <span>Moves <b id="moves">0</b></span>
+  <span>Pearls <b id="pcount">0</b></span>
+</div>
+
+<div id="wrap"><canvas id="cv"></canvas></div>
+<div id="status">Generating…</div>
+<div class="legend">
+  <span><i style="background:#7fe3da"></i>Your loop</span>
+  <span><i style="background:#f59e0b"></i>Pearl breach</span>
+  <span><i style="background:#ef4444"></i>Branch / crossing</span>
+  <span><i style="background:#f4c95d"></i>Hint</span>
+</div>
+
+<script>
+"use strict";
+// ---------- seeded PRNG ----------
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+// ---------- grid helpers ----------
+function zeros(rows,cols){const a=[];for(let r=0;r<rows;r++){a.push(new Array(cols).fill(0));}return a;}
+function clone(a){return a.map(r=>r.slice());}
+// H[r][c] : horizontal edge between cell(r,c) and (r,c+1)  -> N rows x N-1 cols
+// V[r][c] : vertical edge between cell(r,c) and (r+1,c)    -> N-1 rows x N cols
+function bits(H,V,r,c,N){
+  const E=(c<N-1)?H[r][c]:0, W=(c>0)?H[r][c-1]:0, S=(r<N-1)?V[r][c]:0, No=(r>0)?V[r-1][c]:0;
+  const deg=E+W+S+No;
+  const straight=deg===2&&((E&&W)||(S&&No));
+  const turn=deg===2&&!straight;
+  return {E,W,S,N:No,deg,straight,turn,on:deg>0};
+}
+function isTurn(H,V,r,c,N){const b=bits(H,V,r,c,N);return b.turn;}
+// full Masyu rule check for a single pearl on a given loop
+function pearlOk(H,V,r,c,t,N){
+  const b=bits(H,V,r,c,N);
+  if(b.deg!==2) return false;
+  if(t===1){ // white: straight + at least one adjacent turn along the line
+    if(!b.straight) return false;
+    if(b.E&&b.W) return isTurn(H,V,r,c-1,N)||isTurn(H,V,r,c+1,N);
+    return isTurn(H,V,r-1,c,N)||isTurn(H,V,r+1,c,N);
+  } else { // black: turn + straight for the cell beyond each arm
+    if(!b.turn) return false;
+    if(b.N){const n=bits(H,V,r-1,c,N); if(!(n.N&&n.S))return false;}
+    if(b.S){const n=bits(H,V,r+1,c,N); if(!(n.N&&n.S))return false;}
+    if(b.E){const n=bits(H,V,r,c+1,N); if(!(n.E&&n.W))return false;}
+    if(b.W){const n=bits(H,V,r,c-1,N); if(!(n.E&&n.W))return false;}
+    return true;
+  }
+}
+function loopInfo(H,V,N){
+  const on=[];const parent=new Int32Array(N*N);for(let i=0;i<N*N;i++)parent[i]=i;
+  const find=x=>{while(parent[x]!==x){parent[x]=parent[parent[x]];x=parent[x];}return x;};
+  let bad=false;
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){const d=bits(H,V,r,c,N).deg;if(d>0){on.push(r*N+c);if(d!==2)bad=true;}}
+  for(let r=0;r<N;r++)for(let c=0;c<N-1;c++)if(H[r][c]){const a=find(r*N+c),b=find(r*N+c+1);if(a!==b)parent[a]=b;}
+  for(let r=0;r<N-1;r++)for(let c=0;c<N;c++)if(V[r][c]){const a=find(r*N+c),b=find((r+1)*N+c);if(a!==b)parent[a]=b;}
+  const roots=new Set(on.map(find));
+  return {singleLoop:on.length>0&&!bad&&roots.size===1,count:on.length};
+}
+function fullWin(H,V,pearls,N){
+  if(!loopInfo(H,V,N).singleLoop) return false;
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){const t=pearls[r][c];if(t&&!pearlOk(H,V,r,c,t,N))return false;}
+  return true;
+}
+
+// ---------- solver: count Masyu solutions (up to `limit`) ----------
+function solveCount(N,pearls,limit,budget){
+  const total=N*N;
+  const dN=new Int8Array(total),dE=new Int8Array(total),dS=new Int8Array(total),dW=new Int8Array(total);
+  const parent=new Int32Array(total),rank=new Int8Array(total),deg=new Int8Array(total);
+  for(let i=0;i<total;i++)parent[i]=i;
+  let openEnds=0,steps=0,solutions=0,aborted=false,closed=0;
+  const find=x=>{while(parent[x]!==x)x=parent[x];return x;};
+  function addEdge(a,b){
+    if(deg[a]>=2||deg[b]>=2)return null;
+    const ra=find(a),rb=find(b),closing=ra===rb;
+    if(closing&&openEnds!==2)return null;
+    deg[a]++; openEnds+=deg[a]===1?1:-1;
+    deg[b]++; openEnds+=deg[b]===1?1:-1;
+    const rec={a,b,ua:null,closed:closing};
+    if(closing)closed++;
+    else{let pa=ra,pb=rb;if(rank[pa]<rank[pb]){const t=pa;pa=pb;pb=t;}
+      rec.ua={child:pb,root:pa,inc:rank[pa]===rank[pb]};parent[pb]=pa;if(rec.ua.inc)rank[pa]++;}
+    return rec;
+  }
+  function undoEdge(rec){
+    if(rec.closed)closed--;
+    if(rec.ua){parent[rec.ua.child]=rec.ua.child;if(rec.ua.inc)rank[rec.ua.root]--;}
+    openEnds+=deg[rec.b]===1?-1:1; deg[rec.b]--;
+    openEnds+=deg[rec.a]===1?-1:1; deg[rec.a]--;
+  }
+  function complete(){
+    if(openEnds!==0)return;
+    const roots=new Set();let any=false;
+    for(let i=0;i<total;i++)if(deg[i]>0){roots.add(find(i));any=true;}
+    if(!any||roots.size!==1)return;
+    // full white/black look-ahead validation
+    for(let r=0;r<N;r++)for(let c=0;c<N;c++){
+      const t=pearls[r][c];if(!t)continue;const i=r*N+c;
+      const E=dE[i],W=dW[i],S=dS[i],No=dN[i];
+      if(t===1){
+        // E&&W guarantees 1<=c<=N-2, S&&No guarantees 1<=r<=N-2, so both neighbours
+        // are always on-grid: no bounds guard needed (matches pearlOk exactly).
+        if(E&&W){ if(!( isT(r,c-1) || isT(r,c+1) ))return;}
+        else if(S&&No){ if(!( isT(r-1,c) || isT(r+1,c) ))return;}
+        else return;
+      } else {
+        if(No){const j=(r-1)*N+c;if(!(dN[j]&&dS[j]))return;}
+        if(S){const j=(r+1)*N+c;if(!(dN[j]&&dS[j]))return;}
+        if(E){const j=r*N+c+1;if(!(dE[j]&&dW[j]))return;}
+        if(W){const j=r*N+c-1;if(!(dE[j]&&dW[j]))return;}
+      }
+    }
+    solutions++;
+  }
+  function isT(r,c){const i=r*N+c;const d=dN[i]+dE[i]+dS[i]+dW[i];return d===2&&!((dE[i]&&dW[i])||(dN[i]&&dS[i]));}
+  function rec(idx){
+    if(aborted||solutions>=limit)return;
+    if(++steps>budget){aborted=true;return;}
+    if(idx===total){complete();return;}
+    const r=(idx/N)|0,c=idx%N;
+    const fN=r>0?dS[idx-N]:0, fW=c>0?dE[idx-1]:0;
+    for(let E=0;E<=1;E++){
+      if(E&&c===N-1)continue;
+      for(let S=0;S<=1;S++){
+        if(S&&r===N-1)continue;
+        const sum=fN+fW+E+S;
+        if(sum!==0&&sum!==2)continue;
+        // prune: once a loop has closed, forbid starting a new component
+        if(closed>0&&!fN&&!fW&&sum===2)continue;
+        const straight=sum===2&&((fN&&S)||(fW&&E));
+        const turn=sum===2&&!straight;
+        const p=pearls[r][c];
+        if(p===1&&!straight)continue;
+        if(p===2&&!turn)continue;
+        dN[idx]=fN;dW[idx]=fW;dE[idx]=E;dS[idx]=S;
+        const recs=[];let ok=true;
+        if(fN){const e=addEdge(idx,idx-N);if(e)recs.push(e);else ok=false;}
+        if(ok&&fW){const e=addEdge(idx,idx-1);if(e)recs.push(e);else ok=false;}
+        if(ok)rec(idx+1);
+        for(let k=recs.length-1;k>=0;k--)undoEdge(recs[k]);
+        if(aborted||solutions>=limit)return;
+      }
+    }
+  }
+  rec(0);
+  return {count:solutions,aborted};
+}
+
+// ---------- generator: grow a random single loop ----------
+function growLoop(rng,N){
+  const H=zeros(N,N-1),V=zeros(N-1,N),deg=new Int8Array(N*N);
+  const set=(t,r,c,v)=>{
+    if(t==='H'){if(H[r][c]===v)return;H[r][c]=v;const s=v?1:-1;deg[r*N+c]+=s;deg[r*N+c+1]+=s;}
+    else{if(V[r][c]===v)return;V[r][c]=v;const s=v?1:-1;deg[r*N+c]+=s;deg[(r+1)*N+c]+=s;}
+  };
+  const free=(r,c)=>r>=0&&r<N&&c>=0&&c<N&&deg[r*N+c]===0;
+  const r0=Math.floor(rng()*(N-1)),c0=Math.floor(rng()*(N-1));
+  set('H',r0,c0,1);set('H',r0+1,c0,1);set('V',r0,c0,1);set('V',r0,c0+1,1);
+  let cells=4;const target=Math.min(N*N,Math.floor(N*N*(0.42+rng()*0.28)));
+  let tries=N*N*30;
+  while(tries-->0&&cells<target){
+    const edges=[];
+    for(let r=0;r<N;r++)for(let c=0;c<N-1;c++)if(H[r][c])edges.push(['H',r,c]);
+    for(let r=0;r<N-1;r++)for(let c=0;c<N;c++)if(V[r][c])edges.push(['V',r,c]);
+    const[t,r,c]=edges[Math.floor(rng()*edges.length)];
+    if(t==='H'){
+      const dr=rng()<0.5?-1:1, rr=r+dr;
+      if(!free(rr,c)||!free(rr,c+1))continue;
+      const vr=Math.min(r,rr);
+      set('H',r,c,0);set('V',vr,c,1);set('H',rr,c,1);set('V',vr,c+1,1);cells+=2;
+    } else {
+      const dc=rng()<0.5?-1:1, cc=c+dc;
+      if(!free(r,cc)||!free(r+1,cc))continue;
+      const hc=Math.min(c,cc);
+      set('V',r,c,0);set('H',r,hc,1);set('V',r,cc,1);set('H',r+1,hc,1);cells+=2;
+    }
+  }
+  return {H,V};
+}
+function deriveCandidates(H,V,N){
+  const cand=[];
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){
+    const b=bits(H,V,r,c,N);if(b.deg!==2)continue;
+    if(b.straight){
+      let ok=false;
+      if(b.E&&b.W)ok=isTurn(H,V,r,c-1,N)||isTurn(H,V,r,c+1,N);
+      else ok=isTurn(H,V,r-1,c,N)||isTurn(H,V,r+1,c,N);
+      if(ok)cand.push({r,c,t:1});
+    } else {
+      let ok=true;
+      if(b.N){const n=bits(H,V,r-1,c,N);if(!(n.N&&n.S))ok=false;}
+      if(b.S){const n=bits(H,V,r+1,c,N);if(!(n.N&&n.S))ok=false;}
+      if(b.E){const n=bits(H,V,r,c+1,N);if(!(n.E&&n.W))ok=false;}
+      if(b.W){const n=bits(H,V,r,c-1,N);if(!(n.E&&n.W))ok=false;}
+      if(ok)cand.push({r,c,t:2});
+    }
+  }
+  return cand;
+}
+function shuffle(a,rng){for(let i=a.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));const t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function buildPearls(N,list){const p=zeros(N,N);for(const c of list)p[c.r][c.c]=c.t;return p;}
+
+function tryGen(rng,N,diff){
+  const {H,V}=growLoop(rng,N);
+  const cand=deriveCandidates(H,V,N);
+  if(cand.length<3)return null;
+  // proven-unique = solver completes the whole search (not aborted) with exactly one solution,
+  // so a modest budget never yields a false positive: it only skips slow-to-prove boards.
+  const budget=22000;
+  let res=solveCount(N,buildPearls(N,cand),2,budget);
+  if(res.aborted||res.count!==1)return null;
+  // minimize to a forcing set
+  shuffle(cand,rng);
+  let keep=cand.slice();
+  for(const cd of cand){
+    const trial=keep.filter(x=>x!==cd);
+    const r=solveCount(N,buildPearls(N,trial),2,budget);
+    if(!r.aborted&&r.count===1)keep=trial;
+  }
+  // difficulty: re-add some removed clues for easier boards
+  const removed=cand.filter(x=>!keep.includes(x));
+  const addFrac=diff==='easy'?0.65:diff==='med'?0.30:0;
+  shuffle(removed,rng);
+  const extra=removed.slice(0,Math.round(removed.length*addFrac));
+  const finalList=keep.concat(extra);
+  if(finalList.length<3)return null;
+  return {N,pearls:buildPearls(N,finalList),solH:H,solV:V,pcount:finalList.length};
+}
+// try a slice of attempts synchronously; returns a board or null (the async driver chunks these)
+function genSlice(baseSeed,N,diff,att,count){
+  for(let i=0;i<count;i++,att++){
+    const seed=(baseSeed+att*0x9e3779b9)>>>0;
+    const b=tryGen(mulberry32(seed),N,diff);
+    if(b){b.seed=seed;b.att=att;return b;}
+  }
+  return null;
+}
+
+// ---------- app state & rendering ----------
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+const L=560,P=42;let CS=80;
+let S=null;        // active game state
+let GEN=null;      // {N} while generating
+const el=id=>document.getElementById(id);
+const reduceMotion=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function setCanvas(N){
+  CS=(L-2*P)/(N-1);
+  const dpr=Math.min(2,window.devicePixelRatio||1);
+  // internal coordinate system stays L (DPR-scaled backing buffer); only the CSS display
+  // size shrinks to fit the viewport. toLocal() normalises by getBoundingClientRect().width,
+  // so hit-testing stays correct at any display size.
+  const disp=Math.max(240,Math.min(L,window.innerWidth-24));
+  cv.style.width=disp+'px';cv.style.height=disp+'px';
+  cv.width=L*dpr;cv.height=L*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+const cx=c=>P+c*CS, cy=r=>P+r*CS;
+
+function drawSpinner(){
+  const t=reduceMotion?0:performance.now();ctx.clearRect(0,0,L,L);
+  ctx.save();ctx.translate(L/2,L/2);
+  for(let i=0;i<3;i++){
+    ctx.beginPath();ctx.strokeStyle=`hsla(174,60%,60%,${0.35-i*0.09})`;
+    ctx.lineWidth=3;ctx.arc(0,0,40+i*14,(t/500+i)%(Math.PI*2),(t/500+i)%(Math.PI*2)+2.1);ctx.stroke();
+  }
+  ctx.restore();
+  ctx.fillStyle='#8b93ad';ctx.font='13px Segoe UI,sans-serif';ctx.textAlign='center';
+  ctx.fillText('proving a unique solution…',L/2,L/2+90);
+  requestAnimationFrame(loop);
+}
+function loop(){ if(GEN)drawSpinner(); else if(S)draw(); else requestAnimationFrame(loop); }
+
+function draw(){
+  const N=S.N;ctx.clearRect(0,0,L,L);
+  // subtle grid dots
+  ctx.fillStyle='#26304d';
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){ctx.beginPath();ctx.arc(cx(c),cy(r),2,0,7);ctx.fill();}
+  // violations
+  const vio=violations();
+  // player loop
+  const t=performance.now();
+  const glow=S.won?(reduceMotion?10:8+6*Math.sin(t/220)):4;
+  ctx.lineCap='round';ctx.lineJoin='round';
+  ctx.lineWidth=CS*0.14;
+  ctx.strokeStyle=S.won?(reduceMotion?'#f4c95d':`hsl(${(t/12)%360},80%,68%)`):getComputedStyle(document.body).getPropertyValue('--line').trim();
+  ctx.shadowColor=S.won?'#f4c95d':'#7fe3da';ctx.shadowBlur=glow;
+  ctx.beginPath();
+  for(let r=0;r<N;r++)for(let c=0;c<N-1;c++)if(S.H[r][c]){ctx.moveTo(cx(c),cy(r));ctx.lineTo(cx(c+1),cy(r));}
+  for(let r=0;r<N-1;r++)for(let c=0;c<N;c++)if(S.V[r][c]){ctx.moveTo(cx(c),cy(r));ctx.lineTo(cx(c),cy(r+1));}
+  ctx.stroke();ctx.shadowBlur=0;
+  // hint flash
+  if(S.hint&&t<S.hint.until){
+    const h=S.hint;ctx.strokeStyle='#f4c95d';ctx.lineWidth=CS*0.16;
+    ctx.shadowColor='#f4c95d';ctx.shadowBlur=14;ctx.beginPath();
+    if(h.type==='H'){ctx.moveTo(cx(h.c),cy(h.r));ctx.lineTo(cx(h.c+1),cy(h.r));}
+    else{ctx.moveTo(cx(h.c),cy(h.r));ctx.lineTo(cx(h.c),cy(h.r+1));}
+    ctx.stroke();ctx.shadowBlur=0;
+  }
+  // branch markers
+  ctx.fillStyle='rgba(239,68,68,.25)';
+  vio.branch.forEach(k=>{const[r,c]=k.split(',').map(Number);ctx.beginPath();ctx.arc(cx(c),cy(r),CS*0.32,0,7);ctx.fill();});
+  // pearls
+  const pr=CS*0.27;
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){
+    const tp=S.pearls[r][c];if(!tp)continue;
+    const breach=vio.breach.has(r+','+c);
+    ctx.beginPath();ctx.arc(cx(c),cy(r),pr,0,7);
+    if(tp===1){ctx.fillStyle='#f3f5fb';ctx.fill();ctx.lineWidth=3;
+      ctx.strokeStyle=breach?'#f59e0b':'#0e1220';ctx.stroke();}
+    else{ctx.fillStyle=breach?'#7a3d05':'#0b0f1c';ctx.fill();ctx.lineWidth=3;
+      ctx.strokeStyle=breach?'#f59e0b':'#c9d2ea';ctx.stroke();}
+  }
+  requestAnimationFrame(loop);
+}
+function violations(){
+  const N=S.N,branch=new Set(),breach=new Set();
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){
+    const b=bits(S.H,S.V,r,c,N);
+    if(b.deg>=3)branch.add(r+','+c);
+    const tp=S.pearls[r][c];
+    if(tp&&b.deg===2&&!pearlOk(S.H,S.V,r,c,tp,N))breach.add(r+','+c);
+  }
+  return {branch,breach};
+}
+
+// ---------- pointer input ----------
+let drag=null;
+function toLocal(e){const rc=cv.getBoundingClientRect();return[(e.clientX-rc.left)/rc.width*L,(e.clientY-rc.top)/rc.height*L];}
+function nearestEdge(x,y){
+  const N=S.N;let best=null,bd=CS*0.42;
+  for(let r=0;r<N;r++)for(let c=0;c<N-1;c++){const d=Math.hypot(x-(P+(c+0.5)*CS),y-(P+r*CS));if(d<bd){bd=d;best={type:'H',r,c};}}
+  for(let r=0;r<N-1;r++)for(let c=0;c<N;c++){const d=Math.hypot(x-(P+c*CS),y-(P+(r+0.5)*CS));if(d<bd){bd=d;best={type:'V',r,c};}}
+  return best;
+}
+const getE=(t,r,c)=>t==='H'?S.H[r][c]:S.V[r][c];
+const setE=(t,r,c,v)=>{if(t==='H')S.H[r][c]=v;else S.V[r][c]=v;};
+function edgeKey(ed){return ed.type+ed.r+'_'+ed.c;}
+cv.addEventListener('pointerdown',e=>{
+  if(!S||S.won)return;e.preventDefault();cv.setPointerCapture(e.pointerId);
+  const[x,y]=toLocal(e);const ed=nearestEdge(x,y);if(!ed)return;
+  drag={mode:getE(ed.type,ed.r,ed.c)?0:1,seen:new Set(),snapH:clone(S.H),snapV:clone(S.V),changed:false};
+  applyDrag(ed);
+});
+cv.addEventListener('pointermove',e=>{
+  if(!drag)return;const[x,y]=toLocal(e);const ed=nearestEdge(x,y);if(ed)applyDrag(ed);
+});
+function applyDrag(ed){
+  const k=edgeKey(ed);if(drag.seen.has(k))return;drag.seen.add(k);
+  if(getE(ed.type,ed.r,ed.c)!==drag.mode){setE(ed.type,ed.r,ed.c,drag.mode);drag.changed=true;}
+}
+function endDrag(){
+  if(!drag)return;
+  if(drag.changed){
+    S.undo.push({H:drag.snapH,V:drag.snapV});S.redo.length=0;S.moves++;
+    if(!S.running)startTimer();
+    S.hint=null;refreshMeta();checkAuto();
+  }
+  drag=null;
+}
+cv.addEventListener('pointerup',endDrag);
+cv.addEventListener('pointercancel',endDrag);
+
+// ---------- timer / meta ----------
+function startTimer(){S.running=true;S.startTime=performance.now();if(S.tick)clearInterval(S.tick);
+  S.tick=setInterval(()=>{const s=Math.floor((performance.now()-S.startTime)/1000);el('timer').textContent=(s/60|0)+':'+String(s%60).padStart(2,'0');},250);}
+function stopTimer(){S.running=false;if(S.tick){clearInterval(S.tick);S.tick=null;}}
+function refreshMeta(){el('moves').textContent=S.moves;el('pcount').textContent=S.pcount;
+  el('undoBtn').disabled=!S.undo.length;el('redoBtn').disabled=!S.redo.length;}
+function say(msg,cls){const s=el('status');s.textContent=msg;s.className=cls||'';}
+
+// ---------- actions ----------
+function checkAuto(){ if(fullWin(S.H,S.V,S.pearls,S.N))win(); }
+function win(){if(S.won)return;S.won=true;stopTimer();drag=null;
+  say('Solved! One clean loop, every pearl honoured. ✦',' win');}
+el('checkBtn').onclick=()=>{
+  if(fullWin(S.H,S.V,S.pearls,S.N)){win();return;}
+  const v=violations();const info=loopInfo(S.H,S.V,S.N);
+  const issues=v.branch.size+v.breach.size;
+  if(issues)say(`${v.branch.size} branch/crossing and ${v.breach.size} pearl breach${v.breach.size!==1?'es':''} to fix.`,'err');
+  else if(!info.singleLoop)say('No rule breaks yet — but it is not one closed loop. Keep connecting.','');
+  else say('Loop is closed, but a pearl rule is unmet somewhere.','err');
+};
+el('hintBtn').onclick=()=>{
+  if(S.won)return;
+  const N=S.N,miss=[],extra=[];
+  const scan=(t,rows,cols)=>{for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+    const sv=t==='H'?S.solH[r][c]:S.solV[r][c], pv=t==='H'?S.H[r][c]:S.V[r][c];
+    if(sv&&!pv)miss.push({type:t,r,c});else if(!sv&&pv)extra.push({type:t,r,c});}};
+  scan('H',N,N-1);scan('V',N-1,N);
+  const pearlAdj=e=>{const a=[[e.r,e.c]];a.push(e.type==='H'?[e.r,e.c+1]:[e.r+1,e.c]);
+    return a.some(([r,c])=>S.pearls[r][c]);};
+  let pick=miss.find(pearlAdj)||miss[0];
+  if(pick){ // apply one forced correct segment
+    S.undo.push({H:clone(S.H),V:clone(S.V)});S.redo.length=0;
+    setE(pick.type,pick.r,pick.c,1);S.moves++;S.hint={...pick,until:performance.now()+1600};
+    if(!S.running)startTimer();refreshMeta();
+    say('Hint: this segment is forced by an adjacent pearl.','');checkAuto();
+  } else if(extra.length){
+    const rm=extra[0];S.undo.push({H:clone(S.H),V:clone(S.V)});S.redo.length=0;
+    setE(rm.type,rm.r,rm.c,0);S.hint={...rm,until:performance.now()+1600};refreshMeta();
+    say('Hint: this segment cannot be part of the loop — removed.','');
+  } else say('Nothing to hint — the loop already matches.','');
+};
+el('undoBtn').onclick=()=>{if(!S.undo.length)return;S.redo.push({H:clone(S.H),V:clone(S.V)});
+  const p=S.undo.pop();S.H=p.H;S.V=p.V;S.won=false;say('');refreshMeta();};
+el('redoBtn').onclick=()=>{if(!S.redo.length)return;S.undo.push({H:clone(S.H),V:clone(S.V)});
+  const p=S.redo.pop();S.H=p.H;S.V=p.V;refreshMeta();checkAuto();};
+el('shareBtn').onclick=async()=>{
+  try{await navigator.clipboard.writeText(location.href);say('Share link copied to clipboard.','');}
+  catch(e){say('Share URL is in the address bar (#seed).','');}
+};
+el('newBtn').onclick=()=>load((Math.random()*4294967296)>>>0,+el('sizeSel').value,el('diffSel').value);
+// changing size or difficulty regenerates immediately, so the control never silently no-ops
+el('sizeSel').onchange=el('diffSel').onchange=()=>load((Math.random()*4294967296)>>>0,+el('sizeSel').value,el('diffSel').value);
+el('helpLink').onclick=e=>{e.preventDefault();el('help').hidden=!el('help').hidden;};
+el('dailyBtn').onclick=()=>{const d=new Date();
+  // UTC-derived so the daily board is identical worldwide, matching the "same for everyone" copy
+  const seed=(d.getUTCFullYear()*10000+(d.getUTCMonth()+1)*100+d.getUTCDate())>>>0;
+  load(seed,6,'med',true);};
+
+// ---------- board load (async, chunked so the UI never freezes) ----------
+function writeHash(seed,N,diff){history.replaceState(null,'',`#seed=${seed}&size=${N}&diff=${diff}`);}
+let genToken=0;
+function setGenUI(on){['newBtn','dailyBtn','checkBtn','hintBtn','undoBtn','redoBtn','shareBtn','sizeSel','diffSel']
+  .forEach(id=>el(id).disabled=on);}
+function load(baseSeed,N,diff,daily){
+  const token=++genToken;
+  stopTimer();S=null;GEN={N};setCanvas(N);setGenUI(true);
+  el('sizeSel').value=N;el('diffSel').value=diff;
+  say('Forging a board and proving it has exactly one solution…');
+  const chunk=N<=6?150:10, cap=8000;let att=0;
+  (function step(){
+    if(token!==genToken)return;                 // superseded by a newer request
+    const b=genSlice(baseSeed,N,diff,att,chunk);
+    if(b){finish(b,diff,daily);return;}
+    att+=chunk;
+    if(att>=cap){baseSeed=(Math.random()*4294967296)>>>0;att=0;}  // keep trying fresh sets
+    if(att%(chunk*20)===0)say(`Forging a unique board… checked ${att} candidate loops`);
+    setTimeout(step,0);
+  })();
+}
+function finish(b,diff,daily){
+  GEN=null;setGenUI(false);stopTimer();
+  S={N:b.N,pearls:b.pearls,solH:b.solH,solV:b.solV,pcount:b.pcount,seed:b.seed,
+     H:zeros(b.N,b.N-1),V:zeros(b.N-1,b.N),moves:0,won:false,running:false,
+     startTime:0,tick:null,undo:[],redo:[],hint:null};
+  setCanvas(b.N);writeHash(b.seed,b.N,diff);
+  el('timer').textContent='0:00';refreshMeta();
+  say(daily?'Daily puzzle — the same board for everyone today. Draw one closed loop.'
+           :'New board ready — one unique loop threads every pearl.','');
+}
+// re-scale backing store + display size on viewport/DPR change (zoom, rotate, monitor move)
+let rzT;window.addEventListener('resize',()=>{clearTimeout(rzT);
+  rzT=setTimeout(()=>setCanvas(S?S.N:GEN?GEN.N:6),120);});
+// initial: from hash or fresh
+(function init(){
+  requestAnimationFrame(loop);
+  const h=new URLSearchParams(location.hash.slice(1));
+  const seed=h.has('seed')?(+h.get('seed'))>>>0:(Math.random()*4294967296)>>>0;
+  const N=Math.min(7,Math.max(6,+h.get('size')||6));
+  const diff=['easy','med','hard'].includes(h.get('diff'))?h.get('diff'):'med';
+  load(seed,N,diff);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VO2Max — VO₂max Estimator & Fitness Rating</title>
+<meta name="description" content="Estimate your VO2 max from a 12-minute Cooper run or your resting heart rate, and see your fitness category by age and sex. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('vo2max-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#059669;
+    --bg:#f4f7f5; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e0e6e2; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#0f1512; --card:#18201c; --fg:#eef4f0; --muted:#93a29a; --line:#26302b; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:760px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#047857);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:760px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:14px}
+  input,select{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  .toggle{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:16px}
+  .toggle button{padding:8px 16px;border:0;background:var(--bg);color:var(--fg);cursor:pointer;font:inherit}
+  .toggle button.on{background:var(--c);color:#fff;font-weight:700}
+  .method{display:none}
+  .method.on{display:block}
+  .out{text-align:center;margin-top:4px}
+  .value{font-size:3rem;font-weight:800;letter-spacing:-1px}
+  .value small{font-size:1rem;color:var(--muted);font-weight:600}
+  .cat{display:inline-block;margin-top:8px;padding:5px 16px;border-radius:999px;background:var(--c);color:#fff;font-weight:700}
+  .hint{color:var(--muted);font-size:.82rem;margin-top:10px}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:760px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🫁</div>
+    <div><h1>VO2Max</h1><div class="sub">Estimate VO₂max &amp; rate your aerobic fitness</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="toggle" id="methodToggle">
+      <button type="button" data-m="cooper">12-min Cooper run</button>
+      <button type="button" data-m="uth">Resting heart rate</button>
+    </div>
+
+    <div class="method on" id="m-cooper">
+      <label for="dist">Distance covered in 12 minutes (meters)</label>
+      <input type="number" id="dist" value="2400" min="100" step="10">
+    </div>
+
+    <div class="method" id="m-uth">
+      <div class="grid">
+        <div><label for="hrRest">Resting heart rate (bpm)</label><input type="number" id="hrRest" value="60" min="30" max="120"></div>
+        <div><label for="hrMax">Max heart rate (bpm, optional)</label><input type="number" id="hrMax" placeholder="220 − age"></div>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-top:14px">
+      <div><label for="age">Age</label><input type="number" id="age" value="30" min="10" max="99"></div>
+      <div><label for="sex">Sex</label><select id="sex"><option value="male">Male</option><option value="female">Female</option></select></div>
+    </div>
+  </div>
+
+  <div class="card out">
+    <div class="value"><span id="vo2">—</span> <small>ml/kg/min</small></div>
+    <div><span class="cat" id="cat">—</span></div>
+    <div class="hint" id="hint"></div>
+  </div>
+</main>
+<footer>
+  Estimates only — not medical advice. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/vo2max">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  // Cooper 12-minute run test (distance in meters)
+  function cooper(distanceMeters){
+    if(!(distanceMeters > 0)) throw new Error('distance must be positive');
+    return (distanceMeters - 504.9) / 44.73;
+  }
+
+  // Uth–Sørensen resting-HR estimate
+  function uth(hrMax, hrRest){
+    if(!(hrRest > 0) || !(hrMax > 0)) throw new Error('heart rates must be positive');
+    return 15.3 * (hrMax / hrRest);
+  }
+
+  function hrMaxFromAge(age){
+    if(!(age > 0)) throw new Error('age must be positive');
+    return 220 - age;
+  }
+
+  function ageBracket(age){
+    if(age < 30) return '20-29';
+    if(age < 40) return '30-39';
+    if(age < 50) return '40-49';
+    if(age < 60) return '50-59';
+    return '60+';
+  }
+
+  // Cooper Institute normative minimums (ml/kg/min): [poor, fair, good, excellent, superior]
+  const NORMS = {
+    male: {
+      '20-29': [37.1, 41.7, 45.4, 51.1, 55.5],
+      '30-39': [35.4, 40.5, 44.0, 48.3, 54.1],
+      '40-49': [33.0, 38.5, 42.4, 46.4, 52.6],
+      '50-59': [30.2, 35.6, 39.2, 43.3, 49.7],
+      '60+':   [26.1, 32.3, 35.5, 39.5, 46.5]
+    },
+    female: {
+      '20-29': [31.6, 36.1, 39.5, 43.9, 49.7],
+      '30-39': [29.9, 34.4, 38.7, 42.4, 47.5],
+      '40-49': [28.0, 33.0, 36.1, 39.7, 45.4],
+      '50-59': [24.4, 30.2, 33.2, 36.7, 41.2],
+      '60+':   [23.8, 27.5, 30.0, 33.0, 37.9]
+    }
+  };
+  const LABELS = ['Very poor', 'Poor', 'Fair', 'Good', 'Excellent', 'Superior'];
+
+  function category(vo2, sex, age){
+    const table = NORMS[sex];
+    if(!table) throw new Error('sex must be "male" or "female"');
+    const t = table[ageBracket(age)];
+    let idx = 0; // Very poor
+    for(let i = 0; i < t.length; i++) if(vo2 >= t[i]) idx = i + 1;
+    return LABELS[idx];
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('vo2')){
+    const $ = id => document.getElementById(id);
+    let method = 'cooper';
+
+    function render(){
+      const age = +$('age').value || 30;
+      const sex = $('sex').value;
+      let vo2;
+      try{
+        if(method === 'cooper'){
+          vo2 = cooper(+$('dist').value);
+        }else{
+          const hrRest = +$('hrRest').value;
+          const hrMax = +$('hrMax').value || hrMaxFromAge(age);
+          vo2 = uth(hrMax, hrRest);
+        }
+      }catch(e){ $('vo2').textContent = '—'; $('cat').textContent = '—'; return; }
+      if(!isFinite(vo2) || vo2 <= 0){ $('vo2').textContent = '—'; $('cat').textContent = '—'; return; }
+      $('vo2').textContent = vo2.toFixed(1);
+      $('cat').textContent = category(vo2, sex, age);
+      $('hint').textContent = method === 'cooper'
+        ? 'Cooper test: run as far as you can in 12 minutes on a flat course.'
+        : 'Uth–Sørensen estimate from your max/resting heart-rate ratio.';
+    }
+
+    $('methodToggle').addEventListener('click', e => {
+      const b = e.target.closest('button'); if(!b) return;
+      method = b.dataset.m;
+      [...$('methodToggle').children].forEach(x => x.classList.toggle('on', x === b));
+      $('m-cooper').classList.toggle('on', method === 'cooper');
+      $('m-uth').classList.toggle('on', method === 'uth');
+      render();
+    });
+    $('methodToggle').querySelector('[data-m="cooper"]').classList.add('on');
+
+    ['dist', 'hrRest', 'hrMax', 'age', 'sex'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('vo2max-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { cooper, uth, hrMaxFromAge, ageBracket, category };
+</script>
+</body>
+</html>

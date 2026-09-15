@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Deadwax</title>
+<style>
+  :root{--ink:#0c0a10;--paper:#efe9df;--accent:#ff5b2e}
+  *{box-sizing:border-box;margin:0}
+  html,body{height:100%}
+  body{background:radial-gradient(120% 120% at 50% 20%,#1a1622,#08070c 70%);color:var(--paper);
+    font:14px/1.4 ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+    display:flex;flex-direction:column;align-items:center;overflow:hidden;height:100%;-webkit-user-select:none;user-select:none}
+  header{width:100%;max-width:760px;display:flex;align-items:center;gap:12px;padding:10px 14px;flex-wrap:wrap}
+  header h1{font:800 20px/1 ui-monospace,monospace;letter-spacing:3px;color:var(--accent)}
+  header .sub{opacity:.55;font-size:11px;letter-spacing:1px}
+  .spacer{flex:1}
+  header .seed{opacity:.8;font-size:12px;background:#ffffff10;padding:5px 9px;border-radius:6px}
+  header button{font:inherit;color:var(--paper);background:#ffffff14;border:1px solid #ffffff20;
+    padding:5px 10px;border-radius:6px;cursor:pointer}
+  header button:hover{background:#ffffff24}
+  #wrap{position:relative;flex:1;display:flex;align-items:center;justify-content:center;width:100%;min-height:0}
+  canvas{background:transparent;touch-action:none;max-width:96vw;max-height:100%;border-radius:50%}
+  footer{opacity:.5;font-size:11px;padding:6px 0 12px;text-align:center;letter-spacing:.5px}
+  kbd{background:#ffffff18;border-radius:4px;padding:1px 6px;font-size:11px}
+</style>
+</head>
+<body>
+<header>
+  <h1>DEADWAX</h1><span class="sub">ride the stylus</span>
+  <span class="spacer"></span>
+  <span class="seed" id="seedLbl">seed —</span>
+  <button id="copyBtn" title="Copy shareable link">share</button>
+  <button id="reseedBtn" title="New random record">re-seed</button>
+</header>
+<div id="wrap"><canvas id="c" width="720" height="720"></canvas></div>
+<footer><kbd>W</kbd>/<kbd>S</kbd> or <kbd>&uarr;</kbd>/<kbd>&darr;</kbd> hop grooves &nbsp;&middot;&nbsp; <kbd>Space</kbd> start &nbsp;&middot;&nbsp; <kbd>R</kbd> restart &nbsp;&middot;&nbsp; be on a clean groove at the 6 o'clock line</footer>
+<script>
+"use strict";
+(function(){
+const cv=document.getElementById("c"),x=cv.getContext("2d");
+const W=720,H=720,CX=W/2,CY=H/2,TAU=Math.PI*2,SA=Math.PI/2; // stylus at 6 o'clock
+const NG=5, BPR=16, bi=TAU/BPR;               // grooves, beats/rev, beat interval (rad)
+const R0=310, RIN=150;                          // outer & inner groove radii
+const grR=[];for(let i=0;i<NG;i++)grR[i]=R0-(R0-RIN)*i/(NG-1);
+
+// ---- deterministic PRNG (mulberry32) ----
+function hashStr(s){let h=2166136261>>>0;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+// ---- seed + per-seed art/music ----
+let seed,seedN,PAL,BASS,BPM;
+function initSeed(s){
+  seed=(s||"").replace(/^#/,"")||Math.random().toString(36).slice(2,8);
+  if(location.hash.replace(/^#/,"")!==seed)history.replaceState(null,"","#"+seed);
+  seedN=hashStr(seed);
+  const r=mulberry32(seedN);
+  const hue=Math.floor(r()*360);
+  PAL={h:hue,label:`hsl(${hue} 70% 55%)`,label2:`hsl(${(hue+40)%360} 65% 48%)`,
+       ink:`hsl(${hue} 30% 10%)`,ring:`hsl(${(hue+180)%360} 60% 60%)`};
+  BASS=[];const scale=[0,3,5,7,10,12];for(let i=0;i<8;i++)BASS.push(scale[Math.floor(r()*scale.length)]);
+  BPM=96+Math.floor(r()*48);
+  document.getElementById("seedLbl").textContent="seed "+seed;
+}
+
+// ---- accessibility ----
+const RM=(window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches)||false;
+
+// ---- audio ----
+let ac=null;
+function A(){if(!ac)ac=new(window.AudioContext||window.webkitAudioContext)();return ac;}
+// Unlock/resume the AudioContext from inside a real user gesture (Chrome/Safari/mobile autoplay policy).
+function startAudio(){try{const c=A();if(c.state==="suspended")c.resume();}catch(e){}}
+function tone(freq,dur,type,gain,slide){const c=A(),t=c.currentTime,o=c.createOscillator(),g=c.createGain();
+  o.type=type;o.frequency.setValueAtTime(freq,t);if(slide)o.frequency.exponentialRampToValueAtTime(freq*slide,t+dur);
+  g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(gain,t+0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);o.connect(g).connect(c.destination);o.start(t);o.stop(t+dur+0.02);}
+function noise(dur,gain,lp){const c=A(),t=c.currentTime,n=c.createBufferSource(),
+  b=c.createBuffer(1,c.sampleRate*dur,c.sampleRate),d=b.getChannelData(0);
+  for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*(1-i/d.length);
+  n.buffer=b;const f=c.createBiquadFilter();f.type="lowpass";f.frequency.value=lp||1200;
+  const g=c.createGain();g.gain.setValueAtTime(gain,t);g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  n.connect(f).connect(g).connect(c.destination);n.start(t);}
+function bass(k){const off=BASS[((k%BPR)>>1)%BASS.length];tone(55*Math.pow(2,off/12),0.16,"triangle",0.16);
+  if(k%BPR===0)noise(0.12,0.25,180);}
+function blip(m){tone(520*Math.pow(1.0595,Math.min(m,14)),0.10,"square",0.12,1.5);}
+function thunk(){noise(0.28,0.5,500);tone(70,0.25,"sawtooth",0.25,0.4);}
+function sparkle(){tone(880,0.12,"triangle",0.08,2);}
+
+// ---- state ----
+let S;
+function reset(){
+  S={rot:0,rpm:18,g:2,pg:2,pr:grR[2],combo:0,mult:1,score:0,hp:3,
+     ev:[],genK:24,nextBeat:0,parts:[],shake:0,flash:0,slow:0,
+     trail:[],theme:0,ghost:loadGhost(),grec:[],started:false,over:false,shatter:0,best:hi()};
+  for(let k=0;k<24;k++)gen(k);
+}
+function hi(){try{return +(localStorage.getItem("deadwax.hi")||0);}catch(e){return 0;}}
+function loadGhost(){try{return JSON.parse(localStorage.getItem("deadwax.g."+seed)||"null");}catch(e){return null;}}
+
+// ---- wax generation (deterministic per seed+beat) ----
+function pickType(v){return v<0.52?"scratch":v<0.79?"dust":"skip";}
+function gen(k){
+  const r=mulberry32(seedN^Math.imul(k+1,2654435761));
+  const d=Math.min(1,k/520),items=[];
+  const pr=r();
+  if(k>4 && pr<0.30+0.45*d){
+    const g=Math.floor(r()*NG),t=pickType(r());items.push({g,t,kind:"d"});
+    if(d>0.45 && r()<0.35*d){const g2=(g+1+Math.floor(r()*(NG-1)))%NG;items.push({g:g2,t:pickType(r()),kind:"d"});}
+  }
+  if(r()<0.5){const g=Math.floor(r()*NG);if(!items.some(i=>i.g===g))items.push({g,kind:"n"});}
+  for(const it of items){it.k=k;it.tr=k*bi;it.done=false;it.fade=1;S.ev.push(it);}
+}
+
+// ---- input ----
+function hop(dir){if(!S.started){S.started=true;return;}if(S.over)return;
+  const ng=Math.max(0,Math.min(NG-1,S.g+dir));if(ng!==S.g){S.g=ng;S.combo++;S.mult=1+Math.floor(S.combo/5);sparkle();}}
+addEventListener("keydown",e=>{
+  const k=e.key.toLowerCase();
+  startAudio();
+  if(k==="arrowup"||k==="w"){hop(-1);e.preventDefault();}
+  else if(k==="arrowdown"||k==="s"){hop(1);e.preventDefault();}
+  else if(k===" "||k==="enter"){e.preventDefault();if(!S.started){S.started=true;}else if(S.over){initSeed(seed);reset();S.started=true;}}
+  else if(k==="r"){initSeed(seed);reset();S.started=true;}
+});
+cv.addEventListener("pointerdown",e=>{startAudio();const rect=cv.getBoundingClientRect();
+  const y=(e.clientY-rect.top)/rect.height;if(!S.started){S.started=true;return;}
+  if(S.over){initSeed(seed);reset();S.started=true;return;}hop(y<0.5?-1:1);});
+
+// ---- resolve a beat crossing the stylus ----
+function resolve(k){
+  bass(k);S.grec[k]=S.g;
+  for(const it of S.ev){if(it.k!==k||it.done)continue;it.done=true;
+    if(it.kind==="n"){ if(it.g===S.g){S.score+=10*S.mult;S.combo++;S.mult=1+Math.floor(S.combo/5);blip(S.mult);spark(it.g,PAL.ring,10);} }
+    else if(it.t==="dust"){ if(it.g===S.g){S.combo=0;S.mult=1;S.shake=6;noise(0.14,0.2,900);} }
+    else { // scratch / skip
+      if(it.g===S.g){strike(it.t,k);}
+      else if(Math.abs(it.g-S.g)===1){S.score+=25*S.mult;S.combo++;S.mult=1+Math.floor(S.combo/5);S.slow=0.45;S.flash=RM?0.15:0.6;sparkle();spark(S.g,"#fff",14);}
+    }
+  }
+  S.score+=S.mult; // survival tick
+  const t=Math.floor(S.score/3000);if(t!==S.theme){S.theme=t;PAL.label=`hsl(${(PAL.h+t*57)%360} 70% 55%)`;PAL.ring=`hsl(${(PAL.h+180+t*57)%360} 60% 62%)`;}
+}
+function strike(kind,k){S.hp--;S.combo=0;S.mult=1;S.shake=RM?5:26;S.flash=RM?0.15:1;thunk();spark(S.g,"#ff3b2e",26);
+  // seeded jitter so a run stays deterministic/replayable for a given seed
+  if(kind==="skip"){const r=mulberry32(seedN^Math.imul((k|0)+7,40503));S.rot+=(r()-0.5)*0.5;}
+  if(S.hp<=0)gameOver();}
+function gameOver(){S.over=true;S.shatter=1;
+  if(S.score>S.best)S.best=S.score;
+  const prevBest=S.ghost?S.ghost.score:0;
+  try{
+    localStorage.setItem("deadwax.hi",S.best);
+    if(S.score>=prevBest)localStorage.setItem("deadwax.g."+seed,JSON.stringify({score:S.score,rec:S.grec}));
+  }catch(e){}}
+
+// ---- particles ----
+function spark(g,col,n){const r=grR[g];for(let i=0;i<n;i++){const a=SA+(Math.random()-0.5)*0.6;
+  S.parts.push({px:CX+r*Math.cos(a),py:CY+r*Math.sin(a),vx:(Math.random()-0.5)*4,vy:(Math.random()-0.5)*4-1,life:1,col});}}
+
+// ---- update ----
+let last=0;
+function update(dt){
+  if(!S.started||S.over){S.parts=S.parts.filter(p=>(p.life-=dt*1.5)>0).map(p=>(p.px+=p.vx,p.py+=p.vy,p));
+    S.shake*=0.9;S.flash*=0.92;if(S.over)S.shatter+=dt*0.6;return;}
+  const ts=S.slow>0?0.35:1;S.slow=Math.max(0,S.slow-dt);
+  const bars=Math.floor(S.nextBeat/BPR);S.rpm=Math.min(72,18+bars*2.4);
+  S.rot+=(S.rpm/60*TAU)*dt*ts;
+  const cur=Math.floor(S.rot/bi);
+  while(S.nextBeat<=cur){resolve(S.nextBeat);S.nextBeat++;}
+  while(S.genK<cur+24){gen(S.genK);S.genK++;}
+  S.ev=S.ev.filter(it=>it.tr-S.rot>-0.6);
+  // player radius tween + trail
+  S.pr+=(grR[S.g]-S.pr)*Math.min(1,dt*16);
+  S.trail.unshift(S.pr);if(S.trail.length>10)S.trail.pop();
+  S.shake*=0.86;S.flash*=0.9;
+  S.parts=S.parts.filter(p=>(p.life-=dt*1.6)>0).map(p=>(p.px+=p.vx,p.py+=p.vy,p.vy+=0.15,p));
+}
+
+// ---- draw ----
+function glyph(px,py,it,al){x.save();x.globalAlpha=al;x.translate(px,py);
+  if(it.kind==="n"){x.fillStyle=PAL.ring;x.beginPath();for(let i=0;i<4;i++){const a=i/4*TAU+Math.PI/4,rr=7;x.lineTo(Math.cos(a)*rr,Math.sin(a)*rr);}x.closePath();x.fill();}
+  else if(it.t==="scratch"){x.strokeStyle="#ff5b4e";x.lineWidth=3;x.beginPath();x.moveTo(-7,-7);x.lineTo(7,7);x.moveTo(7,-7);x.lineTo(-7,7);x.stroke();}
+  else if(it.t==="dust"){x.fillStyle="#e9d27a";for(const o of[[-4,-3],[4,-1],[-1,4],[3,4]]){x.beginPath();x.arc(o[0],o[1],2.2,0,TAU);x.fill();}}
+  else{x.fillStyle="#c07bff";x.beginPath();x.moveTo(0,-9);x.lineTo(3,-1);x.lineTo(8,-1);x.lineTo(2,4);x.lineTo(5,9);x.lineTo(0,4);x.lineTo(-5,9);x.lineTo(-2,4);x.lineTo(-8,-1);x.lineTo(-3,-1);x.closePath();x.fill();}
+  x.restore();}
+function draw(){
+  x.clearRect(0,0,W,H);
+  x.save();
+  const sh=S.shake*(RM?0.2:1);x.translate(CX+(Math.random()-0.5)*sh,CY+(Math.random()-0.5)*sh);
+  const jump=S.over?S.shatter*(RM?4:22):0;
+  // vinyl disc
+  x.save();x.rotate(S.rot);
+  const grd=x.createRadialGradient(0,0,RIN*0.4,0,0,R0+18);
+  grd.addColorStop(0,PAL.ink);grd.addColorStop(1,"#050409");
+  x.beginPath();x.arc(0,0,R0+18,0,TAU);x.fillStyle=grd;x.fill();
+  // groove sheen ring that spins
+  x.strokeStyle="#ffffff10";x.lineWidth=1;
+  for(let rr=RIN;rr<R0+16;rr+=6){x.beginPath();x.arc(0,0,rr,0,TAU);x.stroke();}
+  x.strokeStyle="#ffffff30";x.lineWidth=2;x.beginPath();x.arc(0,0,R0-4,-0.4,0.5);x.stroke();
+  // seeded center label
+  x.beginPath();x.arc(0,0,RIN-14,0,TAU);x.fillStyle=PAL.label;x.fill();
+  x.save();for(let i=0;i<6;i++){x.rotate(TAU/6);x.fillStyle=i%2?PAL.label2:PAL.ink;x.globalAlpha=.35;
+    x.beginPath();x.moveTo(0,0);x.arc(0,0,RIN-18,0,TAU/6);x.closePath();x.fill();}x.restore();
+  x.beginPath();x.arc(0,0,RIN-30,0,TAU);x.strokeStyle=PAL.ink;x.lineWidth=3;x.stroke();
+  x.beginPath();x.arc(0,0,6,0,TAU);x.fillStyle="#000";x.fill();
+  x.fillStyle=PAL.ink;x.font="800 15px ui-monospace,monospace";x.textAlign="center";
+  x.fillText("DEADWAX",0,-6);x.font="9px ui-monospace,monospace";x.fillText(seed.toUpperCase(),0,10);
+  x.restore();
+  // crack overlay
+  if(S.hp<3){x.strokeStyle="#ffffff88";x.lineWidth=1.5;const cr=mulberry32(999);
+    for(let i=0;i<(3-S.hp)*4;i++){x.beginPath();const a=cr()*TAU;let rr=RIN,px=Math.cos(a)*rr,py=Math.sin(a)*rr;x.moveTo(px,py);
+      for(let s=0;s<5;s++){rr+=30;const aa=a+(cr()-0.5)*0.5;x.lineTo(Math.cos(aa)*rr,Math.sin(aa)*rr);}x.stroke();}}
+  // events (defects + notes) — telegraphed approach toward stylus
+  for(const it of S.ev){const d=it.tr-S.rot;if(d<-0.35||d>2.7)continue;
+    const ang=SA-d,r=grR[it.g],px=r*Math.cos(ang),py=r*Math.sin(ang);
+    let al=d>2.2?(2.7-d)/0.5:1;if(it.done)al*=Math.max(0,1+d/0.35);
+    if(d<0.55&&d>-0.1&&it.kind==="d"&&it.t!=="dust"){ // fairness telegraph glow
+      x.save();x.globalAlpha=0.25*(1-d/0.55);x.strokeStyle=it.t==="scratch"?"#ff5b4e":"#c07bff";x.lineWidth=4;
+      x.beginPath();x.arc(0,0,r,SA-0.55,SA-d);x.stroke();x.restore();}
+    glyph(px,py,it,Math.max(0,al));}
+  // groove ring guides
+  x.globalAlpha=1;for(let i=0;i<NG;i++){x.beginPath();x.arc(0,0,grR[i],0,TAU);x.strokeStyle=i===S.g?"#ffffff26":"#ffffff10";x.lineWidth=i===S.g?2:1;x.stroke();}
+  // ghost stylus
+  if(S.ghost&&S.ghost.rec){const gk=Math.floor(S.rot/bi);const gg=S.ghost.rec[gk];
+    if(gg!=null){const gr=grR[gg];x.save();x.globalAlpha=.5;x.fillStyle="#7fd4ff";
+      x.beginPath();x.arc(gr*Math.cos(SA),gr*Math.sin(SA)-2,5,0,TAU);x.fill();x.restore();}}
+  // stylus trail + head at 6 o'clock
+  for(let i=S.trail.length-1;i>=0;i--){const tr=S.trail[i];x.beginPath();x.globalAlpha=(1-i/S.trail.length)*0.4;
+    x.arc(0,tr,6-i*0.4,0,TAU);x.fillStyle=PAL.ring;x.fill();}
+  x.globalAlpha=1;
+  const py=S.pr+jump;
+  x.beginPath();x.arc(0,py,10,0,TAU);x.fillStyle="#fff";x.shadowColor=PAL.ring;x.shadowBlur=18;x.fill();x.shadowBlur=0;
+  // tonearm from top-right pivot
+  x.strokeStyle="#cfc8bd";x.lineWidth=5;x.beginPath();x.moveTo(R0*0.78,-R0*0.78);x.lineTo(0,py);x.stroke();
+  x.fillStyle="#8a8378";x.beginPath();x.arc(R0*0.78,-R0*0.78,9,0,TAU);x.fill();
+  x.restore();
+  // flash
+  if(S.flash>0.02){x.fillStyle=`rgba(255,90,46,${S.flash*0.4})`;x.fillRect(0,0,W,H);}
+  // particles
+  for(const p of S.parts){x.globalAlpha=Math.max(0,p.life);x.fillStyle=p.col;x.fillRect(p.px-2,p.py-2,4,4);}
+  x.globalAlpha=1;
+  // HUD
+  x.fillStyle=PAL.paper||"#efe9df";x.textAlign="left";x.font="800 26px ui-monospace,monospace";
+  x.fillStyle="#efe9df";x.fillText(S.score.toString().padStart(6,"0"),18,40);
+  x.font="12px ui-monospace,monospace";x.fillStyle="#ffffffaa";x.fillText("HIGH "+S.best.toString().padStart(6,"0"),18,58);
+  if(S.combo>1){x.font="800 20px ui-monospace,monospace";x.fillStyle=PAL.ring;x.textAlign="right";
+    x.fillText("x"+S.mult+"  "+S.combo+" combo",W-18,40);}
+  // integrity meter
+  x.textAlign="left";for(let i=0;i<3;i++){x.beginPath();x.arc(28+i*22,H-28,8,0,TAU);
+    x.fillStyle=i<S.hp?"#ff5b2e":"#ffffff22";x.fill();}
+  x.fillStyle="#ffffff88";x.font="11px ui-monospace,monospace";x.fillText("integrity",78,H-24);
+  x.textAlign="right";x.fillText(Math.round(S.rpm)+" RPM",W-18,H-24);
+  // overlays
+  if(!S.started){overlay("DEADWAX","Be on a clean groove when a defect hits the 6 o'clock line.\nSkim one groove past a scratch for a slow-mo risk bonus.","Press SPACE / tap to drop the needle   ·   R restarts");legend();}
+  else if(S.over){overlay("RECORD SHATTERED","Score "+S.score.toString().padStart(6,"0")+"   ·   High "+S.best.toString().padStart(6,"0"),"Press SPACE / tap to spin a fresh cut");}
+}
+function overlay(t,sub,foot){x.fillStyle="rgba(6,5,10,0.72)";x.fillRect(0,0,W,H);
+  x.textAlign="center";x.fillStyle=PAL.label;x.font="800 44px ui-monospace,monospace";x.fillText(t,CX,CY-40);
+  x.fillStyle="#efe9df";x.font="15px ui-monospace,monospace";
+  sub.split("\n").forEach((l,i)=>x.fillText(l,CX,CY+6+i*22));
+  x.fillStyle=PAL.ring;x.font="13px ui-monospace,monospace";x.fillText(foot,CX,CY+96);}
+// draw the real in-game glyphs (not lookalike unicode) so onboarding matches gameplay
+function legend(){
+  const items=[{it:{kind:"d",t:"scratch"},lab:"scratch"},
+               {it:{kind:"d",t:"dust"},lab:"dust"},
+               {it:{kind:"d",t:"skip"},lab:"skip"},
+               {it:{kind:"n"},lab:"note"}];
+  const gap=104,gy=CY+52,x0=CX-(items.length-1)*gap/2;
+  x.textAlign="center";x.font="11px ui-monospace,monospace";
+  items.forEach((e,i)=>{const gx=x0+i*gap;glyph(gx,gy,e.it,1);
+    x.globalAlpha=1;x.fillStyle="#efe9df";x.fillText(e.lab,gx,gy+22);});}
+
+// ---- loop ----
+function frame(t){const dt=Math.min(0.05,(t-last)/1000||0);last=t;update(dt);draw();requestAnimationFrame(frame);}
+
+// ---- controls ----
+document.getElementById("copyBtn").onclick=()=>{const u=location.href;
+  (navigator.clipboard?navigator.clipboard.writeText(u):Promise.reject()).then(()=>{
+    const b=document.getElementById("copyBtn");b.textContent="copied!";setTimeout(()=>b.textContent="share",1200);
+  }).catch(()=>{prompt("Copy this shareable link:",u);});};
+document.getElementById("reseedBtn").onclick=()=>{location.hash=Math.random().toString(36).slice(2,8);
+  initSeed(location.hash);reset();};
+addEventListener("hashchange",()=>{initSeed(location.hash);reset();});
+
+// ---- HiDPI backing store: keep 720x720 draw code, render crisp on retina/4K ----
+function fit(){const dpr=Math.max(1,Math.min(3,window.devicePixelRatio||1));
+  cv.width=W*dpr;cv.height=H*dpr;cv.style.width=W+"px";cv.style.height=H+"px";
+  x.setTransform(dpr,0,0,dpr,0,0);}
+addEventListener("resize",fit);addEventListener("orientationchange",fit);
+
+fit();initSeed(location.hash);reset();requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

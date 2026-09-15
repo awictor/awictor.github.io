@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HtmlToMd — HTML to Markdown Converter</title>
+<meta name="description" content="Convert common HTML (headings, bold, italic, links, lists, code, blockquotes) into clean Markdown. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('html-to-md-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#16a34a;
+    --bg:#f4f7f5; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e2e6e2; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#0f140f; --card:#181e18; --fg:#eef4ee; --muted:#93a293; --line:#26302a; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:900px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#15803d);display:flex;align-items:center;justify-content:center;font-size:20px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:900px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:720px){.grid{grid-template-columns:1fr}}
+  textarea{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.85rem;min-height:220px;resize:vertical}
+  pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.85rem;margin:0;white-space:pre-wrap;min-height:220px}
+  .btns{display:flex;gap:10px;margin-top:12px}
+  button.act{background:var(--c);color:#fff;border:0;border-radius:8px;padding:9px 15px;cursor:pointer;font:inherit;font-weight:600}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:900px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">📝</div>
+    <div><h1>HtmlToMd</h1><div class="sub">Convert HTML into clean Markdown</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div>
+        <label for="input">HTML</label>
+        <textarea id="input" spellcheck="false">&lt;h1&gt;Title&lt;/h1&gt;
+&lt;p&gt;Hello &lt;strong&gt;world&lt;/strong&gt;, see &lt;a href="https://example.com"&gt;this&lt;/a&gt;.&lt;/p&gt;
+&lt;ul&gt;&lt;li&gt;one&lt;/li&gt;&lt;li&gt;two&lt;/li&gt;&lt;/ul&gt;
+&lt;blockquote&gt;A quote&lt;/blockquote&gt;</textarea>
+      </div>
+      <div>
+        <label>Markdown</label>
+        <pre id="out"></pre>
+      </div>
+    </div>
+    <div class="btns"><button class="act" id="copy" type="button">Copy Markdown</button></div>
+  </div>
+</main>
+<footer>
+  Handles common tags — headings, bold/italic, links, lists, code, blockquote, hr. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/html-to-md">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  function decode(t){
+    return String(t).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+  }
+  function stripTags(t){ return String(t).replace(/<[^>]+>/g, ''); }
+  function fmt(t){
+    return String(t)
+      .replace(/<(strong|b)[^>]*>([\s\S]*?)<\/\1>/gi, '**$2**')
+      .replace(/<(em|i)[^>]*>([\s\S]*?)<\/\1>/gi, '*$2*')
+      .replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, '`$1`')
+      .replace(/<a[^>]*href=["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi, '[$2]($1)')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, '');
+  }
+  function listItems(t, ordered){
+    const out = []; const re = /<li[^>]*>([\s\S]*?)<\/li>/gi; let m, i = 1;
+    while((m = re.exec(t))) out.push((ordered ? (i++) + '. ' : '- ') + fmt(m[1]).trim());
+    return out.join('\n');
+  }
+  function htmlToMd(html){
+    let s = String(html).replace(/\r\n/g, '\n');
+    s = s.replace(/<(script|style)[\s\S]*?<\/\1>/gi, '');
+    s = s.replace(/<pre[^>]*>\s*<code[^>]*>([\s\S]*?)<\/code>\s*<\/pre>/gi, (_, t) => '\n```\n' + stripTags(t).trim() + '\n```\n');
+    s = s.replace(/<pre[^>]*>([\s\S]*?)<\/pre>/gi, (_, t) => '\n```\n' + stripTags(t).trim() + '\n```\n');
+    s = s.replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, (_, n, t) => '\n' + '#'.repeat(+n) + ' ' + fmt(t).trim() + '\n');
+    s = s.replace(/<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi, (_, t) => '\n> ' + fmt(t).trim().replace(/\n+/g, ' ') + '\n');
+    s = s.replace(/<ul[^>]*>([\s\S]*?)<\/ul>/gi, (_, t) => '\n' + listItems(t, false) + '\n');
+    s = s.replace(/<ol[^>]*>([\s\S]*?)<\/ol>/gi, (_, t) => '\n' + listItems(t, true) + '\n');
+    s = s.replace(/<hr\s*\/?>/gi, '\n---\n');
+    s = s.replace(/<p[^>]*>([\s\S]*?)<\/p>/gi, (_, t) => '\n' + fmt(t).trim() + '\n');
+    s = s.replace(/<br\s*\/?>/gi, '\n');
+    s = fmt(s);
+    s = decode(s);
+    return s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('out')){
+    const $ = id => document.getElementById(id);
+    function render(){ $('out').textContent = htmlToMd($('input').value); }
+    $('input').addEventListener('input', render);
+    $('copy').addEventListener('click', async () => {
+      try{ await navigator.clipboard.writeText($('out').textContent); $('copy').textContent = 'Copied!'; setTimeout(() => $('copy').textContent = 'Copy Markdown', 1200); }catch(e){}
+    });
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('html-to-md-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { decode, stripTags, fmt, htmlToMd };
+</script>
+</body>
+</html>

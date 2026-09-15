@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trichroma — Color Vision Simulator</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --line:#2a3340;
+    --ink:#e6edf3; --dim:#8b98a8; --accent:#5ec8ff; --good:#3fb950; --warn:#e3b341; --bad:#f85149;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+  header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  header h1{margin:0;font-size:19px;letter-spacing:.3px}
+  header h1 span{color:var(--accent)}
+  header p{margin:0;color:var(--dim);font-size:12.5px}
+  main{display:grid;grid-template-columns:1fr 340px;gap:16px;padding:16px 20px;align-items:start}
+  @media(max-width:960px){main{grid-template-columns:1fr}}
+  .toolbar{grid-column:1/-1;display:flex;gap:14px;flex-wrap:wrap;align-items:center;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+  .toolbar label{color:var(--dim);font-size:12px;margin-right:6px}
+  select,button{font:inherit;color:var(--ink);background:var(--panel2);border:1px solid var(--line);
+    border-radius:7px;padding:6px 10px;cursor:pointer}
+  select:focus,button:focus{outline:2px solid var(--accent);outline-offset:1px}
+  button:hover{border-color:var(--accent)}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+  .seg button{border:0;border-radius:0;background:var(--panel2)}
+  .seg button.on{background:var(--accent);color:#04121c;font-weight:600}
+  input[type=range]{width:130px;vertical-align:middle;accent-color:var(--accent)}
+  .chk{display:inline-flex;align-items:center;gap:6px;user-select:none}
+  .chk input{accent-color:var(--accent)}
+  .stagewrap{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:12px;min-height:320px;display:flex;align-items:center;justify-content:center}
+  #stage{max-width:100%;height:auto;border-radius:6px;background:
+    repeating-conic-gradient(#20262e 0% 25%,#171c23 0% 50%) 50%/22px 22px;image-rendering:auto;cursor:default}
+  #sevv{display:inline-block;min-width:3.5ch;text-align:right}
+  #drop{position:absolute;inset:12px;border:2px dashed var(--line);border-radius:8px;display:flex;
+    flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--dim);text-align:center;
+    padding:20px;transition:.15s}
+  #drop.hi{border-color:var(--accent);color:var(--ink);background:rgba(94,200,255,.06)}
+  #drop.hidden{display:none}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+  .panel h2{margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--dim)}
+  .verdict{font-size:14px;font-weight:600;padding:8px 10px;border-radius:7px;margin-bottom:8px}
+  .v-good{background:rgba(63,185,80,.15);color:var(--good)} .v-warn{background:rgba(227,179,65,.15);color:var(--warn)}
+  .v-bad{background:rgba(248,81,73,.15);color:var(--bad)}
+  .sw{display:inline-block;width:16px;height:16px;border-radius:3px;border:1px solid rgba(255,255,255,.25);vertical-align:middle}
+  .pairrow,.fixrow{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:12.5px}
+  .fixrow .arrow{color:var(--dim)}
+  .muted{color:var(--dim);font-size:12px}
+  .demos{grid-column:1/-1}
+  .gallery{display:flex;gap:10px;flex-wrap:wrap}
+  .gallery figure{margin:0;cursor:pointer;border:1px solid var(--line);border-radius:8px;overflow:hidden;
+    width:120px;background:var(--panel2);transition:.15s}
+  .gallery figure:hover,.gallery figure:focus-visible{border-color:var(--accent);transform:translateY(-2px)}
+  .gallery figure:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .gallery canvas{display:block;width:120px;height:78px}
+  .gallery figcaption{font-size:11px;padding:5px 7px;color:var(--dim);text-align:center}
+  .eye{font-size:12.5px}
+  .eye .pt{display:flex;align-items:center;gap:6px;margin:4px 0}
+  code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:12px}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <h1><span>Tri</span>chroma</h1>
+  <p>See any image through eight kinds of color vision — locally, in one file. Drop / paste an image or pick a demo.</p>
+</header>
+
+<main>
+  <div class="toolbar">
+    <span><label>CVD type</label>
+      <select id="type">
+        <optgroup label="Anomalous (mild)">
+          <option value="protanomaly">Protanomaly (red-weak)</option>
+          <option value="deuteranomaly">Deuteranomaly (green-weak)</option>
+          <option value="tritanomaly">Tritanomaly (blue-weak)</option>
+        </optgroup>
+        <optgroup label="Dichromat (severe)">
+          <option value="protanopia">Protanopia (no red)</option>
+          <option value="deuteranopia">Deuteranopia (no green)</option>
+          <option value="tritanopia">Tritanopia (no blue)</option>
+        </optgroup>
+        <optgroup label="Monochromat">
+          <option value="achromatomaly">Achromatomaly (partial)</option>
+          <option value="achromatopsia">Achromatopsia (full)</option>
+        </optgroup>
+      </select>
+    </span>
+    <span><label>Severity</label><input type="range" id="sev" min="0" max="100" value="60"><b id="sevv">60%</b></span>
+    <span><label>Compare</label>
+      <span class="seg" id="mode">
+        <button data-m="single" class="on">Single</button>
+        <button data-m="side">Side</button>
+        <button data-m="wipe">Wipe</button>
+      </span>
+    </span>
+    <label class="chk"><input type="checkbox" id="dalt">Daltonize</label>
+    <label class="chk"><input type="checkbox" id="heat">Problem heatmap</label>
+    <label class="chk"><input type="checkbox" id="eye">Eyedropper</label>
+    <button id="pick">Open image…</button>
+    <button id="dl">Download PNG</button>
+    <input type="file" id="file" accept="image/*" hidden>
+  </div>
+
+  <div class="stagewrap">
+    <canvas id="stage" width="640" height="420"></canvas>
+    <div id="drop">
+      <div style="font-size:15px">Drop an image, paste from clipboard, or open a file</div>
+      <div class="muted">…or click a demo target below. Nothing is uploaded — all math runs on your canvas.</div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel" id="legPanel">
+      <h2>Legibility note</h2>
+      <div id="verdict" class="verdict v-good">Load an image to analyze.</div>
+      <div id="pairs"></div>
+      <div id="heatLegend" class="muted" style="display:none;margin-top:8px">Heatmap: redder = colors that shift most under this deficiency (candidate confusion zones).</div>
+      <div class="muted" style="margin-top:8px">Heuristic: dominant-color pairs compared by perceptual distance, original vs. simulated. Not a certified audit.</div>
+    </div>
+    <div class="panel" id="fixPanel" style="display:none">
+      <h2>CVD-safe recolor</h2>
+      <div class="muted" style="margin-bottom:8px">Collapsing colors mapped to the Okabe-Ito colorblind-safe set:</div>
+      <div id="fixes"></div>
+    </div>
+    <div class="panel" id="eyePanel" style="display:none">
+      <h2>Eyedropper spot-compare</h2>
+      <div id="eyeout" class="eye"><span class="muted">Enable eyedropper, then click two points on the image.</span></div>
+    </div>
+  </div>
+
+  <div class="panel demos">
+    <h2>Demo gallery</h2>
+    <div class="gallery" id="gallery"></div>
+  </div>
+</main>
+
+<script>
+"use strict";
+/* ---------- Machado et al. 2009 CVD matrices (operate on LINEAR RGB) ---------- */
+const ID=[1,0,0,0,1,0,0,0,1];
+const MACHADO={
+  protan:[ID,
+    [.856167,.182038,-.038205,.029342,.955115,.015544,-.002880,-.001562,1.004443],
+    [.734766,.334872,-.069637,.051840,.919198,.028963,-.004928,-.004209,1.009137],
+    [.630323,.465641,-.095964,.069181,.890046,.040773,-.006308,-.007724,1.014032],
+    [.539009,.579343,-.118352,.082546,.866121,.051332,-.007136,-.011959,1.019095],
+    [.458064,.679578,-.137642,.092785,.846313,.060902,-.007494,-.016807,1.024301],
+    [.385450,.769005,-.154455,.100526,.829802,.069673,-.007442,-.022190,1.029632],
+    [.319627,.849633,-.169261,.106241,.815969,.077790,-.007025,-.028051,1.035076],
+    [.259411,.923008,-.182420,.110296,.804340,.085364,-.006276,-.034346,1.040622],
+    [.203876,.990338,-.194214,.112975,.794542,.092483,-.005222,-.041043,1.046265],
+    [.152286,1.052583,-.204868,.114503,.786281,.099216,-.003882,-.048116,1.051998]],
+  deutan:[ID,
+    [.866435,.177704,-.044139,.049567,.939063,.011370,-.003453,.007233,.996220],
+    [.760729,.319078,-.079807,.090568,.889315,.020117,-.006027,.013325,.992702],
+    [.675425,.433850,-.109275,.125303,.847755,.026942,-.007950,.018572,.989378],
+    [.605511,.528560,-.134071,.155318,.812366,.032316,-.009376,.023176,.986200],
+    [.547494,.607765,-.155259,.181692,.781742,.036566,-.010410,.027275,.983136],
+    [.498864,.674741,-.173604,.205199,.754872,.039929,-.011131,.030969,.980162],
+    [.457771,.731899,-.189670,.226409,.731012,.042579,-.011595,.034333,.977261],
+    [.422823,.781057,-.203881,.245752,.709602,.044646,-.011843,.037423,.974421],
+    [.392952,.823610,-.216562,.263559,.690210,.046232,-.011910,.040281,.971630],
+    [.367322,.860646,-.227968,.280085,.672501,.047413,-.011820,.042940,.968881]],
+  tritan:[ID,
+    [.926670,.092514,-.019184,.021191,.964503,.014306,.008437,.054813,.936750],
+    [.895720,.133330,-.029050,.029997,.945400,.024603,.013027,.104707,.882266],
+    [.905871,.127791,-.033662,.026856,.941251,.031893,.013410,.148296,.838294],
+    [.948035,.089490,-.037526,.014364,.946792,.038844,.010853,.193991,.795156],
+    [1.017277,.027029,-.044306,-.006113,.958479,.047634,.006379,.248708,.744913],
+    [1.104996,-.046633,-.058363,-.032137,.971635,.060503,.001336,.317922,.680742],
+    [1.193214,-.109812,-.083402,-.058496,.979410,.079086,-.002346,.403492,.598854],
+    [1.257728,-.139648,-.118081,-.078003,.975409,.102594,-.003316,.501214,.502102],
+    [1.278864,-.125333,-.153531,-.084748,.957674,.127074,-.000989,.601151,.399838],
+    [1.255528,-.076749,-.178779,-.078411,.930809,.147602,.004733,.691367,.303900]]
+};
+const GRAY=[.2126,.7152,.0722,.2126,.7152,.0722,.2126,.7152,.0722];
+const TYPES={
+  protanomaly:{fam:"protan",def:60}, deuteranomaly:{fam:"deutan",def:60}, tritanomaly:{fam:"tritan",def:60},
+  protanopia:{fam:"protan",def:100}, deuteranopia:{fam:"deutan",def:100}, tritanopia:{fam:"tritan",def:100},
+  achromatomaly:{fam:"achroma",def:60}, achromatopsia:{fam:"achroma",def:100}
+};
+const OKABE=[[0,0,0],[230,159,0],[86,180,233],[0,158,115],[240,228,66],[0,114,178],[213,94,0],[204,121,167]];
+
+/* ---------- sRGB <-> linear LUTs ---------- */
+const S2L=new Float32Array(256), L2S=new Uint8Array(4097);
+for(let i=0;i<256;i++){const c=i/255;S2L[i]=c<=0.04045?c/12.92:Math.pow((c+0.055)/1.055,2.4);}
+for(let i=0;i<=4096;i++){const c=i/4096;const s=c<=0.0031308?c*12.92:1.055*Math.pow(c,1/2.4)-0.055;L2S[i]=Math.max(0,Math.min(255,Math.round(s*255)));}
+const l2s=v=>L2S[v<0?0:v>1?4096:(v*4096)|0];
+
+function matrixFor(type,sevPct){
+  const fam=TYPES[type].fam, s=sevPct/100;
+  if(fam==="achroma"){const M=new Array(9);for(let i=0;i<9;i++)M[i]=ID[i]+(GRAY[i]-ID[i])*s;return M;}
+  const table=MACHADO[fam], f=s*10, lo=Math.floor(f), hi=Math.min(10,lo+1), t=f-lo;
+  const A=table[lo],B=table[hi],M=new Array(9);
+  for(let i=0;i<9;i++)M[i]=A[i]+(B[i]-A[i])*t;
+  return M;
+}
+// apply matrix to one sRGB byte triple -> sRGB bytes
+function simRGB(r,g,b,M){
+  const lr=S2L[r],lg=S2L[g],lb=S2L[b];
+  return [l2s(M[0]*lr+M[1]*lg+M[2]*lb),l2s(M[3]*lr+M[4]*lg+M[5]*lb),l2s(M[6]*lr+M[7]*lg+M[8]*lb)];
+}
+// perceptual color distance (redmean approximation)
+function dist(a,b){const rm=(a[0]+b[0])/2,dr=a[0]-b[0],dg=a[1]-b[1],db=a[2]-b[2];
+  return Math.sqrt((2+rm/256)*dr*dr+4*dg*dg+(2+(255-rm)/256)*db*db);}
+function relLum(c){return .2126*S2L[c[0]]+.7152*S2L[c[1]]+.0722*S2L[c[2]];}
+function wcag(a,b){const l1=relLum(a),l2=relLum(b),hi=Math.max(l1,l2),lo=Math.min(l1,l2);return (hi+.05)/(lo+.05);}
+const hex=c=>"#"+c.map(v=>v.toString(16).padStart(2,"0")).join("");
+
+/* ---------- State ---------- */
+const S={type:"deuteranopia",sev:60,mode:"single",dalt:false,heat:false,eye:false,demo:null,wipe:0.5,pts:[]};
+let srcCanvas=document.createElement("canvas"), srcCtx=srcCanvas.getContext("2d",{willReadFrequently:true});
+let simCanvas=document.createElement("canvas"), heatCanvas=document.createElement("canvas");
+let srcData=null, simData=null, hasImg=false;
+const $=id=>document.getElementById(id);
+const stage=$("stage"), sctx=stage.getContext("2d");
+
+/* ---------- Load a source (Image or Canvas), downscale to <=1000px ---------- */
+function useSource(drawable,w,h){
+  const max=1000, scale=Math.min(1,max/Math.max(w,h));
+  const dw=Math.max(1,Math.round(w*scale)), dh=Math.max(1,Math.round(h*scale));
+  srcCanvas.width=dw;srcCanvas.height=dh;srcCtx.drawImage(drawable,0,0,dw,dh);
+  srcData=srcCtx.getImageData(0,0,dw,dh);
+  simCanvas.width=dw;simCanvas.height=dh;heatCanvas.width=dw;heatCanvas.height=dh;
+  hasImg=true;S.pts=[];$("drop").classList.add("hidden");
+  process();
+}
+function showError(msg){const v=$("verdict");v.className="verdict v-bad";v.textContent=msg;
+  if(!hasImg)$("drop").classList.remove("hidden");}
+function loadFile(file){const img=new Image();
+  img.onload=()=>{useSource(img,img.naturalWidth,img.naturalHeight);URL.revokeObjectURL(img.src);};
+  img.onerror=()=>{URL.revokeObjectURL(img.src);showError("Could not read that image — try a PNG or JPG.");};
+  img.src=URL.createObjectURL(file);}
+
+/* ---------- Core: simulate + heatmap + render + analyze ---------- */
+function process(){ if(!hasImg)return;
+  const M=matrixFor(S.type,S.sev), src=srcData.data, N=src.length;
+  const out=new Uint8ClampedArray(N);
+  // daltonize shift (redistribute error into visible channels); skip for achromatic
+  const fam=TYPES[S.type].fam;
+  const shift = fam==="tritan" ? [1,0,.7,0,1,.7,0,0,0] : [0,0,0,.7,1,0,.7,0,1];
+  const doDalt=S.dalt&&fam!=="achroma";
+  for(let i=0;i<N;i+=4){
+    let r=src[i],g=src[i+1],b=src[i+2];
+    if(doDalt){
+      const s0=simRGB(r,g,b,M), er=r-s0[0],eg=g-s0[1],eb=b-s0[2];
+      r=Math.max(0,Math.min(255,r+shift[0]*er+shift[1]*eg+shift[2]*eb));
+      g=Math.max(0,Math.min(255,g+shift[3]*er+shift[4]*eg+shift[5]*eb));
+      b=Math.max(0,Math.min(255,b+shift[6]*er+shift[7]*eg+shift[8]*eb));
+    }
+    const sc=simRGB(r,g,b,M);
+    out[i]=sc[0];out[i+1]=sc[1];out[i+2]=sc[2];out[i+3]=src[i+3];
+  }
+  simData=new ImageData(out,srcData.width,srcData.height);
+  simCanvas.getContext("2d").putImageData(simData,0,0);
+  buildHeat();analyze();render();updateEye();
+}
+function buildHeat(){ // red overlay, alpha ∝ how much color shifted (candidate confusion zones)
+  const src=srcData.data,sim=simData.data,N=src.length,hd=new Uint8ClampedArray(N);
+  for(let i=0;i<N;i+=4){
+    const d=dist([src[i],src[i+1],src[i+2]],[sim[i],sim[i+1],sim[i+2]]);
+    const a=Math.min(255,d*1.4);
+    hd[i]=248;hd[i+1]=81;hd[i+2]=73;hd[i+3]=src[i+3]?a:0;
+  }
+  heatCanvas.getContext("2d").putImageData(new ImageData(hd,srcData.width,srcData.height),0,0);
+}
+function render(){ if(!hasImg)return;
+  const w=srcCanvas.width,h=srcCanvas.height;
+  if(S.mode==="side"){stage.width=w*2;stage.height=h;}else{stage.width=w;stage.height=h;}
+  sctx.clearRect(0,0,stage.width,stage.height);
+  if(S.mode==="single"){sctx.drawImage(simCanvas,0,0);if(S.heat)sctx.drawImage(heatCanvas,0,0);
+    const lbl="Simulated: "+S.type;sctx.font="12px sans-serif";const tw=sctx.measureText(lbl).width;
+    sctx.fillStyle="rgba(0,0,0,.55)";sctx.fillRect(0,0,tw+12,20);
+    sctx.fillStyle="#fff";sctx.fillText(lbl,6,14);}
+  else if(S.mode==="side"){sctx.drawImage(srcCanvas,0,0);sctx.drawImage(simCanvas,w,0);if(S.heat)sctx.drawImage(heatCanvas,w,0);
+    sctx.fillStyle="rgba(0,0,0,.55)";sctx.fillRect(0,0,64,20);sctx.fillRect(w,0,86,20);
+    sctx.fillStyle="#fff";sctx.font="12px sans-serif";sctx.fillText("Original",6,14);sctx.fillText("Simulated",w+6,14);}
+  else{ const wx=Math.round(w*S.wipe);
+    sctx.drawImage(srcCanvas,0,0);
+    sctx.save();sctx.beginPath();sctx.rect(wx,0,w-wx,h);sctx.clip();
+    sctx.drawImage(simCanvas,0,0);if(S.heat)sctx.drawImage(heatCanvas,0,0);sctx.restore();
+    sctx.strokeStyle="#5ec8ff";sctx.lineWidth=2;sctx.beginPath();sctx.moveTo(wx,0);sctx.lineTo(wx,h);sctx.stroke();
+    sctx.fillStyle="#5ec8ff";sctx.beginPath();sctx.arc(wx,h/2,9,0,7);sctx.fill();
+    sctx.fillStyle="#04121c";sctx.font="bold 11px sans-serif";sctx.fillText("↔",wx-5,h/2+4);}
+  // eyedropper markers
+  S.pts.forEach((p,i)=>{const x=p.x,y=p.y;sctx.strokeStyle="#fff";sctx.lineWidth=2;
+    sctx.beginPath();sctx.arc(x,y,7,0,7);sctx.stroke();
+    sctx.fillStyle="#000";sctx.beginPath();sctx.arc(x,y,7,0,7);sctx.globalAlpha=.35;sctx.fill();sctx.globalAlpha=1;
+    sctx.fillStyle="#fff";sctx.font="bold 11px sans-serif";sctx.fillText("AB"[i],x-3,y+4);
+    if(S.mode==="side"){sctx.beginPath();sctx.arc(x+w,y,7,0,7);sctx.stroke();}});
+  stage.style.cursor = S.eye ? "crosshair" : S.mode==="wipe" ? "ew-resize" : "default";
+  $("heatLegend").style.display = S.heat ? "" : "none";
+}
+
+/* ---------- Dominant-color + legibility analysis ---------- */
+function dominant(){
+  const d=srcData.data,w=srcData.width,h=srcData.height,step=Math.max(1,Math.round(Math.sqrt(w*h/4000)));
+  const bins=new Map();
+  for(let y=0;y<h;y+=step)for(let x=0;x<w;x+=step){const i=(y*w+x)*4;if(d[i+3]<128)continue;
+    const k=(d[i]>>4<<8)|(d[i+1]>>4<<4)|(d[i+2]>>4);
+    let e=bins.get(k);if(!e){e=[0,0,0,0];bins.set(k,e);}e[0]+=d[i];e[1]+=d[i+1];e[2]+=d[i+2];e[3]++;}
+  let arr=[...bins.values()].map(e=>({c:[Math.round(e[0]/e[3]),Math.round(e[1]/e[3]),Math.round(e[2]/e[3])],n:e[3]}))
+    .sort((a,b)=>b.n-a.n);
+  const out=[];for(const it of arr){if(out.every(o=>dist(o.c,it.c)>34)){out.push(it);}if(out.length>=6)break;}
+  return out;
+}
+function analyze(){
+  const M=matrixFor(S.type,S.sev), cols=dominant();
+  cols.forEach(o=>o.s=simRGB(o.c[0],o.c[1],o.c[2],M));
+  let worst=null;const bad=[];
+  for(let i=0;i<cols.length;i++)for(let j=i+1;j<cols.length;j++){
+    const od=dist(cols[i].c,cols[j].c), sd=dist(cols[i].s,cols[j].s), drop=od-sd;
+    if(od>60){const rec={a:cols[i],b:cols[j],od,sd,drop,collapse:sd<28&&od>60};
+      if(rec.collapse)bad.push(rec); if(!worst||drop>worst.drop)worst=rec;}
+  }
+  const v=$("verdict"),pl=$("pairs");
+  if(!cols.length){v.className="verdict v-good";v.textContent="No dominant colors detected.";pl.innerHTML="";return;}
+  if(bad.length){v.className="verdict v-bad";v.textContent=`⚠ ${bad.length} color pair${bad.length>1?"s":""} likely to collapse under ${S.type}.`;}
+  else if(worst&&worst.drop>34){v.className="verdict v-warn";v.textContent="Caution: some color separation is reduced but pairs stay distinguishable.";}
+  else{v.className="verdict v-good";v.textContent="✓ Dominant color pairs remain distinguishable.";}
+  const show=(bad.length?bad:worst?[worst]:[]).slice(0,4);
+  pl.innerHTML=show.map(p=>`<div class="pairrow"><span class="sw" style="background:${hex(p.a.c)}"></span>`+
+    `<span class="sw" style="background:${hex(p.b.c)}"></span><span class="muted">orig Δ${Math.round(p.od)}</span> → `+
+    `<span class="sw" style="background:${hex(p.a.s)}"></span><span class="sw" style="background:${hex(p.b.s)}"></span>`+
+    `<span style="color:${p.collapse?'var(--bad)':'var(--dim)'}">sim Δ${Math.round(p.sd)}</span></div>`).join("")
+    ||'<div class="muted">Only one dominant color region — nothing to compare.</div>';
+  suggest(cols,bad.length>0);
+}
+function suggest(cols,collapsing){
+  const fp=$("fixPanel");
+  if(!collapsing){fp.style.display="none";return;}
+  fp.style.display="";const used=[];
+  const rows=cols.slice(0,6).map(o=>{
+    let best=-1,bd=1e9;OKABE.forEach((ok,k)=>{if(used.includes(k))return;const d=dist(o.c,ok);if(d<bd){bd=d;best=k;}});
+    if(best<0)best=cols.indexOf(o)%OKABE.length; used.push(best);
+    const ok=OKABE[best];
+    return `<div class="fixrow"><span class="sw" style="background:${hex(o.c)}"></span><code>${hex(o.c)}</code>`+
+      `<span class="arrow">→</span><span class="sw" style="background:${hex(ok)}"></span><code>${hex(ok)}</code></div>`;
+  });
+  $("fixes").innerHTML=rows.join("");
+}
+
+/* ---------- Eyedropper ---------- */
+function stageXY(ev){const r=stage.getBoundingClientRect();
+  let x=(ev.clientX-r.left)*(stage.width/r.width), y=(ev.clientY-r.top)*(stage.height/r.height);
+  if(S.mode==="side"&&x>=srcCanvas.width)x-=srcCanvas.width;
+  return {x:Math.max(0,Math.min(srcCanvas.width-1,Math.round(x))),y:Math.max(0,Math.min(srcCanvas.height-1,Math.round(y)))};}
+function updateEye(){
+  const p=$("eyePanel"); if(!S.eye){p.style.display="none";return;} p.style.display="";
+  const o=$("eyeout"); if(!S.pts.length){o.innerHTML='<span class="muted">Click two points on the image.</span>';return;}
+  const rows=S.pts.map((pt,i)=>{const idx=(pt.y*srcData.width+pt.x)*4;
+    const oc=[srcData.data[idx],srcData.data[idx+1],srcData.data[idx+2]];
+    const sc=[simData.data[idx],simData.data[idx+1],simData.data[idx+2]];
+    return `<div class="pt"><b>${"AB"[i]}</b> <span class="sw" style="background:${hex(oc)}"></span><code>${hex(oc)}</code>`+
+      `→ <span class="sw" style="background:${hex(sc)}"></span><code>${hex(sc)}</code></div>`;});
+  let extra="";
+  if(S.pts.length===2){const i0=(S.pts[0].y*srcData.width+S.pts[0].x)*4,i1=(S.pts[1].y*srcData.width+S.pts[1].x)*4;
+    const a=[srcData.data[i0],srcData.data[i0+1],srcData.data[i0+2]],b=[srcData.data[i1],srcData.data[i1+1],srcData.data[i1+2]];
+    const sa=[simData.data[i0],simData.data[i0+1],simData.data[i0+2]],sb=[simData.data[i1],simData.data[i1+1],simData.data[i1+2]];
+    const co=wcag(a,b),cs=wcag(sa,sb),dr=cs<co&&cs<3?'var(--bad)':'var(--dim)';
+    extra=`<div style="margin-top:8px;border-top:1px solid var(--line);padding-top:6px">`+
+      `A↔B contrast — original <b>${co.toFixed(2)}:1</b>, simulated <b style="color:${dr}">${cs.toFixed(2)}:1</b><br>`+
+      `<span class="muted">color Δ orig ${Math.round(dist(a,b))} → sim ${Math.round(dist(sa,sb))}</span></div>`;}
+  o.innerHTML=rows.join("")+extra;
+}
+
+/* ---------- Demo target generators ---------- */
+function genIshihara(ctx,w,h){ctx.fillStyle="#e8dcc8";ctx.fillRect(0,0,w,h);
+  const m=document.createElement("canvas");m.width=w;m.height=h;const mc=m.getContext("2d");
+  mc.fillStyle="#000";mc.fillRect(0,0,w,h);mc.fillStyle="#fff";mc.textAlign="center";mc.textBaseline="middle";
+  mc.font="bold "+Math.round(h*0.72)+"px sans-serif";mc.fillText("74",w/2,h/2+4);
+  const md=mc.getImageData(0,0,w,h).data;
+  const fig=[[120,180,90],[90,160,70],[150,190,110]], bg=[[224,150,90],[210,120,70],[230,180,120],[200,140,80]];
+  for(let k=0;k<2600;k++){const x=Math.random()*w,y=Math.random()*h,rad=2+Math.random()*7;
+    const inside=md[((y|0)*w+(x|0))*4]>128;const pal=inside?fig:bg;const c=pal[(Math.random()*pal.length)|0];
+    ctx.fillStyle=hex(c);ctx.beginPath();ctx.arc(x,y,rad,0,7);ctx.fill();}}
+function genChart(ctx,w,h){ctx.fillStyle="#fff";ctx.fillRect(0,0,w,h);
+  const cats=[["Alpha",[213,60,50]],["Bravo",[40,150,60]],["Charlie",[40,90,200]],["Delta",[235,150,30]],["Echo",[150,60,160]]];
+  const vals=[.9,.72,.6,.45,.3];ctx.font="13px sans-serif";
+  cats.forEach((c,i)=>{const y=18+i*(h-30)/cats.length;ctx.fillStyle=hex(c[1]);
+    ctx.fillRect(70,y,vals[i]*(w-90),(h-30)/cats.length-8);
+    ctx.fillStyle="#222";ctx.fillText(c[0],6,y+14);});}
+function genStatus(ctx,w,h){ctx.fillStyle="#f4f5f7";ctx.fillRect(0,0,w,h);
+  const pill=(x,col,txt)=>{ctx.fillStyle=col;ctx.beginPath();
+    if(ctx.roundRect)ctx.roundRect(x,h/2-30,w/2-40,60,30);else ctx.rect(x,h/2-30,w/2-40,60);
+    ctx.fill();
+    ctx.fillStyle="#fff";ctx.font="bold 22px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.fillText(txt,x+(w/2-40)/2,h/2);};
+  pill(24,"#2e9e3f","PASS");pill(w/2+16,"#d23b30","FAIL");}
+function genTransit(ctx,w,h){ctx.fillStyle="#fbfbf9";ctx.fillRect(0,0,w,h);ctx.lineWidth=7;ctx.lineCap="round";
+  const lines=[["#d0342c",[[20,40],[160,40],[220,110],[220,300]]],["#2f9e44",[[20,120],[300,120],[380,200],[600,200]]],
+    ["#1971c2",[[80,20],[80,240],[200,340],[560,340]]],["#f08c00",[[600,30],[420,30],[340,120],[340,360]]]];
+  lines.forEach(L=>{ctx.strokeStyle=L[0];ctx.beginPath();L[1].forEach((p,i)=>i?ctx.lineTo(p[0]*w/640,p[1]*h/420):ctx.moveTo(p[0]*w/640,p[1]*h/420));ctx.stroke();});}
+const DEMOS={ishihara:["Ishihara plate",genIshihara],chart:["Chart legend",genChart],status:["UI status pair",genStatus],transit:["Transit map",genTransit]};
+function loadDemo(key){const w=640,h=420,c=document.createElement("canvas");c.width=w;c.height=h;
+  DEMOS[key][1](c.getContext("2d"),w,h);S.demo=key;useSource(c,w,h);writeHash();}
+function buildGallery(){const g=$("gallery");Object.keys(DEMOS).forEach(k=>{
+  const fig=document.createElement("figure");
+  fig.setAttribute("role","button");fig.tabIndex=0;fig.setAttribute("aria-label","Load demo: "+DEMOS[k][0]);
+  const cv=document.createElement("canvas");cv.width=240;cv.height=156;cv.setAttribute("aria-hidden","true");
+  try{DEMOS[k][1](cv.getContext("2d"),240,156);}catch(err){/* one bad thumbnail must not blank the app */}
+  const cap=document.createElement("figcaption");cap.textContent=DEMOS[k][0];
+  fig.appendChild(cv);fig.appendChild(cap);
+  const go=()=>loadDemo(k);fig.onclick=go;
+  fig.addEventListener("keydown",ev=>{if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();go();}});
+  g.appendChild(fig);});}
+
+/* ---------- URL hash (settings only; image never serialized) ---------- */
+function writeHash(){const p=new URLSearchParams();p.set("type",S.type);p.set("sev",S.sev);p.set("mode",S.mode);
+  if(S.dalt)p.set("dalt","1");if(S.heat)p.set("heat","1");if(S.demo)p.set("demo",S.demo);
+  history.replaceState(null,"","#"+p.toString());}
+function readHash(){const p=new URLSearchParams(location.hash.slice(1));
+  if(p.get("type")&&TYPES[p.get("type")])S.type=p.get("type");
+  if(p.has("sev"))S.sev=Math.max(0,Math.min(100,+p.get("sev")||0));
+  if(["single","side","wipe"].includes(p.get("mode")))S.mode=p.get("mode");
+  S.dalt=p.get("dalt")==="1";S.heat=p.get("heat")==="1";
+  $("type").value=S.type;$("sev").value=S.sev;$("sevv").textContent=S.sev+"%";$("dalt").checked=S.dalt;$("heat").checked=S.heat;
+  [...$("mode").children].forEach(b=>b.classList.toggle("on",b.dataset.m===S.mode));
+  if(p.get("demo")&&DEMOS[p.get("demo")])loadDemo(p.get("demo"));}
+
+/* ---------- Wiring ---------- */
+// coalesce heavy recomputes to one per animation frame so slider drags stay smooth
+let procPending=false;
+function scheduleProcess(){if(procPending)return;procPending=true;
+  requestAnimationFrame(()=>{procPending=false;process();});}
+$("type").addEventListener("change",e=>{S.type=e.target.value;S.sev=TYPES[S.type].def;
+  $("sev").value=S.sev;$("sevv").textContent=S.sev+"%";writeHash();process();});
+$("sev").addEventListener("input",e=>{S.sev=+e.target.value;$("sevv").textContent=S.sev+"%";writeHash();scheduleProcess();});
+$("mode").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;S.mode=b.dataset.m;
+  [...$("mode").children].forEach(x=>x.classList.toggle("on",x===b));writeHash();render();});
+$("dalt").addEventListener("change",e=>{S.dalt=e.target.checked;writeHash();process();});
+$("heat").addEventListener("change",e=>{S.heat=e.target.checked;writeHash();render();});
+$("eye").addEventListener("change",e=>{S.eye=e.target.checked;if(!S.eye)S.pts=[];updateEye();render();});
+$("pick").onclick=()=>$("file").click();
+$("file").onchange=e=>{if(e.target.files[0]){S.demo=null;writeHash();loadFile(e.target.files[0]);}};
+// export exactly what's on screen (single/side/wipe + heatmap + markers), not just the bare sim
+$("dl").onclick=()=>{if(!hasImg)return;const a=document.createElement("a");
+  a.download="trichroma-"+S.type+"-"+S.mode+".png";a.href=stage.toDataURL("image/png");a.click();};
+
+let dragging=false;
+stage.addEventListener("pointerdown",e=>{if(!hasImg)return;const p=stageXY(e);
+  if(S.eye){S.pts.push(p);if(S.pts.length>2)S.pts.shift();updateEye();render();return;}
+  if(S.mode==="wipe"){dragging=true;S.wipe=Math.max(0,Math.min(1,p.x/srcCanvas.width));render();}});
+stage.addEventListener("pointermove",e=>{if(dragging&&S.mode==="wipe"){const p=stageXY(e);
+  S.wipe=Math.max(0,Math.min(1,p.x/srcCanvas.width));render();}});
+window.addEventListener("pointerup",()=>dragging=false);
+
+const dz=$("drop"),sw=document.querySelector(".stagewrap");
+["dragenter","dragover"].forEach(ev=>sw.addEventListener(ev,e=>{e.preventDefault();dz.classList.add("hi");}));
+["dragleave","drop"].forEach(ev=>sw.addEventListener(ev,e=>{e.preventDefault();if(ev==="dragleave"&&e.target!==dz)return;dz.classList.remove("hi");}));
+sw.addEventListener("drop",e=>{const f=[...e.dataTransfer.files].find(f=>f.type.startsWith("image/"));
+  if(f){S.demo=null;writeHash();loadFile(f);}});
+window.addEventListener("paste",e=>{const it=[...(e.clipboardData||{}).items||[]].find(i=>i.type.startsWith("image/"));
+  if(it){S.demo=null;writeHash();loadFile(it.getAsFile());}});
+
+buildGallery();readHash();
+if(!hasImg)loadDemo("ishihara");
+</script>
+</body>
+</html>

@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FilterGen — CSS filter generator</title>
+<meta name="description" content="Free offline CSS filter generator. Dial in blur, brightness, contrast, grayscale, hue-rotate, invert, saturate, and sepia with a live preview, then copy the filter CSS. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/filter-gen/">
+<style>
+  :root{
+    --c:#3b0764; --bg:#fbf8fd; --fg:#1c1030; --muted:#665880;
+    --card:#ffffff; --border:#e9e0f2; --code:#f1eafa;
+  }
+  [data-theme="dark"]{
+    --bg:#120c1e; --fg:#ebe5f5; --muted:#9a90b6; --card:#1b142c;
+    --border:#2e2646; --code:#241d3a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#7c3aed);display:grid;place-items:center;color:#fff;font-size:20px}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  .preview{height:220px;border-radius:14px;margin-bottom:20px;display:grid;place-items:center;
+    background:
+      linear-gradient(135deg,#f472b6,#fb923c 40%,#22d3ee 80%);
+    font-size:4rem}
+  .sliders{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:560px){.sliders{grid-template-columns:1fr}}
+  .sl label{display:flex;justify-content:space-between;font-size:.78rem;color:var(--muted);margin-bottom:4px}
+  .sl label b{color:var(--fg);font-family:ui-monospace,monospace}
+  .sl input[type=range]{width:100%;accent-color:var(--c)}
+  .btns{display:flex;gap:10px;margin-top:16px}
+  .btns button{background:var(--code);border:1px solid var(--border);color:var(--fg);border-radius:9px;
+    padding:8px 14px;cursor:pointer;font-size:.84rem}
+  .btns button:hover{border-color:var(--c);color:var(--c)}
+  .out-head{display:flex;align-items:center;margin-top:16px}
+  .copy{margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);
+    border-radius:8px;padding:5px 13px;cursor:pointer;font-size:.8rem}
+  .copy:hover{color:var(--c);border-color:var(--c)}
+  pre{background:var(--code);border-radius:12px;padding:14px 16px;margin:8px 0 0;overflow-x:auto;
+    font-family:ui-monospace,monospace;font-size:.9rem;white-space:pre-wrap;word-break:break-all}
+  footer{max-width:820px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('flt.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">✦</div>
+  <div>
+    <h1>FilterGen</h1>
+    <p class="sub">CSS filter generator</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <div class="preview" id="preview">🖼️</div>
+    <div class="sliders" id="sliders"></div>
+    <div class="btns">
+      <button id="reset">Reset</button>
+    </div>
+    <div class="out-head">
+      <label style="margin:0;font-weight:600;font-size:.85rem">CSS</label>
+      <button class="copy" id="copy">Copy</button>
+    </div>
+    <pre id="css"></pre>
+  </div>
+</main>
+<footer>
+  FilterGen is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/filter-gen">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+var FILTER_DEFS = [
+  ['blur', 0, 'px', 0, 20, 0.5],
+  ['brightness', 100, '%', 0, 200, 1],
+  ['contrast', 100, '%', 0, 200, 1],
+  ['grayscale', 0, '%', 0, 100, 1],
+  ['hue-rotate', 0, 'deg', 0, 360, 1],
+  ['invert', 0, '%', 0, 100, 1],
+  ['saturate', 100, '%', 0, 200, 1],
+  ['sepia', 0, '%', 0, 100, 1]
+];
+function buildFilter(config){
+  config = config || {};
+  var parts = [];
+  FILTER_DEFS.forEach(function(f){
+    var name = f[0], def = f[1], unit = f[2];
+    var raw = config[name];
+    var v = (raw === undefined || raw === null || raw === '') ? def : Number(raw);
+    if(!isFinite(v)) v = def;
+    if(v !== def) parts.push(name + '(' + v + unit + ')');
+  });
+  return parts.length ? parts.join(' ') : 'none';
+}
+function withProperty(css){ return 'filter: ' + css + ';'; }
+
+if(typeof module !== 'undefined') module.exports = { FILTER_DEFS, buildFilter, withProperty };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var slidersEl = document.getElementById('sliders');
+  var previewEl = document.getElementById('preview');
+  var cssEl = document.getElementById('css');
+  var state = {};
+  FILTER_DEFS.forEach(function(f){ state[f[0]] = f[1]; });
+
+  function renderSliders(){
+    slidersEl.innerHTML = FILTER_DEFS.map(function(f){
+      var name = f[0], unit = f[2], min = f[3], max = f[4], step = f[5];
+      return '<div class="sl"><label>' + name +
+        ' <b><span data-v="' + name + '">' + state[name] + '</span>' + unit + '</b></label>' +
+        '<input type="range" data-n="' + name + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + state[name] + '"></div>';
+    }).join('');
+  }
+  function render(){
+    var css = buildFilter(state);
+    previewEl.style.filter = css === 'none' ? '' : css;
+    cssEl.textContent = withProperty(css);
+    try{ localStorage.setItem('flt.state', JSON.stringify(state)); }catch(e){}
+  }
+  slidersEl.addEventListener('input', function(e){
+    var t = e.target, name = t.getAttribute('data-n');
+    if(!name) return;
+    state[name] = Number(t.value);
+    var span = slidersEl.querySelector('[data-v="' + name + '"]');
+    if(span) span.textContent = t.value;
+    render();
+  });
+  document.getElementById('reset').addEventListener('click', function(){
+    FILTER_DEFS.forEach(function(f){ state[f[0]] = f[1]; });
+    renderSliders(); render();
+  });
+  document.getElementById('copy').addEventListener('click', function(){
+    if(navigator.clipboard) navigator.clipboard.writeText(cssEl.textContent);
+    this.textContent = 'Copied'; var b = this; setTimeout(function(){ b.textContent = 'Copy'; }, 1000);
+  });
+  try{ var s = JSON.parse(localStorage.getItem('flt.state')); if(s) Object.keys(state).forEach(function(k){ if(k in s) state[k] = s[k]; }); }catch(e){}
+  renderSliders();
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('flt.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('flt.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

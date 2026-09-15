@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Radiant Floor Heat 🌡️ — BTU Output From Floor Temperature</title>
+<meta name="description" content="Estimate the heat output of a radiant floor from area and floor-to-room temperature difference, with a comfort-limited max. Offline, private, single file.">
+<style>
+:root{
+  --c:#9a3412;
+  --bg:#f6f8fa; --card:#fff; --fg:#1a1f24; --muted:#5a6470; --line:#e2e6ea;
+}
+[data-theme="dark"]{
+  --bg:#0b1016; --card:#141b23; --fg:#e6edf3; --muted:#8b98a6; --line:#232d38;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.55;transition:background .2s,color .2s}
+.wrap{max-width:640px;margin:0 auto;padding:24px 18px 60px}
+header{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.logo{font-size:2.2rem;line-height:1}
+h1{font-size:1.5rem;margin:0}
+.tag{color:var(--muted);margin:2px 0 22px;font-size:.98rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:18px}
+label{display:block;font-weight:600;margin:14px 0 6px;font-size:.92rem}
+input{width:100%;padding:11px 12px;font-size:1rem;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--fg)}
+input:focus{outline:2px solid var(--c);border-color:var(--c)}
+.row{display:flex;gap:12px}
+.row>div{flex:1}
+.out{margin-top:20px;padding:18px;border-radius:12px;background:linear-gradient(135deg,var(--c)20,transparent);border:1px solid var(--c)}
+.big{font-size:2rem;font-weight:700;color:#7c2d12}
+[data-theme="dark"] .big{color:#fdba74}
+.sub{color:var(--muted);font-size:.9rem;margin-top:4px}
+table{width:100%;border-collapse:collapse;margin-top:8px;font-size:.95rem}
+th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:600}
+td:last-child{text-align:right;font-weight:700}
+.explain{font-size:.9rem;color:var(--muted)}
+.explain h2{font-size:1rem;color:var(--fg);margin:0 0 8px}
+.explain li{margin:4px 0}
+footer{text-align:center;color:var(--muted);font-size:.85rem;margin-top:30px}
+footer a{color:var(--c);text-decoration:none}
+.theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:7px 11px;cursor:pointer;font-size:1.1rem}
+.note{background:var(--bg);border:1px dashed var(--c);border-radius:9px;padding:10px 12px;font-size:.86rem;color:var(--muted);margin-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <span class="logo">🌡️</span>
+  <h1>Radiant Floor Heat</h1>
+  <button class="theme" id="themeBtn" title="Toggle theme">🌙</button>
+</header>
+<p class="tag">Heat a radiant floor gives off, and the comfort-limited ceiling.</p>
+
+<div class="card">
+  <label for="area">Floor area (sq ft)</label>
+  <input type="number" id="area" value="300" min="1" step="10">
+  <div class="row">
+    <div>
+      <label for="floor">Floor surface temp (&deg;F)</label>
+      <input type="number" id="floor" value="82" min="1" step="1">
+    </div>
+    <div>
+      <label for="room">Room temp (&deg;F)</label>
+      <input type="number" id="room" value="68" min="1" step="1">
+    </div>
+  </div>
+
+  <div class="out">
+    <div class="big" id="outOut">—</div>
+    <div class="sub">Heat output at this floor temperature</div>
+    <table>
+      <tr><th>Detail</th><th>Value</th></tr>
+      <tr><td>Output per sq ft</td><td id="perOut">—</td></tr>
+      <tr><td>Max at 85&deg;F comfort cap</td><td id="maxOut">—</td></tr>
+    </table>
+    <div class="note" id="note"></div>
+  </div>
+</div>
+
+<div class="card explain">
+  <h2>How it works</h2>
+  <ul>
+    <li>A radiant floor gives off roughly <strong>2 BTU/hr per square foot for each &deg;F</strong> the floor sits above the room.</li>
+    <li>Output = area &times; 2 &times; (floor temp &minus; room temp).</li>
+    <li>Comfort and flooring limits cap floor surface temperature near <strong>85&deg;F</strong> — that sets the most heat a floor can deliver.</li>
+    <li>If your heat loss exceeds that cap, the floor alone can't keep up; add panel or baseboard for the shortfall.</li>
+  </ul>
+</div>
+
+<footer>Part of the <a href="https://awictor.github.io/toolkit/" target="_blank" rel="noopener">Toolkit</a> · offline &amp; private · no data leaves your device</footer>
+</div>
+
+<script>
+var BTU_PER_SQFT_PER_DEGF = 2;
+var MAX_FLOOR_TEMP = 85;
+
+function outputPerSqFt(floorTempF, roomTempF){
+  if(!(floorTempF > roomTempF)) throw new Error("floor temp must exceed room temp");
+  return BTU_PER_SQFT_PER_DEGF * (floorTempF - roomTempF);
+}
+function totalOutput(areaSqFt, floorTempF, roomTempF){
+  if(!(areaSqFt > 0)) throw new Error("area must be positive");
+  return areaSqFt * outputPerSqFt(floorTempF, roomTempF);
+}
+function maxComfortOutput(areaSqFt, roomTempF){
+  if(!(roomTempF < MAX_FLOOR_TEMP)) throw new Error("room temp must be below the comfort cap");
+  return totalOutput(areaSqFt, MAX_FLOOR_TEMP, roomTempF);
+}
+
+function render(){
+  var area = parseFloat(document.getElementById("area").value);
+  var floor = parseFloat(document.getElementById("floor").value);
+  var room = parseFloat(document.getElementById("room").value);
+  var oO = document.getElementById("outOut"), pO = document.getElementById("perOut"),
+      mO = document.getElementById("maxOut"), note = document.getElementById("note");
+  try{
+    oO.textContent = Math.round(totalOutput(area, floor, room)).toLocaleString() + " BTU/hr";
+    pO.textContent = Math.round(outputPerSqFt(floor, room)) + " BTU/hr/sq ft";
+    mO.textContent = Math.round(maxComfortOutput(area, room)).toLocaleString() + " BTU/hr";
+    note.textContent = floor > MAX_FLOOR_TEMP ? "Floor is above the 85°F comfort cap." : "If heat loss exceeds the cap, add another heat source.";
+  }catch(e){
+    oO.textContent = "—"; pO.textContent = "—"; mO.textContent = "—";
+    note.textContent = "Floor temp must be above room temp, area positive.";
+  }
+}
+
+(function(){
+  if(typeof document === "undefined") return;
+  var th = localStorage.getItem("radiantFloorTheme") || "dark";
+  document.documentElement.setAttribute("data-theme", th);
+  var btn = document.getElementById("themeBtn");
+  btn.textContent = th === "dark" ? "☀️" : "🌙";
+  btn.addEventListener("click", function(){
+    var cur = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", cur);
+    localStorage.setItem("radiantFloorTheme", cur);
+    btn.textContent = cur === "dark" ? "☀️" : "🌙";
+  });
+  ["area", "floor", "room"].forEach(function(id){ document.getElementById(id).addEventListener("input", render); });
+  render();
+})();
+
+if(typeof module !== 'undefined') module.exports = { outputPerSqFt, totalOutput, maxComfortOutput, BTU_PER_SQFT_PER_DEGF, MAX_FLOOR_TEMP };
+</script>
+</body>
+</html>

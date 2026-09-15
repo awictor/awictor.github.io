@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IsoWeek — ISO 8601 Week Number for Any Date</title>
+<meta name="description" content="Find the ISO 8601 week number and week-year for any date, the weekday, and how many weeks are in a year. Handles the tricky year-boundary weeks. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('isoweek-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#075985;
+    --bg:#f1f6fa; --card:#ffffff; --fg:#111c26; --muted:#556570; --line:#dce7f0; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#07121b; --card:#0f1c28; --fg:#e7f1f8; --muted:#8498a8; --line:#1a2a38; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:620px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#0c4a6e);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:620px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.1rem}
+  .out{text-align:center}
+  .big{font-size:2.8rem;font-weight:800;color:var(--c);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;line-height:1}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
+  .box{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .box .v{font-size:1.3rem;font-weight:800}
+  .box .k{color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:620px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">📅</div>
+    <div><h1>IsoWeek</h1><div class="sub">ISO 8601 week number</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="date">Date</label>
+    <input type="date" id="date">
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card out">
+    <div class="big" id="wk">—</div>
+    <div class="grid">
+      <div class="box"><div class="v" id="weekday">—</div><div class="k">Weekday</div></div>
+      <div class="box"><div class="v" id="wiy">—</div><div class="k">Weeks in ISO year</div></div>
+    </div>
+  </div>
+</main>
+<footer>
+  ISO 8601 weeks start on Monday; week 1 is the week containing the year's first Thursday. So early-January dates can belong to the previous year's last week (e.g. 2021-01-01 → 2020-W53). 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/iso-week">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  const DAY = 86400000;
+
+  function chkYmd(y, m, d){
+    if(![y, m, d].every(v => Number.isInteger(Number(v)))) throw new Error('enter a valid date');
+    return [Number(y), Number(m), Number(d)];
+  }
+
+  // ISO 8601 week number and week-year for a Y-M-D (month 1-12).
+  function isoWeek(y, m, d){
+    const [Y, M, D] = chkYmd(y, m, d);
+    const date = new Date(Date.UTC(Y, M - 1, D));
+    if(isNaN(date)) throw new Error('invalid date');
+    const dayNum = (date.getUTCDay() + 6) % 7;            // Mon=0 … Sun=6
+    date.setUTCDate(date.getUTCDate() - dayNum + 3);       // Thursday of this week
+    const weekYear = date.getUTCFullYear();
+    const firstThu = new Date(Date.UTC(weekYear, 0, 4));   // Jan 4 is always in week 1
+    const ftDay = (firstThu.getUTCDay() + 6) % 7;
+    firstThu.setUTCDate(firstThu.getUTCDate() - ftDay + 3);
+    const week = 1 + Math.round((date - firstThu) / (7 * DAY));
+    return { week, weekYear };
+  }
+
+  // Weekday, 1 = Monday … 7 = Sunday.
+  function weekday(y, m, d){
+    const [Y, M, D] = chkYmd(y, m, d);
+    return ((new Date(Date.UTC(Y, M - 1, D)).getUTCDay() + 6) % 7) + 1;
+  }
+
+  // Number of ISO weeks in a year (52 or 53). Dec 28 is always in the last week.
+  const weeksInYear = year => isoWeek(year, 12, 28).week;
+
+  const pad2 = n => String(n).padStart(2, '0');
+  const format = ({ week, weekYear }) => `${weekYear}-W${pad2(week)}`;
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('wk')){
+    const $ = id => document.getElementById(id);
+    const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    $('date').value = new Date().toISOString().slice(0, 10);
+
+    function render(){
+      try{
+        const [y, m, d] = $('date').value.split('-').map(Number);
+        const iso = isoWeek(y, m, d);
+        $('wk').textContent = format(iso);
+        $('weekday').textContent = DAYS[weekday(y, m, d) - 1];
+        $('wiy').textContent = weeksInYear(iso.weekYear);
+        $('err').textContent = '';
+      }catch(e){ $('wk').textContent = '—'; $('weekday').textContent = '—'; $('wiy').textContent = '—'; $('err').textContent = e.message; }
+    }
+    $('date').addEventListener('input', render);
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('isoweek-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { isoWeek, weekday, weeksInYear, format };
+</script>
+</body>
+</html>

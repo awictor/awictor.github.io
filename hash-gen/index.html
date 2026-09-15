@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HashGen — SHA-1 / SHA-256 / SHA-512 Hash Generator</title>
+<meta name="description" content="Generate SHA-1, SHA-256, SHA-384, and SHA-512 hashes of any text in your browser using the Web Crypto API. 100% offline — your text never leaves your device." />
+<meta name="theme-color" content="#0f766e" />
+<meta name="color-scheme" content="light dark" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="HashGen — SHA Hash Generator" />
+<meta property="og:description" content="SHA-1/256/384/512 hashes of text, computed locally with Web Crypto. Offline." />
+<meta property="og:url" content="https://awictor.github.io/hash-gen/" />
+<link rel="canonical" href="https://awictor.github.io/hash-gen/" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f766e'/%3E%3Ctext x='32' y='42' font-size='30' text-anchor='middle' fill='%23fff' font-family='monospace' font-weight='bold'%3E%23%3C/text%3E%3C/svg%3E" />
+<style>
+  :root{ --bg:#eef7f5; --ink:#0c211d; --accent:#0f766e; --accent-d:#115e59;
+    --card:#fff; --line:#d2e8e3; --muted:#4f6f68; --bad:#e5484d; --field:#fff;
+    --shadow:0 1px 2px rgba(12,33,29,.05),0 8px 24px rgba(12,33,29,.07); }
+  [data-theme="dark"]{ --bg:#06140f; --ink:#e6f2ee; --accent:#2dd4bf; --accent-d:#5eead4;
+    --card:#0e1f1a; --line:#1d352f; --muted:#8aa79f; --bad:#f0685c; --field:#06140f;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.35); }
+  html[data-theme="dark"] body{background:var(--bg)}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{padding:28px 20px 8px;text-align:center;position:relative}
+  header h1{margin:0;font-size:26px;letter-spacing:-.02em} header h1 .m{color:var(--accent)}
+  header p{margin:6px 0 0;color:var(--muted);font-size:14px}
+  #themeBtn{position:absolute;top:18px;right:18px;width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:17px;cursor:pointer;box-shadow:var(--shadow)}
+  .wrap{max-width:820px;margin:0 auto;padding:20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:20px}
+  .card h2{margin:0 0 12px;font-size:14px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+  textarea{width:100%;min-height:110px;padding:14px 16px;border:1px solid var(--line);border-radius:11px;font-size:15px;background:var(--field);color:var(--ink);resize:vertical;font-family:inherit}
+  textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(15,118,110,.15)}
+  .hash{margin:12px 0}
+  .hash .k{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;display:flex;justify-content:space-between}
+  .hash .k .copy{cursor:pointer;color:var(--accent);text-transform:none;letter-spacing:0;font-weight:600}
+  .hash .v{margin-top:4px;padding:11px 13px;background:var(--bg);border-radius:9px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;word-break:break-all;cursor:pointer}
+  #msg{font-size:12px;color:var(--muted);min-height:16px}
+  footer{text-align:center;color:var(--muted);font-size:12px;padding:24px}
+  footer a{color:var(--accent-d);text-decoration:none}
+</style>
+<script>(function(){try{var t=localStorage.getItem("hashgen.theme")||((window.matchMedia&&matchMedia("(prefers-color-scheme:dark)").matches)?"dark":"light");document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+</head>
+<body>
+<header>
+  <button id="themeBtn" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
+  <h1><span class="m">Hash</span>Gen</h1>
+  <p>SHA-1, SHA-256, SHA-384 &amp; SHA-512 of any text — computed locally with the Web Crypto API. Nothing leaves your device.</p>
+</header>
+
+<div class="wrap">
+  <section class="card">
+    <h2>Text</h2>
+    <textarea id="input" spellcheck="false" placeholder="Type or paste text to hash…">abc</textarea>
+    <div id="msg"></div>
+  </section>
+  <section class="card">
+    <h2>Hashes</h2>
+    <div id="hashes"></div>
+  </section>
+</div>
+
+<footer>
+  <b>HashGen</b> · offline SHA hash generator · <a href="https://github.com/awictor/hash-gen">source</a> · <a href="https://awictor.github.io/toolkit/">part of Toolkit</a><br>
+  SHA-1 is shown for legacy use; prefer SHA-256+. © <span id="yr">2026</span> Alex Wictor · MIT · v0.1.0
+</footer>
+
+<script>
+const $=id=>document.getElementById(id);
+const ALGOS=["SHA-1","SHA-256","SHA-384","SHA-512"];
+
+// --- Pure(ish) hashing via Web Crypto. Returns lowercase hex. ---
+async function sha(text,algo){
+  const data=new TextEncoder().encode(String(text));
+  const buf=await crypto.subtle.digest(algo,data);
+  return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+async function allHashes(text){
+  const out={}; for(const a of ALGOS) out[a]=await sha(text,a); return out;
+}
+
+// --- UI ---
+let token=0;
+async function render(){
+  const text=$("input").value; const mine=++token;
+  try{localStorage.setItem("hashgen.input",text);}catch(e){}
+  const res=await allHashes(text);
+  if(mine!==token) return; // a newer input superseded this run
+  $("hashes").innerHTML=ALGOS.map(a=>`<div class="hash"><div class="k">${a} <span class="copy" data-a="${a}">copy</span></div><div class="v" data-a="${a}">${res[a]}</div></div>`).join("");
+  const copy=v=>{const done=()=>{$("msg").textContent="✓ Copied";setTimeout(()=>$("msg").textContent="",1200);};if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(v).then(done,done);else done();};
+  $("hashes").querySelectorAll("[data-a]").forEach(el=>el.onclick=()=>copy(res[el.dataset.a]));
+}
+$("input").addEventListener("input",render);
+$("themeBtn").onclick=()=>{const t=document.documentElement.getAttribute("data-theme")==="dark"?"light":"dark";document.documentElement.setAttribute("data-theme",t);try{localStorage.setItem("hashgen.theme",t);}catch(e){}$("themeBtn").textContent=t==="dark"?"☀️":"🌙";};
+$("themeBtn").textContent=document.documentElement.getAttribute("data-theme")==="dark"?"☀️":"🌙";
+try{$("yr").textContent=new Date().getFullYear();}catch(e){}
+try{const s=localStorage.getItem("hashgen.input");if(s!=null)$("input").value=s;}catch(e){}
+render();
+
+if(typeof module!=="undefined") module.exports={sha,allHashes,ALGOS};
+</script>
+</body>
+</html>

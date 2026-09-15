@@ -1,0 +1,1887 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Wickfall</title>
+<meta name="description" content="Wickfall — a turn-based grid roguelike where your lantern light is your fuel, your fog-of-war, and a ticking clock." />
+<style>
+  :root{
+    --bg:#0a0806;
+    --panel:#15100c;
+    --panel2:#1e1712;
+    --ink:#e9dcc3;
+    --dim:#8a795f;
+    --flame:#ff9a3c;
+    --flame2:#ffd27a;
+    --ember:#ff5a2c;
+    --blood:#c8503a;
+    --good:#7fd18a;
+    --steel:#9fb4c8;
+    --border:#3a2c1e;
+    --shadow:rgba(0,0,0,.6);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;overflow:hidden;touch-action:manipulation;}
+  #app{display:flex;flex-direction:column;height:100%;width:100%;align-items:center;justify-content:center;gap:8px;padding:8px;}
+  .frame{display:flex;flex-direction:row;gap:12px;max-width:1100px;width:100%;height:100%;align-items:stretch;justify-content:center;}
+  #stage{position:relative;flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:8px;}
+  .canvaswrap{position:relative;flex:1 1 auto;min-height:0;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#050403;box-shadow:0 10px 30px var(--shadow) inset,0 6px 24px rgba(0,0,0,.5);}
+  canvas#game{display:block;width:100%;height:100%;image-rendering:pixelated;}
+  #sidebar{flex:0 0 250px;display:flex;flex-direction:column;gap:8px;min-height:0;}
+  @media (max-width:820px){
+    .frame{flex-direction:column;gap:8px;}
+    #sidebar{flex:0 0 auto;flex-direction:row;flex-wrap:wrap;}
+    #sidebar .card{flex:1 1 46%;}
+    .hidecompact{display:none!important;}
+  }
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px 12px;box-shadow:0 4px 14px rgba(0,0,0,.35);}
+  .title{font-weight:800;letter-spacing:.06em;color:var(--flame);text-transform:uppercase;font-size:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;}
+  .stat{display:flex;justify-content:space-between;font-variant-numeric:tabular-nums;font-size:13px;margin:3px 0;}
+  .stat b{color:var(--flame2);font-weight:700;}
+  .bar{position:relative;height:12px;border-radius:6px;background:#0c0a08;border:1px solid var(--border);overflow:hidden;margin:4px 0 8px;}
+  .bar > i{position:absolute;left:0;top:0;bottom:0;display:block;border-radius:6px;transition:width .15s ease;}
+  .bar.hp > i{background:linear-gradient(90deg,#7a2418,#c8503a);}
+  .bar.oil > i{background:linear-gradient(90deg,#7a4a12,#ff9a3c,#ffd27a);}
+  /* critical-resource states: bar reddens and pulses to demand attention */
+  @keyframes lowpulse{0%,100%{opacity:1;box-shadow:0 0 0 rgba(255,90,44,0)} 50%{opacity:.5;box-shadow:0 0 10px rgba(255,90,44,.7)}}
+  .bar.low > i{animation:lowpulse 1s ease-in-out infinite;}
+  .bar.oil.low > i{background:linear-gradient(90deg,#7a2410,#ff5a2c,#ffb04a);}
+  .bar.hp.low > i{background:linear-gradient(90deg,#5a1410,#ff3a2c);}
+  @media (prefers-reduced-motion: reduce){ .bar.low > i{animation:none;} }
+  .bar .lbl{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;text-shadow:0 1px 2px #000;color:#fff;letter-spacing:.05em;}
+  #log{flex:1 1 auto;min-height:60px;overflow-y:auto;font-size:12.5px;line-height:1.45;padding-right:4px;}
+  #log .l{margin:2px 0;opacity:.95;}
+  #log .l.old{opacity:.45;}
+  .c-good{color:var(--good)} .c-bad{color:var(--blood)} .c-flame{color:var(--flame2)} .c-dim{color:var(--dim)} .c-steel{color:var(--steel)} .c-crit{color:#ff5a2c;font-weight:800}
+  .topbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;}
+  .topbar .brand{font-weight:900;letter-spacing:.14em;color:var(--flame);font-size:16px;text-transform:uppercase;text-shadow:0 0 12px rgba(255,120,40,.4);}
+  .topbar .spacer{flex:1 1 auto;}
+  .pill{background:var(--panel2);border:1px solid var(--border);border-radius:999px;padding:3px 9px;font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums;}
+  .pill b{color:var(--ink)}
+  button.btn{background:var(--panel2);color:var(--ink);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;font-weight:600;cursor:pointer;user-select:none;transition:.1s;}
+  button.btn:hover{border-color:var(--flame);color:var(--flame2);}
+  button.btn:active{transform:translateY(1px);}
+  button.btn.hot{border-color:var(--flame);color:var(--flame2);}
+  button.btn:focus-visible,.inv-list li:focus-visible{border-color:var(--flame);color:var(--flame2);outline:2px solid var(--flame2);outline-offset:2px;}
+  /* Touch controls */
+  #touch{display:none;position:absolute;inset:0;pointer-events:none;}
+  #touch .dpad{position:absolute;left:10px;bottom:10px;width:150px;height:150px;pointer-events:auto;}
+  #touch .dpad button{position:absolute;width:48px;height:48px;border-radius:10px;font-size:20px;}
+  #touch .dpad .up{left:51px;top:0} #touch .dpad .down{left:51px;top:100px}
+  #touch .dpad .left{left:0;top:51px} #touch .dpad .right{left:100px;top:51px}
+  #touch .dpad .mid{left:51px;top:51px;font-size:13px;}
+  #touch .acts{position:absolute;right:10px;bottom:10px;display:grid;grid-template-columns:repeat(2,66px);gap:8px;pointer-events:auto;}
+  #touch .acts button{height:44px;font-size:12px;}
+  body.touch #touch{display:block;}
+  /* Overlays */
+  .overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(6,4,3,.86);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);z-index:20;padding:16px;}
+  .overlay.show{display:flex;}
+  .modal{background:var(--panel);border:1px solid var(--border);border-radius:14px;max-width:520px;width:100%;max-height:92%;overflow:auto;padding:20px 22px;box-shadow:0 20px 60px rgba(0,0,0,.7);}
+  .modal h1{margin:0 0 4px;color:var(--flame);letter-spacing:.1em;font-size:28px;text-transform:uppercase;text-shadow:0 0 20px rgba(255,120,40,.35);}
+  .modal h2{margin:16px 0 8px;color:var(--flame2);font-size:15px;letter-spacing:.05em;}
+  .modal p{font-size:13.5px;line-height:1.55;color:var(--ink);}
+  .modal .muted{color:var(--dim);font-size:12.5px;}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:2px 14px;font-size:13px;margin:6px 0;font-variant-numeric:tabular-nums;}
+  .kv .k{color:var(--dim);} .kv .v{color:var(--ink);text-align:right;font-weight:600;}
+  table.keys{width:100%;border-collapse:collapse;font-size:12.5px;}
+  table.keys td{padding:3px 6px;border-bottom:1px solid var(--panel2);}
+  table.keys td:first-child{color:var(--flame2);font-weight:700;white-space:nowrap;width:38%;}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
+  .inv-list{list-style:none;margin:8px 0;padding:0;}
+  .inv-list li{display:flex;gap:8px;align-items:center;padding:7px 9px;border:1px solid var(--border);border-radius:8px;margin:5px 0;background:var(--panel2);cursor:pointer;font-size:13px;}
+  .inv-list li:hover{border-color:var(--flame);}
+  .inv-list li .glyph{width:22px;text-align:center;font-weight:800;font-size:16px;}
+  .inv-list li .nm{flex:1 1 auto;}
+  .inv-list li .tag{font-size:10px;color:var(--flame2);border:1px solid var(--border);border-radius:6px;padding:1px 6px;}
+  .inv-list li .keyhint{color:var(--dim);font-size:11px;}
+  .seedbox{display:flex;gap:6px;margin-top:8px;}
+  .seedbox input{flex:1 1 auto;background:#0c0a08;border:1px solid var(--border);border-radius:8px;color:var(--ink);padding:7px 9px;font-family:ui-monospace,monospace;font-size:12.5px;}
+  .cardimg{width:100%;border:1px solid var(--border);border-radius:10px;margin-top:8px;background:#000;}
+  .tabs{display:flex;gap:6px;margin-bottom:8px;}
+  .lb{list-style:none;margin:0;padding:0;font-size:12.5px;font-variant-numeric:tabular-nums;}
+  .lb li{display:flex;justify-content:space-between;padding:4px 6px;border-bottom:1px solid var(--panel2);}
+  .lb li .r{color:var(--dim);width:24px;}
+  .lb li .d{color:var(--flame2);font-weight:700;}
+  .footer{font-size:11px;color:var(--dim);text-align:center;}
+  .kbd{display:inline-block;background:var(--panel2);border:1px solid var(--border);border-radius:5px;padding:0 5px;font-size:11px;color:var(--flame2);font-weight:700;}
+  ::-webkit-scrollbar{width:8px;height:8px}
+  ::-webkit-scrollbar-thumb{background:#2a2016;border-radius:8px}
+  ::-webkit-scrollbar-track{background:transparent}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="topbar" style="max-width:1100px;width:100%;">
+    <span class="brand">Wickfall</span>
+    <span class="pill">Depth <b id="tb-depth">1</b></span>
+    <span class="pill">Turn <b id="tb-turn">0</b></span>
+    <span class="pill">Seed <b id="tb-seed">—</b></span>
+    <span class="spacer"></span>
+    <button class="btn" id="btn-help" title="Help (?)">Help</button>
+    <button class="btn" id="btn-daily" title="Daily Challenge">Daily</button>
+    <button class="btn" id="btn-new" title="New Run (N)">New Run</button>
+  </div>
+
+  <div class="frame">
+    <div id="stage">
+      <div class="canvaswrap">
+        <canvas id="game" width="800" height="560"></canvas>
+        <div id="touch">
+          <div class="dpad">
+            <button class="btn up"    data-dir="N">▲</button>
+            <button class="btn left"  data-dir="W">◄</button>
+            <button class="btn mid"    id="t-wait">wait</button>
+            <button class="btn right" data-dir="E">►</button>
+            <button class="btn down"  data-dir="S">▼</button>
+          </div>
+          <div class="acts">
+            <button class="btn" id="t-grab">Grab</button>
+            <button class="btn" id="t-inv">Bag</button>
+            <button class="btn" id="t-dim">Dim</button>
+            <button class="btn" id="t-flare">Flare</button>
+            <button class="btn" id="t-descend">Descend</button>
+            <button class="btn" id="t-look">Help</button>
+          </div>
+        </div>
+
+        <!-- START overlay -->
+        <div class="overlay" id="ov-start">
+          <div class="modal">
+            <h1>Wickfall</h1>
+            <p class="muted">Your lantern is your life. Every step burns it down.</p>
+            <p>You descend a lightless dungeon with a single lantern. Its glow <b>is</b> your sight — and its oil drains every turn. Linger and the dark closes in tile by tile; things that live in the black grow bold. Move fast and you blunder into ambush. Find oil. Go deep. Die well.</p>
+            <div class="row">
+              <button class="btn hot" id="start-play">Descend ▸</button>
+              <button class="btn" id="start-daily">Daily Challenge</button>
+              <button class="btn" id="start-help">How to Play</button>
+            </div>
+            <div class="seedbox">
+              <input id="start-seed" placeholder="custom seed (optional)…" />
+              <button class="btn" id="start-seed-go">Use Seed</button>
+            </div>
+            <div class="footer" style="margin-top:14px">Keyboard: arrows / <span class="kbd">hjkl</span> / numpad move. <span class="kbd">?</span> for full controls. Runs autosave — refresh to resume.</div>
+          </div>
+        </div>
+
+        <!-- HELP overlay -->
+        <div class="overlay" id="ov-help">
+          <div class="modal">
+            <h1 style="font-size:22px">How to Play</h1>
+            <h2>The Lantern Economy</h2>
+            <p>The lit circle around you is everything you can see — and it shrinks as your <b class="c-flame">oil</b> drains, roughly one unit per turn. At zero oil the wick gutters through a few dimmer <b>ember</b> turns, then blackout: radius&nbsp;1, and you are nearly blind. Pick up <b class="c-flame">oil flasks</b> to refill.</p>
+            <p>Monsters standing in darkness gain a <b class="c-bad">lurk</b> bonus (harder to hit, hit harder) and track you by the <b>noise</b> you make moving. Keep them in your light to expose them.</p>
+            <h2>Active light control</h2>
+            <p><b class="c-flame">Dim</b> (<span class="kbd">z</span>) halves oil burn and cuts your noise for stealth, at the cost of a smaller circle. <b class="c-flame">Flare</b> (<span class="kbd">f</span>) spends oil to blast a bright pulse that briefly blinds and exposes adjacent lurkers.</p>
+            <h2>Controls</h2>
+            <table class="keys">
+              <tr><td>Move</td><td>Arrows, <span class="kbd">h j k l</span>, <span class="kbd">y u b n</span> (diagonals), or numpad</td></tr>
+              <tr><td>Wait a turn</td><td><span class="kbd">.</span> or <span class="kbd">5</span> or <span class="kbd">Space</span></td></tr>
+              <tr><td>Grab item</td><td><span class="kbd">g</span> or <span class="kbd">,</span></td></tr>
+              <tr><td>Descend stairs</td><td><span class="kbd">&gt;</span> or <span class="kbd">Enter</span> (on the &gt;)</td></tr>
+              <tr><td>Inventory / use</td><td><span class="kbd">i</span></td></tr>
+              <tr><td>Dim lantern</td><td><span class="kbd">z</span></td></tr>
+              <tr><td>Flare lantern</td><td><span class="kbd">f</span></td></tr>
+              <tr><td>New run</td><td><span class="kbd">N</span></td></tr>
+              <tr><td>This help</td><td><span class="kbd">?</span></td></tr>
+            </table>
+            <p class="muted" style="margin-top:12px">Every run is seeded from the URL — copy the link to challenge a friend to the exact same dungeon. Permadeath is real; there is no save-scumming.</p>
+            <div class="row"><button class="btn hot" id="help-close">Close</button></div>
+          </div>
+        </div>
+
+        <!-- INVENTORY overlay -->
+        <div class="overlay" id="ov-inv">
+          <div class="modal">
+            <h1 style="font-size:22px">Inventory</h1>
+            <p class="muted" id="inv-hint">Click an item to use / equip. Press its letter, or Esc to close.</p>
+            <ul class="inv-list" id="inv-list"></ul>
+            <div class="row"><button class="btn hot" id="inv-close">Close</button></div>
+          </div>
+        </div>
+
+        <!-- DEATH overlay -->
+        <div class="overlay" id="ov-death">
+          <div class="modal">
+            <h1 id="death-title" style="font-size:24px">You Died</h1>
+            <p class="muted" id="death-sub">The dark took you.</p>
+            <canvas class="cardimg" id="death-card" width="560" height="300"></canvas>
+            <div class="row">
+              <button class="btn hot" id="death-again">New Run</button>
+              <button class="btn" id="death-samesecd">Retry Seed</button>
+              <button class="btn" id="death-copyimg">Copy Image</button>
+              <button class="btn" id="death-copylink">Copy Seed Link</button>
+            </div>
+            <div class="seedbox"><input id="death-link" readonly /></div>
+          </div>
+        </div>
+
+        <!-- CONFIRM overlay -->
+        <div class="overlay" id="ov-confirm">
+          <div class="modal" style="max-width:390px">
+            <h1 style="font-size:22px">Abandon run?</h1>
+            <p class="muted" id="confirm-msg">Your current descent will be lost. Permadeath means there is no going back.</p>
+            <div class="row">
+              <button class="btn hot" id="confirm-yes">Abandon</button>
+              <button class="btn" id="confirm-no">Keep Going</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div id="sidebar">
+      <div class="card">
+        <div class="title">Vitals</div>
+        <div class="bar hp"><i id="hp-fill" style="width:100%"></i><span class="lbl" id="hp-lbl">HP</span></div>
+        <div class="bar oil"><i id="oil-fill" style="width:100%"></i><span class="lbl" id="oil-lbl">OIL</span></div>
+        <div class="stat"><span>Lantern</span><b id="s-radius">Bright</b></div>
+        <div class="stat"><span>Level</span><b id="s-level">1</b></div>
+        <div class="stat"><span>XP</span><b id="s-xp">0 / 18</b></div>
+        <div class="stat"><span>Weapon</span><b id="s-weap">fists</b></div>
+        <div class="stat"><span>Armor</span><b id="s-arm">rags</b></div>
+        <div class="stat"><span>Kills</span><b id="s-kills">0</b></div>
+      </div>
+      <div class="card hidecompact" style="display:flex;flex-direction:column;gap:6px;">
+        <div class="title">Lantern <span id="lamp-mode" class="pill">bright</span></div>
+        <div style="display:flex;gap:6px;">
+          <button class="btn" id="side-dim" style="flex:1">Dim (z)</button>
+          <button class="btn" id="side-flare" style="flex:1">Flare (f)</button>
+        </div>
+      </div>
+      <div class="card" style="flex:1 1 auto;display:flex;flex-direction:column;min-height:90px;">
+        <div class="title">Log</div>
+        <div id="log"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* =========================================================================
+   Wickfall — a single-file, zero-dependency turn-based lantern roguelike.
+   ========================================================================= */
+
+/* -------------------------------------------------------------------------
+   1. Seeded RNG — Mulberry32 with a string hasher, fully deterministic.
+   ------------------------------------------------------------------------- */
+function xmur3(str){
+  let h = 1779033703 ^ str.length;
+  for(let i=0;i<str.length;i++){
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  return function(){
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    h ^= h >>> 16;
+    return h >>> 0;
+  };
+}
+function mulberry32(a){
+  return function(){
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+class RNG{
+  constructor(seedStr){
+    this.seedStr = String(seedStr);
+    const seedFn = xmur3(this.seedStr);
+    this._state = seedFn();
+    this.calls = 0;                       // count draws so a run's position can be persisted
+    const base = mulberry32(this._state);
+    this.rand = ()=>{ this.calls++; return base(); };
+  }
+  // fast-forward the stream to a saved position (used on resume)
+  advanceTo(n){ while(this.calls < n) this.rand(); }
+  // reseed a child stream deterministically (per-depth)
+  fork(salt){
+    return new RNG(this.seedStr + ":" + salt);
+  }
+  next(){ return this.rand(); }
+  int(min,max){ return min + Math.floor(this.rand() * (max - min + 1)); } // inclusive
+  pick(arr){ return arr[Math.floor(this.rand()*arr.length)]; }
+  chance(p){ return this.rand() < p; }
+  shuffle(arr){
+    for(let i=arr.length-1;i>0;i--){
+      const j = Math.floor(this.rand()*(i+1));
+      [arr[i],arr[j]] = [arr[j],arr[i]];
+    }
+    return arr;
+  }
+  // weighted pick: entries [{v, w}]
+  weighted(entries){
+    let total = 0;
+    for(const e of entries) total += e.w;
+    let r = this.rand()*total;
+    for(const e of entries){ if((r -= e.w) < 0) return e.v; }
+    return entries[entries.length-1].v;
+  }
+}
+
+/* -------------------------------------------------------------------------
+   2. Constants & tuning knobs
+   ------------------------------------------------------------------------- */
+const MAP_W = 56, MAP_H = 34;
+const TILE = { WALL:0, FLOOR:1, STAIRS:2, RUBBLE:3 };
+
+// Lantern economy tuning
+const OIL_MAX = 100;
+const OIL_START = 100;
+const OIL_BURN_BRIGHT = 1.0;     // oil per turn while bright
+const OIL_BURN_DIM = 0.45;       // oil per turn while dimmed
+const FLARE_COST = 14;           // oil spent to flare
+const EMBER_TURNS = 4;           // grace turns after oil hits zero
+const RADIUS_BRIGHT_MAX = 7.4;   // radius at full oil, bright
+const RADIUS_BRIGHT_MIN = 2.2;   // radius near-empty, bright
+const RADIUS_DIM_MULT = 0.62;    // dim shrinks the circle
+const RADIUS_BLACKOUT = 1.35;    // when embers are gone
+
+const NOISE_BRIGHT = 1.0;
+const NOISE_DIM = 0.4;
+const HEAR_RANGE_BASE = 6.5;     // how far a monster hears full-noise movement
+
+const XP_FOR = lvl => 18 + (lvl-1)*14; // xp needed to reach next level
+
+const SAVE_KEY = "wickfall.save.v1";
+const LB_KEY = "wickfall.leaderboard.v1";
+const DAILY_LB_KEY = "wickfall.daily.v1";
+
+const DIRS = {
+  N:[0,-1], S:[0,1], E:[1,0], W:[-1,0],
+  NE:[1,-1], NW:[-1,-1], SE:[1,1], SW:[-1,1]
+};
+const DIR8 = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+
+/* -------------------------------------------------------------------------
+   3. Data tables: monsters & items, scaling with depth
+   ------------------------------------------------------------------------- */
+const MONSTERS = {
+  rat:   {name:"cave rat",  glyph:"r", color:"#b79b7a", hp:5,  atk:2, acc:70, def:0, xp:3,  speed:1, minD:1, maxD:4,  w:10, lurk:false, desc:"a scrabbling rat"},
+  bat:   {name:"dusk bat",  glyph:"b", color:"#8f7bb0", hp:6,  atk:3, acc:60, def:2, xp:4,  speed:1, erratic:0.4, minD:1, maxD:6, w:8, desc:"an erratic bat"},
+  crawler:{name:"grave crawler",glyph:"c",color:"#7fb08a",hp:11,atk:4,acc:72,def:1,xp:7,speed:1, minD:2,maxD:8,w:8, poison:2, desc:"a pallid crawler"},
+  lurker:{name:"black lurker",glyph:"l",color:"#5a6b7a",hp:9, atk:5, acc:66, def:2, xp:9, speed:1, minD:3, maxD:12, w:9, lurkLover:true, desc:"a shape that loves the dark"},
+  ghoul: {name:"ghoul",     glyph:"G", color:"#c0b48a", hp:16, atk:6, acc:74, def:2, xp:12, speed:1, minD:4, maxD:14, w:7, desc:"a lean ghoul"},
+  wraith:{name:"wick wraith",glyph:"w",color:"#a7c8d8", hp:14, atk:7, acc:70, def:3, xp:15, speed:1, minD:5, maxD:20, w:6, drainsOil:3, desc:"a wraith that eats light"},
+  brute: {name:"stone brute",glyph:"B",color:"#c8917a", hp:28, atk:9, acc:70, def:4, xp:20, speed:1, minD:6, maxD:20, w:5, slow:true, desc:"a hulking brute"},
+  seer:  {name:"pale seer", glyph:"s", color:"#d8a7c8", hp:18, atk:8, acc:78, def:3, xp:22, speed:1, minD:8, maxD:24, w:5, sees:true, desc:"a seer that needs no light"},
+  reaver:{name:"gloom reaver",glyph:"R",color:"#e07a5a",hp:34, atk:12,acc:76, def:5, xp:34, speed:1, minD:11,maxD:30,w:5, crit:true, desc:"a merciless reaver"},
+};
+
+const ITEMS = {
+  oil:     {kind:"oil",   name:"oil flask",      glyph:"!", color:"#ffd27a", w:16, restore:42, stack:true, minD:1, desc:"Refills the lantern."},
+  bigoil:  {kind:"oil",   name:"heavy oil cask", glyph:"!", color:"#ffb04a", w:5,  restore:78, stack:true, minD:3, desc:"A generous refill."},
+  potion:  {kind:"heal",  name:"salve potion",   glyph:"?", color:"#7fd18a", w:10, heal:14, stack:true, minD:1, desc:"Restores health."},
+  bigpot:  {kind:"heal",  name:"greater salve",  glyph:"?", color:"#8fe0a0", w:4,  heal:28, stack:true, minD:5, desc:"Restores much health."},
+  scroll_flash:{kind:"scroll",name:"scroll of dawnburst", glyph:"§", color:"#ffe0a0", w:6, effect:"flash", minD:2, desc:"Floods the floor with light, blinding foes."},
+  scroll_teleport:{kind:"scroll",name:"scroll of blink",  glyph:"§", color:"#a7c8ff", w:6, effect:"teleport", minD:3, desc:"Teleports you to a random spot."},
+  scroll_wick:{kind:"scroll",name:"scroll of steady wick",glyph:"§", color:"#ffd27a", w:5, effect:"wick", minD:4, desc:"Halves oil burn for 40 turns."},
+  // weapons
+  w_dagger:{kind:"weapon",name:"iron dagger",    glyph:"/", color:"#cfd8e0", w:9,  dmg:4, acc:6,  minD:1, desc:"Quick and reliable."},
+  w_sword: {kind:"weapon",name:"short sword",    glyph:"/", color:"#dfe6ee", w:8,  dmg:7, acc:4,  minD:3, desc:"A balanced blade."},
+  w_axe:   {kind:"weapon",name:"war axe",        glyph:"/", color:"#e8c0a0", w:6,  dmg:11,acc:0,  crit:0.12, minD:6, desc:"Heavy, brutal swings."},
+  w_lantern_pick:{kind:"weapon",name:"wick pick",glyph:"/",color:"#ffd27a", w:4, dmg:8, acc:8, minD:8, desc:"Glows faintly; strikes true."},
+  // armor
+  a_leather:{kind:"armor",name:"leather vest",   glyph:"[", color:"#c9a06a", w:9,  def:2, minD:1, desc:"Light protection."},
+  a_chain: {kind:"armor",name:"chain shirt",     glyph:"[", color:"#b8c0c8", w:7,  def:4, minD:3, desc:"Solid mail."},
+  a_plate: {kind:"armor",name:"plate harness",   glyph:"[", color:"#d0d8e0", w:5,  def:6, minD:6, desc:"Heavy plate."},
+};
+
+/* -------------------------------------------------------------------------
+   4. Small utilities
+   ------------------------------------------------------------------------- */
+const clamp = (v,a,b)=> v<a?a:(v>b?b:v);
+const dist2 = (ax,ay,bx,by)=> (ax-bx)*(ax-bx)+(ay-by)*(ay-by);
+const now = ()=> Date.now();
+
+function todaySeed(){
+  const d = new Date();
+  const y = d.getUTCFullYear(), m = String(d.getUTCMonth()+1).padStart(2,"0"), day = String(d.getUTCDate()).padStart(2,"0");
+  return "daily-" + y + m + day;
+}
+
+/* -------------------------------------------------------------------------
+   5. Dungeon generation: rooms + corridors
+   ------------------------------------------------------------------------- */
+function genLevel(rng, depth){
+  const tiles = new Uint8Array(MAP_W*MAP_H).fill(TILE.WALL);
+  const idx = (x,y)=> y*MAP_W+x;
+  const rooms = [];
+  const roomTarget = clamp(6 + Math.floor(depth/2), 6, 12);
+  let attempts = 0;
+  while(rooms.length < roomTarget && attempts < 260){
+    attempts++;
+    const rw = rng.int(4,9), rh = rng.int(3,6);
+    const rx = rng.int(1, MAP_W-rw-2), ry = rng.int(1, MAP_H-rh-2);
+    const nr = {x:rx,y:ry,w:rw,h:rh, cx:(rx+(rw>>1)), cy:(ry+(rh>>1))};
+    let overlap = false;
+    for(const r of rooms){
+      if(rx <= r.x+r.w+1 && rx+rw+1 >= r.x && ry <= r.y+r.h+1 && ry+rh+1 >= r.y){ overlap=true; break; }
+    }
+    if(overlap) continue;
+    for(let y=ry;y<ry+rh;y++) for(let x=rx;x<rx+rw;x++) tiles[idx(x,y)] = TILE.FLOOR;
+    rooms.push(nr);
+  }
+  // connect rooms with L-corridors in generation order (MST-ish by nearest)
+  const carveH = (x1,x2,y)=>{ for(let x=Math.min(x1,x2);x<=Math.max(x1,x2);x++) tiles[idx(x,y)]=TILE.FLOOR; };
+  const carveV = (y1,y2,x)=>{ for(let y=Math.min(y1,y2);y<=Math.max(y1,y2);y++) tiles[idx(x,y)]=TILE.FLOOR; };
+  for(let i=1;i<rooms.length;i++){
+    const a = rooms[i-1], b = rooms[i];
+    if(rng.chance(0.5)){ carveH(a.cx,b.cx,a.cy); carveV(a.cy,b.cy,b.cx); }
+    else { carveV(a.cy,b.cy,a.cx); carveH(a.cx,b.cx,b.cy); }
+  }
+  // a couple of extra loops for interesting layouts
+  const extra = rng.int(1, 3);
+  for(let e=0;e<extra && rooms.length>2;e++){
+    const a = rng.pick(rooms), b = rng.pick(rooms);
+    if(a===b) continue;
+    carveH(a.cx,b.cx,a.cy); carveV(a.cy,b.cy,b.cx);
+  }
+  // scatter a little rubble (impassable-look, but walkable dim tiles) for texture
+  for(let i=0;i<rooms.length*2;i++){
+    const r = rng.pick(rooms);
+    const x = rng.int(r.x, r.x+r.w-1), y = rng.int(r.y, r.y+r.h-1);
+    if(tiles[idx(x,y)]===TILE.FLOOR && rng.chance(0.5)) tiles[idx(x,y)] = TILE.RUBBLE;
+  }
+
+  // place stairs in the room farthest from the first (start) room
+  const start = rooms[0];
+  let far = rooms[1] || rooms[0], best = -1;
+  for(const r of rooms){
+    const d = dist2(start.cx,start.cy,r.cx,r.cy);
+    if(d>best){ best=d; far=r; }
+  }
+  tiles[idx(far.cx,far.cy)] = TILE.STAIRS;
+
+  return { tiles, rooms, startX:start.cx, startY:start.cy, stairsX:far.cx, stairsY:far.cy, idx };
+}
+
+/* -------------------------------------------------------------------------
+   6. FOV — symmetric recursive shadowcasting, clipped to a float radius.
+   ------------------------------------------------------------------------- */
+function computeFOV(game, ox, oy, radius){
+  const visible = game.visible;
+  visible.fill(0);
+  const W=MAP_W,H=MAP_H;
+  const blocks = (x,y)=> x<0||y<0||x>=W||y>=H || game.tiles[y*W+x]===TILE.WALL;
+  const r2 = radius*radius;
+  // origin always visible
+  if(ox>=0&&oy>=0&&ox<W&&oy<H) visible[oy*W+ox]=1;
+
+  // 8 octants
+  const mult = [
+    [1,0,0,1],[0,1,1,0],[0,-1,1,0],[-1,0,0,1],
+    [-1,0,0,-1],[0,-1,-1,0],[0,1,-1,0],[1,0,0,-1]
+  ];
+  function cast(cx,cy, row, startSlope, endSlope, xx,xy,yx,yy){
+    if(startSlope < endSlope) return;
+    let nextStart = startSlope;
+    for(let i=row;i<=Math.ceil(radius);i++){
+      let blocked=false, prevBlocked=false;
+      const dy = -i;
+      for(let dx=-i;dx<=0;dx++){
+        const l = (dx-0.5)/(dy+0.5);
+        const rSlope = (dx+0.5)/(dy-0.5);
+        if(startSlope < rSlope) continue;
+        if(endSlope > l) break;
+        const X = cx + dx*xx + dy*xy;
+        const Y = cy + dx*yx + dy*yy;
+        if(X<0||Y<0||X>=W||Y>=H) continue;
+        if(dx*dx+dy*dy <= r2) visible[Y*W+X] = 1;
+        if(blocked){
+          if(blocks(X,Y)){ nextStart = rSlope; continue; }
+          else { blocked=false; startSlope = nextStart; }
+        } else {
+          if(blocks(X,Y) && i < radius){
+            blocked=true;
+            cast(cx,cy,i+1,startSlope,l,xx,xy,yx,yy);
+            nextStart = rSlope;
+          }
+        }
+      }
+      if(blocked) break;
+    }
+  }
+  for(let oct=0;oct<8;oct++){
+    cast(ox,oy,1,1.0,0.0,mult[oct][0],mult[oct][1],mult[oct][2],mult[oct][3]);
+  }
+}
+
+/* -------------------------------------------------------------------------
+   7. Entities
+   ------------------------------------------------------------------------- */
+let ENT_ID = 1;
+function makeMonster(key, x, y, depth, rng){
+  const t = MONSTERS[key];
+  // scale hp/atk gently with depth beyond its minD
+  const over = Math.max(0, depth - t.minD);
+  const hpMax = t.hp + Math.round(over*1.4) + rng.int(0,2);
+  return {
+    id: ENT_ID++, type:"monster", key, name:t.name, glyph:t.glyph, color:t.color,
+    x, y, hp:hpMax, hpMax, atk:t.atk + Math.floor(over*0.5), acc:t.acc, def:t.def,
+    xp:t.xp, speed:t.speed||1,
+    state:"sleep",          // sleep -> hunt -> (lost) wander
+    targetX:x, targetY:y,   // last-known player location (noise/sight)
+    tmr:0, blinded:0,
+    flags:t
+  };
+}
+
+/* -------------------------------------------------------------------------
+   8. Game state & core loop
+   ------------------------------------------------------------------------- */
+const Game = {
+  seed:"", rng:null, depth:1, turn:0,
+  tiles:null, rooms:null, idx:(x,y)=>y*MAP_W+x,
+  visible:null, remembered:null, // remembered: Uint8Array flags of explored tiles
+  monsters:[], items:[],         // items: {item, x, y, qty}
+  player:null,
+  log:[], floaters:[],           // damage floaters
+  shake:0, flash:0, flareRing:0,
+  lampMode:"bright",             // bright | dim
+  emberLeft:0,                   // ember grace counter (0 => none active)
+  wickBoost:0,                   // turns of scroll-of-wick
+  state:"menu",                  // menu | play | dead
+  radius:RADIUS_BRIGHT_MAX,
+  kills:0, cause:"", started:0, isDaily:false,
+  msgSeen:{},
+};
+
+function newPlayer(){
+  return {
+    type:"player", glyph:"@", color:"#ffe6b0",
+    x:0,y:0, hp:26, hpMax:26, oil:OIL_START, oilMax:OIL_MAX,
+    baseAtk:2, baseAcc:72, level:1, xp:0,
+    weapon:null, armor:null,
+    inv:[], // {item, qty}
+    poison:0,
+  };
+}
+
+/* ---- Logging ---- */
+function log(msg, cls){
+  Game.log.push({t:msg, cls:cls||""});
+  if(Game.log.length>120) Game.log.shift();
+  renderLog();
+}
+function logOnce(key,msg,cls){ if(!Game.msgSeen[key]){ Game.msgSeen[key]=1; log(msg,cls);} }
+
+function renderLog(){
+  const el = document.getElementById("log");
+  const items = Game.log.slice(-40);
+  let html="";
+  for(let i=0;i<items.length;i++){
+    const old = i < items.length-6 ? " old":"";
+    html += `<div class="l${old}">${items[i].cls?`<span class="${items[i].cls}">`:""}${items[i].t}${items[i].cls?"</span>":""}</div>`;
+  }
+  el.innerHTML = html;
+  el.scrollTop = el.scrollHeight;
+}
+
+/* ---- Floaters (floating combat text) ---- */
+function floater(x,y,text,color){
+  Game.floaters.push({x,y,text,color,life:1.0});
+}
+
+/* -------------------------------------------------------------------------
+   9. Level population
+   ------------------------------------------------------------------------- */
+function populate(lvl, rng, depth){
+  Game.monsters = [];
+  Game.items = [];
+  // Monster count scales with depth
+  const count = clamp(4 + Math.floor(depth*1.3), 4, 20);
+  const table = Object.keys(MONSTERS)
+    .filter(k=> depth>=MONSTERS[k].minD && depth<=MONSTERS[k].maxD)
+    .map(k=>({v:k, w:MONSTERS[k].w}));
+  const occupied = new Set();
+  occupied.add(lvl.startX+","+lvl.startY);
+  const freeCells = [];
+  for(let y=0;y<MAP_H;y++) for(let x=0;x<MAP_W;x++){
+    const t = lvl.tiles[y*MAP_W+x];
+    if((t===TILE.FLOOR||t===TILE.RUBBLE)){
+      const d = dist2(x,y,lvl.startX,lvl.startY);
+      if(d>16) freeCells.push([x,y,d]); // keep a safe zone around start
+    }
+  }
+  rng.shuffle(freeCells);
+  let ci=0;
+  for(let i=0;i<count && ci<freeCells.length && table.length;i++){
+    const [x,y] = freeCells[ci++];
+    if(occupied.has(x+","+y)) { i--; continue; }
+    occupied.add(x+","+y);
+    Game.monsters.push(makeMonster(rng.weighted(table), x, y, depth, rng));
+  }
+  // Items: guarantee some oil, then random loot
+  const itemCount = clamp(3 + Math.floor(depth*0.8), 4, 12);
+  const itemTable = Object.keys(ITEMS)
+    .filter(k=> depth>=ITEMS[k].minD)
+    .map(k=>({v:k,w:ITEMS[k].w}));
+  // guaranteed oil drops — generous early, per the design's mitigation
+  const guaranteedOil = depth<=2 ? 3 : 2;
+  for(let g=0; g<guaranteedOil && ci<freeCells.length; g++){
+    const [x,y] = freeCells[ci++];
+    Game.items.push({key:"oil", x, y, qty:1});
+  }
+  for(let i=0;i<itemCount && ci<freeCells.length;i++){
+    const [x,y] = freeCells[ci++];
+    Game.items.push({key:rng.weighted(itemTable), x, y, qty:1});
+  }
+}
+
+/* -------------------------------------------------------------------------
+   10. Start / descend / death
+   ------------------------------------------------------------------------- */
+function beginRun(seed, isDaily){
+  Game.seed = String(seed);
+  Game.rng = new RNG(Game.seed);
+  Game.depth = 1;
+  Game.turn = 0;
+  Game.kills = 0;
+  Game.cause = "";
+  Game.lampMode = "bright";
+  Game.emberLeft = 0;
+  Game.wickBoost = 0;
+  Game.log = [];
+  Game.floaters = [];
+  Game.msgSeen = {};
+  Game.player = newPlayer();
+  Game.started = now();
+  Game.isDaily = !!isDaily;
+  Game.state = "play";
+  // reflect seed in URL hash (shareable, reproducible) — skip for daily to keep link clean-ish
+  try{ location.replace("#seed=" + encodeURIComponent(Game.seed)); }catch(e){}
+  document.getElementById("tb-seed").textContent = Game.seed.length>14 ? Game.seed.slice(0,14)+"…" : Game.seed;
+  buildFloor(1);
+  log("You strike your lantern. Its light is all you have.", "c-flame");
+  log("Depth 1. The dark waits below.", "c-dim");
+  hideAllOverlays();
+  saveGame();
+  recomputeAndDraw();
+}
+
+function buildFloor(depth){
+  Game.depth = depth;
+  const lrng = Game.rng.fork("depth"+depth);
+  const lvl = genLevel(lrng, depth);
+  Game.tiles = lvl.tiles;
+  Game.rooms = lvl.rooms;
+  Game.stairsX = lvl.stairsX; Game.stairsY = lvl.stairsY;
+  Game.visible = new Uint8Array(MAP_W*MAP_H);
+  Game.remembered = new Uint8Array(MAP_W*MAP_H);
+  Game.player.x = lvl.startX;
+  Game.player.y = lvl.startY;
+  populate(lvl, lrng, depth);
+}
+
+function descend(){
+  if(Game.tiles[Game.idx(Game.player.x,Game.player.y)] !== TILE.STAIRS){
+    log("There are no stairs here.", "c-dim");
+    return false;
+  }
+  Game.depth++;
+  log(`You descend to depth ${Game.depth}.`, "c-flame");
+  if(Game.depth % 3 === 0) log("The air grows colder. Something older stirs.", "c-bad");
+  buildFloor(Game.depth);
+  Game.turn++;
+  saveGame();
+  recomputeAndDraw();
+  return true;
+}
+
+function die(cause){
+  if(Game.state==="dead") return;
+  Game.state = "dead";
+  Game.cause = cause;
+  Game.player.hp = 0;
+  log("You collapse into the dark. Permadeath.", "c-bad");
+  clearSave();
+  recordScore();
+  updateHUD();
+  drawDeathCard();
+  showOverlay("ov-death");
+}
+
+/* -------------------------------------------------------------------------
+   11. Lantern economy
+   ------------------------------------------------------------------------- */
+function currentBurn(){
+  let burn = Game.lampMode==="dim" ? OIL_BURN_DIM : OIL_BURN_BRIGHT;
+  if(Game.wickBoost>0) burn *= 0.5;
+  return burn;
+}
+function currentRadius(){
+  const p = Game.player;
+  if(p.oil<=0){
+    if(Game.emberLeft>0){
+      // dying-ember grace: progressively dimmer
+      const frac = Game.emberLeft/EMBER_TURNS; // 1..~0
+      return Math.max(RADIUS_BLACKOUT, RADIUS_BLACKOUT + (2.6*frac));
+    }
+    return RADIUS_BLACKOUT; // blackout
+  }
+  const frac = clamp(p.oil / p.oilMax, 0, 1);
+  let r = RADIUS_BRIGHT_MIN + (RADIUS_BRIGHT_MAX - RADIUS_BRIGHT_MIN) * frac;
+  if(Game.lampMode==="dim") r *= RADIUS_DIM_MULT;
+  return r;
+}
+function currentNoise(){
+  let n = Game.lampMode==="dim" ? NOISE_DIM : NOISE_BRIGHT;
+  if(Game.player.oil<=0) n *= 0.6; // a guttering wick is quieter but you're blind
+  return n;
+}
+// is a tile currently lit (within FOV and inside the light circle)?
+function tileLit(x,y){
+  if(!Game.visible[Game.idx(x,y)]) return false;
+  const r = Game.radius;
+  return dist2(x,y,Game.player.x,Game.player.y) <= r*r + 0.5;
+}
+
+function burnOil(){
+  const p = Game.player;
+  if(p.oil>0){
+    p.oil = Math.max(0, p.oil - currentBurn());
+    if(p.oil<=0){
+      Game.emberLeft = EMBER_TURNS;
+      log("Your lantern sputters — only embers remain!", "c-bad");
+    } else if(p.oil<=20){
+      logOnce("lowoil","The flame is running low. Find oil.", "c-bad");
+    }
+  } else if(Game.emberLeft>0){
+    Game.emberLeft--;
+    if(Game.emberLeft<=0){
+      Game.msgSeen["lowoil"]=0;
+      log("The wick dies. You are in near-total darkness.", "c-bad");
+    }
+  }
+}
+
+function toggleDim(){
+  if(Game.state!=="play") return;
+  Game.lampMode = Game.lampMode==="dim" ? "bright" : "dim";
+  log(Game.lampMode==="dim" ? "You dim the lantern to a whisper of flame." : "You open the lantern wide.", "c-flame");
+  document.getElementById("lamp-mode").textContent = Game.lampMode;
+  recomputeAndDraw();
+}
+
+function flare(){
+  if(Game.state!=="play") return;
+  const p = Game.player;
+  if(p.oil < FLARE_COST){
+    log("Not enough oil to flare.", "c-dim");
+    return;
+  }
+  p.oil -= FLARE_COST;
+  Game.flareRing = 1.0;
+  Game.flash = Math.max(Game.flash, 0.9);
+  log("You flare the lantern — light erupts outward!", "c-flame");
+  // blind & expose adjacent lurkers
+  let hit=0;
+  for(const m of Game.monsters){
+    if(m.hp<=0) continue;
+    if(Math.abs(m.x-p.x)<=2 && Math.abs(m.y-p.y)<=2){
+      m.blinded = 4; m.state="hunt"; hit++;
+      floater(m.x,m.y,"blind!","#ffe0a0");
+    }
+  }
+  if(hit) log(`${hit} creature${hit>1?"s are":" is"} dazzled by the burst.`, "c-good");
+  endPlayerTurn(true); // flaring takes a turn but already spent FLARE_COST oil; skip the normal burn
+}
+
+/* -------------------------------------------------------------------------
+   12. Combat
+   ------------------------------------------------------------------------- */
+function playerAtk(){
+  const p = Game.player;
+  let dmg = p.baseAtk, acc = p.baseAcc, crit=0.06;
+  if(p.weapon){ dmg += ITEMS[p.weapon].dmg||0; acc += ITEMS[p.weapon].acc||0; crit += ITEMS[p.weapon].crit||0; }
+  return {dmg, acc, crit};
+}
+function playerDef(){
+  const p = Game.player;
+  return (p.armor ? (ITEMS[p.armor].def||0) : 0);
+}
+
+function attackMonster(m){
+  const {dmg,acc,crit} = playerAtk();
+  // lurk bonus: monsters in darkness are harder to hit
+  const inDark = !tileLit(m.x,m.y) && !m.flags.sees;
+  const lurkPenalty = inDark ? 22 : 0;
+  const roll = Game.rng.int(1,100);
+  const hitChance = clamp(acc - m.def*3 - lurkPenalty, 8, 96);
+  if(roll > hitChance){
+    floater(m.x,m.y,"miss","#8a795f");
+    log(`You swing at the ${m.name} and miss` + (inDark?" in the dark.":"."), "c-dim");
+    return;
+  }
+  let d = Game.rng.int(Math.max(1,dmg-2), dmg+2);
+  let isCrit = Game.rng.chance(crit);
+  if(isCrit){ d = Math.round(d*1.8); }
+  m.hp -= d;
+  Game.shake = Math.max(Game.shake, isCrit?7:3.5);
+  floater(m.x,m.y, (isCrit?"✷":"")+d, isCrit?"#ff5a2c":"#ffd27a");
+  log(`You hit the ${m.name} for ${d}${isCrit?" — critical!":"."}`, isCrit?"c-crit":"");
+  m.state="hunt"; m.targetX=Game.player.x; m.targetY=Game.player.y;
+  if(m.hp<=0) killMonster(m);
+}
+
+function killMonster(m){
+  m.hp = 0;
+  Game.kills++;
+  log(`The ${m.name} falls.`, "c-good");
+  floater(m.x,m.y,"✝","#7fd18a");
+  gainXP(m.xp);
+}
+
+function gainXP(amount){
+  const p = Game.player;
+  p.xp += amount;
+  while(p.xp >= XP_FOR(p.level)){
+    p.xp -= XP_FOR(p.level);
+    p.level++;
+    p.hpMax += 6; p.hp = p.hpMax;
+    p.baseAtk += 1; p.baseAcc = Math.min(90, p.baseAcc+1);
+    log(`You feel steadier — Level ${p.level}! (+HP, +power)`, "c-flame");
+    Game.flash = Math.max(Game.flash, 0.5);
+  }
+}
+
+function monsterAttackPlayer(m){
+  const p = Game.player;
+  // lurk bonus: monsters in dark do extra damage
+  const inDark = !tileLit(m.x,m.y);
+  const lurkBonus = (inDark ? 1 : 0);
+  const roll = Game.rng.int(1,100);
+  const acc = clamp(m.acc + (inDark?8:0), 5, 96);
+  const def = playerDef();
+  if(roll > acc){
+    log(`The ${m.name} lunges but misses.`, "c-dim");
+    return;
+  }
+  let base = Game.rng.int(Math.max(1,m.atk-1), m.atk+1) + lurkBonus;
+  if(m.flags.crit && Game.rng.chance(0.18)){ base = Math.round(base*1.7); floater(p.x,p.y,"CRIT","#ff5a2c"); }
+  let d = Math.max(1, base - def);
+  p.hp -= d;
+  Game.shake = Math.max(Game.shake, inDark?5:3);
+  Game.flash = Math.max(Game.flash, 0.35);
+  floater(p.x,p.y,"-"+d,"#c8503a");
+  log(`The ${m.name} hits you for ${d}` + (inDark?" from the dark!":".") , "c-bad");
+  // side effects
+  if(m.flags.poison){ p.poison += m.flags.poison; log("Venom seeps into the wound.", "c-bad"); }
+  if(m.flags.drainsOil){ p.oil = Math.max(0, p.oil - m.flags.drainsOil); floater(p.x,p.y,"oil!","#ffb04a"); }
+  if(p.hp<=0){ die("slain by a " + m.name); }
+}
+
+/* -------------------------------------------------------------------------
+   13. Monster AI: chase-by-noise + wander; darkness-lovers, seers
+   ------------------------------------------------------------------------- */
+function monsterHears(m, noiseLevel){
+  // player noise heard within range scaled by noise level
+  const range = HEAR_RANGE_BASE * noiseLevel;
+  return dist2(m.x,m.y,Game.player.x,Game.player.y) <= range*range;
+}
+function monsterSees(m){
+  // a monster sees the player if the player's tile is within the monster's own short sight,
+  // and there's light OR the monster is a seer. We approximate LOS by visibility + proximity.
+  const seesFar = m.flags.sees;
+  const inPlayerLight = tileLit(m.x,m.y);
+  const near = dist2(m.x,m.y,Game.player.x,Game.player.y) <= (seesFar?100:36);
+  if(!near) return false;
+  if(seesFar) return true;
+  // if the monster stands in the player's light, they can see the source
+  return inPlayerLight;
+}
+
+function stepToward(m, tx, ty){
+  const dx = Math.sign(tx - m.x), dy = Math.sign(ty - m.y);
+  // try direct, then axis fallbacks
+  const tries = [[dx,dy],[dx,0],[0,dy]];
+  if(m.flags.erratic && Game.rng.chance(m.flags.erratic)){
+    // bats jitter
+    const d = Game.rng.pick(DIR8); tries.unshift(d);
+  }
+  for(const [ddx,ddy] of tries){
+    if(ddx===0 && ddy===0) continue;
+    const nx = m.x+ddx, ny = m.y+ddy;
+    if(tryMonsterMove(m,nx,ny)) return true;
+  }
+  return false;
+}
+function wander(m){
+  const d = Game.rng.pick(DIR8);
+  tryMonsterMove(m, m.x+d[0], m.y+d[1]);
+}
+function walkable(x,y){
+  if(x<0||y<0||x>=MAP_W||y>=MAP_H) return false;
+  const t = Game.tiles[y*MAP_W+x];
+  return t===TILE.FLOOR || t===TILE.STAIRS || t===TILE.RUBBLE;
+}
+function monsterAt(x,y){
+  for(const m of Game.monsters){ if(m.hp>0 && m.x===x && m.y===y) return m; }
+  return null;
+}
+function tryMonsterMove(m,nx,ny){
+  if(!walkable(nx,ny)) return false;
+  if(nx===Game.player.x && ny===Game.player.y){ monsterAttackPlayer(m); return true; }
+  if(monsterAt(nx,ny)) return false;
+  m.x=nx; m.y=ny; return true;
+}
+
+function monstersAct(){
+  const p = Game.player;
+  const noise = currentNoise();
+  for(const m of Game.monsters){
+    if(m.hp<=0) continue;
+    if(m.blinded>0){ m.blinded--; wander(m); continue; }
+    if(m.flags.slow && (Game.turn % 2 === 0)) continue; // brutes move at half speed
+
+    const adjacent = Math.abs(m.x-p.x)<=1 && Math.abs(m.y-p.y)<=1;
+    const sees = monsterSees(m);
+    const hears = monsterHears(m, noise);
+
+    if(sees || hears || adjacent){
+      m.state = "hunt";
+      m.targetX = p.x; m.targetY = p.y;
+      m.tmr = 6; // remember for 6 turns
+    } else if(m.state==="hunt"){
+      m.tmr--;
+      if(m.tmr<=0) m.state="wander";
+    }
+
+    if(m.state==="hunt"){
+      if(adjacent){ monsterAttackPlayer(m); }
+      else { stepToward(m, m.targetX, m.targetY); }
+    } else if(m.state==="wander"){
+      if(Game.rng.chance(0.6)) wander(m);
+    } else {
+      // sleeping: darkness-lovers occasionally shuffle deeper into dark
+      if(m.flags.lurkLover && Game.rng.chance(0.25)) wander(m);
+    }
+  }
+  // cleanup dead
+  Game.monsters = Game.monsters.filter(m=> m.hp>0);
+}
+
+/* -------------------------------------------------------------------------
+   14. Items: pickup, inventory, use
+   ------------------------------------------------------------------------- */
+function itemHere(){
+  for(const it of Game.items){ if(it.x===Game.player.x && it.y===Game.player.y) return it; }
+  return null;
+}
+function grab(){
+  if(Game.state!=="play") return;
+  const it = itemHere();
+  if(!it){ log("Nothing here to grab.", "c-dim"); return; }
+  const def = ITEMS[it.key];
+  addToInv(it.key, it.qty);
+  log(`You pick up the ${def.name}.`, "c-good");
+  Game.items = Game.items.filter(x=>x!==it);
+  endPlayerTurn(false);
+}
+function addToInv(key, qty){
+  const def = ITEMS[key];
+  const p = Game.player;
+  if(def.stack){
+    const slot = p.inv.find(s=>s.key===key);
+    if(slot){ slot.qty += qty; return; }
+  }
+  p.inv.push({key, qty:qty||1});
+}
+function useItem(slotIndex){
+  const p = Game.player;
+  const slot = p.inv[slotIndex];
+  if(!slot) return;
+  const def = ITEMS[slot.key];
+  let consumed = true;
+  switch(def.kind){
+    case "oil":
+      p.oil = Math.min(p.oilMax, p.oil + def.restore);
+      if(Game.emberLeft>0 || p.oil>0){ Game.emberLeft=0; }
+      Game.msgSeen["lowoil"]=0;
+      log(`You pour the ${def.name}. The flame swells (+${def.restore} oil).`, "c-flame");
+      Game.flash = Math.max(Game.flash,0.4);
+      break;
+    case "heal":
+      p.hp = Math.min(p.hpMax, p.hp + def.heal);
+      if(p.poison>0){ p.poison=Math.max(0,p.poison-2); }
+      log(`You drink the ${def.name}. (+${def.heal} HP)`, "c-good");
+      break;
+    case "scroll":
+      doScroll(def.effect);
+      break;
+    case "weapon":
+      // equip; swap old back into inventory
+      { const old = p.weapon; p.weapon = slot.key;
+        log(`You wield the ${def.name}.`, "c-steel");
+        consumed = true; // remove this instance from inv
+        p.inv.splice(slotIndex,1);
+        if(old) addToInv(old,1);
+        updateHUD(); renderInv(); saveGame(); recomputeAndDraw();
+        return; }
+    case "armor":
+      { const old = p.armor; p.armor = slot.key;
+        log(`You don the ${def.name}.`, "c-steel");
+        p.inv.splice(slotIndex,1);
+        if(old) addToInv(old,1);
+        updateHUD(); renderInv(); saveGame(); recomputeAndDraw();
+        return; }
+  }
+  if(consumed){
+    slot.qty--;
+    if(slot.qty<=0) p.inv.splice(slotIndex,1);
+  }
+  renderInv();
+  endPlayerTurn(false);
+  // if inventory still open, refresh; if it emptied, keep open
+  if(document.getElementById("ov-inv").classList.contains("show")) renderInv();
+}
+
+function doScroll(effect){
+  const p = Game.player;
+  if(effect==="flash"){
+    Game.flash = 1.0; Game.flareRing = 1.4;
+    for(const m of Game.monsters){
+      if(dist2(m.x,m.y,p.x,p.y) <= 64){ m.blinded=6; m.state="hunt"; floater(m.x,m.y,"blind!","#ffe0a0"); }
+    }
+    log("Dawnburst! Blinding light floods the floor.", "c-flame");
+  } else if(effect==="teleport"){
+    // blink to a random walkable tile
+    const cells=[];
+    for(let y=0;y<MAP_H;y++)for(let x=0;x<MAP_W;x++) if(walkable(x,y)&&!monsterAt(x,y)) cells.push([x,y]);
+    if(cells.length){ const c = Game.rng.pick(cells); p.x=c[0]; p.y=c[1]; log("Reality folds — you blink elsewhere.", "c-steel"); }
+  } else if(effect==="wick"){
+    Game.wickBoost = 40;
+    log("The wick steadies — oil burns half as fast for a while.", "c-flame");
+  }
+}
+
+/* -------------------------------------------------------------------------
+   15. Turn flow
+   ------------------------------------------------------------------------- */
+function tryMovePlayer(dx,dy){
+  if(Game.state!=="play") return;
+  const p = Game.player;
+  const nx = p.x+dx, ny = p.y+dy;
+  const m = monsterAt(nx,ny);
+  if(m){ attackMonster(m); endPlayerTurn(); return; }
+  if(!walkable(nx,ny)){ /* bump wall: no turn spent */ recomputeAndDraw(); return; }
+  p.x=nx; p.y=ny;
+  const it = itemHere();
+  if(it) log(`You see a ${ITEMS[it.key].name} here. (g to grab)`, "c-dim");
+  if(Game.tiles[Game.idx(p.x,p.y)]===TILE.STAIRS) log("A stairway descends here. (> to go down)", "c-flame");
+  endPlayerTurn(false);
+}
+function waitTurn(){
+  if(Game.state!=="play") return;
+  endPlayerTurn(false);
+}
+
+// endPlayerTurn: advance the world one tick. Pass skipBurn=true for actions that
+// have already spent oil themselves (flare) so the wick isn't double-charged.
+function endPlayerTurn(skipBurn){
+  if(Game.state!=="play") return;
+  Game.turn++;
+  if(!skipBurn) burnOil();
+  // poison tick
+  const p = Game.player;
+  if(p.poison>0){
+    const pd = Math.min(p.poison, 2);
+    p.hp -= pd; p.poison = Math.max(0, p.poison-1);
+    floater(p.x,p.y,"-"+pd,"#7fb08a");
+    if(p.hp<=0){ die("succumbed to venom"); return; }
+  }
+  if(Game.wickBoost>0) Game.wickBoost--;
+  Game.radius = currentRadius();
+  // Refresh FOV now that the player has moved but BEFORE monsters act, so that
+  // tileLit()/monsterSees() judge lurk/darkness against current-turn lighting.
+  computeFOV(Game, Game.player.x, Game.player.y, Game.radius);
+  for(let i=0;i<Game.visible.length;i++) if(Game.visible[i]) Game.remembered[i]=1;
+  monstersAct();
+  if(Game.state!=="play") return;
+  Game.radius = currentRadius();
+  saveGame();
+  recomputeAndDraw();
+}
+
+function recomputeAndDraw(){
+  Game.radius = currentRadius();
+  computeFOV(Game, Game.player.x, Game.player.y, Game.radius);
+  // mark remembered tiles
+  for(let i=0;i<Game.visible.length;i++) if(Game.visible[i]) Game.remembered[i]=1;
+  updateHUD();
+  draw();
+}
+
+/* -------------------------------------------------------------------------
+   16. Rendering (canvas): tiles, lantern falloff, entities, juice
+   ------------------------------------------------------------------------- */
+const cv = document.getElementById("game");
+const ctx = cv.getContext("2d");
+let CELL = 16, VIEW_W=0, VIEW_H=0, OFFX=0, OFFY=0;
+let flick = 0;
+let _rafId = 0;
+const _reduceMQ = (()=>{ try{ return window.matchMedia("(prefers-reduced-motion: reduce)"); }catch(e){ return null; } })();
+function prefersReducedMotion(){ return !!(_reduceMQ && _reduceMQ.matches); }
+// Single animation loop: guarded by _rafId so repeated draw() calls (one per turn)
+// can never stack multiple concurrent rAF chains.
+function loopDraw(){ _rafId = 0; if(Game.state==="play") draw(); }
+function scheduleDraw(){ if(!_rafId) _rafId = requestAnimationFrame(loopDraw); }
+// Resume the ambient loop when the tab comes back into view (it pauses while hidden).
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden && Game.state==="play") scheduleDraw(); });
+
+function resizeCanvas(){
+  const wrap = cv.parentElement;
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  const dpr = Math.min(window.devicePixelRatio||1, 2);
+  cv.width = Math.floor(w*dpr);
+  cv.height = Math.floor(h*dpr);
+  cv.style.width = w+"px";
+  cv.style.height = h+"px";
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  VIEW_W = w; VIEW_H = h;
+  // choose cell size so a viewport of ~28x18 fits; but never smaller than what shows the player area
+  const cols = Math.min(MAP_W, Math.max(20, Math.floor(w/18)));
+  const rows = Math.min(MAP_H, Math.max(14, Math.floor(h/18)));
+  CELL = Math.floor(Math.min(w/cols, h/rows));
+  CELL = clamp(CELL, 12, 30);
+  if(Game.state!=="menu") draw();
+}
+window.addEventListener("resize", resizeCanvas);
+
+function draw(){
+  if(!Game.tiles){ ctx.clearRect(0,0,VIEW_W,VIEW_H); return; }
+  const reduced = prefersReducedMotion();
+  if(!reduced) flick += 0.12;
+  const p = Game.player;
+  // camera: center on player, clamp to map
+  const colsVisible = Math.floor(VIEW_W/CELL);
+  const rowsVisible = Math.floor(VIEW_H/CELL);
+  let camX = p.x - Math.floor(colsVisible/2);
+  let camY = p.y - Math.floor(rowsVisible/2);
+  camX = clamp(camX, 0, Math.max(0, MAP_W-colsVisible));
+  camY = clamp(camY, 0, Math.max(0, MAP_H-rowsVisible));
+  OFFX = camX; OFFY = camY;
+
+  // screen shake
+  let sx=0, sy=0;
+  if(Game.shake>0.1){
+    if(!reduced){
+      sx = (Math.random()*2-1)*Game.shake;
+      sy = (Math.random()*2-1)*Game.shake;
+    }
+    Game.shake *= 0.82;
+  } else Game.shake=0;
+
+  ctx.save();
+  ctx.translate(sx,sy);
+  ctx.clearRect(-8,-8,VIEW_W+16,VIEW_H+16);
+  ctx.fillStyle = "#050403";
+  ctx.fillRect(-8,-8,VIEW_W+16,VIEW_H+16);
+
+  // flicker on radius for lantern life
+  const baseR = Game.radius;
+  const flamePulse = (Game.lampMode==="dim"?0.06:0.10);
+  const flickerR = reduced ? baseR : baseR * (1 + Math.sin(flick*1.3)*flamePulse*0.35 + (Math.random()*2-1)*0.02);
+  const px = (p.x-camX)*CELL + CELL/2;
+  const py = (p.y-camY)*CELL + CELL/2;
+  const lightPix = flickerR*CELL;
+
+  ctx.font = `bold ${Math.floor(CELL*0.82)}px ui-monospace, "Cascadia Mono", Consolas, monospace`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  // ---- draw tiles ----
+  for(let ry=0; ry<=rowsVisible; ry++){
+    for(let rx=0; rx<=colsVisible; rx++){
+      const x = camX+rx, y = camY+ry;
+      if(x<0||y<0||x>=MAP_W||y>=MAP_H) continue;
+      const i = y*MAP_W+x;
+      const vis = Game.visible[i];
+      const rem = Game.remembered[i];
+      if(!vis && !rem) continue;
+      const t = Game.tiles[i];
+      const sxp = rx*CELL, syp = ry*CELL;
+      // light intensity by distance from player, within circle
+      let inten = 0;
+      if(vis){
+        const d = Math.sqrt(dist2(x,y,p.x,p.y));
+        inten = clamp(1 - (d/(flickerR+0.0001)), 0, 1);
+        inten = Math.pow(inten, 0.65); // gentler falloff
+      }
+      // remembered-but-dark tiles: dim bluish memory
+      const litHere = vis && dist2(x,y,p.x,p.y) <= flickerR*flickerR+0.6;
+      drawTile(t, sxp, syp, litHere?inten:0, rem && !litHere);
+    }
+  }
+
+  // ---- radial light gradient overlay (the "juice") ----
+  // We paint darkness everywhere then punch a warm gradient hole where the lantern reaches.
+  const g = ctx.createRadialGradient(px,py, lightPix*0.12, px,py, lightPix*1.02);
+  const warm = Game.emberLeft>0 && p.oil<=0;
+  const c0 = warm ? "rgba(255,120,50,0.0)" : "rgba(255,190,110,0.0)";
+  g.addColorStop(0, c0);
+  g.addColorStop(0.62, "rgba(20,12,6,0.0)");
+  g.addColorStop(0.86, "rgba(8,5,3,0.55)");
+  g.addColorStop(1, "rgba(3,2,1,0.94)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,VIEW_W,VIEW_H);
+  // outer black beyond the light so remembered tiles read as memory, not fully lit
+  ctx.save();
+  ctx.globalCompositeOperation = "multiply";
+  const g2 = ctx.createRadialGradient(px,py, lightPix*0.5, px,py, lightPix*1.15);
+  g2.addColorStop(0,"rgba(255,255,255,1)");
+  g2.addColorStop(1,"rgba(60,55,50,1)");
+  ctx.fillStyle=g2;
+  ctx.fillRect(0,0,VIEW_W,VIEW_H);
+  ctx.restore();
+
+  // ---- warm glow tint on lit area ----
+  ctx.save();
+  ctx.globalCompositeOperation = "overlay";
+  const gw = ctx.createRadialGradient(px,py,0,px,py,lightPix);
+  const glowA = warm? 0.28 : 0.34;
+  gw.addColorStop(0, `rgba(255,180,90,${glowA})`);
+  gw.addColorStop(0.6, `rgba(255,140,60,${glowA*0.5})`);
+  gw.addColorStop(1, "rgba(255,120,50,0)");
+  ctx.fillStyle = gw;
+  ctx.fillRect(0,0,VIEW_W,VIEW_H);
+  ctx.restore();
+
+  // ---- monsters ----
+  for(const m of Game.monsters){
+    const rx = m.x-camX, ry=m.y-camY;
+    if(rx<0||ry<0||rx>colsVisible||ry>rowsVisible) continue;
+    const cxp = rx*CELL+CELL/2, cyp = ry*CELL+CELL/2;
+    const lit = tileLit(m.x,m.y);
+    if(lit || m.flags.sees && Game.visible[m.y*MAP_W+m.x]){
+      // exposed in light
+      const d = Math.sqrt(dist2(m.x,m.y,p.x,p.y));
+      const inten = clamp(1-(d/(flickerR+0.0001)),0.25,1);
+      ctx.globalAlpha = clamp(0.5+inten,0.5,1);
+      // exposed marker: subtle bright ring
+      if(lit){
+        ctx.beginPath();
+        ctx.arc(cxp,cyp,CELL*0.44,0,Math.PI*2);
+        ctx.strokeStyle="rgba(255,210,130,0.35)";
+        ctx.lineWidth=1.5;
+        ctx.stroke();
+      }
+      ctx.fillStyle = m.color;
+      if(m.blinded>0) ctx.fillStyle="#8899aa";
+      ctx.fillText(m.glyph, cxp, cyp+1);
+      ctx.globalAlpha=1;
+    } else {
+      // lurking in darkness: glinting eyes near the light edge, else invisible
+      const d = Math.sqrt(dist2(m.x,m.y,p.x,p.y));
+      if(d <= flickerR+2.4 && Game.remembered[m.y*MAP_W+m.x]){
+        // glinting eyes
+        const glint = 0.4 + 0.35*Math.abs(Math.sin(flick*2 + m.id));
+        ctx.fillStyle = `rgba(255,70,40,${glint})`;
+        const ex = CELL*0.16;
+        ctx.beginPath(); ctx.arc(cxp-ex,cyp,CELL*0.09,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cxp+ex,cyp,CELL*0.09,0,Math.PI*2); ctx.fill();
+      }
+    }
+  }
+
+  // ---- items (only if lit or remembered) ----
+  for(const it of Game.items){
+    const rx=it.x-camX, ry=it.y-camY;
+    if(rx<0||ry<0||rx>colsVisible||ry>rowsVisible) continue;
+    const i = it.y*MAP_W+it.x;
+    if(!Game.remembered[i]) continue;
+    const lit = tileLit(it.x,it.y);
+    const def = ITEMS[it.key];
+    const cxp=rx*CELL+CELL/2, cyp=ry*CELL+CELL/2;
+    ctx.globalAlpha = lit?1:0.35;
+    ctx.fillStyle = lit?def.color:"#4a4030";
+    ctx.fillText(def.glyph, cxp, cyp+1);
+    ctx.globalAlpha=1;
+  }
+
+  // ---- stairs marker glow if lit ----
+  {
+    const sx2 = Game.stairsX-camX, sy2=Game.stairsY-camY;
+    if(sx2>=0&&sy2>=0&&sx2<=colsVisible&&sy2<=rowsVisible && Game.remembered[Game.stairsY*MAP_W+Game.stairsX]){
+      const lit = tileLit(Game.stairsX,Game.stairsY);
+      ctx.fillStyle = lit?"#ffd27a":"#5a4a2a";
+      ctx.fillText(">", sx2*CELL+CELL/2, sy2*CELL+CELL/2+1);
+    }
+  }
+
+  // ---- player ----
+  ctx.save();
+  const pcx = (p.x-camX)*CELL+CELL/2, pcy=(p.y-camY)*CELL+CELL/2;
+  // little halo
+  const halo = ctx.createRadialGradient(pcx,pcy,0,pcx,pcy,CELL*1.1);
+  halo.addColorStop(0,"rgba(255,220,140,0.5)");
+  halo.addColorStop(1,"rgba(255,180,90,0)");
+  ctx.fillStyle=halo; ctx.beginPath(); ctx.arc(pcx,pcy,CELL*1.1,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = p.hp <= p.hpMax*0.25 ? "#ff9a9a" : "#ffe6b0";
+  ctx.fillText("@", pcx, pcy+1);
+  ctx.restore();
+
+  // ---- flare ring ----
+  if(Game.flareRing>0.01){
+    const rr = (1.5-Game.flareRing) * lightPix * 1.6;
+    ctx.strokeStyle = `rgba(255,220,140,${Game.flareRing})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(px,py, Math.max(2,rr),0,Math.PI*2); ctx.stroke();
+    Game.flareRing *= 0.86;
+    if(Game.flareRing<0.02) Game.flareRing=0;
+  }
+
+  // ---- floaters ----
+  for(let i=Game.floaters.length-1;i>=0;i--){
+    const f = Game.floaters[i];
+    const rx=f.x-camX, ry=f.y-camY;
+    const cxp=rx*CELL+CELL/2, cyp=ry*CELL+CELL/2 - (1-f.life)*CELL*1.4;
+    ctx.globalAlpha = clamp(f.life,0,1);
+    ctx.fillStyle = f.color;
+    ctx.font = `bold ${Math.floor(CELL*0.6)}px ui-monospace, monospace`;
+    ctx.fillText(f.text, cxp, cyp);
+    ctx.globalAlpha=1;
+    f.life -= 0.03;
+    if(f.life<=0) Game.floaters.splice(i,1);
+  }
+  ctx.font = `bold ${Math.floor(CELL*0.82)}px ui-monospace, monospace`;
+
+  ctx.restore(); // shake
+
+  // ---- full-screen flash ----
+  if(Game.flash>0.01){
+    ctx.fillStyle = `rgba(255,230,170,${Game.flash*(reduced?0.12:0.5)})`;
+    ctx.fillRect(0,0,VIEW_W,VIEW_H);
+    Game.flash *= 0.8;
+    if(Game.flash<0.02) Game.flash=0;
+  }
+
+  // Keep the loop alive while something is actually animating, or (for the living
+  // lantern flicker) while motion is allowed and the tab is visible. Under
+  // prefers-reduced-motion with nothing moving, stop — recomputeAndDraw() redraws
+  // on demand each turn. The _rafId guard keeps this to a single rAF chain.
+  const motion = Game.shake>0 || Game.flash>0 || Game.flareRing>0 || Game.floaters.length>0;
+  if(Game.state==="play" && !document.hidden && (motion || !reduced)){
+    scheduleDraw();
+  }
+}
+
+function drawTile(t, x, y, inten, remembered){
+  const s = CELL;
+  if(t===TILE.WALL){
+    if(remembered){ ctx.fillStyle="#0e0b09"; ctx.fillRect(x,y,s,s); ctx.fillStyle="#16110c"; ctx.fillRect(x+1,y+1,s-2,s-2); return; }
+    const v = Math.floor(28+inten*70);
+    ctx.fillStyle = `rgb(${v+14},${v+6},${v-4})`;
+    ctx.fillRect(x,y,s,s);
+    ctx.fillStyle = `rgba(0,0,0,0.25)`;
+    ctx.fillRect(x,y+s-2,s,2);
+    return;
+  }
+  // floor / stairs / rubble
+  if(remembered){
+    ctx.fillStyle = "#0a0908";
+    ctx.fillRect(x,y,s,s);
+    ctx.fillStyle = "#14100c";
+    ctx.fillRect(x+1,y+1,s-2,s-2);
+    if(t===TILE.RUBBLE){ ctx.fillStyle="#1a140e"; ctx.fillRect(x+s*0.3,y+s*0.4,s*0.4,s*0.3); }
+    return;
+  }
+  const base = Math.floor(18 + inten*54);
+  ctx.fillStyle = `rgb(${base+10},${base+4},${base-2})`;
+  ctx.fillRect(x,y,s,s);
+  // subtle grid
+  ctx.fillStyle = `rgba(255,190,110,${0.03+inten*0.05})`;
+  ctx.fillRect(x,y,s-1,1);
+  if(t===TILE.RUBBLE){
+    ctx.fillStyle = `rgba(${base+40},${base+28},${base+10},0.9)`;
+    ctx.fillRect(x+s*0.3, y+s*0.45, s*0.16, s*0.16);
+    ctx.fillRect(x+s*0.55, y+s*0.3, s*0.14, s*0.14);
+  }
+  if(t===TILE.STAIRS && inten>0){
+    ctx.fillStyle = `rgba(255,210,120,${0.15+inten*0.2})`;
+    ctx.fillRect(x+2,y+2,s-4,s-4);
+  }
+}
+
+/* -------------------------------------------------------------------------
+   17. HUD
+   ------------------------------------------------------------------------- */
+function updateHUD(){
+  const p = Game.player;
+  if(!p) return;
+  document.getElementById("tb-depth").textContent = Game.depth;
+  document.getElementById("tb-turn").textContent = Game.turn;
+  const hpPct = clamp(p.hp/p.hpMax*100,0,100);
+  const oilPct = clamp(p.oil/p.oilMax*100,0,100);
+  const hpFill = document.getElementById("hp-fill"), oilFill = document.getElementById("oil-fill");
+  hpFill.style.width = hpPct+"%";
+  oilFill.style.width = oilPct+"%";
+  document.getElementById("hp-lbl").textContent = `HP ${Math.max(0,Math.ceil(p.hp))}/${p.hpMax}`;
+  const oilTxt = p.oil<=0 ? (Game.emberLeft>0?`EMBERS ${Game.emberLeft}`:"DARK") : `OIL ${Math.ceil(p.oil)}`;
+  document.getElementById("oil-lbl").textContent = oilTxt;
+  // critical-resource warning states
+  hpFill.parentElement.classList.toggle("low", hpPct <= 25);
+  oilFill.parentElement.classList.toggle("low", p.oil<=0 || oilPct <= 20);
+  // qualitative lantern readout (more legible than a raw radius float)
+  let lampState;
+  if(p.oil<=0) lampState = Game.emberLeft>0 ? "Embers" : "Dark";
+  else if(Game.lampMode==="dim") lampState = "Dim";
+  else if(oilPct <= 20) lampState = "Guttering";
+  else lampState = "Bright";
+  document.getElementById("s-radius").textContent = lampState;
+  document.getElementById("s-level").textContent = p.level;
+  document.getElementById("s-xp").textContent = `${p.xp} / ${XP_FOR(p.level)}`;
+  document.getElementById("s-weap").textContent = p.weapon?ITEMS[p.weapon].name:"fists";
+  document.getElementById("s-arm").textContent = p.armor?ITEMS[p.armor].name:"rags";
+  document.getElementById("s-kills").textContent = Game.kills;
+  document.getElementById("lamp-mode").textContent = Game.lampMode;
+}
+
+/* -------------------------------------------------------------------------
+   18. Inventory UI
+   ------------------------------------------------------------------------- */
+const INV_LETTERS = "abcdefghijklmnopqrstuvwxyz";
+function renderInv(){
+  const ul = document.getElementById("inv-list");
+  const p = Game.player;
+  if(!p.inv.length){ ul.innerHTML = `<li style="cursor:default;opacity:.6">Your bag is empty.</li>`; return; }
+  let html="";
+  p.inv.forEach((slot,i)=>{
+    const def = ITEMS[slot.key];
+    const equipped = (p.weapon===slot.key||p.armor===slot.key);
+    const tag = def.kind==="weapon"?"weapon":def.kind==="armor"?"armor":def.kind;
+    html += `<li data-i="${i}">
+      <span class="keyhint">${INV_LETTERS[i]||"·"}</span>
+      <span class="glyph" style="color:${def.color}">${def.glyph}</span>
+      <span class="nm">${def.name}${slot.qty>1?` ×${slot.qty}`:""}<br><span class="c-dim" style="font-size:11px">${def.desc}</span></span>
+      <span class="tag">${tag}</span>
+    </li>`;
+  });
+  ul.innerHTML = html;
+  ul.querySelectorAll("li[data-i]").forEach(li=>{
+    li.addEventListener("click", ()=> useItem(parseInt(li.dataset.i)));
+  });
+}
+function openInv(){
+  if(Game.state!=="play") return;
+  renderInv();
+  showOverlay("ov-inv");
+}
+
+/* -------------------------------------------------------------------------
+   19. Save / load (localStorage) — autosave every turn
+   ------------------------------------------------------------------------- */
+function saveGame(){
+  if(Game.state!=="play") return;
+  try{
+    const snap = {
+      seed:Game.seed, depth:Game.depth, turn:Game.turn, kills:Game.kills,
+      rngCalls:Game.rng?Game.rng.calls:0,
+      lampMode:Game.lampMode, emberLeft:Game.emberLeft, wickBoost:Game.wickBoost,
+      isDaily:Game.isDaily, started:Game.started,
+      remembered: Array.from(Game.remembered),
+      player: Game.player,
+      monsters: Game.monsters.map(m=>({id:m.id,key:m.key,x:m.x,y:m.y,hp:m.hp,hpMax:m.hpMax,atk:m.atk,acc:m.acc,def:m.def,xp:m.xp,speed:m.speed,state:m.state,targetX:m.targetX,targetY:m.targetY,tmr:m.tmr,blinded:m.blinded})),
+      items: Game.items,
+      log: Game.log.slice(-30),
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(snap));
+  }catch(e){/* storage may be full/blocked; ignore */}
+}
+function clearSave(){ try{ localStorage.removeItem(SAVE_KEY); }catch(e){} }
+function loadGame(){
+  let raw;
+  try{ raw = localStorage.getItem(SAVE_KEY); }catch(e){ return false; }
+  if(!raw) return false;
+  let snap;
+  try{ snap = JSON.parse(raw); }catch(e){ return false; }
+  if(!snap || !snap.seed || !snap.player) return false;
+  try{
+    Game.seed = snap.seed;
+    Game.rng = new RNG(Game.seed);
+    Game.isDaily = !!snap.isDaily;
+    // buildFloor() below only consumes forked streams, so the master stream is
+    // still at its seed start here — fast-forward it to where the run left off
+    // so resumed combat/AI rolls continue instead of replaying from the top.
+    Game.rng.advanceTo(snap.rngCalls||0);
+    Game.started = snap.started || now();
+    Game.lampMode = snap.lampMode||"bright";
+    Game.emberLeft = snap.emberLeft||0;
+    Game.wickBoost = snap.wickBoost||0;
+    Game.kills = snap.kills||0;
+    Game.msgSeen = {};
+    // rebuild the floor geometry deterministically, then overlay saved state
+    buildFloor(snap.depth);
+    Game.turn = snap.turn||0;
+    Game.player = snap.player;
+    // restore remembered map (size guard)
+    if(snap.remembered && snap.remembered.length===MAP_W*MAP_H){
+      Game.remembered = Uint8Array.from(snap.remembered);
+    }
+    // restore monsters (rehydrate flags)
+    Game.monsters = (snap.monsters||[]).filter(s=>MONSTERS[s.key]).map(s=>{
+      const t = MONSTERS[s.key];
+      return {...s, type:"monster", name:t.name, glyph:t.glyph, color:t.color, flags:t};
+    });
+    Game.items = (snap.items||[]).filter(it=>ITEMS[it.key]);
+    Game.log = (snap.log||[]).map(l=> typeof l==="string"?{t:l,cls:""}:l);
+    Game.state = "play";
+    document.getElementById("tb-seed").textContent = Game.seed.length>14?Game.seed.slice(0,14)+"…":Game.seed;
+    document.getElementById("lamp-mode").textContent = Game.lampMode;
+    renderLog();
+    recomputeAndDraw();
+    log("You awaken where you left off.", "c-dim");
+    return true;
+  }catch(e){ return false; }
+}
+
+/* -------------------------------------------------------------------------
+   20. Leaderboards
+   ------------------------------------------------------------------------- */
+function readLB(key){
+  try{ return JSON.parse(localStorage.getItem(key)||"[]"); }catch(e){ return []; }
+}
+function recordScore(){
+  const entry = {depth:Game.depth, turns:Game.turn, kills:Game.kills, seed:Game.seed, cause:Game.cause, when:now(), level:Game.player.level};
+  const key = Game.isDaily ? DAILY_LB_KEY : LB_KEY;
+  let lb = readLB(key);
+  if(Game.isDaily){
+    // one best per day-seed: push then keep the single best entry per seed
+    lb.push(entry);
+    const byBest = {};
+    for(const e of lb){
+      const prev = byBest[e.seed];
+      if(!prev || e.depth>prev.depth || (e.depth===prev.depth && e.kills>prev.kills)) byBest[e.seed]=e;
+    }
+    lb = Object.values(byBest);
+  } else {
+    lb.push(entry);
+  }
+  lb.sort((a,b)=> b.depth-a.depth || b.kills-a.kills || a.turns-b.turns);
+  lb = lb.slice(0,12);
+  try{ localStorage.setItem(key, JSON.stringify(lb)); }catch(e){}
+}
+
+/* -------------------------------------------------------------------------
+   21. Death card (canvas → PNG) with copy-to-clipboard
+   ------------------------------------------------------------------------- */
+function drawDeathCard(){
+  const c = document.getElementById("death-card");
+  const g = c.getContext("2d");
+  const W=c.width, H=c.height;
+  // background
+  const bg = g.createRadialGradient(W/2,H*0.35,20,W/2,H*0.35,W*0.8);
+  bg.addColorStop(0,"#241206"); bg.addColorStop(1,"#0a0705");
+  g.fillStyle=bg; g.fillRect(0,0,W,H);
+  // vignette lantern glow
+  const gl = g.createRadialGradient(W*0.5,H*0.32,10,W*0.5,H*0.32,180);
+  gl.addColorStop(0,"rgba(255,150,60,0.35)"); gl.addColorStop(1,"rgba(255,120,50,0)");
+  g.fillStyle=gl; g.fillRect(0,0,W,H);
+  g.strokeStyle="#3a2c1e"; g.lineWidth=3; g.strokeRect(6,6,W-12,H-12);
+
+  g.textAlign="center";
+  g.fillStyle="#ff9a3c";
+  g.font="900 40px 'Segoe UI', sans-serif";
+  g.fillText("WICKFALL", W/2, 58);
+  g.fillStyle="#e9dcc3";
+  g.font="italic 16px 'Segoe UI', sans-serif";
+  g.fillText("The lantern gutters out.", W/2, 84);
+
+  g.font="700 15px ui-monospace, monospace";
+  g.fillStyle="#c8503a";
+  const cause = Game.cause || "lost to the dark";
+  wrapText(g, "☠ " + cause, W/2, 112, W-80, 20);
+
+  // stats grid
+  const stats = [
+    ["DEPTH", "▼ " + Game.depth],
+    ["TURNS", String(Game.turn)],
+    ["KILLS", String(Game.kills)],
+    ["LEVEL", String(Game.player.level)],
+  ];
+  const colW = (W-80)/4;
+  g.textAlign="center";
+  for(let i=0;i<stats.length;i++){
+    const x = 40 + colW*i + colW/2;
+    g.fillStyle="#8a795f"; g.font="700 12px 'Segoe UI', sans-serif";
+    g.fillText(stats[i][0], x, 168);
+    g.fillStyle="#ffd27a"; g.font="900 30px 'Segoe UI', sans-serif";
+    g.fillText(stats[i][1], x, 202);
+  }
+  // seed line
+  g.fillStyle="#8a795f"; g.font="600 13px ui-monospace, monospace";
+  g.fillText("seed: " + Game.seed, W/2, 246);
+  g.fillStyle="#7fd18a"; g.font="700 13px 'Segoe UI', sans-serif";
+  g.fillText(Game.isDaily?"◆ Daily Challenge — beat this run":"Share the link. Beat my seed.", W/2, 272);
+
+  // fill link input
+  const link = seedLink();
+  document.getElementById("death-link").value = link;
+  document.getElementById("death-title").textContent = "You Died — Depth " + Game.depth;
+  document.getElementById("death-sub").textContent = Game.cause;
+}
+function wrapText(g,text,x,y,maxW,lh){
+  const words = text.split(" ");
+  let line="", yy=y;
+  for(const w of words){
+    const test = line?line+" "+w:w;
+    if(g.measureText(test).width>maxW && line){ g.fillText(line,x,yy); line=w; yy+=lh; }
+    else line=test;
+  }
+  g.fillText(line,x,yy);
+}
+function seedLink(){
+  const base = location.origin + location.pathname;
+  return base + "#seed=" + encodeURIComponent(Game.seed);
+}
+
+/* -------------------------------------------------------------------------
+   22. Overlays + Daily + Menu
+   ------------------------------------------------------------------------- */
+function showOverlay(id){ document.getElementById(id).classList.add("show"); }
+function hideOverlay(id){ document.getElementById(id).classList.remove("show"); }
+function hideAllOverlays(){ document.querySelectorAll(".overlay").forEach(o=>o.classList.remove("show")); }
+
+function buildStartOverlay(){
+  // inject leaderboard into start modal (rebuilt each show)
+  const lb = readLB(LB_KEY), dlb = readLB(DAILY_LB_KEY);
+  let html = "";
+  if(lb.length){
+    html += `<h2>Deepest Runs</h2><ul class="lb">`;
+    lb.slice(0,5).forEach((e,i)=> html += `<li><span><span class="r">${i+1}.</span> depth <span class="d">${e.depth}</span> · ${e.kills} kills · ${e.turns}t</span><span class="c-dim">${e.seed.slice(0,10)}</span></li>`);
+    html += `</ul>`;
+  }
+  if(dlb.length){
+    const today = todaySeed();
+    html += `<h2>Daily Challenge</h2><ul class="lb">`;
+    dlb.slice(0,5).forEach((e,i)=> html += `<li><span><span class="r">${i+1}.</span> depth <span class="d">${e.depth}</span> · ${e.kills} kills · ${e.turns}t${e.seed===today?` <span class="c-flame">(today)</span>`:""}</span><span class="c-dim">${e.seed.replace(/^daily-/,"")}</span></li>`);
+    html += `</ul>`;
+  }
+  const el = document.getElementById("start-lb");
+  if(el) el.innerHTML = html;
+}
+
+function initMenu(){
+  // if a URL seed is present, prefill it
+  const h = parseHash();
+  if(h.seed){ document.getElementById("start-seed").value = h.seed; }
+  // inject leaderboard block below the seedbox
+  const modal = document.querySelector("#ov-start .modal");
+  if(!document.getElementById("start-lb")){
+    const div = document.createElement("div"); div.id="start-lb"; div.style.marginTop="14px";
+    modal.insertBefore(div, modal.querySelector(".footer"));
+  }
+  buildStartOverlay();
+  showOverlay("ov-start");
+}
+
+function parseHash(){
+  const out = {};
+  const h = (location.hash||"").replace(/^#/,"");
+  h.split("&").forEach(pair=>{
+    const [k,v] = pair.split("=");
+    if(k) out[k] = decodeURIComponent(v||"");
+  });
+  return out;
+}
+
+function randomSeed(){
+  return Math.random().toString(36).slice(2,8) + Math.random().toString(36).slice(2,6);
+}
+
+/* -------------------------------------------------------------------------
+   23. Input handling (keyboard + touch)
+   ------------------------------------------------------------------------- */
+const MOVE_KEYS = {
+  ArrowUp:"N", ArrowDown:"S", ArrowLeft:"W", ArrowRight:"E",
+  k:"N", j:"S", h:"W", l:"E",
+  y:"NW", u:"NE", b:"SW", n:"SE",
+  // numpad
+  8:"N",2:"S",4:"W",6:"E",7:"NW",9:"NE",1:"SW",3:"SE",
+};
+function anyOverlayOpen(){
+  return [...document.querySelectorAll(".overlay")].some(o=>o.classList.contains("show"));
+}
+window.addEventListener("keydown", (e)=>{
+  // overlays: allow Esc + inventory letters
+  const invOpen = document.getElementById("ov-inv").classList.contains("show");
+  if(e.key==="Escape"){
+    if(anyOverlayOpen()){ hideAllOverlays(); if(Game.state==="menu"){/*keep menu*/ showOverlay("ov-start");} e.preventDefault(); }
+    return;
+  }
+  if(invOpen){
+    const li = INV_LETTERS.indexOf(e.key);
+    if(li>=0 && li<Game.player.inv.length){ useItem(li); e.preventDefault(); }
+    return;
+  }
+  if(anyOverlayOpen()) return;
+  if(Game.state!=="play") return;
+
+  const k = e.key;
+  if(MOVE_KEYS[k]!==undefined){
+    const [dx,dy] = DIRS[MOVE_KEYS[k]];
+    tryMovePlayer(dx,dy); e.preventDefault(); return;
+  }
+  switch(k){
+    case ".": case "5": case " ": waitTurn(); e.preventDefault(); break;
+    case "g": case ",": grab(); e.preventDefault(); break;
+    case ">": case "Enter": descend(); e.preventDefault(); break;
+    case "i": openInv(); e.preventDefault(); break;
+    case "z": toggleDim(); e.preventDefault(); break;
+    case "f": flare(); e.preventDefault(); break;
+    case "?": showOverlay("ov-help"); e.preventDefault(); break;
+    case "N": showConfirm("Abandon this run and start a new one? Your current descent will be lost.", startNewFromMenu); e.preventDefault(); break;
+  }
+}, {passive:false});
+
+// Touch controls
+function bindTouch(){
+  document.querySelectorAll("#touch .dpad button[data-dir]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const [dx,dy]=DIRS[btn.dataset.dir]; tryMovePlayer(dx,dy);
+    });
+  });
+  document.getElementById("t-wait").onclick = waitTurn;
+  document.getElementById("t-grab").onclick = grab;
+  document.getElementById("t-inv").onclick = openInv;
+  document.getElementById("t-dim").onclick = toggleDim;
+  document.getElementById("t-flare").onclick = flare;
+  document.getElementById("t-descend").onclick = descend;
+  document.getElementById("t-look").onclick = ()=> showOverlay("ov-help");
+}
+// detect touch
+if(("ontouchstart" in window) || navigator.maxTouchPoints>0){
+  document.body.classList.add("touch");
+}
+
+/* -------------------------------------------------------------------------
+   24. UI wiring
+   ------------------------------------------------------------------------- */
+function startNewFromMenu(){
+  const seed = randomSeed();
+  beginRun(seed, false);
+}
+let _confirmCb = null;
+function showConfirm(msg, onYes){
+  _confirmCb = onYes;
+  if(msg) document.getElementById("confirm-msg").textContent = msg;
+  showOverlay("ov-confirm");
+}
+function wireUI(){
+  bindTouch();
+  document.getElementById("btn-help").onclick = ()=> showOverlay("ov-help");
+  document.getElementById("btn-new").onclick = ()=>{
+    if(Game.state==="play"){ showConfirm("Abandon this run and start a new one? Your current descent will be lost.", startNewFromMenu); return; }
+    startNewFromMenu();
+  };
+  document.getElementById("confirm-yes").onclick = ()=>{ hideOverlay("ov-confirm"); const cb=_confirmCb; _confirmCb=null; if(cb) cb(); };
+  document.getElementById("confirm-no").onclick = ()=>{ hideOverlay("ov-confirm"); _confirmCb=null; };
+  document.getElementById("btn-daily").onclick = ()=> beginRun(todaySeed(), true);
+
+  document.getElementById("help-close").onclick = ()=>{ hideOverlay("ov-help"); if(Game.state==="menu") showOverlay("ov-start"); };
+  document.getElementById("inv-close").onclick = ()=> hideOverlay("ov-inv");
+
+  document.getElementById("start-play").onclick = ()=>{
+    const s = document.getElementById("start-seed").value.trim();
+    beginRun(s || randomSeed(), false);
+  };
+  document.getElementById("start-daily").onclick = ()=> beginRun(todaySeed(), true);
+  document.getElementById("start-help").onclick = ()=>{ hideOverlay("ov-start"); showOverlay("ov-help"); };
+  document.getElementById("start-seed-go").onclick = ()=>{
+    const s = document.getElementById("start-seed").value.trim();
+    beginRun(s || randomSeed(), false);
+  };
+
+  document.getElementById("side-dim").onclick = toggleDim;
+  document.getElementById("side-flare").onclick = flare;
+
+  document.getElementById("death-again").onclick = ()=> startNewFromMenu();
+  document.getElementById("death-samesecd").onclick = ()=> beginRun(Game.seed, Game.isDaily);
+  document.getElementById("death-copylink").onclick = async ()=>{
+    const link = seedLink();
+    try{ await navigator.clipboard.writeText(link); flashBtn("death-copylink","Copied!"); }
+    catch(e){ document.getElementById("death-link").select(); flashBtn("death-copylink","Select+Ctrl+C"); }
+  };
+  document.getElementById("death-copyimg").onclick = async ()=>{
+    const c = document.getElementById("death-card");
+    try{
+      const blob = await new Promise(res=> c.toBlob(res,"image/png"));
+      if(navigator.clipboard && window.ClipboardItem){
+        await navigator.clipboard.write([new ClipboardItem({"image/png":blob})]);
+        flashBtn("death-copyimg","Copied!");
+      } else throw new Error("no clipboard image");
+    }catch(e){
+      // fallback: download
+      const url = c.toDataURL("image/png");
+      const a = document.createElement("a"); a.href=url; a.download="wickfall-depth"+Game.depth+".png"; a.click();
+      flashBtn("death-copyimg","Downloaded");
+    }
+  };
+}
+function flashBtn(id,txt){
+  const b = document.getElementById(id); const old=b.textContent; b.textContent=txt; b.classList.add("hot");
+  setTimeout(()=>{ b.textContent=old; b.classList.remove("hot"); }, 1400);
+}
+
+/* -------------------------------------------------------------------------
+   25. Boot
+   ------------------------------------------------------------------------- */
+function boot(){
+  wireUI();
+  resizeCanvas();
+  const h = parseHash();
+  // Priority: explicit ?resume never; if a save exists AND matches (or no seed in URL), offer resume.
+  const hasSave = (()=>{ try{ return !!localStorage.getItem(SAVE_KEY); }catch(e){ return false; } })();
+  if(h.seed){
+    // A shared link — start that exact seed fresh (unless a live save for it exists)
+    if(hasSave){
+      // try to resume if save seed matches; else start the linked seed
+      let snap=null; try{ snap = JSON.parse(localStorage.getItem(SAVE_KEY)); }catch(e){}
+      if(snap && snap.seed===h.seed && loadGame()){ hideAllOverlays(); return; }
+    }
+    document.getElementById("start-seed").value = h.seed;
+    initMenu();
+    return;
+  }
+  if(hasSave && loadGame()){
+    hideAllOverlays();
+    return;
+  }
+  Game.state="menu";
+  initMenu();
+}
+// draw a faint animated menu backdrop so the canvas isn't blank
+function menuBackdrop(){
+  if(Game.state!=="menu"){ return; }
+  ctx.fillStyle="#050403"; ctx.fillRect(0,0,VIEW_W,VIEW_H);
+  flick+=0.05;
+  const cx=VIEW_W/2, cy=VIEW_H/2;
+  const r = 120 + Math.sin(flick)*10;
+  const g = ctx.createRadialGradient(cx,cy,10,cx,cy,r);
+  g.addColorStop(0,"rgba(255,150,60,0.25)"); g.addColorStop(1,"rgba(255,120,50,0)");
+  ctx.fillStyle=g; ctx.fillRect(0,0,VIEW_W,VIEW_H);
+  requestAnimationFrame(menuBackdrop);
+}
+
+let _booted = false;
+function bootOnce(){
+  if(_booted) return; _booted = true;
+  boot();
+  if(Game.state==="menu") menuBackdrop();
+}
+if(document.readyState==="loading"){
+  window.addEventListener("DOMContentLoaded", bootOnce);
+} else {
+  bootOnce();
+}
+</script>
+</body>
+</html>

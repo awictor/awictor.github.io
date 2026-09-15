@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MdToc — Markdown table of contents generator</title>
+<meta name="description" content="Free offline Markdown table-of-contents generator. Paste Markdown to get a nested TOC with GitHub-style anchor links. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/md-toc/">
+<style>
+  :root{
+    --c:#44403c; --bg:#faf9f8; --fg:#1c1917; --muted:#57534e;
+    --card:#ffffff; --border:#e5e2df; --code:#efece9;
+  }
+  [data-theme="dark"]{
+    --bg:#0c0a09; --fg:#e8e4e0; --muted:#8f8880; --card:#161311;
+    --border:#2a2521; --code:#1d1916;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:900px;margin:0 auto;padding:24px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#78716c);display:grid;place-items:center;color:#fff;font-size:19px}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:900px;margin:0 auto;padding:6px 20px 60px}
+  .bar{display:flex;gap:16px;align-items:center;margin-top:14px}
+  .bar label{display:flex;align-items:center;gap:7px;font-size:.86rem;font-weight:600}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px}
+  @media(max-width:720px){.grid{grid-template-columns:1fr}}
+  .pane{background:var(--card);border:1px solid var(--border);border-radius:14px;display:flex;flex-direction:column;overflow:hidden}
+  .pane .h{display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);
+    font-size:.8rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .copy{margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);
+    border-radius:7px;padding:3px 11px;cursor:pointer;font-size:.72rem;text-transform:none;letter-spacing:0}
+  .copy:hover{color:var(--c);border-color:var(--c)}
+  textarea,pre{border:none;background:none;color:var(--fg);min-height:360px;margin:0;padding:15px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9rem;line-height:1.6;width:100%}
+  textarea{resize:vertical}
+  textarea:focus{outline:none}
+  pre{overflow:auto;white-space:pre-wrap;word-break:break-word}
+  footer{max-width:900px;margin:0 auto;padding:14px 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('toc.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">☰</div>
+  <div>
+    <h1>MdToc</h1>
+    <p class="sub">Markdown table of contents generator</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="bar">
+    <label><input type="checkbox" id="ordered"> Numbered list</label>
+  </div>
+  <div class="grid">
+    <div class="pane">
+      <div class="h">Markdown</div>
+      <textarea id="in" spellcheck="false"># Getting Started
+
+## Installation
+
+### Requirements
+
+## Usage
+
+## Usage
+
+# API Reference</textarea>
+    </div>
+    <div class="pane">
+      <div class="h">Table of contents <button class="copy" id="copy">Copy</button></div>
+      <pre id="out"></pre>
+    </div>
+  </div>
+</main>
+<footer>
+  MdToc is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/md-toc">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function ghSlug(text){
+  return String(text).trim().toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s+/g, '-');
+}
+function extractHeadings(md){
+  var lines = String(md).replace(/\r\n?/g, '\n').split('\n');
+  var out = [], inFence = false, seen = {};
+  lines.forEach(function(line){
+    if(/^\s*```/.test(line)){ inFence = !inFence; return; }
+    if(inFence) return;
+    var m = line.match(/^(#{1,6})\s+(.*)$/);
+    if(!m) return;
+    var text = m[2].trim().replace(/\s*#+\s*$/, '');
+    if(text === '') return;
+    var base = ghSlug(text), i = seen[base] || 0;
+    var slug = (i > 0) ? base + '-' + i : base;
+    seen[base] = i + 1;
+    out.push({ level: m[1].length, text: text, slug: slug });
+  });
+  return out;
+}
+function buildToc(headings, opts){
+  opts = opts || {};
+  if(!headings || headings.length === 0) return '';
+  var min = headings.reduce(function(a, h){ return Math.min(a, h.level); }, 6);
+  var bullet = opts.ordered ? '1.' : '-';
+  return headings.map(function(h){
+    var indent = new Array((h.level - min) + 1).join('  ');
+    return indent + bullet + ' [' + h.text + '](#' + h.slug + ')';
+  }).join('\n');
+}
+function generateToc(md, opts){ return buildToc(extractHeadings(md), opts); }
+
+if(typeof module !== 'undefined') module.exports = { ghSlug, extractHeadings, buildToc, generateToc };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var inEl = document.getElementById('in');
+  var outEl = document.getElementById('out');
+  var orderedEl = document.getElementById('ordered');
+  function render(){
+    outEl.textContent = generateToc(inEl.value, { ordered: orderedEl.checked }) || '(no headings found)';
+    try{ localStorage.setItem('toc.in', inEl.value); localStorage.setItem('toc.ord', orderedEl.checked ? '1' : '0'); }catch(e){}
+  }
+  inEl.addEventListener('input', render);
+  orderedEl.addEventListener('change', render);
+  document.getElementById('copy').addEventListener('click', function(){
+    if(navigator.clipboard) navigator.clipboard.writeText(outEl.textContent);
+    this.textContent = 'Copied'; var b = this; setTimeout(function(){ b.textContent = 'Copy'; }, 1000);
+  });
+  try{
+    var si = localStorage.getItem('toc.in'); if(si !== null) inEl.value = si;
+    if(localStorage.getItem('toc.ord') === '1') orderedEl.checked = true;
+  }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('toc.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('toc.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

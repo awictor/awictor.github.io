@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JSON to SQL — generate a CREATE TABLE from JSON</title>
+<meta name="description" content="Paste a JSON object or array and get a CREATE TABLE statement with inferred column types for PostgreSQL, MySQL or SQLite. Offline, no tracking.">
+<style>
+  :root{
+    --c:#4338ca;
+    --bg:#f1f1fb; --card:#ffffff; --fg:#141428; --muted:#585a78;
+    --line:#dedef1; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#0a0a18; --card:#141427; --fg:#e8e8f6; --muted:#9494b6;
+    --line:#252540; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:900px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:900px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:720px){.split{grid-template-columns:1fr}}
+  textarea{width:100%;min-height:280px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85rem;
+    padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);resize:vertical;line-height:1.5;white-space:pre}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .out{min-height:280px}
+  .bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  .field{display:flex;gap:8px;align-items:center}
+  label{font-size:.8rem;font-weight:600;color:var(--muted)}
+  select,input[type=text]{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--fg)}
+  .btn{background:var(--c);color:#fff;border:0;border-radius:9px;padding:9px 14px;font-weight:600;cursor:pointer;font-size:.88rem;margin-left:auto}
+  .err{color:#dc2626;font-size:.85rem;margin-top:8px;min-height:1.1em}
+  h2{font-size:.82rem;margin:0 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🗄️</div>
+  <div>
+    <h1>JSON to SQL</h1>
+    <p>CREATE TABLE from a JSON sample</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="bar">
+      <div class="field"><label>Table</label><input type="text" id="table" value="my_table" size="14"></div>
+      <div class="field"><label>Dialect</label>
+        <select id="dialect">
+          <option value="postgres">PostgreSQL</option>
+          <option value="mysql">MySQL</option>
+          <option value="sqlite">SQLite</option>
+        </select>
+      </div>
+      <button class="btn" id="copy">Copy SQL</button>
+    </div>
+    <div class="split">
+      <div>
+        <h2>JSON in</h2>
+        <textarea id="in" spellcheck="false">[
+  { "id": 1, "name": "Ada", "active": true, "score": 9.5, "joined": "2021-03-04T10:00:00Z" },
+  { "id": 2, "name": "Grace", "active": false, "score": 8, "joined": "2021-05-12T09:30:00Z", "note": null }
+]</textarea>
+      </div>
+      <div>
+        <h2>SQL out</h2>
+        <textarea id="out" class="out" spellcheck="false" readonly></textarea>
+      </div>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="text-transform:none;letter-spacing:0;font-size:1rem;color:var(--fg)">How it works</h2>
+    <p class="note">Paste a single object or an array of objects. The tool scans every row, infers each column's type (integer, real, boolean, ISO timestamp, or text), marks a column nullable if any row omits it or has <code>null</code>, and widens conflicting types (e.g. int + float → real, anything mixed → text). Nested objects and arrays are stored as text (JSON). A column literally named <code>id</code> with integer values becomes the primary key. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var ISO = /^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/;
+  // Internal types: 'INTEGER','REAL','BOOLEAN','TIMESTAMP','TEXT', or null (means the value was null).
+  function inferType(value){
+    if(value === null || value === undefined) return null;
+    if(typeof value === 'boolean') return 'BOOLEAN';
+    if(typeof value === 'number'){ return Number.isInteger(value) ? 'INTEGER' : 'REAL'; }
+    if(typeof value === 'string'){ return ISO.test(value.trim()) ? 'TIMESTAMP' : 'TEXT'; }
+    return 'TEXT'; // objects, arrays -> stored as JSON text
+  }
+  // Widen two internal types to one that fits both.
+  function mergeTypes(a, b){
+    if(a === null) return b;
+    if(b === null) return a;
+    if(a === b) return a;
+    var pair = [a, b].sort().join('+');
+    if(pair === 'INTEGER+REAL') return 'REAL';
+    return 'TEXT';
+  }
+  // Build column definitions from an array of row objects.
+  function inferColumns(rows){
+    if(!Array.isArray(rows)) throw new Error('expected an array of objects');
+    if(rows.length === 0) throw new Error('need at least one object');
+    var order = [], types = {}, nullable = {}, seen = {};
+    rows.forEach(function(row){
+      if(row === null || typeof row !== 'object' || Array.isArray(row)) throw new Error('every row must be an object');
+      Object.keys(row).forEach(function(k){
+        if(!seen[k]){ seen[k] = true; order.push(k); types[k] = null; nullable[k] = false; }
+        var t = inferType(row[k]);
+        if(t === null) nullable[k] = true;
+        types[k] = mergeTypes(types[k], t);
+      });
+    });
+    // A key missing from any row is nullable.
+    order.forEach(function(k){
+      var present = rows.filter(function(r){ return Object.prototype.hasOwnProperty.call(r, k); }).length;
+      if(present < rows.length) nullable[k] = true;
+      if(types[k] === null) types[k] = 'TEXT'; // all-null column
+    });
+    return order.map(function(k){ return { name: k, type: types[k], nullable: nullable[k] }; });
+  }
+  // Map an internal type to a dialect's SQL type.
+  function sqlType(dialect, type){
+    var maps = {
+      postgres: { INTEGER:'INTEGER', REAL:'DOUBLE PRECISION', BOOLEAN:'BOOLEAN', TIMESTAMP:'TIMESTAMP', TEXT:'TEXT' },
+      mysql:    { INTEGER:'INT',     REAL:'DOUBLE',           BOOLEAN:'TINYINT(1)', TIMESTAMP:'DATETIME',  TEXT:'TEXT' },
+      sqlite:   { INTEGER:'INTEGER', REAL:'REAL',             BOOLEAN:'INTEGER',    TIMESTAMP:'TEXT',      TEXT:'TEXT' }
+    };
+    var m = maps[dialect];
+    if(!m) throw new Error('unknown dialect: ' + dialect);
+    return m[type] || 'TEXT';
+  }
+  function quoteIdent(dialect, name){ return dialect === 'mysql' ? '`' + name + '`' : '"' + name + '"'; }
+  // Render the CREATE TABLE statement.
+  function toDDL(tableName, columns, dialect){
+    if(!tableName || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(tableName)) throw new Error('invalid table name');
+    if(!Array.isArray(columns) || columns.length === 0) throw new Error('need at least one column');
+    dialect = dialect || 'postgres';
+    var lines = columns.map(function(c){
+      var isPk = c.name.toLowerCase() === 'id' && c.type === 'INTEGER';
+      var def = '  ' + quoteIdent(dialect, c.name) + ' ' + sqlType(dialect, c.type);
+      if(isPk) def += ' PRIMARY KEY';
+      else if(!c.nullable) def += ' NOT NULL';
+      return def;
+    });
+    return 'CREATE TABLE ' + quoteIdent(dialect, tableName) + ' (\n' + lines.join(',\n') + '\n);';
+  }
+
+  if(typeof module !== 'undefined') module.exports = { inferType:inferType, mergeTypes:mergeTypes, inferColumns:inferColumns, sqlType:sqlType, toDDL:toDDL };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var inEl = document.getElementById('in'), outEl = document.getElementById('out'), errEl = document.getElementById('err');
+    function render(){
+      errEl.textContent = '';
+      var raw = inEl.value.trim();
+      if(!raw){ outEl.value = ''; return; }
+      var data;
+      try{ data = JSON.parse(raw); }
+      catch(e){ outEl.value = ''; errEl.textContent = 'Invalid JSON: ' + e.message; return; }
+      var rows = Array.isArray(data) ? data : [data];
+      try{
+        var cols = inferColumns(rows);
+        var table = document.getElementById('table').value.trim() || 'my_table';
+        var dialect = document.getElementById('dialect').value;
+        outEl.value = toDDL(table, cols, dialect);
+      }catch(e){ outEl.value = ''; errEl.textContent = e.message; }
+    }
+    ['in','table','dialect'].forEach(function(id){ document.getElementById(id).addEventListener('input', render); });
+    document.getElementById('dialect').addEventListener('change', render);
+    document.getElementById('copy').addEventListener('click', function(){
+      if(navigator.clipboard) navigator.clipboard.writeText(outEl.value);
+      this.textContent = 'Copied!'; var b = this; setTimeout(function(){ b.textContent = 'Copy SQL'; }, 1200);
+    });
+    render();
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('jsonsql-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('jsonsql-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

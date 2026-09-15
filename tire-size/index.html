@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TireSize — Tire Dimension & Speedometer Calculator</title>
+<meta name="description" content="Decode a tire size like 225/45R17 into overall diameter, sidewall, circumference and revolutions per mile, and compare two sizes for speedometer error. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('tire-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#0ea5e9;
+    --bg:#f2f7fa; --card:#ffffff; --fg:#141b20; --muted:#5a6771; --line:#e0e9ef; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#0a1216; --card:#111a20; --fg:#e9f2f8; --muted:#8798a3; --line:#1d2a32; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:700px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#0369a1);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:700px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  h2{font-size:.85rem;margin:0 0 12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.1rem}
+  input.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;text-align:center;letter-spacing:.04em}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+  .box{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+  .box .v{font-size:1.3rem;font-weight:800;color:var(--c)}
+  .box .k{color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
+  .cmp{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .verdict{text-align:center;margin-top:14px;font-size:1.05rem}
+  .verdict b{color:var(--c)}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:700px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🛞</div>
+    <div><h1>TireSize</h1><div class="sub">Dimensions &amp; speedometer error</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="a">Tire size (e.g. 225/45R17)</label>
+    <input class="mono" id="a" value="225/45R17" spellcheck="false">
+    <div class="grid" id="specA"></div>
+    <div class="err" id="errA"></div>
+  </div>
+
+  <div class="card">
+    <h2>Compare (speedometer error)</h2>
+    <div class="cmp">
+      <div><label for="orig">Original</label><input class="mono" id="orig" value="225/45R17" spellcheck="false"></div>
+      <div><label for="newt">New</label><input class="mono" id="newt" value="235/45R17" spellcheck="false"></div>
+    </div>
+    <div class="verdict" id="verdict"></div>
+    <div class="err" id="errC"></div>
+  </div>
+</main>
+<footer>
+  Metric tire sizes: <span class="mono">width/aspect R rim</span> (width mm, aspect %, rim inch). A larger overall diameter makes the speedometer read <em>slower</em> than you are going. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/tire-size">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  const MM_PER_INCH = 25.4;
+
+  // Parse "225/45R17" (or with ZR, spaces) into { width, aspect, rim }.
+  function parseTire(str){
+    const m = /^\s*(\d{2,3})\s*\/\s*(\d{2,3})\s*Z?R\s*(\d{1,2}(?:\.\d)?)\s*$/i.exec(String(str));
+    if(!m) throw new Error('use the format width/aspectRrim, e.g. 225/45R17');
+    const width = +m[1], aspect = +m[2], rim = +m[3];
+    if(width < 100 || width > 400) throw new Error('width should be 100–400 mm');
+    if(aspect < 20 || aspect > 90) throw new Error('aspect ratio should be 20–90');
+    return { width, aspect, rim };
+  }
+
+  // Derived dimensions (all lengths in mm unless noted).
+  function tireSpec(str){
+    const { width, aspect, rim } = parseTire(str);
+    const sidewall = width * (aspect / 100);        // one sidewall height, mm
+    const rimMm = rim * MM_PER_INCH;
+    const diameter = rimMm + 2 * sidewall;          // overall diameter, mm
+    const circumference = Math.PI * diameter;       // mm
+    const revsPerMile = 1609344 / circumference;    // 1 mile = 1,609,344 mm
+    const revsPerKm = 1000000 / circumference;      // 1 km = 1,000,000 mm
+    return {
+      width, aspect, rim, sidewall,
+      diameter,
+      diameterIn: diameter / MM_PER_INCH,
+      circumference,
+      revsPerMile,
+      revsPerKm
+    };
+  }
+
+  // Speedometer error swapping `original` for `replacement`.
+  // Returns { diffPct, indicatedAt60 } — indicated speed when truly at 60.
+  function compare(original, replacement){
+    const o = tireSpec(original), r = tireSpec(replacement);
+    const diffPct = (r.diameter - o.diameter) / o.diameter * 100;
+    // A bigger new tire travels farther per rev, so the speedo (calibrated to
+    // the original) under-reads: indicated = actual * (originalDia / newDia).
+    const indicatedAt60 = 60 * (o.diameter / r.diameter);
+    return { diffPct, indicatedAt60, originalDia: o.diameter, newDia: r.diameter };
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('specA')){
+    const $ = id => document.getElementById(id);
+    const r1 = n => (Math.round(n * 10) / 10);
+
+    function renderA(){
+      try{
+        const s = tireSpec($('a').value);
+        $('specA').innerHTML = [
+          [r1(s.diameter) + ' mm', 'Overall diameter'],
+          [r1(s.diameterIn) + ' in', 'Diameter (inch)'],
+          [r1(s.sidewall) + ' mm', 'Sidewall height'],
+          [r1(s.circumference) + ' mm', 'Circumference'],
+          [Math.round(s.revsPerMile) + '', 'Revs / mile'],
+          [Math.round(s.revsPerKm) + '', 'Revs / km']
+        ].map(([v, k]) => `<div class="box"><div class="v">${v}</div><div class="k">${k}</div></div>`).join('');
+        $('errA').textContent = '';
+      }catch(e){ $('specA').innerHTML = ''; $('errA').textContent = e.message; }
+    }
+    function renderC(){
+      try{
+        const c = compare($('orig').value, $('newt').value);
+        const dir = c.diffPct === 0 ? 'identical diameter'
+          : (c.diffPct > 0 ? 'larger' : 'smaller');
+        const speedo = c.indicatedAt60 < 60
+          ? `reads <b>${r1(c.indicatedAt60)} mph</b> when you are actually doing 60 (under-reads)`
+          : c.indicatedAt60 > 60
+            ? `reads <b>${r1(c.indicatedAt60)} mph</b> when you are actually doing 60 (over-reads)`
+            : 'stays accurate';
+        $('verdict').innerHTML = `New tire is <b>${r1(Math.abs(c.diffPct))}% ${dir}</b>. Speedometer ${speedo}.`;
+        $('errC').textContent = '';
+      }catch(e){ $('verdict').textContent = ''; $('errC').textContent = e.message; }
+    }
+    $('a').addEventListener('input', renderA);
+    ['orig', 'newt'].forEach(id => $(id).addEventListener('input', renderC));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('tire-theme', cur); }catch(e){}
+    });
+    renderA(); renderC();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { parseTire, tireSpec, compare };
+</script>
+</body>
+</html>

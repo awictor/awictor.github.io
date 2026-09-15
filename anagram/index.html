@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anagram — Anagram Checker &amp; Finder</title>
+<meta name="description" content="Check whether two phrases are anagrams, see the anagram signature, and find which words in a list are anagrams of your input. Ignores case, spaces and punctuation. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('anagram-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#ec4899;
+    --bg:#fbf4f8; --card:#ffffff; --fg:#20161c; --muted:#6b5560; --line:#f0e2ea; --shadow:0 1px 3px rgba(0,0,0,.08);
+    --ok:#16a34a; --no:#dc2626;
+  }
+  [data-theme="dark"]{
+    --bg:#150c11; --card:#1f131a; --fg:#f5ecf1; --muted:#a88d98; --line:#2d1e27; --shadow:0 1px 3px rgba(0,0,0,.5);
+    --ok:#4ade80; --no:#f87171;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:660px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#be185d);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:660px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  .pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  input,textarea{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem}
+  textarea{min-height:80px;resize:vertical;margin-top:4px}
+  .verdict{text-align:center;margin-top:14px;font-size:1.15rem}
+  .badge{display:inline-block;padding:4px 16px;border-radius:999px;font-weight:700}
+  .badge.ok{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
+  .badge.no{background:color-mix(in srgb,var(--no) 18%,transparent);color:var(--no)}
+  .sig{color:var(--muted);font-size:.85rem;margin-top:8px;text-align:center;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  h2{font-size:.82rem;margin:0 0 8px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  .hits{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .hits span{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok);border-radius:6px;padding:4px 10px;font-weight:600}
+  .none{color:var(--muted);font-size:.9rem}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:660px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🔀</div>
+    <div><h1>Anagram</h1><div class="sub">Checker &amp; finder</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="pair">
+      <div><label for="a">Phrase A</label><input id="a" value="Dormitory" spellcheck="false"></div>
+      <div><label for="b">Phrase B</label><input id="b" value="Dirty Room" spellcheck="false"></div>
+    </div>
+    <div class="verdict" id="verdict"></div>
+    <div class="sig" id="sig"></div>
+  </div>
+  <div class="card">
+    <h2>Find anagrams of a word in a list</h2>
+    <label for="word">Word</label>
+    <input id="word" value="listen" spellcheck="false">
+    <label for="list" style="margin-top:12px">Candidates (comma or newline separated)</label>
+    <textarea id="list" spellcheck="false">silent, enlist, google, tinsel, inlets, banana</textarea>
+    <div class="hits" id="hits"></div>
+  </div>
+</main>
+<footer>
+  Two texts are anagrams if they use exactly the same letters. Comparison ignores case, spaces, and punctuation (letters &amp; digits only). 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/anagram">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  // Canonical signature: lowercased alphanumerics, sorted.
+  function signature(str){
+    return String(str).toLowerCase().replace(/[^a-z0-9]/g, '').split('').sort().join('');
+  }
+
+  // Two strings are anagrams if they share a non-empty signature.
+  function isAnagram(a, b){
+    const sa = signature(a);
+    return sa !== '' && sa === signature(b);
+  }
+
+  // Which candidates are anagrams of `word`?
+  function findAnagrams(word, candidates){
+    const sig = signature(word);
+    if(sig === '') return [];
+    return candidates.filter(c => signature(c) === sig);
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('verdict')){
+    const $ = id => document.getElementById(id);
+    const esc = s => s.replace(/[&<>]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]));
+
+    function render(){
+      const a = $('a').value, b = $('b').value;
+      if(a.trim() && b.trim()){
+        const ok = isAnagram(a, b);
+        $('verdict').innerHTML = `<span class="badge ${ok ? 'ok' : 'no'}">${ok ? '✓ anagrams' : '✗ not anagrams'}</span>`;
+        $('sig').textContent = `signature: ${signature(a) || '∅'}  vs  ${signature(b) || '∅'}`;
+      }else{ $('verdict').textContent = ''; $('sig').textContent = ''; }
+
+      const list = $('list').value.split(/[,\n]/).map(s => s.trim()).filter(Boolean);
+      const hits = findAnagrams($('word').value, list);
+      $('hits').innerHTML = hits.length
+        ? hits.map(h => `<span>${esc(h)}</span>`).join('')
+        : (list.length ? '<span class="none">No anagrams found.</span>' : '');
+    }
+    ['a', 'b', 'word', 'list'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('anagram-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { signature, isAnagram, findAnagrams };
+</script>
+</body>
+</html>

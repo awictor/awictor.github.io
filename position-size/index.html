@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PositionSize — trading position size & risk calculator</title>
+<meta name="description" content="Free offline position size calculator for traders. Enter your account size, risk per trade, entry and stop-loss to get the exact share/unit count that caps your loss — plus risk:reward from a target. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/position-size/">
+<style>
+  :root{
+    --c:#4338ca; --bg:#f8f8f9; --fg:#18181b; --muted:#52525b;
+    --card:#ffffff; --border:#e4e4e7; --code:#efeff1; --good:#16a34a; --bad:#dc2626;
+  }
+  [data-theme="dark"]{
+    --bg:#09090b; --fg:#e7e7ea; --muted:#8b8b93; --card:#151518;
+    --border:#27272a; --code:#1c1c20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#6366f1);display:grid;place-items:center;color:#fff;font-size:16px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:720px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  .inputs{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  .field small{font-weight:400;color:var(--muted)}
+  input{width:100%;padding:11px 13px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:1.05rem;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .hero{margin-top:20px;text-align:center;border:1px solid var(--c);border-radius:14px;padding:18px;background:var(--code)}
+  .hero .k{font-size:.76rem;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+  .hero .v{font-family:ui-monospace,monospace;font-weight:700;font-size:2.6rem;color:var(--c);line-height:1.1;margin-top:4px;
+    cursor:pointer;user-select:all}
+  .hero .tag{font-size:.8rem;color:var(--muted);margin-top:6px}
+  .grid{margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:1px;
+    background:var(--border);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .cell{background:var(--card);padding:13px 15px}
+  .cell .k{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+  .cell .v{font-family:ui-monospace,monospace;font-weight:700;font-size:1.25rem;margin-top:2px}
+  .rr .v{color:var(--good)}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+  @media(max-width:520px){.inputs{grid-template-columns:1fr}.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('psz.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">⚖</div>
+  <div>
+    <h1>PositionSize</h1>
+    <p class="sub">Trading position size &amp; risk calculator</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <div class="inputs">
+      <div class="field"><label for="account">Account size <small>$</small></label>
+        <input id="account" type="number" inputmode="decimal" value="10000" min="0" step="any"></div>
+      <div class="field"><label for="risk">Risk per trade <small>%</small></label>
+        <input id="risk" type="number" inputmode="decimal" value="1" min="0" step="any"></div>
+      <div class="field"><label for="entry">Entry price</label>
+        <input id="entry" type="number" inputmode="decimal" value="100" min="0" step="any"></div>
+      <div class="field"><label for="stop">Stop-loss price</label>
+        <input id="stop" type="number" inputmode="decimal" value="95" min="0" step="any"></div>
+      <div class="field"><label for="target">Target price <small>(optional, for R:R)</small></label>
+        <input id="target" type="number" inputmode="decimal" value="110" min="0" step="any"></div>
+    </div>
+
+    <div class="hero">
+      <div class="k">Position size</div>
+      <div class="v" id="shares">—</div>
+      <div class="tag" id="dir"></div>
+    </div>
+
+    <div class="grid">
+      <div class="cell"><div class="k">Amount at risk</div><div class="v" id="riskAmt">—</div></div>
+      <div class="cell"><div class="k">Risk per unit</div><div class="v" id="perUnit">—</div></div>
+      <div class="cell"><div class="k">Position value</div><div class="v" id="posVal">—</div></div>
+      <div class="cell"><div class="k">% of account</div><div class="v" id="posPct">—</div></div>
+      <div class="cell rr"><div class="k">Risk : reward</div><div class="v" id="rr">—</div></div>
+      <div class="cell rr"><div class="k">Potential reward</div><div class="v" id="reward">—</div></div>
+    </div>
+    <p class="hint">Position size = (account × risk%) ÷ (entry − stop), rounded down so your loss at the stop stays
+      within your risk budget. Direction is inferred from entry vs. stop. Not financial advice — sanity-check every trade.</p>
+  </div>
+</main>
+<footer>
+  PositionSize is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/position-size">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function num(x){ var n = Number(x); return isFinite(n) ? n : NaN; }
+
+function positionSize(p){
+  p = p || {};
+  var account = num(p.account), riskPct = num(p.riskPct), entry = num(p.entry), stop = num(p.stop);
+  var out = {
+    account: account, riskPct: riskPct, entry: entry, stop: stop,
+    direction: null, riskAmount: 0, perUnitRisk: 0, shares: 0, positionValue: 0, positionPct: 0
+  };
+  if(!(account > 0) || !(riskPct >= 0) || !(entry > 0) || !(stop >= 0)) return out;
+  out.riskAmount = account * riskPct / 100;
+  out.perUnitRisk = Math.abs(entry - stop);
+  out.direction = entry > stop ? 'long' : entry < stop ? 'short' : 'flat';
+  if(out.perUnitRisk > 0){
+    out.shares = Math.floor(out.riskAmount / out.perUnitRisk);
+    out.positionValue = out.shares * entry;
+    out.positionPct = out.positionValue / account * 100;
+  }
+  return out;
+}
+
+function riskReward(entry, stop, target){
+  entry = num(entry); stop = num(stop); target = num(target);
+  var risk = Math.abs(entry - stop);
+  var long = entry > stop;
+  var reward = long ? (target - entry) : (entry - target);
+  var ratio = (risk > 0) ? reward / risk : NaN;
+  return { risk: risk, reward: reward, ratio: ratio };
+}
+
+if(typeof module !== 'undefined') module.exports = { num, positionSize, riskReward };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var ids = ['account', 'risk', 'entry', 'stop', 'target'];
+  var el = {};
+  ids.forEach(function(k){ el[k] = document.getElementById(k); });
+  var out = {};
+  ['shares','dir','riskAmt','perUnit','posVal','posPct','rr','reward'].forEach(function(k){ out[k] = document.getElementById(k); });
+
+  function money(n){
+    if(!isFinite(n)) return '—';
+    return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function render(){
+    var r = positionSize({ account: el.account.value, riskPct: el.risk.value, entry: el.entry.value, stop: el.stop.value });
+    out.shares.textContent = r.perUnitRisk > 0 ? r.shares.toLocaleString('en-US') : '—';
+    out.dir.textContent = r.direction && r.direction !== 'flat'
+      ? r.direction.toUpperCase() + ' · risking ' + money(r.riskAmount) + ' at the stop'
+      : (r.perUnitRisk === 0 && r.entry > 0 ? 'Entry equals stop — set a stop-loss.' : '');
+    out.riskAmt.textContent = money(r.riskAmount);
+    out.perUnit.textContent = r.perUnitRisk > 0 ? money(r.perUnitRisk) : '—';
+    out.posVal.textContent = r.shares > 0 ? money(r.positionValue) : '—';
+    out.posPct.textContent = r.shares > 0 ? r.positionPct.toFixed(1) + '%' : '—';
+
+    var rr = riskReward(el.entry.value, el.stop.value, el.target.value);
+    out.rr.textContent = isFinite(rr.ratio) ? '1 : ' + rr.ratio.toFixed(2) : '—';
+    out.reward.textContent = isFinite(rr.reward) && r.shares > 0 ? money(rr.reward * r.shares) : '—';
+
+    try{ ids.forEach(function(k){ localStorage.setItem('psz.' + k, el[k].value); }); }catch(e){}
+  }
+  ids.forEach(function(k){ el[k].addEventListener('input', render); });
+  out.shares.addEventListener('click', function(){
+    if(navigator.clipboard) navigator.clipboard.writeText(out.shares.textContent);
+  });
+  try{ ids.forEach(function(k){ var v = localStorage.getItem('psz.' + k); if(v !== null) el[k].value = v; }); }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('psz.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('psz.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Aplomb — the cart-pole benchmark, but you're the controller</title>
+<style>
+  :root{ --bg:#0d1017; --panel:#141a24; --ink:#e8edf4; --dim:#7d8aa0; --acc:#4fd1c5; --warn:#f6a340; --bad:#f2585b; --pb:#a78bfa; --pid:#4fd1c5; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;overflow:hidden;-webkit-user-select:none;user-select:none}
+  #wrap{position:fixed;inset:0}
+  canvas{display:block;width:100%;height:100%}
+  .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+  .card{background:rgba(20,26,36,.92);border:1px solid #26303f;border-radius:14px;padding:26px 30px;max-width:440px;
+    box-shadow:0 20px 60px rgba(0,0,0,.5);pointer-events:auto;text-align:center}
+  h1{margin:0 0 4px;font-size:30px;letter-spacing:1px;color:var(--acc)}
+  .tag{color:var(--dim);font-size:12.5px;line-height:1.5;margin:0 0 16px}
+  .keys{font-size:12px;color:var(--dim);line-height:1.9;margin-top:10px}
+  .keys b{background:#1d2632;border:1px solid #2c3747;border-radius:5px;padding:1px 7px;color:var(--ink)}
+  button{font:inherit;font-size:13px;cursor:pointer;border:none;border-radius:8px;padding:9px 16px;margin:5px 4px 0;
+    background:var(--acc);color:#06231f;font-weight:700;transition:transform .08s}
+  button:hover{transform:translateY(-1px)} button.ghost{background:#1d2632;color:var(--ink);border:1px solid #2c3747}
+  .row{display:flex;gap:26px;justify-content:center;margin:14px 0 4px}
+  .stat{text-align:center}.stat .v{font-size:26px;font-weight:700}.stat .l{font-size:10.5px;color:var(--dim);letter-spacing:1px;text-transform:uppercase}
+  .grade{font-size:40px;font-weight:800;letter-spacing:1px}
+  #toast{position:absolute;bottom:22px;left:50%;transform:translateX(-50%);background:#1d2632;border:1px solid #2c3747;
+    color:var(--ink);font-size:12px;padding:8px 14px;border-radius:8px;opacity:0;transition:opacity .3s;pointer-events:none}
+  a{color:var(--acc)}
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas>
+  <div class="overlay" id="ov"></div>
+  <div id="toast"></div>
+</div>
+<script>
+"use strict";
+//============================ config (the "hard but doable" band) ============================
+const CFG={
+  mc:1, mp0:0.12, l0:0.55, g:9.8,        // cart mass, pole mass, pole half-length, gravity
+  XL:3.4, THRESH:0.9,                     // rail half-limit, topple angle (rad)
+  fric0:0.40, fricRate:0.004, fricMin:0.06,   // cart friction: starts here, ices over time
+  glRate:0.004,                          // pole half-length growth per second (center of mass rises)
+  gustBase:1.5, gustRamp:0.025, gustDur:0.30, gustLead:1.0,  // wind (angular shove on tip)
+  dropMass:0.04, dropRand:0.04, dropLead:1.2,                // parachuting tip weights
+  fMouseK:30, fMouseD:10, fKey:22, fMax:32, // player authority
+  pidK:[40,8,0.5,2], pidMax:25,          // PID ghost gains [th, thd, x, xd] + force clamp
+  dt:1/60
+};
+//============================ seeded PRNG (mulberry32 from URL hash) ============================
+function hashStr(s){let h=1779033703^s.length;for(let i=0;i<s.length;i++){h=Math.imul(h^s.charCodeAt(i),3432918353);h=h<<13|h>>>19;}return (h^h>>>16)>>>0;}
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+let SEED=(location.hash||"").replace(/^#/,"").replace(/[^a-z0-9]/gi,"").slice(0,32);
+if(!SEED){SEED=Math.floor(Math.random()*1e9).toString(36);history.replaceState(null,"","#"+SEED);}
+let rand=mulberry32(hashStr(SEED));
+//============================ physics: canonical cart-pole integrator ============================
+// state {x,xd,th,thd}; P holds shared difficulty (mp, l, fric). Returns nothing; mutates s in place.
+function step(s,F,P,dt){
+  F=Math.max(-CFG.fMax,Math.min(CFG.fMax,F))-P.fric*s.xd;
+  const sin=Math.sin(s.th),cos=Math.cos(s.th),tot=CFG.mc+P.mp;
+  const temp=(F+P.mp*P.l*s.thd*s.thd*sin)/tot;
+  const thacc=(CFG.g*sin-cos*temp)/(P.l*(4/3-P.mp*cos*cos/tot));
+  const xacc=temp-P.mp*P.l*thacc*cos/tot;
+  s.xd+=xacc*dt; s.x+=s.xd*dt; s.thd+=thacc*dt; s.th+=s.thd*dt;   // semi-implicit Euler
+}
+function pidForce(s){const k=CFG.pidK;let F=k[0]*s.th+k[1]*s.thd+k[2]*s.x+k[3]*s.xd;return Math.max(-CFG.pidMax,Math.min(CFG.pidMax,F));}
+function dead(s){return Math.abs(s.th)>CFG.THRESH||Math.abs(s.x)>CFG.XL;}
+//============================ canvas + input ============================
+const cv=document.getElementById("c"),g=cv.getContext("2d"),ov=document.getElementById("ov");
+// Canvas 2D does NOT resolve CSS var() — resolve the palette to literal colors once, up front.
+const CS=getComputedStyle(document.documentElement),COL={};
+for(const k of ["ink","dim","acc","warn","bad","pb","pid"])COL[k]=CS.getPropertyValue("--"+k).trim();
+let W=0,H=0,DPR=1,scale=1,cx=0,ground=0;
+function resize(){DPR=Math.min(2,devicePixelRatio||1);W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;
+  g.setTransform(DPR,0,0,DPR,0,0);cx=W/2;ground=H*0.66;scale=(W*0.82)/(2*CFG.XL);}
+addEventListener("resize",resize);resize();
+const w2p=x=>cx+x*scale;
+let mouseX=cx, keyL=false, keyR=false, mode="mouse", showPid=false;
+addEventListener("mousemove",e=>{mouseX=e.clientX;if(state==="play")mode="mouse";});
+// Start on canvas click only — a window-level handler would swallow the overlay buttons'
+// own clicks (mousedown clears the overlay before the button's onclick can fire).
+cv.addEventListener("mousedown",()=>{if(state!=="play")startRun();});
+// Touch: steer by dragging (cart follows finger) and tap-to-start.
+cv.addEventListener("touchstart",e=>{if(state!=="play"){startRun();}else{mouseX=e.touches[0].clientX;mode="mouse";}e.preventDefault();},{passive:false});
+cv.addEventListener("touchmove",e=>{mouseX=e.touches[0].clientX;if(state==="play")mode="mouse";e.preventDefault();},{passive:false});
+addEventListener("keydown",e=>{
+  const k=e.key.toLowerCase();
+  if(k==="a"||k==="arrowleft"){keyL=true;if(state==="play")mode="keys";}
+  if(k==="d"||k==="arrowright"){keyR=true;if(state==="play")mode="keys";}
+  if(k==="g"){showPid=!showPid;toast(showPid?"PID autopilot ghost ON":"PID ghost off");}
+  if(k==="c"){mode=mode==="mouse"?"keys":"mouse";toast("Control: "+mode);}
+  if(k==="r"||k===" "||k==="enter")startRun();  // restart anytime (incl. mid-run), matches help text
+  if(["arrowleft","arrowright"," "].includes(k))e.preventDefault();
+});
+addEventListener("keyup",e=>{const k=e.key.toLowerCase();if(k==="a"||k==="arrowleft")keyL=false;if(k==="d"||k==="arrowright")keyR=false;});
+//============================ state ============================
+let state="ready",t=0,acc=0,last=0,shake=0;
+let you,pid,P,gust,drop,phase=[],pbTrace=null,pbIdx=0,rec=[];
+let sumYou=0,sumPid=0,nStat=0;
+const LSK=k=>"aplomb:"+SEED+":"+k;
+function bestTime(){return parseFloat(localStorage.getItem(LSK("t"))||"0");}
+function loadPB(){try{const r=JSON.parse(localStorage.getItem(LSK("trace"))||"null");pbTrace=(r&&r.length)?r:null;}catch(e){pbTrace=null;}}
+function reset(){
+  t=0;acc=0;shake=0;phase=[];rec=[];pbIdx=0;sumYou=0;sumPid=0;nStat=0;
+  rand=mulberry32(hashStr(SEED));
+  you={x:0,xd:0,th:(rand()*2-1)*0.03,thd:0};
+  pid={x:0,xd:0,th:you.th,thd:0};
+  P={mp:CFG.mp0,l:CFG.l0,fric:CFG.fric0};
+  gust={dir:rand()<.5?-1:1,mag:CFG.gustBase,time:2+rand()*3,active:0};
+  drop={time:6+rand()*6};
+  loadPB();
+}
+function startRun(){reset();state="play";ov.innerHTML="";}
+//============================ difficulty scheduler (deterministic in t) ============================
+function schedule(dt){
+  P.fric=Math.max(CFG.fricMin,CFG.fric0-t*CFG.fricRate);
+  P.l=CFG.l0+t*CFG.glRate;
+  // wind gust: direction/magnitude chosen when the NEXT gust is scheduled, so the telegraph is truthful
+  if(gust.active<=0 && t>=gust.time){gust.mag=CFG.gustBase+t*CFG.gustRamp;gust.active=CFG.gustDur;}
+  let wind=0;
+  if(gust.active>0){wind=gust.dir*gust.mag;gust.active-=dt;if(gust.active<=0){gust.time=t+2+rand()*3;gust.dir=rand()<.5?-1:1;}}
+  // parachuting weight: lands on the tip, adds mass (shifts balance point)
+  if(t>=drop.time){P.mp+=CFG.dropMass+rand()*CFG.dropRand;drop.time=t+7+rand()*6;}
+  return wind;
+}
+//============================ fixed-step sim ============================
+function sim(dt){
+  const wind=schedule(dt);
+  // player force
+  let F;
+  if(mode==="mouse"){const tx=Math.max(-CFG.XL,Math.min(CFG.XL,(mouseX-cx)/scale));F=CFG.fMouseK*(tx-you.x)-CFG.fMouseD*you.xd;}
+  else F=(keyR?CFG.fKey:0)-(keyL?CFG.fKey:0);
+  you.thd+=wind*dt; step(you,F,P,dt);
+  // PID ghost lives on the same seeded chaos
+  pid.thd+=wind*dt; step(pid,pidForce(pid),P,dt);
+  // stats for efficiency-vs-PID rating
+  sumYou+=you.th*you.th; sumPid+=pid.th*pid.th; nStat++;
+  // phase-space trail (angle vs angular velocity)
+  phase.push(you.th,you.thd); if(phase.length>360)phase.splice(0,2);
+  rec.push(Math.round(you.x*1000)/1000,Math.round(you.th*1000)/1000);
+  pbIdx++;
+  t+=dt;
+  if(dead(you))gameOver();
+}
+function gameOver(){
+  state="over";shake=16;
+  const prev=bestTime(),beat=t>prev+1e-6;
+  if(beat){localStorage.setItem(LSK("t"),t.toFixed(2));localStorage.setItem(LSK("trace"),JSON.stringify(rec));}
+  const pidRMS=Math.sqrt(sumPid/Math.max(1,nStat)),youRMS=Math.sqrt(sumYou/Math.max(1,nStat));
+  const eff=Math.max(0,Math.min(100,Math.round(100*pidRMS/Math.max(youRMS,1e-4))));
+  scorecard(beat,prev,eff);
+}
+//============================ rendering ============================
+function drawCart(s,alpha,col,poleCol){
+  const px=w2p(s.x), plen=P.l*2*scale;
+  const tipx=px+Math.sin(s.th)*plen, tipy=ground-Math.cos(s.th)*plen;
+  g.save();g.globalAlpha=alpha;
+  // rail highlight already drawn; cart slab
+  g.fillStyle=col;roundRect(px-26,ground-9,52,18,6);g.fill();
+  // pole (tapered)
+  g.strokeStyle=poleCol;g.lineCap="round";
+  g.beginPath();g.lineWidth=9;g.moveTo(px,ground-4);g.lineTo(px+(tipx-px)*0.5,ground-4+(tipy-(ground-4))*0.5);g.stroke();
+  g.beginPath();g.lineWidth=5;g.moveTo(px+(tipx-px)*0.5,ground-4+(tipy-(ground-4))*0.5);g.lineTo(tipx,tipy);g.stroke();
+  // bob (mass scales with tip weight)
+  const r=7+Math.min(10,(P.mp-CFG.mp0)*20);
+  g.fillStyle=poleCol;g.beginPath();g.arc(tipx,tipy,r,0,7);g.fill();
+  g.restore();
+  return {tipx,tipy,px};
+}
+function roundRect(x,y,w,h,r){g.beginPath();g.moveTo(x+r,y);g.arcTo(x+w,y,x+w,y+h,r);g.arcTo(x+w,y+h,x,y+h,r);g.arcTo(x,y+h,x,y,r);g.arcTo(x,y,x+w,y,r);g.closePath();}
+function draw(){
+  g.save();
+  if(shake>0){g.translate((rand()*2-1)*shake,(rand()*2-1)*shake);shake*=0.86;if(shake<0.4)shake=0;}
+  g.clearRect(-40,-40,W+80,H+80);
+  // rail
+  const railL=w2p(-CFG.XL),railR=w2p(CFG.XL);
+  g.strokeStyle="#26303f";g.lineWidth=4;g.beginPath();g.moveTo(railL,ground);g.lineTo(railR,ground);g.stroke();
+  g.fillStyle="#26303f";g.fillRect(railL-4,ground-14,4,28);g.fillRect(railR,ground-14,4,28);
+  // icing tint on rail as friction drops
+  const ice=1-(P?(P.fric-CFG.fricMin)/(CFG.fric0-CFG.fricMin):1);
+  g.strokeStyle="rgba(120,200,255,"+(0.5*ice).toFixed(2)+")";g.lineWidth=2;g.beginPath();g.moveTo(railL,ground+3);g.lineTo(railR,ground+3);g.stroke();
+  if(state==="play"||state==="over"){
+    // PB ghost of your record
+    if(pbTrace){const i=Math.min(pbIdx*2,pbTrace.length-2);drawGhostFromTrace(pbTrace[i],pbTrace[i+1]);}
+    // PID autopilot ghost
+    if(showPid)drawCart(pid,0.32,"#1f6b63","rgba(79,209,197,.55)");
+    // telegraphs
+    telegraph();
+    // you
+    drawCart(you,1,"#cfd8e6",Math.abs(you.th)>CFG.THRESH*0.75?COL.warn:COL.ink);
+    if(state==="over"){g.globalAlpha=1;}
+    hud();
+    phasePortrait();
+  }
+  g.restore();
+}
+function drawGhostFromTrace(x,th){
+  const px=w2p(x),plen=P.l*2*scale,tipx=px+Math.sin(th)*plen,tipy=ground-Math.cos(th)*plen;
+  g.save();g.globalAlpha=0.28;g.fillStyle="#7c5cd6";roundRect(px-24,ground-8,48,16,6);g.fill();
+  g.strokeStyle="rgba(167,139,250,.7)";g.lineWidth=6;g.lineCap="round";
+  g.beginPath();g.moveTo(px,ground-4);g.lineTo(tipx,tipy);g.stroke();
+  g.beginPath();g.arc(tipx,tipy,7,0,7);g.fillStyle="rgba(167,139,250,.9)";g.fill();g.restore();
+}
+function telegraph(){
+  // charging wind arrow before a gust — points in the true shove direction
+  if(gust.active<=0 && gust.time-t<CFG.gustLead && gust.time-t>0){
+    const ch=1-(gust.time-t)/CFG.gustLead, d=gust.dir;
+    const tipx=w2p(you.x)+Math.sin(you.th)*P.l*2*scale, tipy=ground-Math.cos(you.th)*P.l*2*scale;
+    g.save();g.globalAlpha=0.3+0.55*ch;g.strokeStyle=COL.warn;g.lineWidth=3+4*ch;g.lineCap="round";
+    const ax=tipx-d*(30+40*ch);
+    g.beginPath();g.moveTo(ax,tipy);g.lineTo(tipx-d*10,tipy);g.stroke();
+    g.beginPath();g.moveTo(tipx-d*10,tipy);g.lineTo(tipx-d*24,tipy-8);g.moveTo(tipx-d*10,tipy);g.lineTo(tipx-d*24,tipy+8);g.stroke();
+    g.restore();
+  } else if(gust.active>0){ // active gust: streaking particles
+    g.save();g.globalAlpha=0.5;g.strokeStyle=COL.warn;g.lineWidth=2;
+    for(let i=0;i<7;i++){const y=ground-40-i*22,x0=cx+gust.dir*((t*260+i*90)%W-W/2);g.beginPath();g.moveTo(x0,y);g.lineTo(x0+gust.dir*22,y);g.stroke();}
+    g.restore();
+  }
+  // parachuting weight shadow before it lands on the tip
+  if(drop.time-t<CFG.dropLead && drop.time-t>0){
+    const fall=1-(drop.time-t)/CFG.dropLead, tipx=w2p(you.x)+Math.sin(you.th)*P.l*2*scale, tipy=ground-Math.cos(you.th)*P.l*2*scale;
+    const y=Math.min(tipy,60+fall*(tipy-60));
+    g.save();g.globalAlpha=0.6;g.strokeStyle=COL.pb;g.lineWidth=2;
+    g.beginPath();g.arc(tipx,y-14,10,Math.PI,0);g.stroke(); // parachute
+    g.beginPath();g.moveTo(tipx-10,y-14);g.lineTo(tipx,y);g.moveTo(tipx+10,y-14);g.lineTo(tipx,y);g.stroke();
+    g.fillStyle=COL.pb;g.fillRect(tipx-4,y,8,8);g.restore();
+  }
+}
+function hud(){
+  g.save();g.globalAlpha=1;g.textBaseline="top";
+  // timer
+  g.fillStyle=COL.ink;g.font="700 34px ui-monospace,monospace";g.fillText(t.toFixed(2)+"s",22,20);
+  g.font="11px ui-monospace,monospace";g.fillStyle=COL.dim;
+  g.fillText("SEED #"+SEED+"   best "+bestTime().toFixed(2)+"s   ["+mode+"]",22,58);
+  // tilt meter
+  const bx=22,by=84,bw=180;g.fillStyle="#1d2632";roundRect(bx,by,bw,8,4);g.fill();
+  const tv=Math.max(-1,Math.min(1,you.th/CFG.THRESH));
+  g.fillStyle=Math.abs(tv)>0.75?COL.bad:Math.abs(tv)>0.45?COL.warn:COL.acc;
+  roundRect(bx+bw/2,by,tv*bw/2,8,3);g.fill();
+  g.fillStyle=COL.dim;g.fillRect(bx+bw/2-1,by-3,2,14);
+  g.fillText("tilt",bx,by+13);
+  // wind arrow + pole length readouts (right side)
+  g.textAlign="right";g.fillStyle=COL.dim;
+  g.fillText("pole "+ (P.l*2).toFixed(2)+"m",W-22,20);
+  g.fillText("tip mass +"+((P.mp-CFG.mp0)).toFixed(2),W-22,36);
+  g.fillText("friction "+P.fric.toFixed(2),W-22,52);
+  g.textAlign="left";g.restore();
+}
+function phasePortrait(){
+  const s=132,x0=W-s-20,y0=H-s-20;
+  g.save();g.globalAlpha=1;g.fillStyle="rgba(20,26,36,.82)";roundRect(x0,y0,s,s,10);g.fill();
+  g.strokeStyle="#26303f";g.lineWidth=1;g.stroke();
+  const midx=x0+s/2,midy=y0+s/2;
+  g.strokeStyle="#2c3747";g.beginPath();g.moveTo(x0+8,midy);g.lineTo(x0+s-8,midy);g.moveTo(midx,y0+8);g.lineTo(midx,y0+s-8);g.stroke();
+  const sx=(s/2-10)/CFG.THRESH, sy=(s/2-10)/6;
+  for(let i=0;i<phase.length;i+=2){const a=i/phase.length;
+    g.fillStyle="rgba(79,209,197,"+(0.15+0.85*a).toFixed(2)+")";
+    const px=midx+Math.max(-s/2+8,Math.min(s/2-8,phase[i]*sx)),py=midy-Math.max(-s/2+8,Math.min(s/2-8,phase[i+1]*sy));
+    g.fillRect(px-1,py-1,2.4,2.4);}
+  g.fillStyle=COL.dim;g.font="9.5px ui-monospace,monospace";g.textAlign="center";
+  g.fillText("θ",x0+s-14,midy+4);g.fillText("ω",midx+8,y0+8);
+  g.fillText("phase portrait",midx,y0+s-13);g.textAlign="left";g.restore();
+}
+//============================ overlays ============================
+function toast(m){const el=document.getElementById("toast");el.textContent=m;el.style.opacity=1;clearTimeout(toast._t);toast._t=setTimeout(()=>el.style.opacity=0,1400);}
+function ready(){
+  ov.innerHTML=`<div class="card">
+    <h1>APLOMB</h1>
+    <p class="tag">The cart-pole RL benchmark — but <b>you're</b> the controller.<br>
+    Keep the pole balanced overhead. Survival time is your score.<br>
+    Wind, a lengthening pole, an icing rail and tip-weights ramp fairly and are seeded from <b>#${SEED}</b> — fully reproducible.</p>
+    <button onclick="startRun()">▶ Start · #${SEED}</button>
+    <button class="ghost" onclick="reseed()">↺ New seed</button>
+    <div class="keys">
+      <b>Mouse</b> cart follows cursor &nbsp;·&nbsp; <b>A</b>/<b>D</b> or <b>←</b>/<b>→</b> nudge &nbsp;·&nbsp; <b>C</b> toggle scheme<br>
+      <b>G</b> toggle PID autopilot ghost &nbsp;·&nbsp; <b>R</b>/<b>Space</b> restart
+    </div></div>`;
+}
+function scorecard(beat,prev,eff){
+  const grade=eff>=90?"S":eff>=75?"A":eff>=55?"B":eff>=35?"C":"D";
+  const gc=eff>=75?"var(--acc)":eff>=45?"var(--warn)":"var(--bad)";
+  ov.innerHTML=`<div class="card">
+    <h1 style="color:var(--bad);font-size:24px">TOPPLED</h1>
+    <div class="row">
+      <div class="stat"><div class="v">${t.toFixed(2)}s</div><div class="l">survived</div></div>
+      <div class="stat"><div class="v" style="color:${beat?'var(--acc)':'var(--ink)'}">${Math.max(prev,t).toFixed(2)}s</div><div class="l">${beat?'new best!':'seed best'}</div></div>
+    </div>
+    <div class="grade" style="color:${gc}">${grade}</div>
+    <div class="l" style="color:var(--dim);font-size:11px">efficiency vs PID · ${eff}%</div>
+    <div style="margin-top:16px">
+      <button onclick="startRun()">↻ Retry #${SEED}</button>
+      <button class="ghost" onclick="copySeed()">🔗 Copy challenge</button>
+      <button class="ghost" onclick="reseed()">New seed</button>
+    </div>
+    <div class="keys">Press <b>G</b> then retry to watch the PID controller balance the same run.</div>
+  </div>`;
+}
+function reseed(){SEED=Math.floor(Math.random()*1e9).toString(36);history.replaceState(null,"","#"+SEED);reset();state="ready";ready();}
+function copySeed(){const url=location.href.split("#")[0]+"#"+SEED;  // href-based: correct for http(s) AND file:// on every browser
+  (navigator.clipboard?navigator.clipboard.writeText(url):Promise.reject()).then(()=>toast("Challenge link copied — same chaos, beat "+bestTime().toFixed(2)+"s"))
+   .catch(()=>toast("Copy this: "+url));}
+window.startRun=startRun;window.reseed=reseed;window.copySeed=copySeed;
+//============================ main loop ============================
+function frame(ts){
+  if(!last)last=ts;let d=(ts-last)/1000;last=ts;if(d>0.1)d=0.1;
+  if(state==="play"){acc+=d;while(acc>=CFG.dt){sim(CFG.dt);acc-=CFG.dt;if(state!=="play")break;}}
+  draw();
+  requestAnimationFrame(frame);
+}
+reset();ready();requestAnimationFrame(frame);
+</script>
+</body>
+</html>

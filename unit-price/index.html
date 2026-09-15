@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UnitPrice — compare price per unit &amp; find the best value</title>
+<meta name="description" content="Free offline unit price calculator. Compare products of different sizes by price per unit (per g, ml, or item) — with unit conversion — to find the real best value. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/unit-price/">
+<style>
+  :root{
+    --c:#4d7c0f; --bg:#f8f8f9; --fg:#18181b; --muted:#52525b;
+    --card:#ffffff; --border:#e4e4e7; --code:#efeff1; --best:#16a34a;
+  }
+  [data-theme="dark"]{
+    --bg:#09090b; --fg:#e7e7ea; --muted:#8b8b93; --card:#151518;
+    --border:#27272a; --code:#1c1c20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:760px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#84cc16);display:grid;place-items:center;color:#fff;font-size:16px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:760px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  select,input{padding:10px 11px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--fg);
+    font-size:.98rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  select:focus,input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .items{margin-top:14px}
+  .item{display:grid;grid-template-columns:1.3fr .9fr .9fr .8fr;gap:8px;margin-bottom:8px}
+  .item input{width:100%}
+  .item .lbl{font-size:.7rem;color:var(--muted);grid-column:1 / -1;display:none}
+  .headrow{display:grid;grid-template-columns:1.3fr .9fr .9fr .8fr;gap:8px;font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin-bottom:4px}
+  .results{margin-top:18px}
+  .res{display:flex;justify-content:space-between;align-items:center;padding:11px 14px;border:1px solid var(--border);border-radius:11px;margin-bottom:8px}
+  .res.best{border-color:var(--best);background:rgba(22,163,74,.08)}
+  .res .name{font-weight:600}
+  .res .up{font-family:ui-monospace,monospace;font-weight:700}
+  .res .tag{font-size:.75rem;color:var(--muted)}
+  .res.best .tag{color:var(--best);font-weight:700}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:760px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+  @media(max-width:520px){.item,.headrow{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('up.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">$/u</div>
+  <div>
+    <h1>UnitPrice</h1>
+    <p class="sub">Compare price per unit &amp; find the best value</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <label for="family">Measure by</label>
+    <select id="family"><option value="weight">Weight</option><option value="volume">Volume</option><option value="count">Count</option></select>
+    <div class="items">
+      <div class="headrow"><div>Label</div><div>Price</div><div>Size</div><div>Unit</div></div>
+      <div id="rows"></div>
+    </div>
+    <div class="results" id="results"></div>
+    <p class="hint">Enter each product's price and package size; UnitPrice converts to a common base
+      (per gram, per millilitre, or per item) and ranks them, showing how much more the others cost.
+      Fill any rows you like — blanks are ignored. 100% local.</p>
+  </div>
+</main>
+<footer>
+  UnitPrice is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/unit-price">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+var FACTORS = { g: 1, kg: 1000, oz: 28.349523125, lb: 453.59237, ml: 1, l: 1000, floz: 29.5735295625, ea: 1 };
+var FAMILIES = { weight: ['g', 'kg', 'oz', 'lb'], volume: ['ml', 'l', 'floz'], count: ['ea'] };
+var BASE = { weight: 'g', volume: 'ml', count: 'item' };
+
+function toBase(value, unit){
+  var f = FACTORS[unit];
+  value = Number(value);
+  if(!isFinite(value) || !f) return NaN;
+  return value * f;
+}
+function unitPrice(price, value, unit){
+  price = Number(price);
+  var base = toBase(value, unit);
+  if(!isFinite(price) || !isFinite(base) || !(base > 0)) return NaN;
+  return price / base;
+}
+function rank(items){
+  var valid = (items || []).map(function(it){
+    return { label: it.label, price: it.price, value: it.value, unit: it.unit, unitPrice: unitPrice(it.price, it.value, it.unit) };
+  }).filter(function(it){ return isFinite(it.unitPrice) && it.unitPrice > 0; });
+  if(valid.length === 0) return [];
+  valid.sort(function(a, b){ return a.unitPrice - b.unitPrice; });
+  var min = valid[0].unitPrice;
+  return valid.map(function(it, i){
+    it.best = (i === 0);
+    it.ratio = it.unitPrice / min;
+    return it;
+  });
+}
+
+if(typeof module !== 'undefined') module.exports = { FACTORS, FAMILIES, BASE, toBase, unitPrice, rank };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var familyEl = document.getElementById('family');
+  var rowsEl = document.getElementById('rows');
+  var resultsEl = document.getElementById('results');
+  var N = 4;
+
+  function unitOptions(){
+    return (FAMILIES[familyEl.value] || FAMILIES.weight).map(function(u){ return '<option value="' + u + '">' + u + '</option>'; }).join('');
+  }
+  function buildRows(){
+    var opts = unitOptions();
+    var h = '';
+    for(var i = 0; i < N; i++){
+      h += '<div class="item">' +
+        '<input data-i="' + i + '" data-k="label" placeholder="Brand A" spellcheck="false">' +
+        '<input data-i="' + i + '" data-k="price" type="number" step="any" placeholder="$">' +
+        '<input data-i="' + i + '" data-k="value" type="number" step="any" placeholder="size">' +
+        '<select data-i="' + i + '" data-k="unit">' + opts + '</select></div>';
+    }
+    rowsEl.innerHTML = h;
+  }
+  function collect(){
+    var items = [];
+    for(var i = 0; i < N; i++){
+      var get = function(k){ var el = rowsEl.querySelector('[data-i="' + i + '"][data-k="' + k + '"]'); return el ? el.value : ''; };
+      items.push({ label: get('label') || ('Item ' + (i + 1)), price: get('price'), value: get('value'), unit: get('unit') });
+    }
+    return items;
+  }
+  function money(n){ return '$' + Number(n).toLocaleString('en-US', { maximumFractionDigits: 4 }); }
+  function render(){
+    var ranked = rank(collect());
+    var base = BASE[familyEl.value];
+    if(ranked.length === 0){ resultsEl.innerHTML = '<div class="hint">Enter at least one price and size.</div>'; return; }
+    resultsEl.innerHTML = ranked.map(function(it){
+      var per = money(it.unitPrice) + ' / ' + base;
+      var tag = it.best ? '★ best value' : '+' + ((it.ratio - 1) * 100).toFixed(1) + '% more';
+      return '<div class="res' + (it.best ? ' best' : '') + '"><div><div class="name">' + esc(it.label) + '</div>' +
+        '<div class="tag">' + tag + '</div></div><div class="up">' + per + '</div></div>';
+    }).join('');
+    try{ localStorage.setItem('up.family', familyEl.value); localStorage.setItem('up.data', JSON.stringify(collect())); }catch(e){}
+  }
+  function esc(s){ return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+  familyEl.addEventListener('change', function(){ buildRows(); restore(); render(); });
+  rowsEl.addEventListener('input', render);
+  function restore(){
+    try{
+      var d = JSON.parse(localStorage.getItem('up.data') || '[]');
+      d.forEach(function(it, i){
+        ['label', 'price', 'value', 'unit'].forEach(function(k){
+          var el = rowsEl.querySelector('[data-i="' + i + '"][data-k="' + k + '"]');
+          if(el && it[k] !== undefined && (k !== 'label' || !/^Item \d+$/.test(it[k]))){
+            if(k === 'unit' && (FAMILIES[familyEl.value] || FAMILIES.weight).indexOf(it[k]) < 0) return;
+            el.value = it[k];
+          }
+        });
+      });
+    }catch(e){}
+  }
+  try{ var f = localStorage.getItem('up.family'); if(f) familyEl.value = f; }catch(e){}
+  buildRows(); restore(); render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('up.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('up.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

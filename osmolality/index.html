@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Osmolality — Serum Osmolality &amp; Osmolar Gap Calculator</title>
+<meta name="description" content="Calculate serum osmolality from sodium, glucose, BUN (and ethanol), and the osmolar gap versus a measured value. 100% offline, informational only.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('osmo-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#0369a1;
+    --bg:#f1f6fb; --card:#ffffff; --fg:#111a26; --muted:#556173; --line:#dde6f0; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#070f1a; --card:#0f1826; --fg:#e7eef8; --muted:#8496a8; --line:#1a2636; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:640px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#0c4a6e);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:640px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.78rem;color:var(--muted);margin-bottom:5px;font-weight:600}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .field{margin-bottom:14px}
+  input{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem}
+  .out{text-align:center}
+  .big{font-size:3rem;font-weight:800;color:var(--c);line-height:1}
+  .u{color:var(--muted);font-size:.85rem}
+  .gap{margin-top:14px;text-align:center;font-size:1.05rem}
+  .gap b{color:var(--c)}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:640px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.8rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🧫</div>
+    <div><h1>Osmolality</h1><div class="sub">Serum osmolality &amp; osmolar gap</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div class="field"><label for="na">Sodium (mmol/L)</label><input type="number" id="na" value="140" step="1"></div>
+      <div class="field"><label for="glu">Glucose (mg/dL)</label><input type="number" id="glu" value="90" step="1"></div>
+    </div>
+    <div class="grid">
+      <div class="field"><label for="bun">BUN (mg/dL)</label><input type="number" id="bun" value="14" step="1"></div>
+      <div class="field"><label for="etoh">Ethanol (mg/dL, optional)</label><input type="number" id="etoh" value="0" step="1"></div>
+    </div>
+    <div class="field"><label for="measured">Measured osmolality (mOsm/kg, optional — for the gap)</label><input type="number" id="measured" placeholder="e.g. 295" step="1"></div>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card out">
+    <div class="big" id="calc">—</div>
+    <div class="u">calculated mOsm/kg</div>
+    <div class="gap" id="gap"></div>
+  </div>
+</main>
+<footer>
+  Calculated osmolality = 2·Na + glucose/18 + BUN/2.8 (+ ethanol/3.7), in US units. A raised osmolar gap (measured − calculated &gt; ~10) suggests unmeasured osmoles (e.g. toxic alcohols). Informational only — <strong>not medical advice</strong>. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/osmolality">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic (US units) ----------
+  // Calculated serum osmolality: 2·Na + glucose/18 + BUN/2.8 + ethanol/3.7.
+  function osmolality(na, glucoseMgdl, bunMgdl, ethanolMgdl = 0){
+    const vals = [na, glucoseMgdl, bunMgdl, ethanolMgdl].map(Number);
+    if(!vals.every(Number.isFinite)) throw new Error('enter numbers');
+    const [n, g, b, e] = vals;
+    return 2 * n + g / 18 + b / 2.8 + e / 3.7;
+  }
+
+  // SI units: 2·Na + glucose(mmol/L) + urea(mmol/L).
+  function osmolalitySI(na, glucoseMmol, ureaMmol){
+    const vals = [na, glucoseMmol, ureaMmol].map(Number);
+    if(!vals.every(Number.isFinite)) throw new Error('enter numbers');
+    return 2 * vals[0] + vals[1] + vals[2];
+  }
+
+  // Osmolar gap = measured − calculated.
+  const osmolarGap = (measured, calculated) => Number(measured) - Number(calculated);
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('calc')){
+    const $ = id => document.getElementById(id);
+    const r1 = n => Math.round(n * 10) / 10;
+
+    function render(){
+      try{
+        const calc = osmolality($('na').value, $('glu').value, $('bun').value, +$('etoh').value || 0);
+        $('calc').textContent = r1(calc);
+        const measStr = $('measured').value.trim();
+        if(measStr !== ''){
+          const gap = osmolarGap(measStr, calc);
+          $('gap').innerHTML = `Osmolar gap: <b>${r1(gap)}</b> mOsm/kg ` +
+            (gap > 10 ? '— elevated (unmeasured osmoles?)' : '— within normal range');
+        }else $('gap').textContent = 'Enter a measured value to see the osmolar gap.';
+        $('err').textContent = '';
+      }catch(e){ $('calc').textContent = '—'; $('gap').textContent = ''; $('err').textContent = e.message; }
+    }
+    [...document.querySelectorAll('input')].forEach(el => el.addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('osmo-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { osmolality, osmolalitySI, osmolarGap };
+</script>
+</body>
+</html>

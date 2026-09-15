@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CRC Calculator — CRC-8/16/32 (multi-polynomial)</title>
+<meta name="description" content="Compute CRC checksums with common polynomials — CRC-8, CRC-16 (CCITT, XMODEM, ARC, MODBUS), and CRC-32. Text or hex input, hex output. Offline, no tracking.">
+<style>
+  :root{
+    --c:#0e7490;
+    --bg:#f1f7f9; --card:#ffffff; --fg:#101f24; --muted:#566a72;
+    --line:#d9e9ee; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#0a1417; --card:#121e22; --fg:#e6f2f6; --muted:#89a1a9;
+    --line:#20323a; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:800px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:14px;font-weight:800;color:#fff;flex:0 0 auto;font-family:ui-monospace,monospace}
+  h1{font-size:1.4rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:800px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.82rem;font-weight:600;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+  textarea{width:100%;font:inherit;font-family:ui-monospace,Menlo,Consolas,monospace;padding:12px;
+    border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);min-height:70px;resize:vertical}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .seg{display:flex;gap:8px;margin-top:12px}
+  .seg button{padding:8px 16px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:9px;cursor:pointer;font-weight:600;font-size:.85rem}
+  .seg button.on{background:var(--c);color:#fff;border-color:var(--c)}
+  .err{color:#dc2626;font-size:.85rem;margin-top:8px;min-height:16px}
+  table{width:100%;border-collapse:collapse;margin-top:6px}
+  td{padding:10px;border-bottom:1px solid var(--line);font-size:.95rem}
+  td:first-child{color:var(--muted)}
+  td.val{text-align:right;font-family:ui-monospace,monospace;font-weight:700;color:var(--c);cursor:pointer}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">CRC</div>
+  <div>
+    <h1>CRC Calculator</h1>
+    <p>CRC-8 / CRC-16 / CRC-32, multiple polynomials</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <label for="in">Input</label>
+    <textarea id="in" spellcheck="false">123456789</textarea>
+    <div class="seg">
+      <button id="mText" class="on">Text (UTF-8)</button>
+      <button id="mHex">Hex bytes</button>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>Checksums</h2>
+    <table><tbody id="rows"></tbody></table>
+    <p class="note" style="margin-top:12px">Tap a value to copy. Computed with the standard Rocksoft model (width, polynomial, init, input/output reflection, final XOR). The classic check value for the string <code>123456789</code> is shown for each — e.g. CRC-32 = 0xCBF43926.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var PRESETS = {
+    'CRC-8':               { width:8,  poly:0x07,       init:0x00,       refin:false, refout:false, xorout:0x00 },
+    'CRC-16/CCITT-FALSE':  { width:16, poly:0x1021,     init:0xFFFF,     refin:false, refout:false, xorout:0x0000 },
+    'CRC-16/XMODEM':       { width:16, poly:0x1021,     init:0x0000,     refin:false, refout:false, xorout:0x0000 },
+    'CRC-16/ARC':          { width:16, poly:0x8005,     init:0x0000,     refin:true,  refout:true,  xorout:0x0000 },
+    'CRC-16/MODBUS':       { width:16, poly:0x8005,     init:0xFFFF,     refin:true,  refout:true,  xorout:0x0000 },
+    'CRC-32':              { width:32, poly:0x04C11DB7, init:0xFFFFFFFF, refin:true,  refout:true,  xorout:0xFFFFFFFF }
+  };
+  function reflect(value, width){
+    var r = 0;
+    for(var i = 0; i < width; i++){ if((value >>> i) & 1) r = (r | (1 << (width - 1 - i))) >>> 0; }
+    return r >>> 0;
+  }
+  function mask(reg, width){ return width === 32 ? (reg >>> 0) : (reg & ((1 << width) - 1)); }
+  function crcCompute(bytes, m){
+    var width = m.width, poly = m.poly >>> 0;
+    var topbit = width === 32 ? 0x80000000 : (1 << (width - 1));
+    var reg = mask(m.init >>> 0, width);
+    for(var i = 0; i < bytes.length; i++){
+      var b = bytes[i] & 0xff;
+      if(m.refin) b = reflect(b, 8);
+      reg = mask((reg ^ ((b << (width - 8)) >>> 0)) >>> 0, width);
+      for(var k = 0; k < 8; k++){
+        if(reg & topbit) reg = mask(((reg << 1) ^ poly) >>> 0, width);
+        else reg = mask((reg << 1) >>> 0, width);
+      }
+    }
+    if(m.refout) reg = reflect(reg, width);
+    return mask((reg ^ (m.xorout >>> 0)) >>> 0, width);
+  }
+  function asciiToBytes(str){ return Array.from(String(str)).map(function(c){ return c.charCodeAt(0) & 0xff; }); }
+  function hexToBytes(hex){
+    var h = String(hex).replace(/[^0-9a-fA-F]/g, '');
+    if(h.length % 2 !== 0) throw new Error('hex must have an even number of digits');
+    var out = [];
+    for(var i = 0; i < h.length; i += 2) out.push(parseInt(h.substr(i, 2), 16));
+    return out;
+  }
+  function toHex(v, width){ return '0x' + (v >>> 0).toString(16).toUpperCase().padStart(width / 4, '0'); }
+
+  if(typeof module !== 'undefined') module.exports = {
+    PRESETS:PRESETS, reflect:reflect, crcCompute:crcCompute, asciiToBytes:asciiToBytes, hexToBytes:hexToBytes, toHex:toHex
+  };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var inp=document.getElementById('in'), err=document.getElementById('err'), rows=document.getElementById('rows');
+    var mText=document.getElementById('mText'), mHex=document.getElementById('mHex');
+    var mode='text';
+    function render(){
+      err.textContent='';
+      var bytes;
+      try{ bytes = mode==='text' ? asciiToBytes(inp.value) : hexToBytes(inp.value); }
+      catch(e){ err.textContent='✗ ' + e.message; rows.innerHTML=''; return; }
+      rows.innerHTML = Object.keys(PRESETS).map(function(name){
+        var m = PRESETS[name];
+        var v = toHex(crcCompute(bytes, m), m.width);
+        return '<tr><td>' + name + '</td><td class="val" data-v="' + v + '">' + v + '</td></tr>';
+      }).join('');
+      rows.querySelectorAll('.val').forEach(function(el){
+        el.addEventListener('click', function(){ if(navigator.clipboard) navigator.clipboard.writeText(el.getAttribute('data-v')); });
+      });
+    }
+    inp.addEventListener('input', render);
+    mText.addEventListener('click', function(){ mode='text'; mText.classList.add('on'); mHex.classList.remove('on'); render(); });
+    mHex.addEventListener('click', function(){ mode='hex'; mHex.classList.add('on'); mText.classList.remove('on'); render(); });
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('crc-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('crc-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+
+    render();
+  }
+</script>
+</body>
+</html>

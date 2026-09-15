@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Adder — trace the snake of consecutive numbers</title>
+<style>
+  :root{
+    --bg:#0f1512; --panel:#16201b; --line:#2b3a31; --ink:#e9f2ec; --dim:#8fa79a;
+    --given:#f2c14e; --entry:#e9f2ec; --run:#3fae6b; --sel:#5fd08a; --bad:#e0655e;
+    --accent:#3fae6b; --accent2:#286b45;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:radial-gradient(1200px 700px at 50% -10%,#1a2620,var(--bg));
+    color:var(--ink);font:16px/1.5 "Segoe UI",system-ui,sans-serif;
+    display:flex;flex-direction:column;align-items:center;min-height:100%;padding:22px 14px 40px}
+  h1{margin:0;font-size:26px;letter-spacing:.5px;font-weight:700}
+  h1 .s{color:var(--accent)}
+  .tag{color:var(--dim);font-size:13px;margin:2px 0 16px;text-align:center}
+  .wrap{width:100%;max-width:560px}
+  .bar{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-bottom:12px}
+  button{background:var(--panel);color:var(--ink);border:1px solid var(--line);
+    padding:8px 13px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600;
+    transition:.15s}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button.on{background:var(--accent2);border-color:var(--accent);color:#fff}
+  button.pri{background:var(--accent);border-color:var(--accent);color:#04160c}
+  button.pri:hover{filter:brightness(1.1);color:#04160c}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .seg button{border:none;border-radius:0;border-right:1px solid var(--line)}
+  .seg button:last-child{border-right:none}
+  .stats{display:flex;gap:18px;justify-content:center;color:var(--dim);font-size:13px;margin-bottom:12px;flex-wrap:wrap}
+  .stats b{color:var(--ink);font-variant-numeric:tabular-nums}
+  #board{display:grid;gap:5px;justify-content:center;margin:0 auto;
+    grid-template-columns:repeat(var(--cols),1fr);width:min(94vw,480px)}
+  .cell{aspect-ratio:1;background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    display:flex;align-items:center;justify-content:center;position:relative;
+    font-size:clamp(13px,4.4vw,24px);font-weight:600;font-variant-numeric:tabular-nums;
+    color:var(--entry);cursor:pointer;user-select:none;transition:background .3s,box-shadow .15s,transform .3s}
+  .cell.given{color:var(--given);background:#1c2822;font-weight:800}
+  .cell.run{background:#1e3a2a;box-shadow:inset 0 0 0 1px var(--run)}
+  .cell.sel{box-shadow:0 0 0 2px var(--sel);z-index:2}
+  .cell.bad{background:#3a1e1c;color:var(--bad);box-shadow:inset 0 0 0 1px var(--bad)}
+  .cell.hintcell{box-shadow:0 0 0 2px var(--given),0 0 14px var(--given)}
+  .cell.hintanchor{box-shadow:inset 0 0 0 2px var(--given)}
+  .cell.lit{background:var(--run);color:#04160c;transform:scale(1.06)}
+  .cell .pen{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    flex-wrap:wrap;gap:1px 4px;padding:3px;font-size:clamp(8px,2.3vw,11px);
+    color:var(--dim);font-weight:600;line-height:1.05}
+  #hint{min-height:20px;text-align:center;color:var(--given);font-size:13px;margin:14px auto 0;max-width:480px}
+  .help{color:var(--dim);font-size:12px;text-align:center;margin-top:14px;line-height:1.7;max-width:480px}
+  kbd{background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:11px;color:var(--ink)}
+  #won{color:var(--accent);font-weight:700}
+  #pad{display:flex;flex-wrap:wrap;gap:5px;justify-content:center;margin:14px auto 0;max-width:480px}
+  #pad button{min-width:36px;padding:8px 9px}
+  #pad button.used{opacity:.32}
+  .cell.shake{animation:adder-shake .3s ease}
+  @keyframes adder-shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-4px)}60%{transform:translateX(4px)}}
+  @media (prefers-reduced-motion: reduce){
+    .cell{transition:none}
+    .cell.lit{transform:none}
+    .cell.shake{animation:none}
+  }
+</style>
+</head>
+<body>
+  <h1>Add<span class="s">der</span></h1>
+  <div class="tag">Fill the grid so 1→N forms one continuous snake — every k touches k+1.</div>
+  <div class="wrap">
+    <div class="bar">
+      <div class="seg" id="sizes"></div>
+      <button class="pri" id="new">New</button>
+      <button id="daily">Daily</button>
+      <button id="check">Check</button>
+      <button id="hintBtn">Hint</button>
+      <button id="undo">Undo</button>
+      <button id="redo">Redo</button>
+      <button id="share">Share</button>
+    </div>
+    <div class="stats">
+      <span id="mode"></span>
+      <span>Time <b id="time">0:00</b></span>
+      <span>Moves <b id="moves">0</b></span>
+      <span><span id="bestlbl">Best</span> <b id="best">—</b></span>
+    </div>
+    <div id="board"></div>
+    <div id="pad"></div>
+    <div id="hint"></div>
+    <div class="help">
+      Tap a cell, then tap a number below — or type it. <kbd>Shift</kbd>+digits (or the ✎ toggle) = pencil marks ·
+      Arrow keys move · <kbd>Del</kbd> clears · <kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Y</kbd> undo/redo
+    </div>
+  </div>
+<script>
+"use strict";
+const $=s=>document.querySelector(s);
+const DIFF={5:"Coiled 5×5",7:"Serpent 7×7",9:"Basilisk 9×9"};
+
+// ---- seeded PRNG ----
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function strSeed(s){let h=2166136261>>>0;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
+
+// ---- state ----
+let SIZE=5,ROWS,COLS,N,seed,isDaily=false,dailyDate="";
+let solution=[],given=[],board=[],pencils=[],NB=[];
+let selected=0,checkMode=false,solved=false;
+let undoStack=[],future=[];
+let startTime=null,timerId=null,moves=0,typed="",penBuf="";
+let cells=[],padCells=[],penMode=false;
+let pendingCell=-1,pendingSnap=null,commitTimer=null;
+
+const idx=(r,c)=>r*COLS+c;
+const rc=i=>[Math.floor(i/COLS),i%COLS];
+function manhattan(a,b){const p=rc(a),q=rc(b);return Math.abs(p[0]-q[0])+Math.abs(p[1]-q[1]);}
+const adj=(a,b)=>manhattan(a,b)===1;
+function buildNB(){NB=new Array(N);for(let i=0;i<N;i++){const[r,c]=rc(i),a=[];if(r>0)a.push(i-COLS);if(r<ROWS-1)a.push(i+COLS);if(c>0)a.push(i-1);if(c<COLS-1)a.push(i+1);NB[i]=a;}}
+
+// ---- Hamiltonian path generator (Warnsdorff greedy + retries, snake fallback) ----
+function deg(n,used){let d=0;for(const m of NB[n])if(!used[m])d++;return d;}
+function hamiltonian(rng){
+  for(let att=0;att<300;att++){
+    const used=new Array(N).fill(false),path=[];
+    let cur=Math.floor(rng()*N);used[cur]=true;path.push(cur);
+    let ok=true;
+    while(path.length<N){
+      const cands=NB[cur].filter(n=>!used[n]);
+      if(!cands.length){ok=false;break;}
+      cands.sort((a,b)=>(deg(a,used)-deg(b,used))||(rng()-0.5));
+      cur=cands[0];used[cur]=true;path.push(cur);
+    }
+    if(ok)return path;
+  }
+  const p=[];for(let r=0;r<ROWS;r++){if(r%2===0)for(let c=0;c<COLS;c++)p.push(idx(r,c));else for(let c=COLS-1;c>=0;c--)p.push(idx(r,c));}return p;
+}
+
+// ---- chain-following solver / uniqueness counter (also the hint oracle's cousin) ----
+function countSolutions(clues,limit){
+  const posOf={};for(let i=0;i<clues.length;i++)if(clues[i])posOf[clues[i]]=i;
+  const fixed=Object.keys(posOf).map(Number).sort((a,b)=>a-b);
+  const occ=new Array(N).fill(false);let count=0;
+  function prune(v,c){for(const f of fixed){if(f>v){const md=manhattan(c,posOf[f]),st=f-v;return md<=st&&(st-md)%2===0;}}return true;}
+  function dfs(v,c){
+    if(count>=limit)return;
+    occ[c]=true;
+    if(v===N){count++;occ[c]=false;return;}
+    const nv=v+1;let targets;
+    if(posOf[nv]!==undefined){const d=posOf[nv];targets=(adj(c,d)&&!occ[d])?[d]:[];}
+    else targets=NB[c].filter(n=>!occ[n]&&clues[n]===0);
+    for(const t of targets){if(prune(nv,t)){dfs(nv,t);if(count>=limit)break;}}
+    occ[c]=false;
+  }
+  dfs(1,posOf[1]);
+  return count;
+}
+
+// ---- clue carver: remove cells while uniqueness holds, above a per-tier floor ----
+function carve(rng,sol,minClues){
+  const clues=sol.slice(),order=[];
+  for(let i=0;i<N;i++)if(sol[i]!==1&&sol[i]!==N)order.push(i);
+  for(let i=order.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[order[i],order[j]]=[order[j],order[i]];}
+  let cnt=N;
+  for(const i of order){
+    if(cnt<=minClues)break;
+    const bak=clues[i];clues[i]=0;
+    if(countSolutions(clues,2)===1)cnt--;else clues[i]=bak;
+  }
+  return clues;
+}
+
+// ---- generate a full puzzle from the seed ----
+function generate(){
+  ROWS=COLS=SIZE;N=ROWS*COLS;buildNB();
+  const rng=mulberry32(seed);
+  const path=hamiltonian(rng);
+  solution=new Array(N);
+  path.forEach((cell,k)=>solution[cell]=k+1);
+  const dens={5:0.45,7:0.34,9:0.30}[SIZE];
+  given=carve(rng,solution,Math.round(N*dens));
+  board=given.slice();
+  pencils=Array.from({length:N},()=>new Set());
+  selected=given.findIndex(v=>!v);if(selected<0)selected=0;
+  undoStack=[];future=[];moves=0;typed="";penBuf="";solved=false;
+  pendingCell=-1;pendingSnap=null;if(commitTimer){clearTimeout(commitTimer);commitTimer=null;}
+  startTime=null;stopTimer();
+  buildBoard();buildPad();render();updateStatus();$("#hint").textContent="";
+}
+
+// ---- DOM board ----
+function buildBoard(){
+  const b=$("#board");b.style.setProperty("--cols",COLS);b.innerHTML="";cells=[];
+  for(let i=0;i<N;i++){
+    const el=document.createElement("div");el.className="cell";
+    el.addEventListener("click",()=>{commitPending();selected=i;typed="";penBuf="";render();});
+    b.appendChild(el);cells.push(el);
+  }
+}
+
+// ---- on-screen number pad (touch input + discoverability) ----
+function buildPad(){
+  const pad=$("#pad");pad.innerHTML="";padCells=[];
+  const pen=document.createElement("button");pen.id="penToggle";pen.textContent="✎";pen.title="Toggle pencil marks";
+  pen.classList.toggle("on",penMode);
+  pen.onclick=()=>{penMode=!penMode;pen.classList.toggle("on",penMode);};
+  pad.appendChild(pen);
+  for(let v=1;v<=N;v++){
+    const b=document.createElement("button");b.textContent=v;
+    b.onclick=()=>{if(solved)return;if(penMode)togglePencil(selected,v);else setValue(selected,v);};
+    pad.appendChild(b);padCells[v]=b;
+  }
+  const er=document.createElement("button");er.textContent="⌫";er.title="Erase cell";
+  er.onclick=()=>clearCell(selected);pad.appendChild(er);
+}
+
+// ---- analysis helpers ----
+function buildPos(){const pos=new Array(N+1).fill(-1);for(let i=0;i<N;i++){const v=board[i];if(v>=1&&v<=N){if(pos[v]!==-1)return null;pos[v]=i;}}return pos;}
+function longestRun(){
+  const pos=buildPos();if(!pos)return new Set();
+  let best=[],cur=[];
+  for(let v=1;v<=N;v++){
+    if(pos[v]===-1){cur=[];continue;}
+    if(v>1&&pos[v-1]!==-1&&cur.length&&adj(pos[v-1],pos[v]))cur.push(pos[v]);else cur=[pos[v]];
+    if(cur.length>best.length)best=cur.slice();
+  }
+  return new Set(best.length>=2?best:[]);
+}
+function checkConflicts(){
+  const bad=new Set(),seen={};
+  for(let i=0;i<N;i++){const v=board[i];if(!v)continue;if(seen[v]!==undefined){bad.add(i);bad.add(seen[v]);}else seen[v]=i;}
+  for(let i=0;i<N;i++){const v=board[i];if(!v)continue;
+    if(v>1&&seen[v-1]!==undefined&&!adj(i,seen[v-1]))bad.add(i);
+    if(v<N&&seen[v+1]!==undefined&&!adj(i,seen[v+1]))bad.add(i);}
+  return bad;
+}
+
+// ---- render ----
+function render(){
+  const conflicts=checkMode?checkConflicts():new Set();
+  const run=longestRun();
+  for(let i=0;i<N;i++){
+    const el=cells[i],v=board[i];
+    el.className="cell";el.style.transitionDelay="";
+    if(given[i])el.classList.add("given");
+    if(i===selected)el.classList.add("sel");
+    if(conflicts.has(i))el.classList.add("bad");
+    if(run.has(i))el.classList.add("run");
+    if(v)el.textContent=v;
+    else if(pencils[i].size){el.textContent="";const p=document.createElement("div");p.className="pen";p.textContent=[...pencils[i]].sort((a,b)=>a-b).join(" ");el.appendChild(p);}
+    else el.textContent="";
+  }
+  if(padCells.length){
+    const used=new Set();for(let i=0;i<N;i++)if(board[i])used.add(board[i]);
+    for(let v=1;v<=N;v++)if(padCells[v])padCells[v].classList.toggle("used",used.has(v));
+  }
+}
+
+// ---- edits ----
+function snapshot(){return{b:board.slice(),p:pencils.map(s=>[...s])};}
+function pushSnap(s){undoStack.push(s);if(undoStack.length>300)undoStack.shift();future=[];}
+function pushHist(){pushSnap(snapshot());}
+function applySnap(s){board=s.b.slice();pencils=s.p.map(a=>new Set(a));}
+function undo(){commitPending();if(!undoStack.length)return;future.push(snapshot());applySnap(undoStack.pop());render();updateStatus();}
+function redo(){commitPending();if(!future.length)return;undoStack.push(snapshot());applySnap(future.pop());render();updateStatus();}
+function shakeCell(i){const el=cells[i];if(!el)return;el.classList.remove("shake");void el.offsetWidth;el.classList.add("shake");}
+
+// A multi-digit keyboard entry is previewed live but only becomes one undoable
+// move (one moves++) when it can no longer be extended, on a short timeout, or
+// when any other action intervenes.
+function commitPending(){
+  if(pendingCell<0)return;
+  if(commitTimer){clearTimeout(commitTimer);commitTimer=null;}
+  const snap=pendingSnap;pendingCell=-1;pendingSnap=null;typed="";
+  pushSnap(snap);moves++;startTimer();updateStatus();checkWin();
+}
+function typeDigit(i,key){
+  if(given[i]||solved){shakeCell(i);return;}
+  if(pendingCell>=0&&pendingCell!==i)commitPending();
+  let cand=(pendingCell===i?typed:"")+key;
+  if(+cand>N||+cand<1)cand=key;
+  if(pendingCell!==i){pendingSnap=snapshot();pendingCell=i;}
+  typed=cand;board[i]=+cand;pencils[i].clear();render();
+  if(commitTimer)clearTimeout(commitTimer);
+  if(+cand*10>N)commitPending();
+  else commitTimer=setTimeout(commitPending,650);
+}
+
+function setValue(i,val){
+  if(given[i]||solved){if(given[i]&&!solved)shakeCell(i);return;}
+  if(val<1||val>N)return;
+  commitPending();
+  pushHist();board[i]=val;pencils[i].clear();moves++;startTimer();
+  render();updateStatus();checkWin();
+}
+function clearCell(i){if(given[i]||solved){if(given[i]&&!solved)shakeCell(i);return;}commitPending();pushHist();board[i]=0;pencils[i].clear();render();}
+function togglePencil(i,d){if(given[i]||board[i]||solved||d<1||d>N){if(given[i]&&!solved)shakeCell(i);return;}commitPending();pushHist();if(pencils[i].has(d))pencils[i].delete(d);else pencils[i].add(d);render();}
+
+// ---- educational hint: surface a real forced deduction ----
+function hint(){
+  if(solved)return;
+  const known=new Array(N+1).fill(-1);
+  for(let i=0;i<N;i++){const v=board[i];if(v&&v===solution[i])known[v]=i;}
+  // sandwich: v-1 and v+1 known, one shared empty neighbor
+  for(let v=2;v<=N-1;v++){
+    if(known[v]!==-1||known[v-1]===-1||known[v+1]===-1)continue;
+    const a=known[v-1],b=known[v+1];
+    const cands=NB[a].filter(n=>!board[n]&&adj(n,b));
+    if(cands.length===1)return applyHint(cands[0],v,`${v} is forced here — it is the only empty cell orthogonally touching both ${v-1} and ${v+1}.`,[a,b]);
+  }
+  // chain end: known value with a single open neighbor and the other side already placed
+  for(let v=1;v<=N;v++){
+    if(known[v]===-1)continue;const a=known[v];
+    if(v<N&&known[v+1]===-1&&(v===1||known[v-1]!==-1)){const c=NB[a].filter(n=>!board[n]);if(c.length===1)return applyHint(c[0],v+1,`${v+1} must follow ${v}, and this is the only open cell next to ${v}.`,[a]);}
+    if(v>1&&known[v-1]===-1&&(v===N||known[v+1]!==-1)){const c=NB[a].filter(n=>!board[n]);if(c.length===1)return applyHint(c[0],v-1,`${v-1} comes right before ${v}, and this is the only open cell next to ${v}.`,[a]);}
+  }
+  // fallback: reveal the most-constrained empty cell
+  let bi=-1,bs=-1;
+  for(let i=0;i<N;i++){if(board[i])continue;const s=NB[i].filter(n=>board[n]).length;if(s>bs){bs=s;bi=i;}}
+  if(bi>=0)applyHint(bi,solution[bi],`Revealing ${solution[bi]} here — its neighbors constrain it the most.`,[]);
+  else $("#hint").textContent="No empty cells left to hint.";
+}
+function applyHint(cell,val,reason,anchors){
+  commitPending();
+  pushHist();board[cell]=val;pencils[cell].clear();selected=cell;moves++;startTimer();
+  render();updateStatus();
+  cells[cell].classList.add("hintcell");
+  anchors.forEach(a=>cells[a].classList.add("hintanchor"));
+  $("#hint").textContent="💡 "+reason;
+  checkWin();
+}
+
+// ---- win detection + snake trace animation + chime ----
+function checkWin(){
+  for(let i=0;i<N;i++)if(!board[i])return;
+  const pos=buildPos();if(!pos)return;
+  for(let v=1;v<=N;v++)if(pos[v]===-1)return;
+  for(let v=1;v<N;v++)if(!adj(pos[v],pos[v+1]))return;
+  solved=true;stopTimer();recordBest();
+  for(let v=1;v<=N;v++){const el=cells[pos[v]];el.style.transitionDelay=(v*0.045)+"s";el.classList.add("lit");}
+  const t=fmt(elapsed());
+  $("#hint").innerHTML=`<span id="won">Solved! One clean snake in ${t} · ${moves} moves.</span>`;
+  chime();
+}
+function chime(){try{const ac=new(window.AudioContext||window.webkitAudioContext)(),now=ac.currentTime;
+  [523,659,784,1047].forEach((f,i)=>{const o=ac.createOscillator(),g=ac.createGain();o.type="sine";o.frequency.value=f;o.connect(g);g.connect(ac.destination);const t=now+i*0.12;g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(0.2,t+0.02);g.gain.exponentialRampToValueAtTime(0.0001,t+0.3);o.start(t);o.stop(t+0.32);});}catch(e){}}
+
+// ---- timer / stats / best ----
+function startTimer(){if(startTime||solved)return;startTime=Date.now();timerId=setInterval(updateStatus,1000);}
+function stopTimer(){if(timerId)clearInterval(timerId);timerId=null;}
+function elapsed(){return startTime?Math.floor((Date.now()-startTime)/1000):0;}
+function fmt(s){return Math.floor(s/60)+":"+String(s%60).padStart(2,"0");}
+function safeGet(k){try{return localStorage.getItem(k);}catch(_){return null;}}
+function safeSet(k,v){try{localStorage.setItem(k,v);}catch(_){}}
+function bestKey(){return"adder-best-"+SIZE+(isDaily?"-daily":"");}
+function recordBest(){const t=elapsed();if(!t)return;const p=+safeGet(bestKey())||0;if(!p||t<p)safeSet(bestKey(),t);}
+function updateStatus(){
+  $("#mode").textContent=DIFF[SIZE]+(isDaily?" · Daily "+dailyDate:"");
+  $("#time").textContent=fmt(elapsed());
+  $("#moves").textContent=moves;
+  $("#bestlbl").textContent=isDaily?"Daily best":"Best";
+  $("#daily").classList.toggle("on",isDaily);
+  const b=+safeGet(bestKey())||0;
+  $("#best").textContent=b?fmt(b):"—";
+}
+
+// ---- hash / seed sync ----
+function todayStr(){const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+function parseHash(){
+  const h=new URLSearchParams(location.hash.slice(1));
+  let sz=parseInt(h.get("size"));if(![5,7,9].includes(sz))sz=5;SIZE=sz;
+  if(h.get("daily")){isDaily=true;dailyDate=h.get("daily");seed=strSeed("adder-daily-"+dailyDate);}
+  else{isDaily=false;seed=h.get("seed")!==null?(parseInt(h.get("seed"))>>>0):(Math.random()*4294967296>>>0);}
+}
+function canonical(){return isDaily?`daily=${dailyDate}&size=${SIZE}`:`size=${SIZE}&seed=${seed}`;}
+function applyHash(){parseHash();generate();try{window.history.replaceState(null,"","#"+canonical());}catch(_){location.hash=canonical();}renderSizes();}
+function renderSizes(){
+  const box=$("#sizes");box.innerHTML="";
+  [5,7,9].forEach(sz=>{const b=document.createElement("button");b.textContent=DIFF[sz].split(" ")[0];if(sz===SIZE&&!isDaily)b.classList.add("on");
+    b.onclick=()=>{location.hash=`size=${sz}&seed=${Math.random()*4294967296>>>0}`;};box.appendChild(b);});
+}
+
+// ---- controls ----
+$("#new").onclick=()=>{location.hash=`size=${SIZE}&seed=${Math.random()*4294967296>>>0}`;};
+$("#daily").onclick=()=>{location.hash=`daily=${todayStr()}&size=${SIZE}`;};
+$("#check").onclick=e=>{checkMode=!checkMode;e.target.classList.toggle("on",checkMode);render();};
+$("#hintBtn").onclick=hint;
+$("#undo").onclick=undo;
+$("#redo").onclick=redo;
+$("#share").onclick=async e=>{
+  const btn=e.currentTarget;
+  const isFile=location.protocol==="file:";
+  const text=isFile?"#"+canonical():location.href;
+  const ok=msg=>{btn.textContent=msg;setTimeout(()=>btn.textContent="Share",1500);};
+  if(isFile)$("#hint").textContent="file:// mode — copied just the puzzle hash. Paste it after a recipient's local URL, or serve over http (e.g. python -m http.server) to share full links.";
+  try{await navigator.clipboard.writeText(text);ok(isFile?"Hash copied":"Copied!");}
+  catch(_){
+    try{const ta=document.createElement("textarea");ta.value=text;ta.style.position="fixed";ta.style.opacity="0";document.body.appendChild(ta);ta.select();const done=document.execCommand("copy");ta.remove();ok(done?(isFile?"Hash copied":"Copied!"):"Copy failed");}
+    catch(__){ok("Copy failed");}
+  }
+};
+
+document.addEventListener("keydown",e=>{
+  if(e.ctrlKey||e.metaKey){if(e.key==="z"){e.preventDefault();undo();}else if(e.key==="y"){e.preventDefault();redo();}return;}
+  const[r,c]=rc(selected);
+  if(e.key.startsWith("Arrow")){e.preventDefault();commitPending();let nr=r,nc=c;
+    if(e.key==="ArrowUp")nr--;else if(e.key==="ArrowDown")nr++;else if(e.key==="ArrowLeft")nc--;else nc++;
+    if(nr>=0&&nr<ROWS&&nc>=0&&nc<COLS){selected=idx(nr,nc);typed="";penBuf="";render();}return;}
+  if(e.key==="Enter"){e.preventDefault();commitPending();return;}
+  if(e.key==="Backspace"||e.key==="Delete"){e.preventDefault();commitPending();clearCell(selected);typed="";return;}
+  if(/^[0-9]$/.test(e.key)){e.preventDefault();
+    if(e.shiftKey){penBuf=(+(penBuf+e.key)<=N&&penBuf)?penBuf+e.key:e.key;return;}
+    typeDigit(selected,e.key);return;}
+});
+document.addEventListener("keyup",e=>{if(e.key==="Shift"&&penBuf){togglePencil(selected,+penBuf);penBuf="";}});
+window.addEventListener("hashchange",applyHash);
+
+applyHash();
+</script>
+</body>
+</html>

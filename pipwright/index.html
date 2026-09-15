@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pipwright — a rolling-die logic puzzle</title>
+<style>
+  :root{
+    --bg:#12151d; --panel:#1b2030; --panel2:#232a3d; --ink:#eef1f7; --muted:#8b93a7;
+    --line:#2e3650; --accent:#ffab4c; --accent2:#5ac8fa; --good:#48d597; --die:#f6f4ee;
+    --dot:#22283a; --wall:#333c58; --pit:#0a0c12; --seal:#3a3350; --lock:#1f6f52;
+    --cell:56px; --gap:6px;
+  }
+  @media(max-width:430px){:root{--cell:44px}}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(1200px 700px at 50% -10%,#1b2233,#0d0f16 70%);
+    color:var(--ink); font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    display:flex; flex-direction:column; align-items:center; min-height:100%;
+    padding:16px 12px 28px; gap:14px; -webkit-tap-highlight-color:transparent;
+  }
+  header{text-align:center}
+  h1{margin:0; font-size:26px; letter-spacing:.5px}
+  h1 b{color:var(--accent)}
+  .tag{color:var(--muted); font-size:13px; margin-top:2px}
+  .bar{display:flex; gap:8px; flex-wrap:wrap; justify-content:center; align-items:center; max-width:640px}
+  select,button{
+    font:inherit; color:var(--ink); background:var(--panel2); border:1px solid var(--line);
+    border-radius:9px; padding:7px 11px; cursor:pointer; transition:.12s; user-select:none;
+  }
+  button:hover,select:hover{border-color:var(--accent); color:#fff}
+  button:active{transform:translateY(1px)}
+  button:disabled{opacity:.45; cursor:default}
+  button:disabled:hover{border-color:var(--line); color:var(--ink); transform:none}
+  button.pri{background:var(--accent); color:#231a08; border-color:var(--accent); font-weight:600}
+  .stats{display:flex; gap:16px; justify-content:center; font-variant-numeric:tabular-nums}
+  .stats span b{color:var(--accent2)}
+  .stage{position:relative}
+  #board{
+    position:relative; display:grid; gap:var(--gap); padding:var(--gap);
+    background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    box-shadow:0 18px 40px -18px #000;
+  }
+  .cell{
+    width:var(--cell); height:var(--cell); border-radius:9px; background:var(--panel2);
+    position:relative; display:flex; align-items:center; justify-content:center;
+    font-weight:700; color:var(--muted);
+  }
+  .cell.wall{background:repeating-linear-gradient(45deg,var(--wall),var(--wall) 6px,#2b3350 6px,#2b3350 12px); border:1px solid #47527a}
+  .cell.pit{background:radial-gradient(circle at 50% 40%,#1a1d29,#05060a); box-shadow:inset 0 6px 14px #000}
+  .cell.seal{background:var(--seal); border:2px dashed var(--accent)}
+  .seal .num{position:absolute; top:2px; left:5px; font-size:11px; color:var(--accent); font-weight:800}
+  .cell.seal.locked{background:var(--lock); border:2px solid var(--good)}
+  .seal.locked .num{color:#d7ffee}
+  /* mini pip pattern for seal target/locked */
+  .pips{width:70%; height:70%; display:grid; grid-template:repeat(3,1fr)/repeat(3,1fr); gap:2px}
+  .pips i{border-radius:50%; background:transparent}
+  .pips i.on{background:currentColor}
+  .seal .pips{color:rgba(255,171,76,.45)}
+  .seal.locked .pips{color:#eafff6}
+  /* the die */
+  #die{
+    position:absolute; width:var(--cell); height:var(--cell); border-radius:12px;
+    background:linear-gradient(155deg,#ffffff,#dcd8cc); color:var(--dot);
+    box-shadow:0 8px 16px -4px #000, inset 0 2px 3px #fff, inset 0 -6px 12px #0003;
+    display:flex; align-items:center; justify-content:center; z-index:5;
+    transition:left .17s cubic-bezier(.34,1.3,.5,1), top .17s cubic-bezier(.34,1.3,.5,1);
+    left:0; top:0;
+  }
+  #die .pips{width:76%; height:76%}
+  #die.tumble{animation:tumble .17s}
+  @keyframes tumble{0%{transform:scale(.9) rotate(-8deg)}60%{transform:scale(1.06)}100%{transform:none}}
+  .cell.pop{animation:pop .45s}
+  @keyframes pop{0%{transform:scale(1)}30%{transform:scale(1.22)}100%{transform:scale(1)}}
+  #ghost{
+    position:absolute; width:var(--cell); height:var(--cell); border-radius:12px; z-index:4;
+    border:2px dashed var(--accent2); color:var(--accent2); display:none;
+    align-items:center; justify-content:center; pointer-events:none;
+    background:rgba(90,200,250,.08);
+  }
+  #ghost .pips{width:70%;height:70%}
+  .hintflash{box-shadow:0 0 0 3px var(--accent2), 0 0 18px var(--accent2) !important}
+  /* d-pad */
+  .pad{display:grid; grid-template-columns:repeat(3,56px); grid-template-rows:repeat(2,52px); gap:6px; justify-content:center}
+  .pad button{font-size:20px; padding:0; height:100%}
+  .pad .up{grid-column:2; grid-row:1}
+  .pad .lf{grid-column:1; grid-row:2}
+  .pad .dn{grid-column:2; grid-row:2}
+  .pad .rt{grid-column:3; grid-row:2}
+  .msg{min-height:22px; color:var(--good); font-weight:600; text-align:center}
+  .msg.warn{color:var(--accent)}
+  .win{
+    position:fixed; inset:0; background:#05070ccc; display:none; align-items:center; justify-content:center; z-index:20;
+    -webkit-backdrop-filter:blur(3px); backdrop-filter:blur(3px);
+  }
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:26px 30px;
+    text-align:center; max-width:340px; box-shadow:0 30px 60px -20px #000;
+  }
+  .card button{margin:6px 4px 0}
+  .card button.pri{display:block; width:100%; margin:6px 0 0}
+  .card h2{margin:0 0 6px; color:var(--accent)}
+  .card .big{font-size:15px; margin:10px 0}
+  .card .par{color:var(--accent2); font-weight:700}
+  .foot{color:var(--muted); font-size:12px; max-width:640px; text-align:center}
+  .editnote{font-size:12px; color:var(--accent2); text-align:center; max-width:600px; display:none}
+  kbd{background:var(--panel2); border:1px solid var(--line); border-bottom-width:2px; border-radius:5px; padding:1px 6px; font:12px monospace}
+</style>
+</head>
+<body>
+<header>
+  <h1><b>Pip</b>wright</h1>
+  <div class="tag">Roll the die so its top face stamps every seal. Deterministic • par-scored • shareable.</div>
+</header>
+
+<div class="bar">
+  <select id="levelSel" title="Choose a level"></select>
+  <button id="dailyBtn" title="Deterministic daily puzzle">Daily</button>
+  <button id="randBtn" title="Generate a verified random level">Random</button>
+  <button id="editBtn" title="Toggle level editor">Edit</button>
+  <button id="hintBtn" title="Reveal only the next optimal step (H)">Hint</button>
+  <button id="undoBtn" title="Undo last roll (Z)">Undo</button>
+  <button id="redoBtn" title="Redo (Y)">Redo</button>
+  <button id="restartBtn" title="Restart this level (R)">Restart</button>
+  <button id="shareBtn" class="pri" title="Copy a link to this exact level">Share</button>
+</div>
+
+<div class="stats">
+  <span>Moves <b id="moves">0</b></span>
+  <span>Par <b id="par">–</b></span>
+  <span>Seals <b id="seals">0/0</b></span>
+</div>
+
+<div class="editnote" id="editnote">Editor: click a cell to cycle <b>empty → wall → pit → seal(1..6)</b>. Shift-click a cell to set the die start there. The share link updates live.</div>
+
+<div class="stage">
+  <div id="board"></div>
+</div>
+
+<div class="pad">
+  <button class="up" data-dir="N">▲</button>
+  <button class="lf" data-dir="W">◀</button>
+  <button class="dn" data-dir="S">▼</button>
+  <button class="rt" data-dir="E">▶</button>
+</div>
+
+<div class="msg" id="msg"></div>
+<div class="foot">Move <kbd>↑↓←→</kbd> / <kbd>WASD</kbd>, swipe, or the d-pad · Undo <kbd>Z</kbd> · Redo <kbd>Y</kbd> · Hint <kbd>H</kbd> · Restart <kbd>R</kbd>. Hover a d-pad arrow to preview the tumble. The up-face is a function of your whole path — the short route rarely wins.</div>
+
+<div class="win" id="winOverlay">
+  <div class="card">
+    <h2>Solved!</h2>
+    <div class="big" id="winText"></div>
+    <button class="pri" id="winShare">Copy win card</button>
+    <button id="winNext">Next level ▶</button>
+    <button id="winClose">Close</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ---------- cube orientation model ----------
+   orientation = {up,down,north,south,east,west}, opposite faces sum to 7.
+   A roll permutes faces exactly like tipping a real cube 90°. */
+const START_O = {up:1,down:6,north:2,south:5,west:3,east:4};
+const DIRS = {
+  N:{dr:-1,dc:0}, S:{dr:1,dc:0}, E:{dr:0,dc:1}, W:{dr:0,dc:-1}
+};
+function roll(o,dir){
+  switch(dir){
+    case 'N': return {up:o.south,down:o.north,north:o.up,south:o.down,east:o.east,west:o.west};
+    case 'S': return {up:o.north,down:o.south,north:o.down,south:o.up,east:o.east,west:o.west};
+    case 'E': return {up:o.west,down:o.east,east:o.up,west:o.down,north:o.north,south:o.south};
+    case 'W': return {up:o.east,down:o.west,west:o.up,east:o.down,north:o.north,south:o.south};
+  }
+}
+const okey = o => `${o.up}${o.down}${o.north}${o.east}${o.south}${o.west}`;
+function fromKey(k){return {up:+k[0],down:+k[1],north:+k[2],east:+k[3],south:+k[4],west:+k[5]};}
+
+/* ---------- seeded RNG (mulberry32) ---------- */
+function rng(seed){let s=seed>>>0;return()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+/* deterministic Fisher-Yates: identical result on every JS engine for a given rng stream.
+   (Array.sort with a random comparator is engine-specific and breaks seed reproducibility.) */
+function shuffle(arr,rand){for(let i=arr.length-1;i>0;i--){const j=Math.floor(rand()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];}return arr;}
+
+/* ---------- level model helpers ----------
+   level = {w,h,walls:Set<idx>,pits:Set<idx>,seals:[{i,target}],start:{r,c},orient} */
+const idx=(l,r,c)=>r*l.w+c;
+const inb=(l,r,c)=>r>=0&&c>=0&&r<l.h&&c<l.w;
+function passable(l,r,c){if(!inb(l,r,c))return false;const i=idx(l,r,c);return !l.walls.has(i)&&!l.pits.has(i);}
+
+/* ---------- BFS solver over (pos,orient,lockedMask) ----------
+   returns {par, firstMove} for reaching all-locked from the given state. */
+function solveFrom(l, sr, sc, so, mask0){
+  const full=(1<<l.seals.length)-1;
+  const sealAt=new Map(); l.seals.forEach((s,k)=>sealAt.set(s.i,{k,t:s.target}));
+  const lockOnEnter=(r,c,o,mask)=>{const s=sealAt.get(idx(l,r,c));
+    if(s&&o.up===s.t)return mask|(1<<s.k); return mask;};
+  let m0=lockOnEnter(sr,sc,so,mask0);
+  if(m0===full)return {par:0,firstMove:null};
+  const start=`${sr},${sc},${okey(so)},${m0}`;
+  const q=[[sr,sc,so,m0]]; const seen=new Set([start]); const prev=new Map();
+  let head=0;
+  while(head<q.length){
+    const [r,c,o,mask]=q[head++];
+    const ck=`${r},${c},${okey(o)},${mask}`;
+    for(const d of ['N','E','S','W']){
+      const nr=r+DIRS[d].dr, nc=c+DIRS[d].dc;
+      if(!passable(l,nr,nc))continue;
+      const no=roll(o,d);
+      const nmask=lockOnEnter(nr,nc,no,mask);
+      const nk=`${nr},${nc},${okey(no)},${nmask}`;
+      if(seen.has(nk))continue;
+      seen.add(nk); prev.set(nk,[ck,d]);
+      if(nmask===full){
+        // backtrace to first move
+        let cur=nk, first=d, dist=0;
+        while(cur!==start){const [p,mv]=prev.get(cur); first=mv; cur=p; dist++;}
+        return {par:dist,firstMove:first};
+      }
+      q.push([nr,nc,no,nmask]);
+    }
+  }
+  return {par:null,firstMove:null};
+}
+const parOf = l => solveFrom(l, l.start.r, l.start.c, l.orient, 0).par;
+
+/* ---------- URL-hash codec ----------
+   w x h ~ r.c ~ orientKey(6) ~ w<idx.idx..> ~ p<idx..> ~ s<idx-t.idx-t..>  */
+function encode(l){
+  const parts=[`${l.w}x${l.h}`, `${l.start.r}.${l.start.c}`, okey(l.orient)];
+  if(l.walls.size) parts.push('w'+[...l.walls].join('.'));
+  if(l.pits.size)  parts.push('p'+[...l.pits].join('.'));
+  if(l.seals.length) parts.push('s'+l.seals.map(s=>`${s.i}-${s.target}`).join('.'));
+  return parts.join('~');
+}
+function decode(str){
+  try{
+    const p=str.split('~');
+    const [w,h]=p[0].split('x').map(Number);
+    const [r,c]=p[1].split('.').map(Number);
+    const l={w,h,walls:new Set(),pits:new Set(),seals:[],start:{r,c},orient:fromKey(p[2])};
+    for(let k=3;k<p.length;k++){const seg=p[k];const body=seg.slice(1);if(!body)continue;
+      if(seg[0]==='w')body.split('.').forEach(x=>l.walls.add(+x));
+      else if(seg[0]==='p')body.split('.').forEach(x=>l.pits.add(+x));
+      else if(seg[0]==='s')body.split('.').forEach(x=>{const [i,t]=x.split('-');l.seals.push({i:+i,target:+t});});
+    }
+    if(!Number.isFinite(w)||!Number.isFinite(h)||w<2||h<2)return null;
+    return l;
+  }catch(e){return null;}
+}
+
+/* ---------- verified random generator ----------
+   forward random walk from start places seals at visited (cell,up) states,
+   guaranteeing at least one solving path. BFS then confirms + scores par. */
+function genLevel(seed, w, h, nSeals, nObst){
+  const rand=rng(seed);
+  const ri=n=>Math.floor(rand()*n);
+  for(let attempt=0; attempt<60; attempt++){
+    const l={w,h,walls:new Set(),pits:new Set(),seals:[],start:{r:ri(h),c:ri(w)},orient:{...START_O}};
+    // scatter obstacles (never on the start)
+    let placed=0,guard=0;
+    while(placed<nObst && guard++<80){const rr=ri(h),cc=ri(w),i=idx(l,rr,cc);
+      if((rr===l.start.r&&cc===l.start.c)||l.walls.has(i)||l.pits.has(i))continue;
+      (rand()<0.5?l.walls:l.pits).add(i); placed++;
+    }
+    // random walk, recording (cell -> an up value seen there)
+    let r=l.start.r,c=l.start.c,o=l.orient;
+    const seen=new Map(); // idx -> up
+    for(let step=0; step<w*h*4; step++){
+      const dirs=shuffle(['N','E','S','W'],rand);
+      let moved=false;
+      for(const d of dirs){const nr=r+DIRS[d].dr,nc=c+DIRS[d].dc;
+        if(passable(l,nr,nc)){o=roll(o,d);r=nr;c=nc;moved=true;
+          const i=idx(l,r,c); if(i!==idx(l,l.start.r,l.start.c)&&!seen.has(i))seen.set(i,o.up); break;}
+      }
+      if(!moved)break;
+    }
+    const cells=shuffle([...seen.keys()],rand);
+    if(cells.length<nSeals)continue;
+    for(let k=0;k<nSeals;k++)l.seals.push({i:cells[k],target:seen.get(cells[k])});
+    const res=solveFrom(l,l.start.r,l.start.c,l.orient,0);
+    if(res.par!==null&&res.par>=nSeals) return l; // solvable & non-trivial
+  }
+  // fallback: guaranteed-solvable tiny level
+  return genLevel(seed+1, w, h, Math.max(1,nSeals-1), 0);
+}
+
+/* ---------- built-in levels (deterministic seeds, rising difficulty) ---------- */
+const BUILTINS=[
+  {name:'1 · First Roll', seed:101, w:4,h:4,seals:2,obst:0},
+  {name:'2 · Detour',     seed:207, w:5,h:4,seals:3,obst:2},
+  {name:'3 · Choreograph',seed:334, w:5,h:5,seals:3,obst:3},
+  {name:'4 · Tight Quarters',seed:512,w:5,h:5,seals:4,obst:5},
+  {name:'5 · Cube Master',seed:761, w:6,h:5,seals:4,obst:6},
+];
+
+/* ---------- game state ---------- */
+let L=null, pos=null, ori=null, locked=null, moves=0, curPar=null;
+let undoStack=[], redoStack=[], editing=false, won=false;
+const $=id=>document.getElementById(id);
+const boardEl=$('board');
+
+function pipHTML(v){
+  // 3x3 grid; 'on' cells depend on value
+  const map={1:[4],2:[0,8],3:[0,4,8],4:[0,2,6,8],5:[0,2,4,6,8],6:[0,2,3,5,6,8]};
+  const on=new Set(map[v]||[]);
+  let s='<div class="pips">';for(let i=0;i<9;i++)s+=`<i class="${on.has(i)?'on':''}"></i>`;
+  return s+'</div>';
+}
+
+function loadLevel(l, label){
+  L=l; pos={r:l.start.r,c:l.start.c}; ori={...l.orient};
+  locked=new Set(); moves=0; won=false; undoStack=[]; redoStack=[];
+  // auto-lock if starting on a matching seal
+  applyLocks();
+  curPar = parOf(l);
+  $('par').textContent = curPar===null?'∞':curPar;
+  render(); setMsg(label||'');
+  updateShare();
+}
+function applyLocks(){
+  const i=idx(L,pos.r,pos.c);
+  for(let k=0;k<L.seals.length;k++){const s=L.seals[k];
+    if(s.i===i && !locked.has(k) && ori.up===s.target){locked.add(k);return k;}}
+  return -1;
+}
+
+function buildBoard(){
+  boardEl.style.gridTemplateColumns=`repeat(${L.w},var(--cell))`;
+  boardEl.innerHTML='';
+  const sealMap=new Map(); L.seals.forEach((s,k)=>sealMap.set(s.i,{s,k}));
+  for(let r=0;r<L.h;r++)for(let c=0;c<L.w;c++){
+    const i=idx(L,r,c); const d=document.createElement('div');
+    d.className='cell'; d.dataset.i=i; d.dataset.r=r; d.dataset.c=c;
+    if(L.walls.has(i))d.classList.add('wall');
+    else if(L.pits.has(i))d.classList.add('pit');
+    else if(sealMap.has(i)){const {s,k}=sealMap.get(i); d.classList.add('seal');
+      d.innerHTML=`<span class="num">${s.target}</span>`+pipHTML(s.target);
+      if(locked.has(k))d.classList.add('locked');
+    }
+    boardEl.appendChild(d);
+  }
+  // die + ghost overlays
+  const die=document.createElement('div'); die.id='die'; boardEl.appendChild(die);
+  const ghost=document.createElement('div'); ghost.id='ghost'; ghost.innerHTML=pipHTML(1); boardEl.appendChild(ghost);
+}
+function cellPos(r,c){
+  const cell=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--cell'));
+  const gap=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--gap'));
+  return {x:gap+c*(cell+gap), y:gap+r*(cell+gap)};
+}
+function render(){
+  buildBoard();
+  const die=$('die'); const {x,y}=cellPos(pos.r,pos.c);
+  die.style.left=x+'px'; die.style.top=y+'px'; die.innerHTML=pipHTML(ori.up);
+  $('moves').textContent=moves;
+  $('seals').textContent=`${locked.size}/${L.seals.length}`;
+  paintMoves(); updateButtons();
+}
+// warm the moves counter once you exceed par, so the pressure is felt before the win card
+function paintMoves(){$('moves').style.color = (curPar!=null && moves>curPar) ? 'var(--accent)' : '';}
+// reflect what's actually actionable right now
+function updateButtons(){
+  $('undoBtn').disabled = editing || !undoStack.length;
+  $('redoBtn').disabled = editing || !redoStack.length;
+  $('hintBtn').disabled = editing || won;
+}
+
+function setMsg(t,tone){
+  const m=$('msg'); m.textContent=t;
+  const warn = tone==='warn' || /^⚠|^No solution|\bmust\b/.test(t);
+  m.classList.toggle('warn', warn && !!t);
+}
+
+function tryMove(dir){
+  if(editing||won)return;
+  const nr=pos.r+DIRS[dir].dr, nc=pos.c+DIRS[dir].dc;
+  if(!passable(L,nr,nc)){bump();return;}
+  undoStack.push({r:pos.r,c:pos.c,ori:{...ori},locked:new Set(locked),moves});
+  redoStack=[];
+  ori=roll(ori,dir); pos={r:nr,c:nc}; moves++;
+  const newlyLocked=applyLocks();
+  // animate
+  const die=$('die'); const {x,y}=cellPos(pos.r,pos.c);
+  die.classList.remove('tumble'); void die.offsetWidth; die.classList.add('tumble');
+  die.style.left=x+'px'; die.style.top=y+'px'; die.innerHTML=pipHTML(ori.up);
+  $('moves').textContent=moves; paintMoves(); updateButtons();
+  clearPreview();
+  if(newlyLocked>=0){
+    // re-render board so seal fills, with pop flourish
+    setTimeout(()=>{render();
+      const cell=boardEl.querySelector(`.cell[data-i="${idx(L,pos.r,pos.c)}"]`);
+      if(cell){cell.classList.add('pop');}
+    },120);
+    setMsg('Seal locked!');
+  }
+  $('seals').textContent=`${locked.size}/${L.seals.length}`;
+  if(locked.size===L.seals.length)setTimeout(winGame,260);
+}
+function bump(){const die=$('die');die.classList.remove('tumble');void die.offsetWidth;die.classList.add('tumble');}
+
+function undo(){if(editing||!undoStack.length)return;
+  redoStack.push({r:pos.r,c:pos.c,ori:{...ori},locked:new Set(locked),moves});
+  const s=undoStack.pop(); pos={r:s.r,c:s.c}; ori=s.ori; locked=s.locked; moves=s.moves;
+  won=false; $('winOverlay').style.display='none'; render(); setMsg('');
+}
+function redo(){if(editing||!redoStack.length)return;
+  undoStack.push({r:pos.r,c:pos.c,ori:{...ori},locked:new Set(locked),moves});
+  const s=redoStack.pop(); pos={r:s.r,c:s.c}; ori=s.ori; locked=s.locked; moves=s.moves;
+  render(); if(locked.size===L.seals.length)winGame();
+}
+
+/* ---------- preview & hint ---------- */
+function previewMove(dir){
+  if(editing||won)return;
+  const nr=pos.r+DIRS[dir].dr,nc=pos.c+DIRS[dir].dc;
+  const g=$('ghost'); if(!passable(L,nr,nc)){g.style.display='none';return;}
+  const no=roll(ori,dir); const {x,y}=cellPos(nr,nc);
+  g.style.left=x+'px'; g.style.top=y+'px'; g.innerHTML=pipHTML(no.up); g.style.display='flex';
+}
+function clearPreview(){const g=$('ghost'); if(g)g.style.display='none';}
+function hint(){
+  if(editing||won)return;
+  const res=solveFrom(L,pos.r,pos.c,ori,maskFromLocked());
+  if(res.par===null){setMsg('No solution from here — undo or restart.');return;}
+  if(res.firstMove===null){setMsg('Already solved!');return;}
+  const btn=document.querySelector(`.pad button[data-dir="${res.firstMove}"]`);
+  if(btn){btn.classList.add('hintflash'); previewMove(res.firstMove);
+    setTimeout(()=>{btn.classList.remove('hintflash');clearPreview();},1100);}
+  setMsg(`Hint: roll ${({N:'up',S:'down',E:'right',W:'left'})[res.firstMove]} (par is ${curPar}).`);
+}
+function maskFromLocked(){let m=0;locked.forEach(k=>m|=1<<k);return m;}
+
+/* ---------- win ---------- */
+function winGame(){
+  won=true;
+  const delta=moves-curPar;
+  const rank=delta<=0?'Optimal! 🏆':delta<=2?'Great':delta<=5?'Solid':'Solved';
+  $('winText').innerHTML=`${rank}<br>Solved in <b>${moves}</b> — par <span class="par">${curPar}</span>.`;
+  $('winOverlay').style.display='flex';
+  updateButtons();
+  setMsg(`Solved in ${moves} (par ${curPar}).`);
+}
+function winCardText(){
+  return `Pipwright — solved in ${moves}, par ${curPar}${moves<=curPar?' (optimal 🏆)':''}\n${location.href}`;
+}
+
+/* ---------- editor ---------- */
+function toggleEdit(){
+  editing=!editing;
+  $('editnote').style.display=editing?'block':'none';
+  $('editBtn').classList.toggle('pri',editing);
+  setMsg(editing?'Editing — build a level, share updates live.':'');
+  if(!editing){ // re-validate & recompute par on exit
+    curPar=parOf(L); $('par').textContent=curPar===null?'∞':curPar;
+    pos={r:L.start.r,c:L.start.c}; ori={...L.orient}; locked=new Set(); moves=0; won=false;
+    applyLocks(); render();
+    if(curPar===null)setMsg('⚠ This layout is unsolvable — the share link still encodes it.');
+  }
+  render();
+}
+function editClick(e){
+  if(!editing)return;
+  const cell=e.target.closest('.cell'); if(!cell)return;
+  const i=+cell.dataset.i, r=+cell.dataset.r, c=+cell.dataset.c;
+  if(e.shiftKey){ // set start
+    if(L.walls.has(i)||L.pits.has(i))return;
+    L.start={r,c}; pos={r,c}; ori={...L.orient}; locked=new Set(); moves=0;
+    render(); updateShare(); return;
+  }
+  const sealK=L.seals.findIndex(s=>s.i===i);
+  if(L.walls.has(i)){L.walls.delete(i);L.pits.add(i);}
+  else if(L.pits.has(i)){L.pits.delete(i);L.seals.push({i,target:1});}
+  else if(sealK>=0){const s=L.seals[sealK];
+    if(s.target<6)s.target++; else L.seals.splice(sealK,1);
+  }
+  else { // empty -> wall (but keep start cell walkable)
+    if(i===idx(L,L.start.r,L.start.c)){setMsg('Start cell must stay walkable.');return;}
+    L.walls.add(i);
+  }
+  render(); updateShare();
+}
+
+/* ---------- sharing / hash ---------- */
+function updateShare(){history.replaceState(null,'','#'+encode(L));}
+function copy(text,okMsg){
+  // Optional chaining alone (clipboard?.writeText(...).then) throws when the whole
+  // Clipboard API is absent (http on a LAN IP, file:// in some browsers): the chain
+  // short-circuits to undefined and .then is never reached. Guard on availability first.
+  if(navigator.clipboard && window.isSecureContext){
+    navigator.clipboard.writeText(text).then(()=>setMsg(okMsg)).catch(()=>prompt('Copy this:',text));
+  }else{
+    prompt('Copy this:',text);
+  }
+}
+
+/* ---------- level menu ---------- */
+function populateMenu(){
+  const sel=$('levelSel'); sel.innerHTML='';
+  BUILTINS.forEach((b,k)=>{const o=document.createElement('option');o.value='b'+k;o.textContent=b.name;sel.appendChild(o);});
+  // transient entry shown only when a non-built-in level (daily/random/shared) is active,
+  // so the dropdown never lies about which puzzle you're actually playing
+  const co=document.createElement('option'); co.value='custom'; co.hidden=true; sel.appendChild(co);
+}
+function setMenuCustom(label){const sel=$('levelSel'); sel.querySelector('option[value="custom"]').textContent=label; sel.value='custom';}
+function loadBuiltin(k){
+  const b=BUILTINS[k];
+  const l=genLevel(b.seed,b.w,b.h,b.seals,b.obst);
+  loadLevel(l,'');
+  $('levelSel').value='b'+k;
+}
+function loadDaily(){
+  // seed from UTC so the daily rolls over at one global instant (not per-timezone)
+  const d=new Date(); const seed=(d.getUTCFullYear()*372+(d.getUTCMonth()+1)*31+d.getUTCDate())>>>0;
+  const l=genLevel(seed,5,5,3,3);
+  loadLevel(l,'Daily challenge — same seed for everyone today.');
+  setMenuCustom('Daily challenge');
+}
+function loadRandom(){
+  const seed=(Math.random()*1e9)>>>0;
+  const size=4+Math.floor(Math.random()*3);
+  const l=genLevel(seed,size,size,2+Math.floor(Math.random()*3),Math.floor(Math.random()*6));
+  loadLevel(l,'Random verified level.');
+  setMenuCustom('Random level');
+}
+
+/* ---------- input wiring ---------- */
+const KEYMAP={ArrowUp:'N',ArrowDown:'S',ArrowLeft:'W',ArrowRight:'E',w:'N',s:'S',a:'W',d:'E',W:'N',S:'S',A:'W',D:'E'};
+addEventListener('keydown',e=>{
+  if(e.target.tagName==='SELECT')return;
+  const dir=KEYMAP[e.key];
+  if(dir){e.preventDefault();tryMove(dir);}
+  else if(e.key==='z'||e.key==='Z')undo();
+  else if(e.key==='y'||e.key==='Y')redo();
+  else if(e.key==='h'||e.key==='H')hint();
+  else if(e.key==='r'||e.key==='R')loadLevel(L);
+  else if(e.key==='Escape')$('winOverlay').style.display='none';
+});
+document.querySelectorAll('.pad button').forEach(b=>{
+  const dir=b.dataset.dir;
+  b.addEventListener('click',()=>tryMove(dir));
+  b.addEventListener('pointerenter',()=>previewMove(dir));
+  b.addEventListener('pointerleave',clearPreview);
+});
+// swipe
+let tsx=0,tsy=0;
+boardEl.addEventListener('touchstart',e=>{const t=e.changedTouches[0];tsx=t.clientX;tsy=t.clientY;},{passive:true});
+boardEl.addEventListener('touchend',e=>{const t=e.changedTouches[0];
+  const dx=t.clientX-tsx,dy=t.clientY-tsy;
+  if(Math.max(Math.abs(dx),Math.abs(dy))<24)return;
+  tryMove(Math.abs(dx)>Math.abs(dy)?(dx>0?'E':'W'):(dy>0?'S':'N'));
+},{passive:true});
+boardEl.addEventListener('click',editClick);
+
+$('levelSel').addEventListener('change',e=>loadBuiltin(+e.target.value.slice(1)));
+$('dailyBtn').addEventListener('click',loadDaily);
+$('randBtn').addEventListener('click',loadRandom);
+$('editBtn').addEventListener('click',toggleEdit);
+$('hintBtn').addEventListener('click',hint);
+$('undoBtn').addEventListener('click',undo);
+$('redoBtn').addEventListener('click',redo);
+$('restartBtn').addEventListener('click',()=>loadLevel(L));
+$('shareBtn').addEventListener('click',()=>{updateShare();copy(location.href,'Level link copied!');});
+$('winShare').addEventListener('click',()=>copy(winCardText(),'Win card copied!'));
+$('winClose').addEventListener('click',()=>$('winOverlay').style.display='none');
+$('winOverlay').addEventListener('click',e=>{if(e.target===$('winOverlay'))$('winOverlay').style.display='none';});
+$('winNext').addEventListener('click',()=>{$('winOverlay').style.display='none';
+  const cur=$('levelSel').value; let k=cur[0]==='b'?(+cur.slice(1)+1)%BUILTINS.length:0; loadBuiltin(k);});
+
+/* ---------- boot ---------- */
+function boot(){
+  populateMenu();
+  const h=location.hash.slice(1);
+  if(h){const l=decode(h); if(l){loadLevel(l, parOf(l)===null?'⚠ Shared level looks unsolvable.':'Loaded shared level.');setMenuCustom('Shared level');return;}}
+  loadBuiltin(0);
+}
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ResistorCalc — Resistor Color-Code Decoder</title>
+<meta name="description" content="Decode 4, 5, or 6-band resistor color codes into resistance, tolerance, and temperature coefficient. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('resistor-calc-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#eab308;
+    --bg:#f7f7f5; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e2e2df; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#14140f; --card:#1e1e18; --fg:#f0f0ea; --muted:#9a9a92; --line:#31312a; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:760px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#a16207);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:760px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  select,button{font:inherit}
+  select{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)}
+  .bands{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:12px}
+  .toggle{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:18px}
+  .toggle button{padding:8px 16px;border:0;background:var(--bg);color:var(--fg);cursor:pointer}
+  .toggle button.on{background:var(--c);color:#1a1a1a;font-weight:700}
+  .resistor{display:flex;align-items:center;justify-content:center;margin:10px 0 22px;filter:drop-shadow(0 2px 6px rgba(0,0,0,.15))}
+  .body{position:relative;background:linear-gradient(180deg,#e9dcc0,#d8c49a);border-radius:26px;height:74px;display:flex;align-items:center;gap:10px;padding:0 30px}
+  .lead{height:4px;background:#9a9a92;width:34px}
+  .stripe{width:14px;height:74px;border-radius:2px}
+  .out{text-align:center}
+  .value{font-size:2.4rem;font-weight:800;letter-spacing:-1px}
+  .tol{color:var(--muted);font-size:1rem}
+  .range{display:flex;gap:18px;justify-content:center;margin-top:14px;flex-wrap:wrap}
+  .range div{text-align:center}
+  .range b{display:block;font-size:1.05rem}
+  .range span{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:760px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🎛️</div>
+    <div><h1>ResistorCalc</h1><div class="sub">Color-code decoder for 4, 5 &amp; 6-band resistors</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="toggle" id="countToggle">
+      <button type="button" data-n="4">4-band</button>
+      <button type="button" data-n="5">5-band</button>
+      <button type="button" data-n="6">6-band</button>
+    </div>
+    <div class="bands" id="bands"></div>
+  </div>
+
+  <div class="resistor"><div class="lead"></div><div class="body" id="stripes"></div><div class="lead"></div></div>
+
+  <div class="card out">
+    <div class="value" id="value">—</div>
+    <div class="tol" id="tolLine"></div>
+    <div class="range">
+      <div><b id="minV">—</b><span>Minimum</span></div>
+      <div><b id="maxV">—</b><span>Maximum</span></div>
+      <div><b id="tempV">—</b><span>Temp. coef.</span></div>
+    </div>
+  </div>
+</main>
+<footer>
+  100% offline. Nothing leaves your browser. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/resistor-calc">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  const DIGIT = {black:0,brown:1,red:2,orange:3,yellow:4,green:5,blue:6,violet:7,grey:8,white:9};
+  const MULT  = {black:1,brown:10,red:100,orange:1e3,yellow:1e4,green:1e5,blue:1e6,violet:1e7,grey:1e8,white:1e9,gold:0.1,silver:0.01};
+  const TOL   = {brown:1,red:2,green:0.5,blue:0.25,violet:0.1,grey:0.05,gold:5,silver:10};
+  const TEMPCO= {black:250,brown:100,red:50,orange:15,yellow:25,green:20,blue:10,violet:5};
+  const SWATCH= {black:'#1a1a1a',brown:'#7c4a1e',red:'#d62828',orange:'#f77f00',yellow:'#fcbf49',green:'#2a9d3f',blue:'#1e6fd6',violet:'#7b2ff7',grey:'#888888',white:'#f4f4f4',gold:'#c9a227',silver:'#c0c0c0'};
+
+  function decode(bands){
+    const n = bands.length;
+    let digits, multBand, tolBand, tempBand;
+    if(n===4){ digits=bands.slice(0,2); multBand=bands[2]; tolBand=bands[3]; }
+    else if(n===5){ digits=bands.slice(0,3); multBand=bands[3]; tolBand=bands[4]; }
+    else if(n===6){ digits=bands.slice(0,3); multBand=bands[3]; tolBand=bands[4]; tempBand=bands[5]; }
+    else throw new Error('bands must have length 4, 5, or 6');
+    let sig='';
+    for(const d of digits){ if(!(d in DIGIT)) throw new Error('invalid digit band: '+d); sig+=DIGIT[d]; }
+    if(!(multBand in MULT)) throw new Error('invalid multiplier band: '+multBand);
+    const ohms = parseInt(sig,10) * MULT[multBand];
+    const tolerance = tolBand==null ? null : (tolBand in TOL ? TOL[tolBand] : null);
+    const tempco = tempBand==null ? null : (tempBand in TEMPCO ? TEMPCO[tempBand] : null);
+    return { ohms, tolerance, tempco };
+  }
+
+  function trimNum(x){ return String(Number(x.toFixed(3))); }
+
+  function formatOhms(ohms){
+    const units=[[1e9,'GΩ'],[1e6,'MΩ'],[1e3,'kΩ']];
+    for(const [f,u] of units){ if(ohms>=f) return trimNum(ohms/f)+' '+u; }
+    return trimNum(ohms)+' Ω';
+  }
+
+  function analyze(bands){
+    const {ohms,tolerance,tempco}=decode(bands);
+    const t = tolerance==null ? 0 : tolerance;
+    return {
+      ohms,
+      ohmsFormatted: formatOhms(ohms),
+      tolerance,
+      tempco,
+      min: ohms*(1-t/100),
+      max: ohms*(1+t/100)
+    };
+  }
+
+  // ---- UI ----
+  function digitColors(){ return Object.keys(DIGIT); }
+  function multColors(){ return Object.keys(MULT); }
+  function tolColors(){ return Object.keys(TOL); }
+  function tempColors(){ return Object.keys(TEMPCO); }
+
+  if(typeof document !== 'undefined' && document.getElementById('bands')){
+    const bandsEl=document.getElementById('bands');
+    const stripesEl=document.getElementById('stripes');
+    const toggle=document.getElementById('countToggle');
+    let count=4;
+    const cap=s=>s.charAt(0).toUpperCase()+s.slice(1);
+
+    function specFor(n){
+      // returns array of {label, colors, key}
+      if(n===4) return [
+        {label:'Band 1',colors:digitColors(),def:'brown'},
+        {label:'Band 2',colors:digitColors(),def:'black'},
+        {label:'Multiplier',colors:multColors(),def:'red'},
+        {label:'Tolerance',colors:tolColors(),def:'gold'}
+      ];
+      if(n===5) return [
+        {label:'Band 1',colors:digitColors(),def:'brown'},
+        {label:'Band 2',colors:digitColors(),def:'black'},
+        {label:'Band 3',colors:digitColors(),def:'black'},
+        {label:'Multiplier',colors:multColors(),def:'brown'},
+        {label:'Tolerance',colors:tolColors(),def:'brown'}
+      ];
+      return [
+        {label:'Band 1',colors:digitColors(),def:'brown'},
+        {label:'Band 2',colors:digitColors(),def:'black'},
+        {label:'Band 3',colors:digitColors(),def:'black'},
+        {label:'Multiplier',colors:multColors(),def:'red'},
+        {label:'Tolerance',colors:tolColors(),def:'brown'},
+        {label:'Temp. coef.',colors:tempColors(),def:'red'}
+      ];
+    }
+
+    function build(){
+      const spec=specFor(count);
+      bandsEl.innerHTML='';
+      spec.forEach((s,i)=>{
+        const wrap=document.createElement('div');
+        const lab=document.createElement('label'); lab.textContent=s.label;
+        const sel=document.createElement('select'); sel.dataset.i=i;
+        s.colors.forEach(c=>{ const o=document.createElement('option'); o.value=c; o.textContent=cap(c); if(c===s.def)o.selected=true; sel.appendChild(o); });
+        sel.addEventListener('change',render);
+        wrap.appendChild(lab); wrap.appendChild(sel); bandsEl.appendChild(wrap);
+      });
+      render();
+    }
+
+    function currentBands(){
+      return [...bandsEl.querySelectorAll('select')].map(s=>s.value);
+    }
+
+    function render(){
+      const bands=currentBands();
+      if(bands.some(b=>!b)) return;
+      stripesEl.innerHTML='';
+      bands.forEach(c=>{ const d=document.createElement('div'); d.className='stripe'; d.style.background=SWATCH[c]||'#ccc'; stripesEl.appendChild(d); });
+      let r;
+      try{ r=analyze(bands); }catch(e){ document.getElementById('value').textContent='—'; return; }
+      document.getElementById('value').textContent=r.ohmsFormatted;
+      document.getElementById('tolLine').textContent = r.tolerance==null ? 'tolerance not specified' : '±'+r.tolerance+'%';
+      document.getElementById('minV').textContent=formatOhms(r.min);
+      document.getElementById('maxV').textContent=formatOhms(r.max);
+      document.getElementById('tempV').textContent = r.tempco==null ? '—' : r.tempco+' ppm/K';
+    }
+
+    toggle.addEventListener('click',e=>{
+      const b=e.target.closest('button'); if(!b) return;
+      count=parseInt(b.dataset.n,10);
+      [...toggle.children].forEach(x=>x.classList.toggle('on',x===b));
+      build();
+    });
+    toggle.querySelector('[data-n="4"]').classList.add('on');
+    build();
+
+    const themeBtn=document.getElementById('themeBtn');
+    themeBtn.addEventListener('click',()=>{
+      const cur=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';
+      document.documentElement.setAttribute('data-theme',cur);
+      try{ localStorage.setItem('resistor-calc-theme',cur); }catch(e){}
+    });
+  }
+
+  if(typeof module !== 'undefined') module.exports = { decode, formatOhms, analyze, DIGIT, MULT, TOL, TEMPCO };
+</script>
+</body>
+</html>

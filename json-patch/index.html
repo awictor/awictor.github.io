@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JSON Patch — apply RFC 6902 operations to a JSON document</title>
+<meta name="description" content="Apply a JSON Patch (RFC 6902): add, remove, replace, move, copy, and test operations against a JSON document, in your browser. Offline, no tracking.">
+<style>
+  :root{
+    --c:#4f46e5;
+    --bg:#f1f1fb; --card:#ffffff; --fg:#12122a; --muted:#565685;
+    --line:#e0e0f2; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#0a0a1c; --card:#14142c; --fg:#e9e9fb; --muted:#9a9ac4;
+    --line:#25254a; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:960px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:960px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:720px){.cols{grid-template-columns:1fr}}
+  label{display:block;font-size:.78rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  textarea{width:100%;min-height:150px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9rem;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);resize:vertical;white-space:pre}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .btn{background:var(--c);color:#fff;border:0;border-radius:9px;padding:10px 16px;font-weight:600;cursor:pointer;font-size:.9rem;margin-top:14px}
+  .result{margin-top:14px}
+  .result textarea{background:var(--bg)}
+  .err{color:#dc2626;font-size:.86rem;margin-top:10px;min-height:1em;font-family:ui-monospace,monospace}
+  .ok{color:#16a34a}
+  [data-theme="dark"] .ok{color:#86efac}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🩹</div>
+  <div>
+    <h1>JSON Patch</h1>
+    <p>Apply RFC 6902 operations to a document</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="cols">
+      <div>
+        <label>Document (JSON)</label>
+        <textarea id="doc" spellcheck="false">{ "foo": "bar", "numbers": [1, 2, 3] }</textarea>
+      </div>
+      <div>
+        <label>Patch (array of operations)</label>
+        <textarea id="patch" spellcheck="false">[
+  { "op": "replace", "path": "/foo", "value": "baz" },
+  { "op": "add", "path": "/numbers/-", "value": 4 },
+  { "op": "remove", "path": "/numbers/0" }
+]</textarea>
+      </div>
+    </div>
+    <button class="btn" id="apply">Apply patch</button>
+    <div class="err" id="msg"></div>
+    <div class="result">
+      <label>Result</label>
+      <textarea id="out" readonly spellcheck="false"></textarea>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>About JSON Patch (RFC 6902)</h2>
+    <p class="note">A <b>JSON Patch</b> is an array of operations that transform a JSON document — the standard way to send partial updates to an API (<code>PATCH</code> requests). Each op names a target with a <b>JSON Pointer</b> (RFC 6901) path like <code>/numbers/0</code>. The six operations are <b>add</b>, <b>remove</b>, <b>replace</b>, <b>move</b>, <b>copy</b>, and <b>test</b> (which asserts a value and aborts the patch if it doesn't match). Ops apply in order; use <code>/-</code> to append to an array. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function deepClone(v){ return v === undefined ? undefined : JSON.parse(JSON.stringify(v)); }
+  function deepEqual(a, b){ return JSON.stringify(a) === JSON.stringify(b); }
+  // Parse an RFC 6901 JSON Pointer into an array of reference tokens.
+  function parsePointer(ptr){
+    if(ptr === '') return [];
+    if(ptr[0] !== '/') throw new Error('invalid pointer: ' + ptr);
+    return ptr.split('/').slice(1).map(function(t){ return t.replace(/~1/g, '/').replace(/~0/g, '~'); });
+  }
+  // Resolve the value a pointer refers to; throws if the path is missing.
+  function getValue(doc, tokens){
+    var cur = doc;
+    for(var i = 0; i < tokens.length; i++){
+      if(cur === null || typeof cur !== 'object') throw new Error('path not found');
+      var key = Array.isArray(cur) ? (tokens[i] === '-' ? cur.length : +tokens[i]) : tokens[i];
+      if(Array.isArray(cur)){ if(!(key >= 0 && key < cur.length)) throw new Error('array index out of range'); }
+      else if(!Object.prototype.hasOwnProperty.call(cur, key)) throw new Error('path not found: ' + tokens[i]);
+      cur = cur[key];
+    }
+    return cur;
+  }
+  function parentOf(doc, tokens){ return { parent: getValue(doc, tokens.slice(0, -1)), key: tokens[tokens.length - 1] }; }
+  function addAt(doc, tokens, value){
+    if(tokens.length === 0) return value; // replace whole document
+    var pk = parentOf(doc, tokens), p = pk.parent, key = pk.key;
+    if(Array.isArray(p)){
+      var idx = key === '-' ? p.length : +key;
+      if(!(idx >= 0 && idx <= p.length) || (key !== '-' && !/^\d+$/.test(key))) throw new Error('invalid array index: ' + key);
+      p.splice(idx, 0, value);
+    } else if(p && typeof p === 'object'){ p[key] = value; }
+    else throw new Error('cannot add to a non-container');
+    return doc;
+  }
+  function removeAt(doc, tokens){
+    if(tokens.length === 0) throw new Error('cannot remove the whole document');
+    var pk = parentOf(doc, tokens), p = pk.parent, key = pk.key;
+    if(Array.isArray(p)){ var idx = +key; if(!(idx >= 0 && idx < p.length)) throw new Error('array index out of range'); p.splice(idx, 1); }
+    else if(p && typeof p === 'object'){ if(!Object.prototype.hasOwnProperty.call(p, key)) throw new Error('path not found: ' + key); delete p[key]; }
+    else throw new Error('cannot remove from a non-container');
+    return doc;
+  }
+  function replaceAt(doc, tokens, value){
+    if(tokens.length === 0) return value;
+    getValue(doc, tokens); // must exist
+    return addAt(removeAt(doc, tokens), tokens, value);
+  }
+  // Apply an RFC 6902 patch (array of ops) to a document, returning a new document.
+  function applyPatch(doc, ops){
+    if(!Array.isArray(ops)) throw new Error('patch must be an array of operations');
+    var out = deepClone(doc);
+    ops.forEach(function(op, i){
+      if(!op || typeof op !== 'object' || typeof op.op !== 'string') throw new Error('op ' + i + ': malformed operation');
+      var t = parsePointer(op.path == null ? '' : op.path);
+      switch(op.op){
+        case 'add': out = addAt(out, t, deepClone(op.value)); break;
+        case 'remove': out = removeAt(out, t); break;
+        case 'replace': out = replaceAt(out, t, deepClone(op.value)); break;
+        case 'test': if(!deepEqual(getValue(out, t), op.value)) throw new Error('op ' + i + ': test failed at ' + op.path); break;
+        case 'move': {
+          var f = parsePointer(op.from); var mv = deepClone(getValue(out, f));
+          out = addAt(removeAt(out, f), t, mv); break;
+        }
+        case 'copy': { var cf = parsePointer(op.from); out = addAt(out, t, deepClone(getValue(out, cf))); break; }
+        default: throw new Error('op ' + i + ': unknown operation "' + op.op + '"');
+      }
+    });
+    return out;
+  }
+
+  if(typeof module !== 'undefined') module.exports = { deepClone:deepClone, deepEqual:deepEqual, parsePointer:parsePointer, getValue:getValue, applyPatch:applyPatch };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    function run(){
+      var msg = document.getElementById('msg');
+      msg.textContent = ''; msg.className = 'err';
+      var doc, patch;
+      try{ doc = JSON.parse(document.getElementById('doc').value); }
+      catch(e){ msg.textContent = 'Document is not valid JSON: ' + e.message; return; }
+      try{ patch = JSON.parse(document.getElementById('patch').value); }
+      catch(e){ msg.textContent = 'Patch is not valid JSON: ' + e.message; return; }
+      try{
+        var result = applyPatch(doc, patch);
+        document.getElementById('out').value = JSON.stringify(result, null, 2);
+        msg.textContent = '✓ Patch applied (' + patch.length + ' op' + (patch.length === 1 ? '' : 's') + ')';
+        msg.className = 'err ok';
+      }catch(e){ msg.textContent = e.message; document.getElementById('out').value = ''; }
+    }
+    document.getElementById('apply').addEventListener('click', run);
+    run();
+
+    var root=document.documentElement, tb=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); tb.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('jsonpatch-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('jsonpatch-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

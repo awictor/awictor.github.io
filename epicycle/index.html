@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Epicycle — a pocket orrery that draws the geometry between two planets</title>
+<style>
+  :root{ --bg:#05070f; --panel:rgba(14,18,30,.82); --line:#1f2740; --ink:#e8ecf6; --dim:#8892ad; --acc:#7fb2ff; }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{ height:100%; background:var(--bg); color:var(--ink);
+    font:13px/1.4 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; overflow:hidden; }
+  #sky{ position:fixed; inset:0; display:block; touch-action:none; }
+  .panel{ position:fixed; z-index:5; background:var(--panel); border:1px solid var(--line);
+    border-radius:12px; -webkit-backdrop-filter:blur(9px); backdrop-filter:blur(9px); }
+  /* control strip */
+  #ctl{ left:50%; bottom:14px; transform:translateX(-50%); padding:9px 12px;
+    display:flex; align-items:center; gap:12px; flex-wrap:wrap; max-width:min(96vw,940px); }
+  #ctl .grp{ display:flex; align-items:center; gap:7px; }
+  #ctl .sep{ width:1px; height:26px; background:var(--line); }
+  button{ font:inherit; color:var(--ink); background:#182036; border:1px solid var(--line);
+    border-radius:8px; padding:6px 10px; cursor:pointer; transition:.14s; white-space:nowrap; }
+  button:hover{ background:#22304f; border-color:#3a4b74; }
+  button.on{ background:#28407a; border-color:#4d74c8; color:#dce8ff; }
+  button:focus-visible, select:focus-visible, input:focus-visible{
+    outline:2px solid var(--acc); outline-offset:2px; }
+  select{ font:inherit; color:var(--ink); background:#182036; border:1px solid var(--line);
+    border-radius:8px; padding:5px 7px; cursor:pointer; }
+  input[type=range]{ -webkit-appearance:none; appearance:none; height:4px; border-radius:3px;
+    background:#28324e; outline:none; cursor:pointer; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:14px; height:14px;
+    border-radius:50%; background:var(--acc); border:2px solid #0a0e18; }
+  input[type=range]::-moz-range-thumb{ width:12px; height:12px; border-radius:50%; background:var(--acc); border:2px solid #0a0e18; }
+  label.mini{ color:var(--dim); font-size:11px; letter-spacing:.02em; }
+  /* readout / presets top-left */
+  #info{ left:14px; top:14px; padding:12px 14px; max-width:290px; }
+  #info h1{ font-size:15px; font-weight:650; letter-spacing:.01em; }
+  #info h1 b{ color:var(--acc); }
+  #date{ font-size:22px; font-weight:600; margin-top:4px; font-variant-numeric:tabular-nums; }
+  #speedRead{ color:var(--dim); font-size:12px; margin-bottom:9px; font-variant-numeric:tabular-nums; }
+  #presets{ display:flex; flex-wrap:wrap; gap:6px; }
+  #presets button{ font-size:11px; padding:5px 8px; }
+  #scrub{ width:100%; margin-top:10px; }
+  #note{ position:fixed; left:14px; bottom:14px; z-index:4; color:#7a86a8;
+    font-size:11px; line-height:1.5; max-width:210px; pointer-events:none; }
+  #note b{ color:#a3adca; font-weight:600; }
+  .hint{ color:var(--dim); font-size:10.5px; margin-top:8px; line-height:1.5; }
+  kbd{ background:#0d1424; border:1px solid var(--line); border-bottom-width:2px;
+    border-radius:4px; padding:0 4px; font:11px ui-monospace,monospace; color:#aeb8d4; }
+</style>
+</head>
+<body>
+<canvas id="sky"></canvas>
+
+<div id="info" class="panel">
+  <h1><b>Epicycle</b> · orbital weave</h1>
+  <div id="date">—</div>
+  <div id="speedRead">—</div>
+  <input id="scrub" type="range" min="0" max="1" step="0.0001" value="0.5" aria-label="Date scrubber">
+  <div id="presets"></div>
+  <div class="hint"><kbd>space</kbd> play · <kbd>←</kbd><kbd>→</kbd> speed · <kbd>r</kbd> reverse · <kbd>w</kbd> weave · <kbd>t</kbd> today<br>Click any planet to set the weave pair (A, then B).</div>
+</div>
+
+<div id="note">
+  <b>Approximate J2000 model</b> — mean-longitude + Kepler solve, not an ephemeris (degrees off over centuries).
+  Radii are <b>log-scaled</b> so all eight planets fit one screen; distances are not to scale.
+</div>
+
+<div id="ctl" class="panel">
+  <div class="grp">
+    <button id="play" title="Play / pause (space)">❚❚</button>
+    <button id="rev" title="Reverse time (r)">⇄</button>
+    <button id="today" title="Jump to today (t)">◎ today</button>
+  </div>
+  <div class="sep"></div>
+  <div class="grp">
+    <label class="mini">speed</label>
+    <input id="spd" type="range" min="0" max="100" step="1" value="40" style="width:104px" aria-label="Time speed">
+  </div>
+  <div class="sep"></div>
+  <div class="grp">
+    <button id="weave" class="on" title="Weave mode (w)">weave</button>
+    <select id="selA" aria-label="Weave body A"></select>
+    <label class="mini">→</label>
+    <select id="selB" aria-label="Weave body B"></select>
+  </div>
+  <div class="sep"></div>
+  <div class="grp">
+    <label class="mini">trail</label>
+    <input id="trail" type="range" min="0" max="600" step="10" value="200" style="width:76px" aria-label="Trail length">
+  </div>
+  <div class="sep"></div>
+  <div class="grp">
+    <button id="rings" class="on" title="Orbit rings">rings</button>
+    <button id="labels" class="on" title="Labels">labels</button>
+    <button id="png" title="Save PNG">↓ PNG</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+const cv = document.getElementById('sky'), ctx = cv.getContext('2d');
+const J2000 = 2451545.0, DEG = Math.PI/180;
+
+// name, a(AU), e, period(yr), L0(deg mean-longitude @J2000), peri(deg longitude of perihelion), color, size(px)
+const P = [
+  ['Mercury',0.38709927,0.20563593,0.2408467,   252.25032350, 77.45779628,'#c9c2b4',2.6],
+  ['Venus',  0.72333566,0.00677672,0.61519726,  181.97909950,131.60246718,'#ecc978',4.4],
+  ['Earth',  1.00000261,0.01671123,1.0000174,   100.46457166,102.93768193,'#5aa9e6',4.6],
+  ['Mars',   1.52371034,0.09339410,1.8808476,    -4.55343205,-23.94362959,'#e0674a',3.6],
+  ['Jupiter',5.20288700,0.04838624,11.862615,    34.39644051, 14.72847983,'#dba86b',9.5],
+  ['Saturn', 9.53667594,0.05386179,29.447498,    49.95424423, 92.59887831,'#e6c878',8.0],
+  ['Uranus',19.18916464,0.04725744,84.016846,   313.23810451,170.95427630,'#93d8dd',6.2],
+  ['Neptune',30.06992276,0.00859048,164.79132,  -55.12002969, 44.96476227,'#5b7fe6',6.0],
+];
+
+// ---- astronomy: heliocentric ecliptic position (2D projection, inclination ignored) ----
+function meanAnomaly(i, jd){
+  const p = P[i], n = 360/(p[3]*365.25);           // mean motion, deg/day
+  return ((p[4]-p[5] + n*(jd-J2000)) % 360 + 360) % 360 * DEG;
+}
+function pos(i, jd){
+  const p = P[i], e = p[2], M = meanAnomaly(i, jd);
+  let E = M;                                         // solve Kepler M = E - e sinE (Newton)
+  for(let k=0;k<6;k++) E -= (E - e*Math.sin(E) - M)/(1 - e*Math.cos(E));
+  const nu = 2*Math.atan2(Math.sqrt(1+e)*Math.sin(E/2), Math.sqrt(1-e)*Math.cos(E/2));
+  const r = p[1]*(1 - e*Math.cos(E)), th = nu + p[5]*DEG;
+  return {x:r*Math.cos(th), y:r*Math.sin(th), r};
+}
+// static orbit outline from true anomaly (fixed shape, independent of epoch)
+function orbitPoint(i, nu){
+  const p = P[i], e = p[2], r = p[1]*(1-e*e)/(1+e*Math.cos(nu)), th = nu + p[5]*DEG;
+  return {x:r*Math.cos(th), y:r*Math.sin(th), r};
+}
+
+// ---- screen mapping (log-scaled radius) ----
+let W,H,cx,cy,maxR, dpr=1;
+const logMin = Math.log10(0.30), logMax = Math.log10(31);
+function scaleR(d){ return 24 + (Math.log10(d)-logMin)/(logMax-logMin)*(maxR-24); }
+function screen(pt){
+  const R = scaleR(pt.r), m = Math.hypot(pt.x,pt.y) || 1e-9;
+  return {sx: cx + pt.x/m*R, sy: cy - pt.y/m*R};
+}
+
+// ---- state ----
+function nowJD(){ return Date.now()/86400000 + 2440587.5; }
+function jdToDate(jd){ return new Date((jd-2440587.5)*86400000); }
+const SCR_MIN = 2305448, SCR_MAX = 2597641; // ~year 1600 .. 2400
+const state = { jd:nowJD(), speed:60, playing:true, dir:1, weave:true, a:1, b:2, trail:200, rings:true, labels:true };
+
+let ghost = [];                 // instant-preview resonance figure (screen segments)
+let sp = [];                    // latest per-planet screen positions (for click hit-testing)
+const trails = P.map(()=>[]);   // per-planet [sx,sy] history
+let weaveBuf = [];              // live accumulating chords {p:[x1,y1,x2,y2]}
+const WEAVE_MAX = 2600;
+
+// ---- ghost: forward-integrate the pair so the rose is visible instantly ----
+function computeGhost(){
+  ghost.length = 0;
+  const spanY = 8*Math.max(P[state.a][3], P[state.b][3]);   // enough to close the figure
+  const span = spanY*365.25, steps = 1700;
+  for(let k=0;k<=steps;k++){
+    const jd = J2000 + k/steps*span;
+    const A = screen(pos(state.a,jd)), B = screen(pos(state.b,jd));
+    ghost.push(A.sx,A.sy,B.sx,B.sy);
+  }
+}
+
+// ---- layout ----
+function resize(){
+  dpr = Math.min(window.devicePixelRatio||1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = W*dpr; cv.height = H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
+  cx = W/2; cy = H/2; maxR = Math.min(W,H)/2 - 34;
+  computeGhost(); resetAccum();
+}
+window.addEventListener('resize', resize);
+
+// ---- render ----
+function drawGlow(sx,sy,size,color,intensity){
+  const g = ctx.createRadialGradient(sx,sy,0,sx,sy,size*4.5);
+  g.addColorStop(0,color); g.addColorStop(0.28,color);
+  g.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.globalAlpha = intensity; ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(sx,sy,size*4.5,0,7); ctx.fill();
+  ctx.globalAlpha = 1; ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(sx,sy,size*0.62,0,7); ctx.fill();
+}
+
+function frame(ts){
+  const dt = frame.last ? Math.min((ts-frame.last)/1000, 0.05) : 0;
+  frame.last = ts;
+
+  if(state.playing){
+    state.jd += state.speed*state.dir*dt;
+    if(state.jd<SCR_MIN){state.jd=SCR_MIN;} if(state.jd>SCR_MAX){state.jd=SCR_MAX;}
+  }
+
+  // backdrop
+  ctx.globalCompositeOperation='source-over';
+  ctx.fillStyle='#05070f'; ctx.fillRect(0,0,W,H);
+
+  // faint radial vignette of stars-ish gradient
+  const vg = ctx.createRadialGradient(cx,cy,0,cx,cy,maxR*1.3);
+  vg.addColorStop(0,'rgba(30,40,70,0.25)'); vg.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=vg; ctx.beginPath(); ctx.arc(cx,cy,maxR*1.3,0,7); ctx.fill();
+
+  // ghost resonance preview
+  if(state.weave && ghost.length){
+    ctx.globalCompositeOperation='lighter';
+    ctx.strokeStyle='rgba(90,150,255,0.05)'; ctx.lineWidth=1; ctx.beginPath();
+    for(let i=0;i<ghost.length;i+=4){ ctx.moveTo(ghost[i],ghost[i+1]); ctx.lineTo(ghost[i+2],ghost[i+3]); }
+    ctx.stroke(); ctx.globalCompositeOperation='source-over';
+  }
+
+  // orbit rings (static ellipse outlines, log-mapped)
+  if(state.rings){
+    ctx.lineWidth=1;
+    for(let i=0;i<P.length;i++){
+      ctx.strokeStyle='rgba(120,140,190,0.16)'; ctx.beginPath();
+      for(let s=0;s<=120;s++){
+        const q=screen(orbitPoint(i, s/120*Math.PI*2));
+        s?ctx.lineTo(q.sx,q.sy):ctx.moveTo(q.sx,q.sy);
+      }
+      ctx.closePath(); ctx.stroke();
+    }
+  }
+
+  // current positions
+  sp = P.map((_,i)=>screen(pos(i,state.jd)));
+
+  // trails
+  if(state.trail>0){
+    for(let i=0;i<P.length;i++){
+      const t=trails[i];
+      if(state.playing){ t.push(sp[i].sx,sp[i].sy); while(t.length>state.trail*2) t.splice(0,2); }
+      if(t.length>=4){
+        ctx.lineWidth=1.4; ctx.strokeStyle=P[i][6]; ctx.globalAlpha=0.34;
+        ctx.beginPath(); ctx.moveTo(t[0],t[1]);
+        for(let k=2;k<t.length;k+=2) ctx.lineTo(t[k],t[k+1]);
+        ctx.stroke(); ctx.globalAlpha=1;
+      }
+    }
+  }
+
+  // weave: accumulate + draw live chord with time-gradient hue
+  if(state.weave){
+    if(state.playing){
+      weaveBuf.push(sp[state.a].sx, sp[state.a].sy, sp[state.b].sx, sp[state.b].sy);
+      while(weaveBuf.length>WEAVE_MAX*4) weaveBuf.splice(0,4);
+    }
+    ctx.globalCompositeOperation='lighter'; ctx.lineWidth=1;
+    const n=weaveBuf.length/4;
+    for(let k=0;k<n;k++){
+      const i=k*4, hue=(205 + k/Math.max(n,1)*140)%360;
+      ctx.strokeStyle=`hsla(${hue},90%,63%,0.42)`;
+      ctx.beginPath(); ctx.moveTo(weaveBuf[i],weaveBuf[i+1]); ctx.lineTo(weaveBuf[i+2],weaveBuf[i+3]); ctx.stroke();
+    }
+    ctx.globalCompositeOperation='source-over';
+  }
+
+  // sun
+  ctx.globalCompositeOperation='lighter';
+  drawGlow(cx,cy,10,'#ffd27a',0.95);
+  // bodies
+  for(let i=0;i<P.length;i++){
+    const hot = state.weave && (i===state.a||i===state.b);
+    drawGlow(sp[i].sx, sp[i].sy, P[i][7]*(hot?1.25:1), P[i][6], hot?0.95:0.72);
+  }
+  ctx.globalCompositeOperation='source-over';
+
+  // labels
+  if(state.labels){
+    ctx.font='11px ui-sans-serif,system-ui,sans-serif'; ctx.textBaseline='middle';
+    ctx.fillStyle='rgba(255,220,140,0.9)'; ctx.fillText('Sun', cx+13, cy-11);
+    for(let i=0;i<P.length;i++){
+      const hot = state.weave && (i===state.a||i===state.b);
+      ctx.fillStyle = hot?'#dcecff':'rgba(180,192,220,0.72)';
+      ctx.fillText(P[i][0], sp[i].sx + P[i][7]+5, sp[i].sy);
+    }
+  }
+
+  // readouts
+  const d=jdToDate(state.jd);
+  dateEl.textContent = d.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'});
+  speedEl.textContent = `${(state.speed*state.dir).toFixed(1)} days/sec ${state.playing?'':'· paused'}`;
+  scrub.value = (state.jd-SCR_MIN)/(SCR_MAX-SCR_MIN);
+
+  requestAnimationFrame(frame);
+}
+
+// ---- UI wiring ----
+const dateEl=document.getElementById('date'), speedEl=document.getElementById('speedRead');
+const scrub=document.getElementById('scrub'), selA=document.getElementById('selA'), selB=document.getElementById('selB');
+const btnPlay=document.getElementById('play'), btnWeave=document.getElementById('weave');
+const btnRev=document.getElementById('rev');
+const btnRings=document.getElementById('rings'), btnLabels=document.getElementById('labels');
+let activePreset=-1;   // index of the currently-loaded preset, or -1
+const spd=document.getElementById('spd'), trail=document.getElementById('trail');
+
+P.forEach((p,i)=>{ selA.add(new Option(p[0],i)); selB.add(new Option(p[0],i)); });
+const spdToSlider=s=>Math.round(Math.sqrt(s/500)*100), sliderToSpd=v=>Math.max(0,(v/100)**2*500);
+
+function refreshUI(){
+  btnPlay.textContent = state.playing?'❚❚':'▶';
+  btnRev.classList.toggle('on',state.dir===-1);
+  btnWeave.classList.toggle('on',state.weave);
+  btnRings.classList.toggle('on',state.rings);
+  btnLabels.classList.toggle('on',state.labels);
+  selA.value=state.a; selB.value=state.b;
+  spd.value=spdToSlider(state.speed); trail.value=state.trail;
+  presetBtns.forEach((b,i)=>b.classList.toggle('on',i===activePreset));
+}
+function resetAccum(){ trails.forEach(t=>t.length=0); weaveBuf.length=0; }
+function writeHash(){
+  history.replaceState(null,'',
+    `#d=${state.jd.toFixed(2)}&s=${state.speed.toFixed(1)}&a=${state.a}&b=${state.b}`+
+    `&t=${state.trail}&w=${+state.weave}&r=${+state.rings}&l=${+state.labels}&p=${+state.playing}&g=${state.dir}`);
+}
+function parseHash(){
+  const q=new URLSearchParams(location.hash.slice(1)); if(![...q].length) return;
+  const num=(k,f)=>q.has(k)?parseFloat(q.get(k)):f;
+  state.jd=num('d',state.jd); state.speed=num('s',state.speed);
+  state.a=num('a',state.a)|0; state.b=num('b',state.b)|0; state.trail=num('t',state.trail)|0;
+  state.weave=num('w',1)!==0; state.rings=num('r',1)!==0; state.labels=num('l',1)!==0;
+  state.playing=num('p',1)!==0; state.dir=num('g',1)>=0?1:-1;
+  const clampIdx=i=>((i%P.length)+P.length)%P.length;   // tolerate hostile/stale permalinks
+  state.a=clampIdx(state.a); state.b=clampIdx(state.b);
+  state.trail=Math.min(Math.max(0,state.trail),600);
+  if(state.a===state.b) state.b=(state.a+1)%P.length;
+}
+
+btnPlay.onclick=()=>{ state.playing=!state.playing; refreshUI(); writeHash(); };
+btnRev.onclick=()=>{ state.dir*=-1; refreshUI(); writeHash(); };
+document.getElementById('today').onclick=()=>{ state.jd=nowJD(); resetAccum(); writeHash(); };
+btnWeave.onclick=()=>{ state.weave=!state.weave; if(!state.weave) weaveBuf.length=0; refreshUI(); writeHash(); };
+btnRings.onclick=()=>{ state.rings=!state.rings; refreshUI(); writeHash(); };
+btnLabels.onclick=()=>{ state.labels=!state.labels; refreshUI(); writeHash(); };
+spd.oninput=()=>{ state.speed=sliderToSpd(+spd.value); writeHash(); };
+trail.oninput=()=>{ state.trail=+trail.value; trails.forEach(t=>t.length=0); writeHash(); };
+scrub.oninput=()=>{ state.jd=SCR_MIN+(+scrub.value)*(SCR_MAX-SCR_MIN); activePreset=-1; resetAccum(); refreshUI(); writeHash(); };
+function setPair(a,b){ state.a=a; state.b=b; if(state.a===state.b)state.b=(a+1)%P.length;
+  computeGhost(); weaveBuf.length=0; refreshUI(); writeHash(); }
+selA.onchange=()=>{ activePreset=-1; setPair(+selA.value, state.b); };
+selB.onchange=()=>{ activePreset=-1; setPair(state.a, +selB.value); };
+
+// direct manipulation: click a planet to set the weave pair (A, then B, then A ...)
+function nearestBody(mx,my){
+  let best=-1, bd=Infinity;
+  for(let i=0;i<sp.length;i++){
+    const d=Math.hypot(sp[i].sx-mx, sp[i].sy-my), hit=P[i][7]+9;
+    if(d<hit && d<bd){ bd=d; best=i; }
+  }
+  return best;
+}
+let clickTurn=0;   // 0 -> next click sets A, 1 -> sets B
+cv.addEventListener('click',e=>{
+  const r=cv.getBoundingClientRect(), i=nearestBody(e.clientX-r.left, e.clientY-r.top);
+  if(i<0) return;
+  activePreset=-1;
+  if(clickTurn===0){ setPair(i, state.b); clickTurn=1; }
+  else { setPair(state.a, i); clickTurn=0; }
+});
+cv.addEventListener('mousemove',e=>{
+  const r=cv.getBoundingClientRect();
+  cv.style.cursor = nearestBody(e.clientX-r.left, e.clientY-r.top)>=0 ? 'pointer' : 'default';
+});
+
+// preset gallery (greatest-hits resonance figures, each updates the shareable hash)
+const presets=[
+  ['✦ Venus pentagram', ()=>{ setPair(1,2); state.speed=90; state.weave=true; }],
+  ['Earth–Mars loop',   ()=>{ setPair(2,3); state.speed=120; state.weave=true; }],
+  ['Jupiter–Saturn',    ()=>{ setPair(4,5); state.speed=380; state.weave=true; }],
+  ['Mercury–Venus',     ()=>{ setPair(0,1); state.speed=30; state.weave=true; }],
+];
+const pdiv=document.getElementById('presets');
+const presetBtns=presets.map(([label,fn],idx)=>{
+  const b=document.createElement('button'); b.textContent=label;
+  b.onclick=()=>{ activePreset=idx; fn(); resetAccum(); refreshUI(); writeHash(); };
+  pdiv.appendChild(b); return b;
+});
+
+// PNG export — burn a self-describing caption into the canvas before capture
+document.getElementById('png').onclick=()=>{
+  const d=jdToDate(state.jd);
+  const dateStr=d.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'});
+  const pair=state.weave?` · ${P[state.a][0]}→${P[state.b][0]}`:'';
+  ctx.save(); ctx.globalCompositeOperation='source-over'; ctx.textBaseline='alphabetic';
+  ctx.textAlign='left';
+  ctx.font='600 15px ui-sans-serif,system-ui,sans-serif'; ctx.fillStyle='rgba(232,236,246,0.95)';
+  ctx.fillText(`Epicycle${pair} · ${dateStr}`, 16, H-28);
+  ctx.font='10px ui-sans-serif,system-ui,sans-serif'; ctx.fillStyle='rgba(150,160,190,0.9)';
+  ctx.fillText('approximate J2000 model · radii log-scaled, not to scale', 16, H-14);
+  ctx.restore();
+  const a=document.createElement('a');
+  a.download=`epicycle-${d.toISOString().slice(0,10)}.png`;
+  a.href=cv.toDataURL('image/png'); a.click();
+};
+
+// keyboard
+addEventListener('keydown',e=>{
+  if(e.target.tagName==='SELECT'||e.target.tagName==='INPUT') return;
+  const k=e.key;
+  if(k===' '){ e.preventDefault(); btnPlay.onclick(); }
+  else if(k==='ArrowRight'){ state.speed=sliderToSpd(Math.min(100,spdToSlider(state.speed)+4)); refreshUI(); writeHash(); }
+  else if(k==='ArrowLeft'){ state.speed=sliderToSpd(Math.max(0,spdToSlider(state.speed)-4)); refreshUI(); writeHash(); }
+  else if(k==='r'){ state.dir*=-1; refreshUI(); writeHash(); }
+  else if(k==='w'){ btnWeave.onclick(); }
+  else if(k==='t'){ document.getElementById('today').onclick(); }
+});
+
+// boot
+parseHash(); resize(); refreshUI(); writeHash();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

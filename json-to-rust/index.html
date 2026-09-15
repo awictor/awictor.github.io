@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JSON to Rust — generate serde structs</title>
+<meta name="description" content="Convert JSON into Rust structs with serde derives — snake_case fields with rename attributes, nested structs, Vec and Option types. Offline, no tracking.">
+<style>
+  :root{
+    --c:#c2410c;
+    --bg:#fbf5f1; --card:#ffffff; --fg:#20160f; --muted:#77685d;
+    --line:#efe3d8; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#17110b; --card:#211710; --fg:#f5ece4; --muted:#b4a294;
+    --line:#39291c; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:960px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:24px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.4rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:960px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .opts{display:flex;gap:16px;align-items:end;margin-bottom:14px;flex-wrap:wrap}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  input[type=text]{font:inherit;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--fg)}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:680px){.cols{grid-template-columns:1fr}}
+  textarea{width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9rem;padding:12px;
+    border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);min-height:280px;resize:vertical;white-space:pre;overflow-wrap:normal}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .copy{margin-top:10px;background:var(--c);color:#fff;border:0;border-radius:10px;padding:9px 16px;cursor:pointer;font-weight:600}
+  .err{color:#dc2626;font-size:.85rem;margin-top:6px;min-height:18px}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🦀</div>
+  <div>
+    <h1>JSON to Rust</h1>
+    <p>Generate serde structs from JSON</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="opts">
+      <div><label for="root">Root struct name</label><input type="text" id="root" value="Root" style="width:160px"></div>
+    </div>
+    <div class="cols">
+      <div>
+        <label for="in">JSON</label>
+        <textarea id="in" spellcheck="false">{
+  "id": 42,
+  "userName": "ada",
+  "score": 9.5,
+  "active": true,
+  "tags": ["admin", "dev"],
+  "address": { "city": "Paris", "zipCode": "75001" }
+}</textarea>
+        <div class="err" id="err"></div>
+      </div>
+      <div>
+        <label for="out">Rust</label>
+        <textarea id="out" readonly></textarea>
+        <button class="copy" id="copy">Copy Rust</button>
+      </div>
+    </div>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function typeOf(v){ if(v === null) return 'null'; if(Array.isArray(v)) return 'array'; return typeof v; }
+  function toSnake(s){
+    return String(s)
+      .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+      .replace(/[\s\-]+/g, '_')
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, '');
+  }
+  function toPascal(s){
+    var parts = String(s).replace(/[^a-zA-Z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+    var out = parts.map(function(w){ return w.charAt(0).toUpperCase() + w.slice(1); }).join('');
+    return out || 'Root';
+  }
+  function singular(k){ return String(k).replace(/s$/, ''); }
+
+  function jsonToRust(obj, rootName){
+    rootName = toPascal(rootName || 'Root');
+    var structs = [], seen = {};
+    function rustType(v, key){
+      var t = typeOf(v);
+      if(t === 'null') return 'Option<serde_json::Value>';
+      if(t === 'boolean') return 'bool';
+      if(t === 'number') return Number.isInteger(v) ? 'i64' : 'f64';
+      if(t === 'string') return 'String';
+      if(t === 'array') return v.length === 0 ? 'Vec<serde_json::Value>' : 'Vec<' + rustType(v[0], singular(key)) + '>';
+      var name = toPascal(key);
+      buildStruct(name, v);
+      return name;
+    }
+    function buildStruct(name, o){
+      if(seen[name]) return; seen[name] = true;
+      var entry = { name: name, fields: [] };
+      structs.push(entry);
+      entry.fields = Object.keys(o).map(function(k){
+        return { orig: k, snake: toSnake(k), type: rustType(o[k], k) };
+      });
+    }
+    if(typeOf(obj) !== 'object') throw new Error('top-level JSON must be an object');
+    buildStruct(rootName, obj);
+    return structs.map(function(s){
+      var body = s.fields.map(function(f){
+        var rename = (f.snake !== f.orig) ? '    #[serde(rename = "' + f.orig + '")]\n' : '';
+        return rename + '    pub ' + f.snake + ': ' + f.type + ',';
+      }).join('\n');
+      return '#[derive(Serialize, Deserialize, Debug)]\npub struct ' + s.name + ' {\n' + body + '\n}';
+    }).join('\n\n');
+  }
+
+  if(typeof module !== 'undefined') module.exports = { toSnake:toSnake, toPascal:toPascal, jsonToRust:jsonToRust };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var inp=document.getElementById('in'), out=document.getElementById('out'), err=document.getElementById('err'), root=document.getElementById('root');
+    function render(){
+      try{
+        var obj = JSON.parse(inp.value);
+        err.textContent = '';
+        out.value = jsonToRust(obj, root.value || 'Root');
+      }catch(e){ err.textContent = '✗ ' + e.message; }
+    }
+    [inp, root].forEach(function(el){ el.addEventListener('input', render); });
+    document.getElementById('copy').addEventListener('click', function(){ if(navigator.clipboard) navigator.clipboard.writeText(out.value); });
+
+    var rootEl=document.documentElement, tb=document.getElementById('theme');
+    function setTheme(t){ rootEl.setAttribute('data-theme',t); tb.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('j2rust-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('j2rust-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    tb.addEventListener('click', function(){ setTheme(rootEl.getAttribute('data-theme')==='dark'?'light':'dark'); });
+
+    render();
+  }
+</script>
+</body>
+</html>

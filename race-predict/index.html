@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RacePredict — running race time predictor (Riegel)</title>
+<meta name="description" content="Free offline running race predictor. Enter a recent race time and distance to estimate your time at another distance (5K, 10K, half, marathon) using Riegel's formula, with pace. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/race-predict/">
+<style>
+  :root{
+    --c:#dc2626; --bg:#f8f8f9; --fg:#18181b; --muted:#52525b;
+    --card:#ffffff; --border:#e4e4e7; --code:#efeff1;
+  }
+  [data-theme="dark"]{
+    --bg:#09090b; --fg:#e7e7ea; --muted:#8b8b93; --card:#151518;
+    --border:#27272a; --code:#1c1c20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#ef4444);display:grid;place-items:center;color:#fff;font-size:16px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:720px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  input,select{width:100%;padding:11px 12px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:1.05rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  input:focus,select:focus{outline:2px solid var(--c);border-color:var(--c)}
+  table{width:100%;border-collapse:collapse;margin-top:18px}
+  th,td{padding:10px 10px;border-bottom:1px solid var(--border);text-align:left;font-size:.95rem}
+  th{font-size:.72rem;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
+  td.t{font-family:ui-monospace,monospace;font-weight:700}
+  td.p{font-family:ui-monospace,monospace;color:var(--muted);text-align:right}
+  tr:last-child td{border-bottom:none}
+  tr.src td{background:var(--code)}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+  @media(max-width:520px){.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('rp.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">🏃</div>
+  <div>
+    <h1>RacePredict</h1>
+    <p class="sub">Running race time predictor (Riegel)</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <div class="row">
+      <div>
+        <label for="dist">Recent race distance</label>
+        <select id="dist"></select>
+      </div>
+      <div>
+        <label for="time">Finish time (h:mm:ss)</label>
+        <input id="time" spellcheck="false" value="22:30">
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>Distance</th><th>Predicted time</th><th style="text-align:right">Pace /km</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p class="hint">Uses Riegel's formula T₂ = T₁ · (D₂/D₁)^1.06. Predictions assume similar conditions and
+      appropriate training for the longer distance — they're a guide, not a guarantee. Enter time as
+      <code style="font-family:ui-monospace">mm:ss</code> or <code style="font-family:ui-monospace">h:mm:ss</code>. Runs 100% locally.</p>
+  </div>
+</main>
+<footer>
+  RacePredict is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/race-predict">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function parseTime(str){
+  var s = String(str).trim();
+  if(s === '') return NaN;
+  if(/^\d+(\.\d+)?$/.test(s)) return Number(s);          // plain seconds
+  if(!/^\d+(:\d{1,2}){1,2}$/.test(s)) return NaN;
+  var p = s.split(':').map(Number);
+  if(p.length === 2) return p[0] * 60 + p[1];
+  return p[0] * 3600 + p[1] * 60 + p[2];
+}
+function formatTime(sec){
+  if(!isFinite(sec) || sec < 0) return '—';
+  sec = Math.round(sec);
+  var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  var ss = String(s).padStart(2, '0');
+  if(h > 0) return h + ':' + String(m).padStart(2, '0') + ':' + ss;
+  return m + ':' + ss;
+}
+function riegel(t1Sec, d1, d2, exp){
+  t1Sec = Number(t1Sec); d1 = Number(d1); d2 = Number(d2);
+  exp = exp === undefined ? 1.06 : Number(exp);
+  if(!(t1Sec > 0) || !(d1 > 0) || !(d2 > 0)) return NaN;
+  return t1Sec * Math.pow(d2 / d1, exp);
+}
+function pacePerKm(totalSec, distKm){
+  totalSec = Number(totalSec); distKm = Number(distKm);
+  if(!(totalSec > 0) || !(distKm > 0)) return NaN;
+  return totalSec / distKm;
+}
+
+if(typeof module !== 'undefined') module.exports = { parseTime, formatTime, riegel, pacePerKm };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var DISTS = [['1 mile', 1.609344], ['5K', 5], ['10K', 10], ['15K', 15],
+    ['Half Marathon', 21.0975], ['Marathon', 42.195], ['50K', 50]];
+  var distEl = document.getElementById('dist');
+  var timeEl = document.getElementById('time');
+  var rowsEl = document.getElementById('rows');
+  distEl.innerHTML = DISTS.map(function(d, i){ return '<option value="' + i + '"' + (d[0] === '5K' ? ' selected' : '') + '>' + d[0] + '</option>'; }).join('');
+
+  function render(){
+    var t1 = parseTime(timeEl.value);
+    var d1 = DISTS[+distEl.value][1];
+    rowsEl.innerHTML = DISTS.map(function(d, i){
+      var isSrc = i === +distEl.value;
+      var t = isSrc ? t1 : riegel(t1, d1, d[1]);
+      var timeStr = isFinite(t) ? formatTime(t) : '—';
+      var pace = isFinite(t) ? formatTime(pacePerKm(t, d[1])) : '—';
+      return '<tr' + (isSrc ? ' class="src"' : '') + '><td>' + d[0] + (isSrc ? ' (entered)' : '') + '</td>' +
+        '<td class="t">' + timeStr + '</td><td class="p">' + pace + '</td></tr>';
+    }).join('');
+    try{ localStorage.setItem('rp.dist', distEl.value); localStorage.setItem('rp.time', timeEl.value); }catch(e){}
+  }
+  [distEl, timeEl].forEach(function(x){ x.addEventListener('input', render); });
+  try{ var d = localStorage.getItem('rp.dist'); if(d !== null) distEl.value = d;
+       var t = localStorage.getItem('rp.time'); if(t !== null) timeEl.value = t; }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('rp.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('rp.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

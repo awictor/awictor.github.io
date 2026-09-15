@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SIPrefix — Metric / SI Prefix Converter</title>
+<meta name="description" content="Enter a value with a metric prefix (kilo, milli, micro…) and see it in every SI prefix at once, plus scientific notation. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('si-prefix-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#155e75;
+    --bg:#f4f7f8; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e2e6e8; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#0d1417; --card:#151e22; --fg:#eef4f6; --muted:#92a2a8; --line:#233036; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#0e4a5e);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:720px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+  @media(max-width:520px){.grid{grid-template-columns:1fr}}
+  .sci{text-align:center;margin-top:14px;font-size:1.3rem;font-family:"SF Mono",Menlo,Consolas,monospace}
+  table{width:100%;border-collapse:collapse;font-size:.9rem}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.05em}
+  td.val{font-family:"SF Mono",Menlo,Consolas,monospace;text-align:right}
+  td.sym{font-weight:700}
+  tr.here{background:color-mix(in srgb, var(--c) 12%, transparent)}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🔬</div>
+    <div><h1>SIPrefix</h1><div class="sub">Convert a value across every metric prefix</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div><label for="value">Value</label><input type="number" id="value" value="2500" step="any"></div>
+      <div><label for="prefix">Prefix</label><select id="prefix"></select></div>
+      <div><label for="unit">Unit (optional)</label><input id="unit" value="m" placeholder="e.g. g, B, Hz"></div>
+    </div>
+    <div class="sci" id="sci"></div>
+  </div>
+  <div class="card">
+    <table><thead><tr><th>Prefix</th><th>Symbol</th><th style="text-align:right">Value</th></tr></thead><tbody id="rows"></tbody></table>
+  </div>
+</main>
+<footer>
+  100% offline. Nothing leaves your browser. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/si-prefix">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  const PREFIXES = [
+    { name: 'peta', symbol: 'P', exp: 15 }, { name: 'tera', symbol: 'T', exp: 12 },
+    { name: 'giga', symbol: 'G', exp: 9 }, { name: 'mega', symbol: 'M', exp: 6 },
+    { name: 'kilo', symbol: 'k', exp: 3 }, { name: 'hecto', symbol: 'h', exp: 2 },
+    { name: 'deca', symbol: 'da', exp: 1 }, { name: '(base)', symbol: '', exp: 0 },
+    { name: 'deci', symbol: 'd', exp: -1 }, { name: 'centi', symbol: 'c', exp: -2 },
+    { name: 'milli', symbol: 'm', exp: -3 }, { name: 'micro', symbol: 'µ', exp: -6 },
+    { name: 'nano', symbol: 'n', exp: -9 }, { name: 'pico', symbol: 'p', exp: -12 },
+    { name: 'femto', symbol: 'f', exp: -15 }
+  ];
+
+  function convertPrefix(value, fromExp, toExp){
+    return value * Math.pow(10, fromExp - toExp);
+  }
+
+  function toBase(value, fromExp){
+    return value * Math.pow(10, fromExp);
+  }
+
+  function allPrefixes(value, fromExp){
+    return PREFIXES.map(p => ({ name: p.name, symbol: p.symbol, exp: p.exp, value: convertPrefix(value, fromExp, p.exp) }));
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('rows')){
+    const $ = id => document.getElementById(id);
+
+    $('prefix').innerHTML = PREFIXES.map(p =>
+      `<option value="${p.exp}"${p.exp === 3 ? ' selected' : ''}>${p.name}${p.symbol ? ' (' + p.symbol + ')' : ''}</option>`).join('');
+
+    function fmt(v){
+      if(v === 0) return '0';
+      const a = Math.abs(v);
+      if(a >= 1e15 || a < 1e-9) return v.toExponential(4);
+      return Number(v.toPrecision(10)).toLocaleString(undefined, { maximumFractionDigits: 12 });
+    }
+
+    function render(){
+      const value = +$('value').value;
+      const fromExp = +$('prefix').value;
+      const unit = $('unit').value.trim();
+      $('sci').textContent = toBase(value, fromExp).toExponential(4) + (unit ? ' ' + unit : '');
+      $('rows').innerHTML = allPrefixes(value, fromExp).map(p =>
+        `<tr class="${p.exp === fromExp ? 'here' : ''}"><td>${p.name}</td><td class="sym">${p.symbol || '—'}</td><td class="val">${fmt(p.value)}${unit ? ' ' + p.symbol + unit : ''}</td></tr>`
+      ).join('');
+    }
+
+    ['value', 'prefix', 'unit'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('si-prefix-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { PREFIXES, convertPrefix, toBase, allPrefixes };
+</script>
+</body>
+</html>

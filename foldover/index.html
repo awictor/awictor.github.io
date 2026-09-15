@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Foldover — an interactive aliasing &amp; Nyquist explainer</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#141a24; --panel2:#0f141d; --line:#28303d;
+    --ink:#e6edf3; --dim:#8b98a9; --faint:#5a6675;
+    --true:#8b98a9; --sample:#e0b13c; --recon:#ff7043; --nyq:#5aa9ff; --zoh:#3fb950;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(1200px 700px at 70% -10%,#16202e 0%,var(--bg) 60%);
+    color:var(--ink);font:14px/1.45 ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+    padding:14px;min-height:100vh;
+  }
+  h1{font-size:17px;margin:0;letter-spacing:.5px}
+  h1 b{color:var(--recon)}
+  header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+  header .sub{color:var(--dim);font-size:12px}
+  .wrap{display:grid;grid-template-columns:1fr 340px;gap:12px;align-items:start}
+  .stage{display:grid;grid-template-columns:minmax(260px,1fr) minmax(300px,1.15fr);
+    grid-template-rows:auto auto;gap:10px}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));
+    border:1px solid var(--line);border-radius:10px;padding:8px 10px;position:relative}
+  .card h2{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);
+    margin:0 0 4px}
+  #wheelCard{grid-row:1/3;display:flex;flex-direction:column}
+  canvas{width:100%;display:block;border-radius:6px}
+  #wheel{height:330px} #strip{height:172px} #fold{height:160px}
+  .side{display:flex;flex-direction:column;gap:12px}
+  .banner{border-radius:10px;padding:10px 12px;border:1px solid var(--line);font-weight:700;
+    letter-spacing:.4px;text-align:center;font-size:15px;transition:.25s}
+  .b-faithful{background:#0e2a17;border-color:#1f6b38;color:#5fd98a}
+  .b-critical{background:#2a2410;border-color:#7a6620;color:#e0b13c}
+  .b-alias{background:#2a1410;border-color:#7a3320;color:#ff8a63}
+  .read{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px}
+  .read div{display:flex;justify-content:space-between;gap:8px;border-bottom:1px dotted var(--line);padding:2px 0}
+  .read span{color:var(--dim)} .read b{font-variant-numeric:tabular-nums}
+  .ctrl label b,.formula,.formula .num{font-variant-numeric:tabular-nums}
+  .k-true{color:var(--true)} .k-samp{color:var(--sample)} .k-nyq{color:var(--nyq)} .k-rec{color:var(--recon)}
+  .formula{background:#0a0d13;border:1px solid var(--line);border-radius:8px;padding:8px 10px;
+    font-size:12px;line-height:1.7;color:var(--dim)}
+  .formula .num{color:var(--ink)} .formula .op{color:var(--recon)}
+  .ctrl label{display:flex;justify-content:space-between;font-size:12px;color:var(--dim);margin:8px 0 2px}
+  .ctrl label b{color:var(--ink)}
+  .slot{position:relative}
+  input[type=range]{width:100%;-webkit-appearance:none;appearance:none;height:6px;border-radius:6px;
+    background:var(--line);margin:0}
+  input[type=range]:focus-visible{outline:2px solid var(--nyq);outline-offset:4px}
+  button:focus-visible{outline:2px solid var(--nyq);outline-offset:2px}
+  .chip:focus-visible{outline:2px solid var(--sample);outline-offset:2px}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;
+    background:var(--recon);border:2px solid #1a1109;cursor:pointer}
+  input[type=range]::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:var(--recon);border:2px solid #1a1109;cursor:pointer}
+  .nyqmark{position:absolute;top:-3px;width:2px;height:12px;background:var(--nyq);pointer-events:none;transform:translateX(-1px)}
+  .nyqmark::after{content:"fs/2";position:absolute;top:-13px;left:-9px;font-size:9px;color:var(--nyq)}
+  .btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  button{background:#1b2431;color:var(--ink);border:1px solid var(--line);border-radius:7px;
+    padding:6px 9px;font:inherit;font-size:12px;cursor:pointer;transition:.15s}
+  button:hover{border-color:var(--recon);color:#fff}
+  button.on{background:var(--recon);border-color:var(--recon);color:#160b04;font-weight:700}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+  .chip{font-size:11px;padding:5px 8px;border-radius:20px;background:#161d28;border:1px solid var(--line);cursor:pointer}
+  .chip:hover{border-color:var(--sample);color:#fff}
+  .legend{font-size:10.5px;color:var(--dim);display:flex;gap:12px;flex-wrap:wrap;margin-top:6px}
+  .legend i{display:inline-block;width:10px;height:3px;border-radius:2px;vertical-align:middle;margin-right:4px}
+  .hint{font-size:10.5px;color:var(--faint);margin-top:8px;line-height:1.5}
+  @media(max-width:880px){.wrap{grid-template-columns:1fr}.stage{grid-template-columns:1fr}#wheelCard{grid-row:auto}}
+  @media(prefers-reduced-motion:reduce){.banner{transition:none}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Fold<b>over</b></h1>
+  <span class="sub">Watch a spinning wheel run backwards — and finally see why. Aliasing &amp; the Nyquist limit, live.</span>
+</header>
+
+<div class="wrap">
+  <div class="stage">
+    <div class="card" id="wheelCard">
+      <h2>Spinning wheel · true vs. reconstructed</h2>
+      <canvas id="wheel" role="img" aria-label="Spinning spoked wheel"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--true)"></i>true motion</span>
+        <span><i style="background:var(--sample);height:8px;border-radius:50%;width:8px"></i>strobe samples</span>
+        <span><i style="background:var(--recon)"></i>what you see (alias)</span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Time domain · sine, samples &amp; reconstruction</h2>
+      <canvas id="strip" role="img" aria-label="Time-domain waveform"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--true)"></i>true sine</span>
+        <span><i style="background:var(--sample);height:8px;border-radius:50%;width:8px"></i>samples</span>
+        <span><i style="background:var(--recon)"></i>band-limited alias</span>
+        <span id="zohleg" style="display:none"><i style="background:var(--zoh)"></i>zero-order hold</span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>The foldover · frequency reflects at Nyquist</h2>
+      <canvas id="fold" role="img" aria-label="Frequency-axis fold diagram"></canvas>
+    </div>
+  </div>
+
+  <div class="side">
+    <div class="banner b-faithful" id="banner">faithful</div>
+
+    <div class="card read">
+      <div><span>true freq</span><b class="k-true" id="rTrue">3.0 Hz</b></div>
+      <div><span>sample rate</span><b class="k-samp" id="rFs">5.0 Hz</b></div>
+      <div><span>Nyquist</span><b class="k-nyq" id="rNyq">2.5 Hz</b></div>
+      <div><span>alias</span><b class="k-rec" id="rAlias">2.0 Hz</b></div>
+    </div>
+
+    <div class="card">
+      <h2>Live folding math</h2>
+      <div class="formula" id="formula"></div>
+    </div>
+
+    <div class="card ctrl">
+      <h2>Controls</h2>
+      <label>signal freq <b><span id="lF">3.0</span> Hz</b></label>
+      <div class="slot"><input type="range" id="f" min="0.1" max="20" step="0.1" value="3">
+        <div class="nyqmark" id="nyqmark"></div></div>
+      <label>sample rate <b><span id="lFs">5.0</span> Hz</b></label>
+      <div class="slot"><input type="range" id="fs" min="0.4" max="20" step="0.1" value="5"></div>
+      <label>time speed <b><span id="lSpd">0.15</span>×</b></label>
+      <div class="slot"><input type="range" id="spd" min="0.02" max="0.6" step="0.01" value="0.15"></div>
+      <div class="btns">
+        <button id="play" class="on" title="Play or pause the animation (or press Space)">❚❚ pause</button>
+        <button id="sweep" title="Auto-ramp the signal frequency up past Nyquist and back down">↗ sweep</button>
+        <button id="zoh" title="Overlay the zero-order-hold staircase reconstruction on the time strip">⊓ hold</button>
+        <button id="snd" title="Play true vs. alias pitch as two oscillators (starts muted)">♪ sound</button>
+        <button id="share" title="Copy a shareable link that restores this exact state">⧉ copy link</button>
+      </div>
+      <div class="hint">sweep ramps f past Nyquist · hold shows the staircase · sound plays true vs. alias · Space toggles play</div>
+    </div>
+
+    <div class="card">
+      <h2>Presets</h2>
+      <div class="chips" id="chips"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const TAU=Math.PI*2, EPS=0.05;
+const S={f:3, fs:5, spd:0.15, zoh:false, snd:false, play:true, sweep:false};
+let sweepDir=1;
+
+// ---------- math ----------
+function fold(f,fs){
+  const k=Math.round(f/fs);
+  const signed=f-k*fs;      // apparent (signed) frequency: sign = direction
+  return {k, signed, alias:Math.abs(signed)};
+}
+function classify(f,fs){
+  const nyq=fs/2, {signed,alias}=fold(f,fs);
+  if(Math.abs(f-nyq)<EPS) return {cls:"b-critical",txt:"critically sampled"};
+  if(f<nyq)              return {cls:"b-faithful",txt:"faithful"};
+  if(alias<EPS)          return {cls:"b-alias",txt:"aliased — frozen"};
+  if(signed<0)           return {cls:"b-alias",txt:"aliased — reversing"};
+  return {cls:"b-alias",txt:"aliased — slowed"};
+}
+
+// ---------- canvas ----------
+function fit(cv){const r=cv.getBoundingClientRect(),d=devicePixelRatio||1;
+  cv.width=r.width*d;cv.height=r.height*d;const c=cv.getContext("2d");
+  c.setTransform(d,0,0,d,0,0);return {c,w:r.width,h:r.height};}
+let W,ST,FD;
+function layout(){W=fit($("wheel"));ST=fit($("strip"));FD=fit($("fold"));dirty=true;}
+addEventListener("resize",layout);
+
+function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim();}
+const COL={};["--bg","--line","--true","--sample","--recon","--nyq","--zoh","--dim","--ink","--faint"]
+  .forEach(k=>COL[k]=css(k));
+
+// ---------- renderers ----------
+function drawWheel(t){
+  const {c,w,h}=W, cx=w/2, cy=h/2, R=Math.min(w,h)*0.37;
+  c.clearRect(0,0,w,h);
+  const trueA=TAU*S.f*t, {signed}=fold(S.f,S.fs), appA=TAU*signed*t;
+  const spoke=(ang,col,lw,mk)=>{
+    c.strokeStyle=col;c.lineWidth=lw;
+    for(let i=0;i<6;i++){const a=ang+i*Math.PI/3;
+      c.beginPath();c.moveTo(cx,cy);c.lineTo(cx+Math.cos(a)*R,cy+Math.sin(a)*R);c.stroke();}
+    c.beginPath();c.arc(cx,cy,R,0,TAU);c.stroke();
+    if(mk){c.strokeStyle=mk;c.lineWidth=lw+2;
+      c.beginPath();c.moveTo(cx,cy);c.lineTo(cx+Math.cos(ang)*R,cy+Math.sin(ang)*R);c.stroke();
+      c.fillStyle=mk;c.beginPath();c.arc(cx+Math.cos(ang)*R,cy+Math.sin(ang)*R,lw+3,0,TAU);c.fill();}
+  };
+  // true motion (faint)
+  spoke(trueA,COL["--faint"],1,COL["--true"]);
+  // strobe ghosts: recent sample instants
+  for(let j=0;j<6;j++){const ts=(Math.floor(t*S.fs)-j)/S.fs; if(ts<0)break;
+    const a=TAU*S.f*ts, al=(1-j/6)*0.8;
+    c.fillStyle=COL["--sample"];c.globalAlpha=al;
+    c.beginPath();c.arc(cx+Math.cos(a)*R,cy+Math.sin(a)*R,4,0,TAU);c.fill();c.globalAlpha=1;}
+  // reconstructed (what your eye sees)
+  spoke(appA,"rgba(255,112,67,.9)",2.5,COL["--recon"]);
+  c.fillStyle=COL["--bg"];c.beginPath();c.arc(cx,cy,5,0,TAU);c.fill();
+  c.strokeStyle=COL["--recon"];c.lineWidth=2;c.beginPath();c.arc(cx,cy,5,0,TAU);c.stroke();
+}
+
+function drawStrip(t){
+  const {c,w,h}=ST, pad=10, cy=h/2, amp=h*0.36, Twin=2, t0=t-Twin;
+  c.clearRect(0,0,w,h);
+  const X=tt=>pad+(tt-t0)/Twin*(w-2*pad), Y=v=>cy-v*amp;
+  c.strokeStyle=COL["--line"];c.lineWidth=1;c.beginPath();c.moveTo(pad,cy);c.lineTo(w-pad,cy);c.stroke();
+  const {signed}=fold(S.f,S.fs);
+  // true sine (faint)
+  c.strokeStyle=COL["--true"];c.globalAlpha=.55;c.lineWidth=1.4;c.beginPath();
+  for(let x=pad;x<=w-pad;x++){const tt=t0+(x-pad)/(w-2*pad)*Twin;const y=Y(Math.sin(TAU*S.f*tt));
+    x===pad?c.moveTo(x,y):c.lineTo(x,y);}c.stroke();c.globalAlpha=1;
+  const k0=Math.ceil(t0*S.fs), k1=Math.floor(t*S.fs);
+  // zero-order-hold staircase
+  if(S.zoh){c.strokeStyle=COL["--zoh"];c.lineWidth=1.6;c.beginPath();
+    for(let k=k0;k<=k1;k++){const tt=k/S.fs,y=Y(Math.sin(TAU*S.f*tt)),x=X(tt),xn=X((k+1)/S.fs);
+      c.moveTo(x,y);c.lineTo(Math.min(xn,w-pad),y);}c.stroke();}
+  // band-limited reconstruction = sine at signed apparent freq (passes through every sample)
+  c.strokeStyle=COL["--recon"];c.lineWidth=2.4;c.beginPath();
+  for(let x=pad;x<=w-pad;x++){const tt=t0+(x-pad)/(w-2*pad)*Twin;const y=Y(Math.sin(TAU*signed*tt));
+    x===pad?c.moveTo(x,y):c.lineTo(x,y);}c.stroke();
+  // samples
+  c.fillStyle=COL["--sample"];
+  for(let k=k0;k<=k1;k++){const tt=k/S.fs,y=Y(Math.sin(TAU*S.f*tt));
+    c.beginPath();c.arc(X(tt),y,3.4,0,TAU);c.fill();
+    c.strokeStyle="rgba(224,177,60,.25)";c.lineWidth=1;c.beginPath();c.moveTo(X(tt),cy);c.lineTo(X(tt),y);c.stroke();}
+}
+
+function drawFold(t){
+  const {c,w,h}=FD, pad=26, base=h*0.72, nyq=S.fs/2;
+  c.clearRect(0,0,w,h);
+  const maxD=Math.max(S.f,S.fs)*1.06+0.4, X=f=>pad+f/maxD*(w-2*pad);
+  // axis
+  c.strokeStyle=COL["--line"];c.lineWidth=1.4;c.beginPath();c.moveTo(pad,base);c.lineTo(w-pad,base);c.stroke();
+  c.fillStyle=COL["--dim"];c.font="10px ui-monospace";c.textAlign="center";
+  c.fillText("0",X(0),base+14);c.fillText(maxD.toFixed(1)+" Hz",w-pad,base+14);
+  // Nyquist crease
+  c.strokeStyle=COL["--nyq"];c.setLineDash([4,3]);c.beginPath();c.moveTo(X(nyq),base-52);c.lineTo(X(nyq),base+6);c.stroke();c.setLineDash([]);
+  c.fillStyle=COL["--nyq"];c.fillText("Nyquist "+nyq.toFixed(1),X(nyq),base+22);
+  // build accordion fold path from f down to alias, reflecting at Nyquist & 0
+  // worst case reflections ~ 2*fMax/fsMin (~100); cap generously above that so the
+  // path always terminates exactly on the computed alias, then re-anchor the last point
+  const pts=[S.f];let x=S.f,g=0;
+  while((x>nyq+1e-6||x<-1e-6)&&g<300){if(x>nyq){x=2*nyq-x;pts.push(nyq);}else{x=-x;pts.push(0);}g++;}
+  pts.push(fold(S.f,S.fs).alias);
+  // hop peak height: scale by segment count and clamp so it never leaves the canvas
+  const segs=pts.length-1;
+  const peakY=i=>Math.max(base*0.12,base-38-i*Math.min(4,(base*0.5)/Math.max(segs,1)));
+  // hops
+  c.strokeStyle=COL["--recon"];c.lineWidth=2;
+  for(let i=0;i<pts.length-1;i++){const x0=X(pts[i]),x1=X(pts[i+1]),cxm=(x0+x1)/2,peak=peakY(i);
+    c.beginPath();c.moveTo(x0,base);c.quadraticCurveTo(cxm,peak,x1,base);c.stroke();}
+  // travelling dot along the folds
+  if(segs>0){const p=(t*0.35)%1,si=Math.min(segs-1,Math.floor(p*segs)),s=p*segs-si;
+    const x0=X(pts[si]),x1=X(pts[si+1]),cxm=(x0+x1)/2,peak=peakY(si);
+    const bx=(1-s)*(1-s)*x0+2*(1-s)*s*cxm+s*s*x1, by=(1-s)*(1-s)*base+2*(1-s)*s*peak+s*s*base;
+    c.fillStyle=COL["--ink"];c.beginPath();c.arc(bx,by,4.5,0,TAU);c.fill();}
+  // markers: true f (may be far right) and alias
+  const {alias}=fold(S.f,S.fs);
+  const mark=(f,col,lab)=>{c.fillStyle=col;c.beginPath();c.arc(X(f),base,4,0,TAU);c.fill();
+    c.fillText(lab,X(f),base-8);};
+  c.fillStyle=COL["--true"];c.fillText("f = "+S.f.toFixed(1),Math.min(X(S.f),w-pad-14),Math.max(9,peakY(segs-1)-8));
+  mark(alias,COL["--recon"],"alias "+alias.toFixed(2));
+}
+
+// ---------- readouts ----------
+function updateReadouts(){
+  const nyq=S.fs/2,{k,signed,alias}=fold(S.f,S.fs),st=classify(S.f,S.fs),dir=signed<0?"−":"+";
+  $("rTrue").textContent=S.f.toFixed(1)+" Hz";$("rFs").textContent=S.fs.toFixed(1)+" Hz";
+  $("rNyq").textContent=nyq.toFixed(2)+" Hz";$("rAlias").textContent=alias.toFixed(2)+" Hz";
+  const b=$("banner");b.className="banner "+st.cls;b.textContent=st.txt;
+  $("formula").innerHTML=
+    'f_alias = |f − round(f/f<sub>s</sub>)·f<sub>s</sub>|<br>'+
+    '= |<span class="num">'+S.f.toFixed(1)+'</span> <span class="op">−</span> round('+
+      '<span class="num">'+(S.f/S.fs).toFixed(2)+'</span>)·<span class="num">'+S.fs.toFixed(1)+'</span>|<br>'+
+    '= |'+S.f.toFixed(1)+' − <span class="num">'+k+'</span>·'+S.fs.toFixed(1)+'| = '+
+      '<span class="op">'+alias.toFixed(2)+' Hz</span><br>'+
+    'apparent spin: <span class="op">'+dir+'</span> ('+(signed<0?"reverse":"forward")+')';
+  const desc=st.txt+": true "+S.f.toFixed(1)+" Hz sampled at "+S.fs.toFixed(1)+" Hz (Nyquist "+nyq.toFixed(2)
+    +" Hz) reads as "+alias.toFixed(2)+" Hz, apparent spin "+(signed<0?"reverse":"forward")+".";
+  $("wheel").setAttribute("aria-label","Spinning wheel — "+desc);
+  $("strip").setAttribute("aria-label","Time-domain waveform — "+desc);
+  $("fold").setAttribute("aria-label","Frequency fold diagram — "+desc);
+}
+
+// ---------- audio (opt-in) ----------
+let AC=null,oA=null,oB=null,gA=null,gB=null;
+function audioOn(){
+  AC=new (window.AudioContext||window.webkitAudioContext)();
+  const mk=type=>{const o=AC.createOscillator(),g=AC.createGain();o.type=type;g.gain.value=0.05;
+    o.connect(g);g.connect(AC.destination);o.start();return [o,g];};
+  [oA,gA]=mk("sine");[oB,gB]=mk("triangle");
+}
+function audioUpdate(){
+  if(!AC)return;const hz=f=>100+f*42,{alias}=fold(S.f,S.fs);
+  oA.frequency.value=hz(S.f);oB.frequency.value=hz(alias);
+}
+
+// ---------- hash / share ----------
+function writeHash(){
+  const q=`f=${S.f.toFixed(1)}&fs=${S.fs.toFixed(1)}&spd=${S.spd}&zoh=${S.zoh?1:0}`;
+  history.replaceState(null,"","#"+q);
+}
+function readHash(){
+  const p=new URLSearchParams(location.hash.slice(1));
+  if(p.has("f"))S.f=clamp(+p.get("f"),0.1,20);
+  if(p.has("fs"))S.fs=clamp(+p.get("fs"),0.4,20);
+  if(p.has("spd"))S.spd=clamp(+p.get("spd"),0.02,0.6);
+  if(p.has("zoh"))S.zoh=p.get("zoh")==="1";
+}
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+// ---------- UI ----------
+function syncControls(){
+  $("f").value=S.f;$("fs").value=S.fs;$("spd").value=S.spd;
+  $("lF").textContent=S.f.toFixed(1);$("lFs").textContent=S.fs.toFixed(1);$("lSpd").textContent=S.spd.toFixed(2);
+  $("zoh").classList.toggle("on",S.zoh);$("zohleg").style.display=S.zoh?"":"none";
+  $("play").classList.toggle("on",S.play);$("play").textContent=S.play?"❚❚ pause":"▶ play";
+  $("sweep").classList.toggle("on",S.sweep);$("snd").classList.toggle("on",S.snd);
+  placeNyq();updateReadouts();audioUpdate();dirty=true;
+}
+function placeNyq(){
+  const mk=$("nyqmark"),min=0.1,max=20,frac=clamp((S.fs/2-min)/(max-min),0,1);
+  mk.style.left="calc(8px + "+frac+" * (100% - 16px))";  // match native 16px thumb geometry
+}
+$("f").addEventListener("input",e=>{let v=+e.target.value;const nyq=S.fs/2;
+  if(Math.abs(v-nyq)<0.2)v=+nyq.toFixed(1);          // snap to critical
+  S.f=v;S.sweep=false;syncControls();writeHash();});
+$("fs").addEventListener("input",e=>{S.fs=+e.target.value;S.sweep=false;syncControls();writeHash();});
+$("spd").addEventListener("input",e=>{S.spd=+e.target.value;syncControls();writeHash();});
+$("play").onclick=()=>{S.play=!S.play;syncControls();};
+$("sweep").onclick=()=>{S.sweep=!S.sweep;if(S.sweep)S.play=true;syncControls();};
+$("zoh").onclick=()=>{S.zoh=!S.zoh;syncControls();writeHash();};
+$("snd").onclick=()=>{S.snd=!S.snd;if(S.snd&&!AC)audioOn();
+  if(AC){const v=S.snd?0.05:0;gA.gain.value=v;gB.gain.value=v;if(S.snd&&AC.state==="suspended")AC.resume();}
+  syncControls();};
+$("share").onclick=()=>{writeHash();const b=$("share");
+  const ok=()=>{b.textContent="✓ copied";setTimeout(()=>b.textContent="⧉ copy link",1200);};
+  const fallback=()=>{                                   // file:// / non-secure / rejected write
+    try{const ta=document.createElement("textarea");ta.value=location.href;ta.style.position="fixed";
+      ta.style.opacity="0";document.body.appendChild(ta);ta.focus();ta.select();
+      const done=document.execCommand("copy");document.body.removeChild(ta);
+      done?ok():prompt("Copy this link:",location.href);
+    }catch(e){prompt("Copy this link:",location.href);}
+  };
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(location.href).then(ok).catch(fallback);
+  }else fallback();};
+
+const PRESETS=[
+  ["faithful","f=2&fs=12&spd=0.15&zoh=0"],
+  ["critically sampled","f=5&fs=10&spd=0.15&zoh=0"],
+  ["classic reversal","f=9&fs=10&spd=0.2&zoh=0"],
+  ["standstill","f=10&fs=10&spd=0.25&zoh=0"],
+  ["strobe-matched","f=12&fs=6&spd=0.25&zoh=1"],
+];
+function applyPreset(q){history.replaceState(null,"","#"+q);readHash();S.sweep=false;syncControls();dirty=true;}
+PRESETS.forEach(([name,q])=>{const el=document.createElement("span");el.className="chip";el.textContent=name;
+  el.tabIndex=0;el.setAttribute("role","button");
+  el.onclick=()=>applyPreset(q);
+  el.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();applyPreset(q);}};
+  $("chips").appendChild(el);});
+
+// ---------- loop ----------
+let simT=0,last=performance.now(),dirty=true;
+function frame(now){
+  const dt=Math.min(0.05,(now-last)/1000);last=now;
+  if(S.play)simT+=dt*S.spd;
+  if(S.sweep){                                   // ramp f past Nyquist and back
+    const low=Math.min(0.5,S.fs*0.4), hi=Math.max(low+0.1,S.fs*0.98);  // never invert at small fs
+    S.f=clamp(S.f+sweepDir*dt*1.3,low,hi);
+    if(S.f>=hi)sweepDir=-1;else if(S.f<=low)sweepDir=1;
+    $("f").value=S.f;$("lF").textContent=S.f.toFixed(1);updateReadouts();audioUpdate();
+  }
+  // redraw only when something moves or a control changed — saves CPU/battery while paused
+  if(S.play||S.sweep||dirty){drawWheel(simT);drawStrip(simT);drawFold(simT);dirty=false;}
+  requestAnimationFrame(frame);
+}
+
+// Space toggles play (except while a control/button is focused, which handles Space itself)
+addEventListener("keydown",e=>{
+  if(e.code==="Space"&&!/^(BUTTON|INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)&&e.target.getAttribute("role")!=="button"){
+    e.preventDefault();S.play=!S.play;syncControls();}
+});
+// respect reduced-motion: present a static, still-informative first frame
+if(window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches)S.play=false;
+layout();readHash();syncControls();requestAnimationFrame(frame);
+</script>
+</body>
+</html>

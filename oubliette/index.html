@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Oubliette — seed-driven dungeon generator</title>
+<style>
+  :root{ --paper:#f5f0e4; --ink:#26343f; --accent:#8a3324; --panel:#ece4d2; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#d9cfb8;color:var(--ink);
+    font-family:"Iowan Old Style","Palatino Linotype",Georgia,"Segoe UI Symbol","Noto Sans Symbols2","Apple Symbols",serif}
+  #app{display:flex;flex-direction:column;height:100%}
+  #bar{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;padding:10px 16px;
+    background:var(--panel);border-bottom:2px solid #b7a988;box-shadow:0 2px 6px rgba(0,0,0,.15)}
+  #bar h1{font-size:20px;margin:0 12px 0 0;letter-spacing:1px;font-variant:small-caps;color:var(--accent)}
+  .ctl{display:flex;align-items:center;gap:6px;font-size:13px}
+  .ctl label{opacity:.8;white-space:nowrap}
+  input[type=text]{font:inherit;font-size:13px;padding:4px 8px;width:150px;border:1px solid #9a8c6a;
+    background:var(--paper);border-radius:4px}
+  input[type=range]{width:96px;accent-color:var(--accent)}
+  button{font:inherit;font-size:13px;padding:5px 11px;border:1px solid #9a8c6a;background:var(--paper);
+    border-radius:5px;cursor:pointer;color:var(--ink)}
+  button:hover{background:#fff}
+  input:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .val{min-width:16px;text-align:center;font-variant-numeric:tabular-nums;font-weight:600}
+  #wrap{flex:1;overflow:auto;display:flex;justify-content:center;align-items:flex-start;padding:16px}
+  canvas{background:var(--paper);box-shadow:0 6px 24px rgba(0,0,0,.35);border-radius:3px;max-width:100%}
+  .sep{width:1px;align-self:stretch;background:#b7a988;margin:2px 0}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="bar">
+    <h1>Oubliette</h1>
+    <div class="ctl"><label>seed</label><input id="seed" type="text" spellcheck="false" title="Dungeon seed — the same seed always draws the same map"><button id="reseed" title="Roll a fresh random seed">⟳ reseed</button></div>
+    <div class="sep"></div>
+    <div class="ctl"><label>size</label><input id="size" type="range" min="20" max="44" step="2" title="Grid width in tiles (bigger floor)"><span class="val" id="sizeV"></span></div>
+    <div class="ctl"><label>density</label><input id="density" type="range" min="1" max="7" title="More rooms per floor"><span class="val" id="densityV"></span></div>
+    <div class="ctl"><label>danger</label><input id="danger" type="range" min="1" max="5" title="Monster / loot / trap intensity (1–5)"><span class="val" id="dangerV"></span></div>
+    <div class="sep"></div>
+    <div class="ctl"><label>level</label><button id="prev" title="Ascend to the floor above">◄</button><span class="val" id="levelV"></span><button id="next" title="Descend to the floor below (a new connected map)">►</button></div>
+    <div class="sep"></div>
+    <div class="ctl"><button id="view" title="Toggle GM view (all secrets shown) vs Player view (secrets, traps &amp; key hidden)">GM view</button></div>
+    <div class="ctl"><button id="png" title="Download a 2× print-resolution PNG">⭳ PNG</button><button id="json" title="Download a JSON legend for VTT import">⭳ JSON</button></div>
+  </div>
+  <div id="wrap"><canvas id="cv"></canvas></div>
+</div>
+<script>
+"use strict";
+// ---------- PRNG ----------
+function hashStr(s){let h=1779033703^s.length;for(let i=0;i<s.length;i++){h=Math.imul(h^s.charCodeAt(i),3432918353);h=h<<13|h>>>19;}return (h>>>0);}
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+// ---------- name generator ----------
+const PRE=["Sunken","Forgotten","Whispering","Shattered","Weeping","Ashen","Drowned","Gilded","Cursed","Hollow","Bleak","Crimson","Frostbit","Serpent's","Buried"];
+const NOUN=["Warren","Vault","Catacomb","Sanctum","Labyrinth","Crypt","Delve","Hold","Barrow","Undercroft","Reliquary","Oubliette","Deep","Maze"];
+function makeName(rng){
+  const syl=["vor","rath","mor","gath","zul","dun","kar","eth","nul","tha","grim"," or","ux","bel","nyx","dra","gol"];
+  let nm="";const n=2+(rng()*2|0);for(let i=0;i<n;i++)nm+=syl[rng()*syl.length|0];
+  nm=nm.charAt(0).toUpperCase()+nm.slice(1);
+  return "The "+PRE[rng()*PRE.length|0]+" "+NOUN[rng()*NOUN.length|0]+" of "+nm;
+}
+const SEEDWORDS=["ghast","tomb","rune","onyx","fang","cellar","gloom","thorn","raven","ember","mire","vault","spire","dread","moss"];
+
+// ---------- encounter tables ----------
+const ROLES=["Guard Post","Barracks","Shrine","Flooded Cavern","Crypt","Armory","Library","Mess Hall","Torture Cell","Fungus Grotto","Antechamber","Cistern"];
+const MONS=[["giant rats","kobolds","cave crickets"],["goblins","skeletons","stirges"],["orc raiders","ghouls","gnolls"],["ogre","wraith","cave troll"],["bone golem","wyvern","death knight"]];
+const LOOT=[["copper coins","tallow candles","rat pelts"],["silver pieces","a healing draught","iron rations"],["a jeweled dagger","a spell scroll","garnet gems"],["a +1 blade","a wand charge","a golden idol"],["an artifact relic","a dragon hoard","a crown of gems"]];
+const TRAPS=["pit","dart","snare","gas","glyph","scything blade"];
+
+// ---------- generation ----------
+function gen(st){
+  const eff=hashStr(st.seed+"::"+st.level);
+  const rng=mulberry32(eff);
+  const W=st.size, H=Math.round(st.size*0.62);
+  const grid=new Uint8Array(W*H);
+  const idx=(x,y)=>y*W+x;
+  const inb=(x,y)=>x>=0&&y>=0&&x<W&&y<H;
+  const rooms=[], edges=[];
+  const minLeaf=Math.max(4,9-st.density), maxD=4+st.density;
+  function carve(x,y,w,h){
+    const rw=Math.max(3,w-1-(rng()*3|0)), rh=Math.max(3,h-1-(rng()*3|0));
+    const rx=x+((w-rw)*rng()|0), ry=y+((h-rh)*rng()|0);
+    for(let yy=ry;yy<ry+rh;yy++)for(let xx=rx;xx<rx+rw;xx++)if(inb(xx,yy))grid[idx(xx,yy)]=1;
+    const r={id:rooms.length,x:rx,y:ry,w:rw,h:rh,cx:(rx+rw/2)|0,cy:(ry+rh/2)|0,deg:0};
+    rooms.push(r);return r;
+  }
+  function line(a,b,c,horiz,tiles){
+    const lo=Math.min(a,b),hi=Math.max(a,b);
+    for(let v=lo;v<=hi;v++){const x=horiz?v:c,y=horiz?c:v;if(inb(x,y)){grid[idx(x,y)]=1;tiles.push([x,y]);}}
+  }
+  function connect(a,b){
+    const t=[];
+    if(rng()<.5){line(a.cx,b.cx,a.cy,true,t);line(a.cy,b.cy,b.cx,false,t);}
+    else{line(a.cy,b.cy,a.cx,false,t);line(a.cx,b.cx,b.cy,true,t);}
+    edges.push({a:a.id,b:b.id,tiles:t});a.deg++;b.deg++;
+  }
+  function bsp(x,y,w,h,d){
+    const canV=w>minLeaf*2, canH=h>minLeaf*2;
+    if(d<maxD&&(canV||canH)){
+      const vert=canV&&(w>=h||!canH);
+      if(vert){const sp=minLeaf+(rng()*(w-2*minLeaf)|0);const A=bsp(x,y,sp,h,d+1),B=bsp(x+sp,y,w-sp,h,d+1);connect(A,B);return rng()<.5?A:B;}
+      const sp=minLeaf+(rng()*(h-2*minLeaf)|0);const A=bsp(x,y,w,sp,d+1),B=bsp(x,y+sp,w,h-sp,d+1);connect(A,B);return rng()<.5?A:B;
+    }
+    return carve(x,y,w,h);
+  }
+  bsp(1,1,W-2,H-2,0);
+
+  // openings: room-border tiles whose orthogonal outside neighbour is floor
+  const isF=(x,y)=>inb(x,y)&&grid[idx(x,y)]===1;
+  for(const r of rooms){
+    r.open=[];const seen=new Set();
+    const add=(ix,iy,ox,oy)=>{if(isF(ox,oy)){const k=ox+","+oy;if(!seen.has(k)){seen.add(k);r.open.push({ix,iy,ox,oy});}}};
+    for(let xx=r.x;xx<r.x+r.w;xx++){add(xx,r.y,xx,r.y-1);add(xx,r.y+r.h-1,xx,r.y+r.h);}
+    for(let yy=r.y;yy<r.y+r.h;yy++){add(r.x,yy,r.x-1,yy);add(r.x+r.w-1,yy,r.x+r.w,yy);}
+  }
+
+  // entrance / exit = the two most separated rooms
+  let ent=rooms[0],exit=rooms[0],best=-1;
+  for(let i=0;i<rooms.length;i++)for(let j=i+1;j<rooms.length;j++){
+    const d=Math.hypot(rooms[i].cx-rooms[j].cx,rooms[i].cy-rooms[j].cy);
+    if(d>best){best=d;ent=rooms[i];exit=rooms[j];}
+  }
+  if(ent.cx+ent.cy>exit.cx+exit.cy){const t=ent;ent=exit;exit=t;}
+  ent.role="Entrance Hall";exit.role="Descent Stair";
+  ent.stair="up";exit.stair="down";
+
+  // vault = a connection-tree leaf (deg<=1) that isn't entrance/exit.
+  // Restricting to genuine dead ends guarantees locking its door only ever
+  // isolates the vault itself — never a pass-through room that would cut the
+  // floor in two and strand the key. If there is no such leaf, we omit the vault.
+  const pool=rooms.filter(r=>r.deg<=1&&r!==ent&&r!==exit&&r.open.length);
+  let vault=null;
+  if(pool.length){vault=pool[rng()*pool.length|0];vault.role="Treasure Vault";vault.locked=true;vault.loot=LOOT[Math.min(4,st.danger)][0];}
+  // secret rooms: up to 2 remaining leaves
+  const rest=pool.filter(r=>r!==vault);
+  const nSecret=Math.min(rest.length,1+(rng()<.5?1:0));
+  for(let i=0;i<nSecret;i++){const s=rest.splice(rng()*rest.length|0,1)[0];s.secret=true;s.role="Hidden Cache";}
+  // key: any non-vault room (always reachable — vault is behind the only locked edge)
+  const keyPool=rooms.filter(r=>r!==vault&&!r.secret&&r!==ent);
+  const keyRoom=(keyPool.length?keyPool:rooms.filter(r=>r!==vault))[rng()*(keyPool.length||1)|0];
+  if(vault&&keyRoom){keyRoom.key=true;}
+
+  // largest ordinary room -> Throne Room
+  let big=null;for(const r of rooms)if(!r.role&&(!big||r.w*r.h>big.w*big.h))big=r;
+  if(big)big.role="Throne Room";
+
+  // assign roles + encounters to the rest, deterministically
+  const dtier=st.danger-1;
+  for(const r of rooms){
+    if(!r.role)r.role=ROLES[rng()*ROLES.length|0];
+    const area=r.w*r.h;
+    if(r!==ent){
+      const mc=0.2+st.danger*0.13+(r.secret?-0.5:0);
+      if(rng()<mc){const tier=Math.min(4,Math.max(0,dtier+(area>30?1:0)-(rng()<.3?1:0)));r.monster=MONS[tier][rng()*3|0];}
+      if(rng()<0.55&&!r.loot)r.loot=LOOT[Math.min(4,Math.max(0,dtier+(rng()<.25?1:0)))][rng()*3|0];
+      if(rng()<0.1+st.danger*0.09)r.trap=TRAPS[Math.min(TRAPS.length-1,(rng()*(2+st.danger))|0)];
+    }
+  }
+  const title=makeName(mulberry32(hashStr(st.seed)));
+  return {W,H,grid,idx,rooms,edges,ent,exit,vault,keyRoom,title};
+}
+
+// ---------- rendering ----------
+const cv=document.getElementById("cv"), ctx=cv.getContext("2d");
+const INK="#26343f", ACC="#8a3324", PAPER="#f5f0e4", GRID="#b7d0e6";
+// one font stack for every glyph the canvas draws — symbol fallbacks keep the
+// dingbats (❖ ⚷ ☠ ※ ▲ ▼) from turning into tofu boxes on Linux/other systems
+const FONT="'Iowan Old Style',Palatino,Georgia,'Segoe UI Symbol','Noto Sans Symbols2','Apple Symbols',serif";
+function drawAll(D,st,target,scale){
+  const c=target,x=c.getContext("2d");
+  const cell=Math.max(15,Math.min(26,Math.round(760/D.W)));
+  const gw=D.W*cell, gh=D.H*cell, topM=76, m=22;
+  const player=st.view==="player";
+  const idx=D.idx;
+  // hidden tiles for player view (secret rooms + their corridors become solid rock)
+  const hide=new Set();
+  if(player){
+    for(const r of D.rooms)if(r.secret)for(let yy=r.y;yy<r.y+r.h;yy++)for(let xx=r.x;xx<r.x+r.w;xx++)hide.add(xx+","+yy);
+    for(const e of D.edges){const A=D.rooms[e.a],B=D.rooms[e.b];if(A.secret||B.secret)for(const t of e.tiles)hide.add(t[0]+","+t[1]);}
+  }
+  const isF=(gx,gy)=>gx>=0&&gy>=0&&gx<D.W&&gy<D.H&&D.grid[idx(gx,gy)]===1&&!hide.has(gx+","+gy);
+
+  // rooms shown in the legend + their one-line descriptions (built once, so the
+  // measure pass below and the draw pass further down never disagree)
+  const listed=D.rooms.filter(r=>!(player&&r.secret));
+  const descs=listed.map(r=>{
+    let d=r.role;
+    if(r.monster)d+=" — guarded by "+r.monster;
+    if(r.stair==="up")d+=" — the way in, stairs up";
+    if(r.stair==="down")d+=" — stairs down to level "+(st.level+1);
+    if(r.role==="Treasure Vault")d+=" — sealed by a locked door"+(r.loot?", holds "+r.loot:"");
+    else if(r.loot)d+="; contains "+r.loot;
+    if(!player&&r.trap)d+="; "+r.trap+" trap";
+    if(!player&&r.key)d+="; the vault key lies here";
+    if(!player&&r.secret)d+=" (hidden)";
+    return d;
+  });
+
+  // ----- layout: legend sits beside the map on wide screens, stacked beneath it
+  // on narrow/portrait screens so small displays get a legible single column -----
+  const portrait = target===cv && typeof window!=="undefined" && window.innerWidth>0 && window.innerWidth<820;
+  const legendFont="12.5px "+FONT, lh=15, entryGap=4, headerH=42, symbolKeyH=58;
+  const legW = portrait ? gw : 316;
+  const textW = legW-42;
+  // measure the encounter key so the canvas grows to fit every room (no silent clip)
+  x.font=legendFont;
+  const countLines=(t,w)=>{const words=t.split(" ");let ln="",n=1;for(const wd of words){const test=ln?ln+" "+wd:wd;if(x.measureText(test).width>w&&ln){n++;ln=wd;}else ln=test;}return n;};
+  let entriesH=0; for(const d of descs)entriesH+=countLines(d,textW)*lh+entryGap;
+  const legendBoxH=headerH+entriesH+symbolKeyH;
+  const legendX = portrait ? m : m+gw+24;
+  const legendTop = portrait ? topM+gh+16 : topM;
+  const cw = portrait ? m+gw+m : m+gw+24+legW+m;
+  const ch = portrait ? legendTop+legendBoxH+m : Math.max(topM+gh+m, topM+legendBoxH+m);
+
+  c.width=cw*scale; c.height=ch*scale;
+  x.setTransform(scale,0,0,scale,0,0);
+  const jr=mulberry32(hashStr(st.seed+"::"+st.level+"::draw"));
+  const j=(k)=>(jr()-0.5)*(k||2.2);
+  const px=(gx)=>m+gx*cell, py=(gy)=>topM+gy*cell;
+
+  x.fillStyle=PAPER; x.fillRect(0,0,cw,ch);
+  // quadrille grid
+  x.strokeStyle=GRID; x.lineWidth=1; x.globalAlpha=.55; x.beginPath();
+  for(let gx=0;gx<=D.W;gx++){x.moveTo(px(gx),topM);x.lineTo(px(gx),topM+gh);}
+  for(let gy=0;gy<=D.H;gy++){x.moveTo(m,py(gy));x.lineTo(m+gw,py(gy));}
+  x.stroke(); x.globalAlpha=1;
+
+  // floor wash + stipple inside rooms
+  for(const r of D.rooms){
+    if(player&&r.secret)continue;
+    x.fillStyle="rgba(138,51,36,.05)"; x.fillRect(px(r.x),py(r.y),r.w*cell,r.h*cell);
+    x.fillStyle="rgba(38,52,63,.28)";
+    const dots=r.w*r.h*1.1|0;
+    for(let i=0;i<dots;i++){const dx=px(r.x)+jr()*r.w*cell, dy=py(r.y)+jr()*r.h*cell;x.fillRect(dx,dy,1,1);}
+  }
+
+  // wobbly walls: any floor-tile edge that borders non-floor
+  function wline(x1,y1,x2,y2,w){
+    const len=Math.hypot(x2-x1,y2-y1), segs=Math.max(1,len/13|0);
+    x.beginPath(); x.moveTo(x1+j(),y1+j());
+    for(let i=1;i<=segs;i++){const t=i/segs;x.lineTo(x1+(x2-x1)*t+j(),y1+(y2-y1)*t+j());}
+    x.lineWidth=w||2.1; x.stroke();
+  }
+  x.strokeStyle=INK; x.lineJoin="round"; x.lineCap="round";
+  for(let gy=0;gy<D.H;gy++)for(let gx=0;gx<D.W;gx++){
+    if(!isF(gx,gy))continue;
+    const X=px(gx),Y=py(gy);
+    if(!isF(gx,gy-1))wline(X,Y,X+cell,Y);
+    if(!isF(gx,gy+1))wline(X,Y+cell,X+cell,Y+cell);
+    if(!isF(gx-1,gy))wline(X,Y,X,Y+cell);
+    if(!isF(gx+1,gy))wline(X+cell,Y,X+cell,Y+cell);
+  }
+
+  // doors on room openings (natural gaps in the wall)
+  function doorEdge(o){ // returns midpoint + orientation of the opening edge
+    let ex,ey,horiz;
+    if(o.oy<o.iy){ex=px(o.ix)+cell/2;ey=py(o.iy);horiz=true;}
+    else if(o.oy>o.iy){ex=px(o.ix)+cell/2;ey=py(o.iy)+cell;horiz=true;}
+    else if(o.ox<o.ix){ex=px(o.ix);ey=py(o.iy)+cell/2;horiz=false;}
+    else{ex=px(o.ix)+cell;ey=py(o.iy)+cell/2;horiz=false;}
+    return {ex,ey,horiz};
+  }
+  for(const r of D.rooms){
+    if(player&&r.secret)continue;
+    for(const o of r.open){
+      if(player&&isF(o.ox,o.oy)===false)continue; // opening leads into hidden rock
+      const {ex,ey,horiz}=doorEdge(o); const h=cell*0.34;
+      x.strokeStyle=INK;
+      if(r.secret){ // dashed hidden passage
+        x.save();x.setLineDash([3,3]);x.lineWidth=1.6;
+        if(horiz)wline(ex-h,ey,ex+h,ey,1.6);else wline(ex,ey-h,ex,ey+h,1.6);
+        x.restore();
+      } else if(r.locked){ // double line + keyhole
+        x.lineWidth=2.4;
+        if(horiz){wline(ex-h,ey-2,ex+h,ey-2,2.4);wline(ex-h,ey+2,ex+h,ey+2,2.4);}
+        else{wline(ex-2,ey-h,ex-2,ey+h,2.4);wline(ex+2,ey-h,ex+2,ey+h,2.4);}
+        x.fillStyle=ACC;x.beginPath();x.arc(ex,ey,2.4,0,7);x.fill();
+      } else { // plain door: bar across the gap
+        x.lineWidth=2.8;
+        if(horiz)wline(ex-h,ey,ex+h,ey,2.8);else wline(ex,ey-h,ex,ey+h,2.8);
+      }
+    }
+  }
+
+  // stairs (hatched)
+  function stairs(r,dir){
+    const cx=px(r.cx)+cell/2, cy=py(r.cy)+cell/2, s=cell*1.2;
+    x.strokeStyle=INK;x.lineWidth=1.6;
+    for(let i=0;i<5;i++){const yy=cy-s/2+i*s/5;wline(cx-s/2,yy,cx-s/2+ (dir==="down"? (i+1):(5-i))*s/6,yy,1.6);}
+    label(cx,cy+s/2+11,dir==="up"?"▲ up":"▼ down",10,ACC);
+  }
+  function label(cx,cy,t,sz,col){x.fillStyle=col||INK;x.font=(sz||11)+"px "+FONT;x.textAlign="center";x.textBaseline="middle";x.fillText(t,cx,cy);}
+  function glyph(r,t,col){label(px(r.x)+r.w*cell-9,py(r.y)+9,t,14,col||INK);}
+
+  // number badges + role glyphs
+  listed.forEach((r,i)=>{ r.num=i+1;
+    label(px(r.cx)+cell/2,py(r.cy)+cell/2,String(i+1),Math.min(20,cell*0.8),INK);
+  });
+  for(const r of D.rooms){
+    if(player&&r.secret)continue;
+    if(r.stair)stairs(r,r.stair);
+    if(r.role==="Treasure Vault")glyph(r,"❖",ACC);
+    if(r.role==="Throne Room")glyph(r,"♛",ACC);
+    if(r.monster)glyph(r,"☠",INK);
+    if(r.loot&&r.role!=="Treasure Vault")label(px(r.x)+9,py(r.y+r.h-1)+cell-8,"$",13,ACC);
+    if(!player&&r.trap)label(px(r.x)+r.w*cell-9,py(r.y+r.h-1)+cell-8,"※",13,ACC);
+    if(!player&&r.key)label(px(r.x)+9,py(r.y)+10,"⚷",14,ACC);
+    if(!player&&r.secret)label(px(r.cx)+cell/2,py(r.cy)+cell/2-cell,"S",13,ACC);
+  }
+
+  // ---- title cartouche ----
+  x.strokeStyle=ACC;x.lineWidth=2.2;
+  wline(m,20,m+gw,20);wline(m,54,m+gw,54);wline(m,20,m,54);wline(m+gw,20,m+gw,54);
+  wline(m+5,24,m+gw-5,24,1);wline(m+5,50,m+gw-5,50,1);
+  x.fillStyle=ACC;x.font="italic 24px "+FONT;x.textAlign="center";x.textBaseline="middle";
+  x.fillText(D.title+"  ·  Level "+st.level,m+gw/2,38);
+  x.fillStyle=INK;x.font="11px "+FONT;x.textAlign="left";
+  x.fillText("seed: "+st.seed+"   ·   "+(player?"Player map":"GM map")+"   ·   danger "+st.danger,m,68);
+
+  // ---- legend (box sized to its content, so nothing clips and there is no dead space) ----
+  const lx=legendX; let ly=legendTop+8;
+  x.strokeStyle=INK;x.lineWidth=2; x.strokeRect(lx,legendTop,legW,legendBoxH);
+  x.fillStyle=ACC;x.font="italic 17px "+FONT;x.textAlign="left";x.textBaseline="alphabetic";
+  x.fillText("Encounter Key",lx+12,ly+18); ly=legendTop+headerH;
+  x.font=legendFont;
+  function wrap(t,X,Y,w,ln_h){const words=t.split(" ");let ln="",yy=Y;for(const wd of words){const test=ln?ln+" "+wd:wd;if(x.measureText(test).width>w&&ln){x.fillText(ln,X,yy);yy+=ln_h;ln=wd;}else ln=test;}x.fillText(ln,X,yy);return yy+ln_h;}
+  listed.forEach((r,i)=>{
+    x.fillStyle=ACC;x.font="bold 12.5px "+FONT;x.fillText(r.num+".",lx+12,ly);
+    x.fillStyle=INK;x.font=legendFont;
+    ly=wrap(descs[i],lx+30,ly,textW,lh)+entryGap;
+  });
+  // symbol key, anchored right below the entries
+  const sy=legendTop+headerH+entriesH+18; x.strokeStyle=INK;x.lineWidth=1;x.beginPath();x.moveTo(lx+12,sy-8);x.lineTo(lx+legW-12,sy-8);x.stroke();
+  x.fillStyle=INK;x.font="12px "+FONT;
+  x.fillText("▲ up  ▼ down  ❖ vault  ⚷ key  ☠ foe",lx+12,sy+6);
+  x.fillText("$ loot  ※ trap  ═ locked  · door  ⋯ secret",lx+12,sy+24);
+  return {cw,ch};
+}
+
+// ---------- state + wiring ----------
+const st={seed:"ravenmire",size:32,density:4,danger:3,level:1,view:"gm"};
+let D;
+const $=id=>document.getElementById(id);
+function readHash(){
+  const p=new URLSearchParams(location.hash.slice(1));
+  if(p.get("seed"))st.seed=p.get("seed");
+  if(p.get("size"))st.size=+p.get("size");
+  if(p.get("den"))st.density=+p.get("den");
+  if(p.get("dgr"))st.danger=+p.get("dgr");
+  if(p.get("lvl"))st.level=Math.max(1,+p.get("lvl"));
+  if(p.get("view"))st.view=p.get("view");
+}
+function writeHash(){
+  const p=new URLSearchParams({seed:st.seed,size:st.size,den:st.density,dgr:st.danger,lvl:st.level,view:st.view});
+  history.replaceState(null,"","#"+p.toString());
+}
+function syncUI(){
+  $("seed").value=st.seed;$("size").value=st.size;$("sizeV").textContent=st.size;
+  $("density").value=st.density;$("densityV").textContent=st.density;
+  $("danger").value=st.danger;$("dangerV").textContent=st.danger;
+  $("levelV").textContent=st.level;$("prev").disabled=st.level<=1;
+  $("view").textContent=st.view==="gm"?"GM view":"Player view";
+  $("view").classList.toggle("on",st.view==="player");
+}
+function refresh(){
+  D=gen(st);
+  const dpr=Math.max(1,Math.min(2,window.devicePixelRatio||1));
+  const dim=drawAll(D,st,cv,dpr);
+  cv.style.width=dim.cw+"px";cv.style.height=dim.ch+"px";
+  syncUI();writeHash();
+}
+$("seed").addEventListener("change",e=>{st.seed=e.target.value.trim()||"oubliette";st.level=1;refresh();});
+$("reseed").addEventListener("click",()=>{const r=mulberry32(Date.now()>>>0);st.seed=SEEDWORDS[r()*SEEDWORDS.length|0]+"-"+(r()*9000+1000|0);st.level=1;refresh();});
+$("size").addEventListener("input",e=>{st.size=+e.target.value;refresh();});
+$("density").addEventListener("input",e=>{st.density=+e.target.value;refresh();});
+$("danger").addEventListener("input",e=>{st.danger=+e.target.value;refresh();});
+$("prev").addEventListener("click",()=>{if(st.level>1){st.level--;refresh();}});
+$("next").addEventListener("click",()=>{st.level++;refresh();});
+$("view").addEventListener("click",()=>{st.view=st.view==="gm"?"player":"gm";refresh();});
+// filesystem-safe base name from the (possibly exotic) seed text
+const safeName=()=>(st.seed.replace(/[^a-z0-9_-]+/gi,"_").replace(/^_+|_+$/g,"").slice(0,40)||"oubliette")+"-lvl"+st.level;
+$("png").addEventListener("click",()=>{
+  const off=document.createElement("canvas");
+  drawAll(D,st,off,2); // high-res / print
+  off.toBlob(b=>{if(!b){alert("PNG export failed — try again or use a smaller map.");return;}const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=safeName()+".png";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);});
+});
+$("json").addEventListener("click",()=>{
+  const out={name:D.title,seed:st.seed,level:st.level,danger:st.danger,grid:{w:D.W,h:D.H},
+    entrance:{room:D.ent.num||D.ent.id+1,x:D.ent.cx,y:D.ent.cy},
+    exit:{room:D.exit.num||D.exit.id+1,x:D.exit.cx,y:D.exit.cy},
+    lockedVault:D.vault?{x:D.vault.cx,y:D.vault.cy}:null,
+    key:(D.vault&&D.keyRoom)?{x:D.keyRoom.cx,y:D.keyRoom.cy}:null,
+    rooms:D.rooms.map(r=>({n:r.num||r.id+1,role:r.role,x:r.x,y:r.y,w:r.w,h:r.h,
+      monster:r.monster||null,loot:r.loot||null,trap:r.trap||null,secret:!!r.secret,locked:!!r.locked,key:!!r.key,
+      doors:r.open.length})),
+    doors:D.edges.length};
+  const blob=new Blob([JSON.stringify(out,null,2)],{type:"application/json"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=safeName()+".json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+});
+// re-render when the viewport crosses the portrait/landscape breakpoint
+let rzT; window.addEventListener("resize",()=>{clearTimeout(rzT);rzT=setTimeout(refresh,150);});
+window.addEventListener("hashchange",()=>{readHash();refresh();});
+readHash();refresh();
+</script>
+</body>
+</html>

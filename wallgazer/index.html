@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wallgazer — hide a message in a wall of noise</title>
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#141922; --panel2:#1b2230; --line:#2a3444;
+    --ink:#e8edf5; --dim:#8896ab; --accent:#ff6a3d; --accent2:#4ea1ff;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(1200px 700px at 50% -10%,#1a2130 0%,var(--bg) 60%);
+    color:var(--ink);font:15px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    min-height:100%;display:flex;flex-direction:column;align-items:center;padding:22px 16px 60px;
+  }
+  h1{font-size:26px;margin:0;letter-spacing:.2px;font-weight:800}
+  h1 span{color:var(--accent)}
+  .sub{color:var(--dim);font-size:13px;margin:4px 0 18px;text-align:center;max-width:640px}
+  .stage{display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;max-width:760px}
+  .dots{position:relative;height:26px;width:100%;pointer-events:none}
+  .dot{position:absolute;top:6px;width:14px;height:14px;border-radius:50%;
+    background:var(--accent);box-shadow:0 0 12px var(--accent);transition:none}
+  .dot.b{background:var(--accent2);box-shadow:0 0 12px var(--accent2)}
+  .canvaswrap{position:relative;line-height:0;border-radius:10px;overflow:hidden;
+    box-shadow:0 12px 40px rgba(0,0,0,.5);border:1px solid var(--line)}
+  canvas{display:block;max-width:100%;background:#000;image-rendering:pixelated}
+  .canvaswrap.celebrate{animation:pop .6s ease}
+  @keyframes pop{0%{transform:scale(1);box-shadow:0 0 0 rgba(255,106,61,0)}
+    35%{transform:scale(1.015);box-shadow:0 0 44px rgba(255,106,61,.55)}
+    100%{transform:scale(1);box-shadow:0 12px 40px rgba(0,0,0,.5)}}
+  #peek{position:absolute;right:10px;bottom:10px;width:150px;height:auto;border:1px solid var(--line);
+    border-radius:6px;display:none;box-shadow:0 4px 16px rgba(0,0,0,.5);opacity:.9}
+  #peek.show{display:block}
+  .coach{color:var(--dim);font-size:13px;text-align:center;min-height:18px}
+  .coach b{color:var(--ink)}
+  .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);
+    border-radius:14px;padding:16px 18px;margin-top:18px;width:100%;max-width:760px;
+    display:grid;grid-template-columns:1fr 1fr;gap:14px 20px}
+  .row{display:flex;flex-direction:column;gap:6px}
+  .row.full{grid-column:1/-1}
+  label{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;font-weight:600}
+  input[type=text]{background:#0c1017;border:1px solid var(--line);color:var(--ink);
+    border-radius:9px;padding:11px 13px;font-size:16px;outline:none}
+  input[type=text]:focus{border-color:var(--accent)}
+  button:focus-visible,.chip:focus-visible,input:focus-visible{outline:2px solid var(--accent2);outline-offset:2px}
+  input[type=range]{width:100%;accent-color:var(--accent);margin:2px 0}
+  .valrow{display:flex;justify-content:space-between;align-items:baseline}
+  .valrow .v{color:var(--ink);font-size:12px;font-variant-numeric:tabular-nums}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  button,.chip{font:inherit;cursor:pointer;border-radius:9px;border:1px solid var(--line);
+    background:#0c1017;color:var(--ink);padding:9px 13px;font-size:13px;transition:.12s}
+  button:hover,.chip:hover{border-color:var(--accent);color:#fff}
+  .chip.on{background:var(--accent);border-color:var(--accent);color:#0b0d12;font-weight:700}
+  .actions{display:flex;flex-wrap:wrap;gap:10px}
+  .actions button{padding:11px 16px;font-weight:600}
+  #reveal{background:var(--accent);border-color:var(--accent);color:#0b0d12}
+  #reveal.on{background:var(--accent2);border-color:var(--accent2);color:#0b0d12}
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);
+    background:var(--accent);color:#0b0d12;font-weight:700;padding:10px 18px;border-radius:10px;
+    opacity:0;transition:.3s;pointer-events:none}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  @media(max-width:640px){.panel{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+  <h1>Wall<span>gazer</span></h1>
+  <div class="sub">Type a secret. It renders a wall of noise. Relax your eyes and look
+    <i>through</i> the screen until the guide dots merge into three — a hidden 3D message floats up.
+    Can't fuse? Hit <b>Reveal</b>.</div>
+
+  <div class="stage">
+    <div class="dots" id="dots">
+      <div class="dot" id="dotA"></div>
+      <div class="dot b" id="dotB"></div>
+    </div>
+    <div class="canvaswrap" id="wrap">
+      <canvas id="cv"></canvas>
+      <canvas id="peek"></canvas>
+    </div>
+    <div class="coach" id="coach"></div>
+  </div>
+
+  <div class="panel">
+    <div class="row full">
+      <label for="msg">Secret message</label>
+      <input type="text" id="msg" maxlength="24" placeholder="type a word…" autocomplete="off">
+    </div>
+    <div class="row full">
+      <label>Presets</label>
+      <div class="chips" id="presets">
+        <button type="button" class="chip" data-p="MARRY ME">MARRY ME</button>
+        <button type="button" class="chip" data-p="HELLO">HELLO</button>
+        <button type="button" class="chip" data-p="LOVE">LOVE</button>
+        <button type="button" class="chip" data-p="★heart">♥ heart</button>
+        <button type="button" class="chip" data-p="★star">★ star</button>
+        <button type="button" class="chip" data-p="★ring">◎ ring</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="valrow"><label>Depth strength</label><span class="v" id="vDepth"></span></div>
+      <input type="range" id="depth" min="0.1" max="1" step="0.05">
+    </div>
+    <div class="row">
+      <div class="valrow"><label>Eye separation</label><span class="v" id="vSep"></span></div>
+      <input type="range" id="sep" min="48" max="140" step="1">
+    </div>
+    <div class="row">
+      <div class="valrow"><label>Dot density</label><span class="v" id="vDen"></span></div>
+      <input type="range" id="den" min="0.15" max="0.9" step="0.05">
+    </div>
+    <div class="row">
+      <div class="valrow"><label>Contrast</label><span class="v" id="vCon"></span></div>
+      <input type="range" id="con" min="0.3" max="1" step="0.05">
+    </div>
+
+    <div class="row">
+      <label>Dot theme</label>
+      <div class="chips">
+        <button type="button" class="chip" data-color="mono">Mono</button>
+        <button type="button" class="chip" data-color="color">Colored</button>
+      </div>
+    </div>
+    <div class="row">
+      <label>Fusion mode</label>
+      <div class="chips">
+        <button type="button" class="chip" data-eye="wall">Wall-eyed</button>
+        <button type="button" class="chip" data-eye="cross">Cross-eyed</button>
+      </div>
+    </div>
+
+    <div class="row full">
+      <label>Seed &amp; noise</label>
+      <div class="chips">
+        <button id="shuffle">↻ New noise pattern</button>
+        <span class="v" id="vSeed" style="align-self:center;color:var(--dim)"></span>
+      </div>
+    </div>
+
+    <div class="row full">
+      <div class="actions">
+        <button id="reveal">👁 Reveal (wiggle)</button>
+        <button id="peekBtn">🔍 Depth peek</button>
+        <button id="copy">🔗 Copy link</button>
+        <button id="png">💾 Save PNG</button>
+        <button id="card">🖨 Printable card</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+(function(){
+  const MAXW = 720, CSS_H = 420, MU = 1/3;
+  const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+  const peek = document.getElementById('peek'), pctx = peek.getContext('2d');
+  const wrap = document.getElementById('wrap');
+  const $ = id => document.getElementById(id);
+  const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+  // Render size follows the display width so the stereogram is drawn 1:1 with
+  // its backing store — an autostereogram must never be scaled/interpolated.
+  let CSS_W, W, H, depthRaw;
+  function computeSize(){
+    const avail = (document.documentElement.clientWidth || MAXW) - 32;
+    CSS_W = Math.max(280, Math.min(MAXW, Math.round(avail)));
+    W = Math.round(CSS_W*dpr); H = Math.round(CSS_H*dpr);
+  }
+  function setupCanvas(){
+    computeSize();
+    cv.width = W; cv.height = H; cv.style.width = CSS_W+'px'; cv.style.height = CSS_H+'px';
+    depthRaw = new Float32Array(W*H);  // 0..1 shape (1 = closest)
+  }
+
+  // ---- state ----
+  const S = { msg:'HELLO', depth:0.75, sep:96, den:0.5, con:0.9, color:'mono', eye:'wall', seed:12345 };
+  let wig = null, wigTimer = null, wigFrame = 0, revealOn = false;
+
+  // ---- seeded RNG (mulberry32) ----
+  function rng32(a){ return function(){ a|=0;a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a);
+    t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+  // ---- depth map authoring ----
+  function buildDepth(){
+    const off = document.createElement('canvas'); off.width=W; off.height=H;
+    const o = off.getContext('2d');
+    o.fillStyle='#000'; o.fillRect(0,0,W,H);
+    o.fillStyle='#fff'; o.textAlign='center'; o.textBaseline='middle';
+    const cx=W/2, cy=H/2;
+    const preset = S.msg.charCodeAt(0)===0x2605 ? S.msg.slice(1) : null; // "★heart" markers
+    if(preset==='heart'){ drawHeart(o,cx,cy,Math.min(W,H)*0.34); }
+    else if(preset==='star'){ drawStar(o,cx,cy,Math.min(W,H)*0.42,5); }
+    else if(preset==='ring'){ o.lineWidth=Math.min(W,H)*0.14; o.strokeStyle='#fff';
+      o.beginPath(); o.arc(cx,cy,Math.min(W,H)*0.3,0,7); o.stroke(); }
+    else {
+      const txt = (S.msg||' ').toUpperCase();
+      let fs = Math.round(H*0.55);
+      o.font = `900 ${fs}px Arial, sans-serif`;
+      const maxW = W*0.86;
+      while(o.measureText(txt).width > maxW && fs > 10){ fs-=2; o.font=`900 ${fs}px Arial, sans-serif`; }
+      o.fillText(txt, cx, cy);
+    }
+    // sample luminance -> soft raised plateau (feather edges via blur pass)
+    const img = o.getImageData(0,0,W,H).data;
+    for(let i=0,p=0;i<img.length;i+=4,p++) depthRaw[p] = img[i]/255;
+    boxBlur(depthRaw, W, H, Math.max(1, Math.round(dpr*2))); // feather = fewer echoes/ghosts
+  }
+  function drawHeart(o,cx,cy,r){ o.beginPath();
+    for(let a=0;a<=Math.PI*2;a+=0.02){ const x=16*Math.pow(Math.sin(a),3);
+      const y=13*Math.cos(a)-5*Math.cos(2*a)-2*Math.cos(3*a)-Math.cos(4*a);
+      const px=cx+x*r/16, py=cy-y*r/16; a===0?o.moveTo(px,py):o.lineTo(px,py); }
+    o.closePath(); o.fill(); }
+  function drawStar(o,cx,cy,r,n){ o.beginPath();
+    for(let i=0;i<n*2;i++){ const rr=i%2?r*0.42:r; const a=Math.PI/n*i - Math.PI/2;
+      const px=cx+Math.cos(a)*rr, py=cy+Math.sin(a)*rr; i===0?o.moveTo(px,py):o.lineTo(px,py); }
+    o.closePath(); o.fill(); }
+  function boxBlur(d,w,h,rad){ if(rad<1) return; const tmp=new Float32Array(d.length);
+    for(let y=0;y<h;y++){ let s=0; const row=y*w; for(let x=-rad;x<=rad;x++) s+=d[row+clamp(x,0,w-1)];
+      for(let x=0;x<w;x++){ tmp[row+x]=s/(2*rad+1);
+        s += d[row+clamp(x+rad+1,0,w-1)] - d[row+clamp(x-rad,0,w-1)]; } }
+    for(let x=0;x<w;x++){ let s=0; for(let y=-rad;y<=rad;y++) s+=tmp[clamp(y,0,h-1)*w+x];
+      for(let y=0;y<h;y++){ d[y*w+x]=s/(2*rad+1);
+        s += tmp[clamp(y+rad+1,0,h-1)*w+x] - tmp[clamp(y-rad,0,h-1)*w+x]; } } }
+  const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+  const clamp01=v=>v<0?0:v>1?1:v;
+
+  // ---- SIRDS core (Thimbleby/Inglis/Witten same-links, correct occlusion) ----
+  function render(){
+    const E = Math.round(S.sep*dpr);
+    const img = ctx.createImageData(W,H); const px = img.data;
+    const same = new Int32Array(W);
+    const colR = new Uint8ClampedArray(W), colG = new Uint8ClampedArray(W), colB = new Uint8ClampedArray(W);
+    const rand = rng32(S.seed);
+    const sepOf = z => Math.round((1-MU*z)*E/(2-MU*z));
+    // Effective depth at a pixel, with cross-eyed inversion applied ONCE so the
+    // disparity and the occlusion test operate on the same geometry.
+    const zAt = i => { let z = depthRaw[i]*S.depth; if(S.eye==='cross') z = S.depth - z; return clamp01(z); };
+    for(let y=0;y<H;y++){
+      const base = y*W;
+      for(let x=0;x<W;x++) same[x]=x;
+      for(let x=0;x<W;x++){
+        const z = zAt(base+x);                       // 0..1 effective depth
+        const s = sepOf(z);
+        let left = x - (s>>1) - (s&1);
+        let right = left + s;
+        if(left>=0 && right<W){
+          // occlusion / hidden-surface visibility test (uses effective depth)
+          let vis=true, t=1, zt;
+          do{ const zc=z;
+            zt = zc + 2*(2-MU*zc)*t/(MU*E);
+            vis = zAt(base+x-t) < zt && zAt(base+x+t) < zt;
+            t++;
+          } while(vis && zt<1 && (x-t)>=0 && (x+t)<W);
+          if(vis){
+            // resolve chained same-links (paper algorithm)
+            let l = same[left];
+            while(l!==left && l!==right){
+              if(l<right){ left=l; l=same[left]; }
+              else{ same[left]=right; left=right; l=same[left]; right=l; }
+            }
+            same[left]=right;
+          }
+        }
+      }
+      // assign colors right->left so chains resolve
+      for(let x=W-1;x>=0;x--){
+        if(same[x]===x){ const c=genCol(rand); colR[x]=c[0];colG[x]=c[1];colB[x]=c[2]; }
+        else{ colR[x]=colR[same[x]]; colG[x]=colG[same[x]]; colB[x]=colB[same[x]]; }
+        const o=(base+x)*4; px[o]=colR[x]; px[o+1]=colG[x]; px[o+2]=colB[x]; px[o+3]=255;
+      }
+    }
+    ctx.putImageData(img,0,0);
+    drawPeek();
+    positionDots(E);
+  }
+  function genCol(rng){
+    const on = rng() < S.den;
+    if(S.color==='mono'){
+      const v = on ? (0.5 - S.con/2) : (0.5 + S.con/2);
+      const c = Math.round(clamp01(v)*255); return [c,c,c];
+    }
+    if(on){
+      // saturated random dot, contrast pushes toward pure channels
+      const mid = (1-S.con)*128;
+      return [ mid + (rng()*S.con*255|0), mid + (rng()*S.con*255|0), mid + (rng()*S.con*255|0) ];
+    }
+    const c = Math.round((0.5 + S.con/2)*255); return [c,c,c];
+  }
+
+  // ---- depth peek thumbnail (self-verification) ----
+  function drawPeek(){
+    const pw=Math.round(150*dpr), ph=Math.round(pw*H/W);
+    peek.width=pw; peek.height=ph; peek.style.width='150px'; peek.style.height=(ph/dpr)+'px';
+    const im=pctx.createImageData(pw,ph); const d=im.data;
+    for(let y=0;y<ph;y++)for(let x=0;x<pw;x++){
+      const sx=Math.floor(x*W/pw), sy=Math.floor(y*H/ph);
+      const v=Math.round(depthRaw[sy*W+sx]*S.depth*255);
+      const o=(y*pw+x)*4; d[o]=v; d[o+1]=Math.round(v*0.55); d[o+2]=v*0.2|0; d[o+3]=255;
+    }
+    pctx.putImageData(im,0,0);
+  }
+
+  // ---- wiggle-gram reveal ----
+  function buildWiggle(){
+    const p = Math.max(3, Math.round(S.sep*dpr*0.32));
+    wig = [mkFrame(-p), mkFrame(p)];
+  }
+  function mkFrame(sh){
+    const im=ctx.createImageData(W,H); const d=im.data;
+    for(let i=0;i<d.length;i+=4){ d[i]=12; d[i+1]=15; d[i+2]=22; d[i+3]=255; }
+    for(let y=0;y<H;y++){ const base=y*W;
+      for(let x=0;x<W;x++){ const z=depthRaw[base+x]*S.depth; if(z<0.04) continue;
+        const dx = x + Math.round(z*sh); if(dx<0||dx>=W) continue;
+        const o=(base+dx)*4; const b=40+z*205;
+        d[o]=b; d[o+1]=Math.round(90+z*130); d[o+2]=Math.round(160+z*60); d[o+3]=255;
+      } }
+    return im;
+  }
+  function setReveal(on){
+    revealOn = on; $('reveal').classList.toggle('on',on);
+    $('reveal').textContent = on ? '✕ Hide wiggle' : '👁 Reveal (wiggle)';
+    clearInterval(wigTimer);
+    if(on){ buildWiggle(); wigFrame=0;
+      wrap.classList.remove('celebrate'); void wrap.offsetWidth; wrap.classList.add('celebrate');
+      wigTimer=setInterval(()=>{ ctx.putImageData(wig[wigFrame&1],0,0); wigFrame++; },130);
+    } else render();
+  }
+
+  // ---- guide dots + coach ----
+  function positionDots(E){
+    // Space the dots at the pattern period as it is ACTUALLY rendered on screen.
+    // E is the separation in device pixels; express it as a fraction of the
+    // backing store (E/W) times the canvas's displayed width, and offset by the
+    // canvas's left edge relative to the dots row so they stay centered on it.
+    const rowRect = $('dots').getBoundingClientRect();
+    const cvRect = cv.getBoundingClientRect();
+    if(!cvRect.width) return;
+    const midX = (cvRect.left - rowRect.left) + cvRect.width/2;
+    const half = cvRect.width * (E/W) / 2;
+    $('dotA').style.left = (midX-half-7)+'px';
+    $('dotB').style.left = (midX+half-7)+'px';
+  }
+  function setCoach(){
+    if(!S.msg || S.msg.trim()===''){
+      $('coach').innerHTML = 'Type a word above to hide it in the noise.'; return;
+    }
+    $('coach').innerHTML = S.eye==='wall'
+      ? 'Look <b>through</b> the screen (as if at a wall behind it) until the two dots become <b>three</b>.'
+      : 'Cross your eyes slightly (focus in <b>front</b> of the screen) until the two dots become <b>three</b>.';
+  }
+  function markPresets(){
+    document.querySelectorAll('[data-p]').forEach(c=>c.classList.toggle('on', c.dataset.p===S.msg));
+  }
+  // gentle dot breathing — pulse each dot's own size (center stays fixed) so the
+  // center-to-center gap that trains convergence never moves.
+  let t0=performance.now();
+  (function breathe(now){
+    const k = 1 + Math.sin((now-t0)/900)*0.12;
+    const tf = `scale(${k})`;
+    $('dotA').style.transform = tf; $('dotB').style.transform = tf;
+    requestAnimationFrame(breathe);
+  })(t0);
+
+  // ---- hash serialize / deserialize ----
+  function toHash(){
+    const p = new URLSearchParams();
+    p.set('m', S.msg); p.set('d', S.depth); p.set('e', S.sep); p.set('n', S.den);
+    p.set('c', S.con); p.set('t', S.color); p.set('y', S.eye); p.set('s', S.seed);
+    return '#'+p.toString();
+  }
+  function fromHash(){
+    if(!location.hash) return;
+    const p = new URLSearchParams(location.hash.slice(1));
+    if(p.has('m')) S.msg=p.get('m');
+    // Numeric params are validated + clamped so a tampered/garbage link can't
+    // poison the render with NaN (which silently yields pure noise, no shape).
+    const num=(k,lo,hi)=>{ const v=parseFloat(p.get(k)); return isFinite(v)?clamp(v,lo,hi):null; };
+    let v;
+    if(p.has('d')&&(v=num('d',0.1,1))!==null) S.depth=v;
+    if(p.has('e')&&(v=num('e',48,140))!==null) S.sep=v;
+    if(p.has('n')&&(v=num('n',0.15,0.9))!==null) S.den=v;
+    if(p.has('c')&&(v=num('c',0.3,1))!==null) S.con=v;
+    if(p.has('s')){ const sd=parseInt(p.get('s'),10); if(isFinite(sd)) S.seed=sd|0; }
+    if(p.get('t')==='mono'||p.get('t')==='color') S.color=p.get('t');
+    if(p.get('y')==='wall'||p.get('y')==='cross') S.eye=p.get('y');
+  }
+  function syncHash(){ history.replaceState(null,'',toHash()); }
+
+  // ---- UI wiring ----
+  function refresh(rebuild){ if(rebuild) buildDepth(); if(revealOn) setReveal(true); else render(); syncHash(); }
+  function syncUI(){
+    $('msg').value = (S.msg.charCodeAt(0)===0x2605)?'':S.msg;
+    $('depth').value=S.depth; $('sep').value=S.sep; $('den').value=S.den; $('con').value=S.con;
+    $('vDepth').textContent=Math.round(S.depth*100)+'%';
+    $('vSep').textContent=S.sep+' px';
+    $('vDen').textContent=Math.round(S.den*100)+'%';
+    $('vCon').textContent=Math.round(S.con*100)+'%';
+    $('vSeed').textContent='seed '+S.seed;
+    document.querySelectorAll('[data-color]').forEach(c=>c.classList.toggle('on',c.dataset.color===S.color));
+    document.querySelectorAll('[data-eye]').forEach(c=>c.classList.toggle('on',c.dataset.eye===S.eye));
+    markPresets();
+    setCoach();
+  }
+  $('msg').addEventListener('input', e=>{ S.msg=e.target.value||' '; setCoach(); markPresets(); refresh(true); });
+  document.getElementById('presets').addEventListener('click', e=>{
+    const c=e.target.closest('[data-p]'); if(!c) return; S.msg=c.dataset.p; syncUI(); refresh(true);
+  });
+  [['depth','depth'],['sep','sep'],['den','den'],['con','con']].forEach(([id,key])=>{
+    $(id).addEventListener('input', e=>{ S[key]=+e.target.value; syncUI(); refresh(false); });
+  });
+  document.querySelectorAll('[data-color]').forEach(c=>c.addEventListener('click',()=>{
+    S.color=c.dataset.color; syncUI(); refresh(false); }));
+  document.querySelectorAll('[data-eye]').forEach(c=>c.addEventListener('click',()=>{
+    S.eye=c.dataset.eye; syncUI(); refresh(false); }));
+  $('shuffle').addEventListener('click',()=>{ S.seed=(Math.random()*1e9)|0; syncUI(); refresh(false); });
+  $('reveal').addEventListener('click',()=>setReveal(!revealOn));
+  $('peekBtn').addEventListener('click',()=>{
+    const on = peek.classList.toggle('show');
+    $('peekBtn').classList.toggle('on',on);
+    $('peekBtn').textContent = on ? '✕ Hide peek' : '🔍 Depth peek';
+  });
+  $('copy').addEventListener('click',()=>{
+    const url=location.href.split('#')[0]+toHash();
+    syncHash();
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(url).then(
+        ()=>toast('Link copied — share the secret!'),
+        ()=>toast('Copy failed — URL is in the address bar')
+      ).catch(()=>toast('Copy failed — URL is in the address bar'));
+    } else {
+      toast('URL is in the address bar — copy it to share');
+    }
+  });
+  $('png').addEventListener('click',()=>{
+    const a=document.createElement('a');
+    a.download='wallgazer-'+S.seed+'.png'; a.href=cv.toDataURL('image/png'); a.click();
+  });
+  $('card').addEventListener('click',()=>{
+    const data=cv.toDataURL('image/png');
+    const w=window.open('','_blank');
+    if(!w){ toast('Allow pop-ups to print a card'); return; }
+    w.document.write(`<!doctype html><title>Wallgazer card</title>
+      <style>body{font-family:Arial,sans-serif;text-align:center;margin:32px;color:#222}
+      img{max-width:100%;border:1px solid #ccc;border-radius:8px}
+      h1{margin:0 0 4px} p{color:#555;max-width:600px;margin:8px auto}</style>
+      <h1>Wallgazer</h1>
+      <p>Relax your eyes and look <b>through</b> the page until the pattern splits into three —
+      a hidden 3D message will float out of the noise.</p>
+      <img src="${data}">
+      <p style="font-size:12px">Made with Wallgazer · a single-file autostereogram toy</p>
+      <script>onload=()=>setTimeout(()=>print(),300)<\/script>`);
+    w.document.close();
+  });
+
+  let toastTimer;
+  function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show');
+    clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),2200); }
+
+  // ---- boot ----
+  setupCanvas(); fromHash(); syncUI(); buildDepth(); render();
+
+  // Re-init on resize/rotate: the SIRDS is redrawn at the new display width (1:1,
+  // never scaled) and the guide dots re-space to the new pattern period.
+  let rzTimer;
+  window.addEventListener('resize', ()=>{
+    clearTimeout(rzTimer);
+    rzTimer = setTimeout(()=>{
+      setupCanvas(); buildDepth();
+      if(revealOn) setReveal(true); else render();
+    }, 150);
+  });
+})();
+</script>
+</body>
+</html>

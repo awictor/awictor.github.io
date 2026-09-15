@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Black-Scholes Option Pricer — call/put price &amp; Greeks</title>
+<meta name="description" content="Price European call and put options with the Black-Scholes-Merton model, including Delta, Gamma, Vega, Theta, and Rho. Verifies put-call parity. Offline, no tracking.">
+<style>
+  :root{
+    --c:#4338ca;
+    --bg:#eef0fb; --card:#ffffff; --fg:#0e1022; --muted:#545478;
+    --line:#dcdef5; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#080818; --card:#131328; --fg:#e8e8f7; --muted:#a2a2c6;
+    --line:#232342; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:860px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto;font-weight:700}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:860px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  input{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.1rem;font-weight:600;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .row{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+  @media(max-width:640px){.row{grid-template-columns:1fr 1fr}}
+  .prices{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
+  .price{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:18px;text-align:center}
+  .price .v{font-size:2.2rem;font-weight:800;color:var(--c);word-break:break-all}
+  .price .k{font-size:.82rem;color:var(--muted);margin-top:2px}
+  table{width:100%;border-collapse:collapse;margin-top:16px;font-size:.92rem}
+  th,td{text-align:right;padding:8px 10px;border-bottom:1px solid var(--line);font-family:ui-monospace,monospace}
+  th:first-child,td:first-child{text-align:left;font-family:inherit;color:var(--muted);font-weight:600}
+  thead th{color:var(--muted);font-weight:700}
+  .err{color:#dc2626;font-size:.86rem;margin-top:10px;text-align:center;min-height:1em}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .parity{text-align:center;color:var(--muted);font-size:.85rem;margin-top:12px}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">∫</div>
+  <div>
+    <h1>Black-Scholes Option Pricer</h1>
+    <p>European call/put price &amp; Greeks</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="row">
+      <div><label>Spot (S)</label><input id="S" inputmode="decimal" value="100"></div>
+      <div><label>Strike (K)</label><input id="K" inputmode="decimal" value="100"></div>
+      <div><label>Vol σ (%/yr)</label><input id="v" inputmode="decimal" value="20"></div>
+      <div><label>Rate r (%/yr)</label><input id="r" inputmode="decimal" value="5"></div>
+      <div><label>Time T (yrs)</label><input id="T" inputmode="decimal" value="1"></div>
+    </div>
+    <div class="prices">
+      <div class="price"><div class="v" id="call">—</div><div class="k">Call price</div></div>
+      <div class="price"><div class="v" id="put">—</div><div class="k">Put price</div></div>
+    </div>
+    <div class="parity" id="parity"></div>
+    <table>
+      <thead><tr><th>Greek</th><th>Call</th><th>Put</th></tr></thead>
+      <tbody>
+        <tr><td>Delta</td><td id="dc">—</td><td id="dp">—</td></tr>
+        <tr><td>Gamma</td><td id="gc">—</td><td id="gp">—</td></tr>
+        <tr><td>Vega (per 1% vol)</td><td id="vc">—</td><td id="vp">—</td></tr>
+        <tr><td>Theta (per day)</td><td id="tc">—</td><td id="tp">—</td></tr>
+        <tr><td>Rho (per 1% rate)</td><td id="rc">—</td><td id="rp">—</td></tr>
+      </tbody>
+    </table>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>About Black-Scholes</h2>
+    <p class="note">The <b>Black-Scholes-Merton</b> model prices European options assuming lognormal returns and constant volatility. With spot <b>S</b>, strike <b>K</b>, volatility <b>σ</b>, risk-free rate <b>r</b>, and time to expiry <b>T</b>: <code>d₁ = [ln(S/K) + (r + σ²/2)T] / (σ√T)</code>, <code>d₂ = d₁ − σ√T</code>, and <code>Call = S·N(d₁) − K·e^(−rT)·N(d₂)</code>. The <b>Greeks</b> measure sensitivity: Delta to spot, Gamma to Delta, Vega to volatility, Theta to time decay, and Rho to rates. This tool also checks <b>put-call parity</b> (<code>C − P = S − K·e^(−rT)</code>) as a sanity test. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  // Standard normal PDF and CDF (CDF via Abramowitz & Stegun 7.1.26 erf approximation).
+  function normPdf(x){ return Math.exp(-x * x / 2) / Math.sqrt(2 * Math.PI); }
+  function normCdf(x){
+    var t = 1 / (1 + 0.2316419 * Math.abs(x));
+    var d = 0.3989422804014327 * Math.exp(-x * x / 2);
+    var p = d * t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+    return x >= 0 ? 1 - p : p;
+  }
+  function checkInputs(S, K, v, r, T){
+    [['spot', S], ['strike', K], ['volatility', v], ['time', T]].forEach(function(pair){ if(typeof pair[1] !== 'number' || !isFinite(pair[1]) || pair[1] <= 0) throw new Error(pair[0] + ' must be positive'); });
+    if(typeof r !== 'number' || !isFinite(r)) throw new Error('rate must be a finite number');
+  }
+  function d1(S, K, v, r, T){ checkInputs(S, K, v, r, T); return (Math.log(S / K) + (r + v * v / 2) * T) / (v * Math.sqrt(T)); }
+  function d2(S, K, v, r, T){ return d1(S, K, v, r, T) - v * Math.sqrt(T); }
+  function callPrice(S, K, v, r, T){ var a = d1(S, K, v, r, T), b = a - v * Math.sqrt(T); return S * normCdf(a) - K * Math.exp(-r * T) * normCdf(b); }
+  function putPrice(S, K, v, r, T){ var a = d1(S, K, v, r, T), b = a - v * Math.sqrt(T); return K * Math.exp(-r * T) * normCdf(-b) - S * normCdf(-a); }
+  // Greeks (per-unit; scale Vega/Rho/Theta at the display layer).
+  function greeks(S, K, v, r, T){
+    var a = d1(S, K, v, r, T), b = a - v * Math.sqrt(T), sqT = Math.sqrt(T), disc = Math.exp(-r * T);
+    var gamma = normPdf(a) / (S * v * sqT);
+    var vega = S * normPdf(a) * sqT;
+    return {
+      deltaCall: normCdf(a),
+      deltaPut: normCdf(a) - 1,
+      gamma: gamma,
+      vega: vega,
+      thetaCall: -(S * normPdf(a) * v) / (2 * sqT) - r * K * disc * normCdf(b),
+      thetaPut: -(S * normPdf(a) * v) / (2 * sqT) + r * K * disc * normCdf(-b),
+      rhoCall: K * T * disc * normCdf(b),
+      rhoPut: -K * T * disc * normCdf(-b)
+    };
+  }
+
+  if(typeof module !== 'undefined') module.exports = { normCdf:normCdf, normPdf:normPdf, d1:d1, d2:d2, callPrice:callPrice, putPrice:putPrice, greeks:greeks };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var $ = function(id){ return document.getElementById(id); };
+    var f = function(x, d){ return x.toFixed(d === undefined ? 4 : d); };
+
+    function render(){
+      $('err').textContent = '';
+      try{
+        var S = Number($('S').value), K = Number($('K').value), v = Number($('v').value) / 100, r = Number($('r').value) / 100, T = Number($('T').value);
+        var c = callPrice(S, K, v, r, T), p = putPrice(S, K, v, r, T);
+        $('call').textContent = f(c, 4); $('put').textContent = f(p, 4);
+        var lhs = c - p, rhs = S - K * Math.exp(-r * T);
+        $('parity').textContent = 'Put-call parity: C − P = ' + f(lhs, 4) + '  ≈  S − Ke⁻ʳᵀ = ' + f(rhs, 4);
+        var g = greeks(S, K, v, r, T);
+        $('dc').textContent = f(g.deltaCall); $('dp').textContent = f(g.deltaPut);
+        $('gc').textContent = f(g.gamma, 5); $('gp').textContent = f(g.gamma, 5);
+        $('vc').textContent = f(g.vega / 100, 4); $('vp').textContent = f(g.vega / 100, 4);
+        $('tc').textContent = f(g.thetaCall / 365, 4); $('tp').textContent = f(g.thetaPut / 365, 4);
+        $('rc').textContent = f(g.rhoCall / 100, 4); $('rp').textContent = f(g.rhoPut / 100, 4);
+      }catch(e){ ['call','put','dc','dp','gc','gp','vc','vp','tc','tp','rc','rp'].forEach(function(id){ $(id).textContent = '—'; }); $('parity').textContent = ''; $('err').textContent = e.message; }
+    }
+    ['S','K','v','r','T'].forEach(function(id){ $(id).addEventListener('input', render); });
+    render();
+
+    var root = document.documentElement, tb = $('theme');
+    function setTheme(t){ root.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? '☀️' : '🌙'; try{ localStorage.setItem('bs-theme', t); }catch(e){} }
+    var saved; try{ saved = localStorage.getItem('bs-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); });
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Warren — watch a dungeon carve itself</title>
+<style>
+  :root{
+    --bg:#0d0c12; --panel:#16151d; --panel2:#1e1c26; --line:#2c2a38;
+    --ink:#e9e4d8; --dim:#9a94a8; --accent:#ff7a4d; --accent2:#6ee7b7;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(1200px 700px at 70% -10%,#1a1826,var(--bg));
+    color:var(--ink);font:14px/1.4 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    display:flex;min-height:100vh;
+  }
+  #wrap{display:flex;gap:18px;padding:18px;margin:auto;align-items:flex-start;flex-wrap:wrap;justify-content:center}
+  #stage{display:flex;flex-direction:column;gap:12px}
+  h1{font-size:19px;margin:0;letter-spacing:.3px;font-weight:700}
+  h1 b{color:var(--accent)}
+  .tag{color:var(--dim);font-size:12.5px;margin:2px 0 0}
+  #cvwrap{position:relative;border:1px solid var(--line);border-radius:12px;overflow:hidden;
+    box-shadow:0 20px 50px -20px #000,inset 0 0 0 1px #ffffff08;background:#000}
+  canvas{display:block;max-width:100%;height:auto}
+  #timeline{display:flex;align-items:center;gap:10px}
+  #scrub{flex:1;accent-color:var(--accent);height:6px}
+  .phasebar{display:flex;height:6px;border-radius:4px;overflow:hidden;margin-top:-4px;opacity:.75}
+  .phasebar>i{display:block}
+  .phasebar .ps{background:#5b6cff}.phasebar .pr{background:var(--accent)}.phasebar .pc{background:var(--accent2)}
+  .btns{display:flex;gap:6px;flex-wrap:wrap}
+  button,select,input[type=text]{
+    background:var(--panel2);color:var(--ink);border:1px solid var(--line);
+    border-radius:8px;padding:7px 11px;font:inherit;cursor:pointer;transition:.12s}
+  button:hover,select:hover{border-color:var(--accent);color:#fff}
+  button.p{background:var(--accent);color:#160b06;border-color:var(--accent);font-weight:600}
+  button.p:hover{filter:brightness(1.08)}
+  input[type=text]{cursor:text;width:120px}
+  #panel{width:270px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;
+    display:flex;flex-direction:column;gap:14px}
+  .sec-h{font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--dim);font-weight:700;margin-bottom:2px}
+  .row{display:flex;flex-direction:column;gap:5px}
+  .row label{display:flex;justify-content:space-between;font-size:12.5px;color:var(--dim)}
+  .row label b{color:var(--ink);font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .pals{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .pal{border:1px solid var(--line);border-radius:8px;padding:7px;cursor:pointer;text-align:center;font-size:12px;
+    display:flex;align-items:center;gap:7px;justify-content:center}
+  .pal.on{border-color:var(--accent);background:#ff7a4d18}
+  .sw{width:14px;height:14px;border-radius:4px;border:1px solid #0006}
+  .chk{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;user-select:none}
+  .chk input{accent-color:var(--accent);width:16px;height:16px}
+  #stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .stat{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  .stat b{display:block;font-size:18px;color:var(--accent);font-variant-numeric:tabular-nums}
+  .stat span{font-size:11px;color:var(--dim)}
+  .legend{display:flex;flex-wrap:wrap;gap:10px;font-size:11.5px;color:var(--dim)}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+  .foot{font-size:11px;color:var(--dim)}
+  .foot code{color:var(--accent2)}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="stage">
+    <div>
+      <h1><b>Warren</b> — watch a dungeon carve itself</h1>
+      <p class="tag">Animated Binary Space Partitioning: splits sweep in, rooms bloom, corridors zipper the tree together.</p>
+    </div>
+    <div id="cvwrap"><canvas id="cv"></canvas></div>
+    <div id="timeline">
+      <button id="play" class="p" title="Play / pause (Space)">▶</button>
+      <button id="step" title="Jump to next phase boundary">⏭</button>
+      <input id="scrub" type="range" min="0" max="100" step="0.01" value="100">
+      <span id="ph" style="font-size:12px;color:var(--dim);width:118px;text-align:right"></span>
+    </div>
+    <div class="phasebar" id="phasebar" title="Splitting → Rooms → Corridors"></div>
+    <div class="btns">
+      <button id="reseed" class="p">↻ Reseed</button>
+      <button id="replay">⟲ Replay</button>
+      <button id="instant">⏩ Instant</button>
+      <label for="seed" style="align-self:center;font-size:11px;color:var(--dim)">seed</label>
+      <input id="seed" type="text" title="Seed — edit and press Enter to regenerate" placeholder="seed" spellcheck="false">
+      <button id="permalink">🔗 Permalink</button>
+      <button id="png">🖼 PNG</button>
+      <button id="json">{ } Copy grid</button>
+    </div>
+    <div class="legend">
+      <span><i id="lg-room" style="background:#b9a888"></i>room</span>
+      <span><i id="lg-corr" style="background:#7c6f5a"></i>corridor</span>
+      <span><i id="lg-door" style="background:#d98a3d"></i>door</span>
+      <span><i style="background:#6ee7b7"></i>start ▲</span>
+      <span><i style="background:#f472b6"></i>exit ▼</span>
+      <span><i style="background:#ffd166"></i>dead-end</span>
+    </div>
+  </div>
+
+  <div id="panel">
+    <div>
+      <div class="sec-h">Generation</div>
+      <div class="row"><label>Grid width <b id="wv"></b></label><input id="pw" type="range" min="28" max="80" step="2"></div>
+      <div class="row"><label>Grid height <b id="hv"></b></label><input id="ph2" type="range" min="20" max="56" step="2"></div>
+      <div class="row"><label>Max depth <b id="dv"></b></label><input id="pd" type="range" min="2" max="7" step="1"></div>
+      <div class="row"><label>Min leaf size <b id="mlv"></b></label><input id="pml" type="range" min="5" max="14" step="1"></div>
+      <div class="row"><label>Room padding <b id="ppv"></b></label><input id="ppad" type="range" min="1" max="4" step="1"></div>
+      <div class="row"><label>Corridor width <b id="cwv"></b></label><input id="pcw" type="range" min="1" max="3" step="1"></div>
+    </div>
+    <div>
+      <div class="sec-h">Playback speed <b id="spv" style="float:right;color:var(--ink)"></b></div>
+      <input id="pspeed" type="range" min="1" max="40" step="1">
+    </div>
+    <div>
+      <div class="sec-h">Palette</div>
+      <div class="pals" id="pals"></div>
+    </div>
+    <label class="chk"><input id="overlay" type="checkbox"> Show BSP tree overlay</label>
+    <div>
+      <div class="sec-h">Floor plan</div>
+      <div id="stats"></div>
+    </div>
+    <p class="foot">Deterministic from the seed in the URL — every layout is <code>#…</code> one shareable link away.</p>
+  </div>
+</div>
+
+<script>
+"use strict";
+// ---------- palettes ----------
+const PALS = {
+  stone:{name:"Stone", bg:"#14121a", floor:"#b9a888", corr:"#7c6f5a", door:"#d98a3d",
+    line:"#ff7a4d", node:"#ffffff22", ink:"#efe7d6", gap:.09, glow:0},
+  neon:{name:"Neon", bg:"#05060c", floor:"#12b3c9", corr:"#7c3aed", door:"#f0abfc",
+    line:"#22d3ee", node:"#22d3ee33", ink:"#c9faff", gap:.14, glow:8},
+  parchment:{name:"Parchment", bg:"#eadfc4", floor:"#cdb791", corr:"#b39c6e", door:"#a5642a",
+    line:"#7a5c3a", node:"#5a452e33", ink:"#4a3b28", gap:.1, glow:0, dark:true},
+  blueprint:{name:"Blueprint", bg:"#0c3a63", floor:"#bfe0ff", corr:"#8fc4ef", door:"#ffd27a",
+    line:"#dcefff", node:"#ffffff40", ink:"#eaf5ff", gap:.16, glow:0, draft:true}
+};
+
+// ---------- state ----------
+const cv=document.getElementById("cv"), ctx=cv.getContext("2d");
+const $=id=>document.getElementById(id);
+let W,H,maxDepth,minLeaf,roomPad,corrW,seed,palKey="stone";
+let grid,owner,ord, steps=[],rooms=[],leavesArr=[],splitSteps=[],edges=[];
+let nSplit=0,nRoom=0,nCorr=0,total=0, TS=14;
+let startRoom=null,exitRoom=null, deadEnds=new Set(), longest=0;
+let playhead=100, playing=false, speed=12, lastT=0, dirty=true;
+const MINROOM=4, MAXW=880, MAXH=620;
+
+// ---------- PRNG ----------
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+let rng=mulberry32(1);
+const clamp=(v,a=0,b=1)=>v<a?a:v>b?b:v;
+
+// ---------- build ----------
+function splitNode(node,depth){
+  const {x,y,w,h}=node;
+  const canV=w>=2*minLeaf, canH=h>=2*minLeaf;
+  if(depth>=maxDepth || (!canV&&!canH)){ node.leaf=true; leavesArr.push(node); return; }
+  let vert;
+  if(canV&&!canH)vert=true; else if(!canV&&canH)vert=false;
+  else if(w/h>=1.28)vert=true; else if(h/w>=1.28)vert=false; else vert=rng()<0.5;
+  if(vert){
+    const at=Math.floor(x+minLeaf+rng()*(w-2*minLeaf));
+    steps.push({type:"split",axis:"v",at,x,y,w,h}); splitSteps.push(steps[steps.length-1]);
+    node.left={x,y,w:at-x,h}; node.right={x:at,y,w:x+w-at,h};
+  }else{
+    const at=Math.floor(y+minLeaf+rng()*(h-2*minLeaf));
+    steps.push({type:"split",axis:"h",at,x,y,w,h}); splitSteps.push(steps[steps.length-1]);
+    node.left={x,y,w,h:at-y}; node.right={x,y:at,w,h:y+h-at};
+  }
+  splitNode(node.left,depth+1); splitNode(node.right,depth+1);
+}
+let roomId=0;
+function placeRoom(leaf){
+  const aw=leaf.w-2*roomPad, ah=leaf.h-2*roomPad;
+  if(aw<MINROOM||ah<MINROOM)return;
+  const rw=Math.floor(MINROOM+rng()*(aw-MINROOM+1)), rh=Math.floor(MINROOM+rng()*(ah-MINROOM+1));
+  const rx=leaf.x+roomPad+Math.floor(rng()*(aw-rw+1)), ry=leaf.y+roomPad+Math.floor(rng()*(ah-rh+1));
+  const r={x:rx,y:ry,w:rw,h:rh,id:roomId++,cx:rx+(rw>>1),cy:ry+(rh>>1)};
+  leaf.room=r; rooms.push(r); steps.push({type:"room",r});
+}
+function carve(a,b){
+  const path=[]; let x=a.cx,y=a.cy;
+  const hFirst=rng()<0.5;
+  const gx=()=>{while(x!==b.cx){x+=Math.sign(b.cx-x);path.push([x,y]);}};
+  const gy=()=>{while(y!==b.cy){y+=Math.sign(b.cy-y);path.push([x,y]);}};
+  if(hFirst){gx();gy();}else{gy();gx();}
+  steps.push({type:"corridor",path}); edges.push([a.id,b.id]);
+}
+function connect(node){
+  if(node.leaf)return node.room||null;
+  const a=connect(node.left), b=connect(node.right);
+  if(a&&b)carve(a,b);
+  return a||b;
+}
+function rasterize(){
+  grid=new Int8Array(W*H); owner=new Int32Array(W*H).fill(-1); ord=new Float32Array(W*H);
+  steps.forEach((st,i)=>{
+    if(st.type==="room"){
+      const r=st.r, half=Math.hypot(r.w,r.h)/2||1;
+      for(let yy=r.y;yy<r.y+r.h;yy++)for(let xx=r.x;xx<r.x+r.w;xx++){
+        const c=xx+yy*W; grid[c]=1; owner[c]=i; ord[c]=clamp(Math.hypot(xx-r.cx,yy-r.cy)/half);
+      }
+    }else if(st.type==="corridor"){
+      const p=st.path,L=p.length||1;
+      p.forEach(([px,py],k)=>{
+        for(let ox=0;ox<corrW;ox++)for(let oy=0;oy<corrW;oy++){
+          const xx=px+ox-(corrW>>1), yy=py+oy-(corrW>>1);
+          if(xx<0||yy<0||xx>=W||yy>=H)continue;
+          const c=xx+yy*W; if(grid[c]===1)continue;
+          if(grid[c]===0){grid[c]=2; owner[c]=i; ord[c]=k/L;}
+        }
+      });
+    }
+  });
+  // doors: corridor cell touching room floor
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const c=x+y*W; if(grid[c]!==2)continue;
+    if((x>0&&grid[c-1]===1)||(x<W-1&&grid[c+1]===1)||(y>0&&grid[c-W]===1)||(y<H-1&&grid[c+W]===1))grid[c]=3;
+  }
+}
+function analyze(){
+  deadEnds=new Set(); startRoom=exitRoom=null; longest=0;
+  if(!rooms.length)return;
+  const adj={}; rooms.forEach(r=>adj[r.id]=[]);
+  edges.forEach(([a,b])=>{adj[a].push(b);adj[b].push(a);});
+  rooms.forEach(r=>{ if(adj[r.id].length<=1)deadEnds.add(r.id); });
+  const byId={}; rooms.forEach(r=>byId[r.id]=r);
+  const bfs=s=>{const d={[s]:0},q=[s];let far=s;while(q.length){const u=q.shift();for(const v of adj[u])if(d[v]==null){d[v]=d[u]+1;if(d[v]>d[far==null?s:far])far=v;q.push(v);}}return{far,d};};
+  const a=bfs(rooms[0].id), b=bfs(a.far);
+  longest=b.d[b.far]||0;
+  startRoom=byId[a.far]; exitRoom=byId[b.far];
+}
+function buildAll(){
+  steps=[];rooms=[];leavesArr=[];splitSteps=[];edges=[];roomId=0;
+  rng=mulberry32(seed>>>0);
+  const root={x:0,y:0,w:W,h:H};
+  splitNode(root,0);
+  nSplit=steps.length;
+  leavesArr.forEach(placeRoom);
+  nRoom=steps.length-nSplit;
+  connect(root);
+  nCorr=steps.length-nSplit-nRoom;
+  total=steps.length;
+  rasterize(); analyze();
+}
+
+// ---------- render ----------
+function tileColor(t,p){return t===1?p.floor:t===2?p.corr:p.door;}
+function drawTile(g,ts,x,y,t,a,sc,p){
+  if(a<=0)return;
+  const gap=ts*p.gap, s=(ts-gap)*sc, px=x*ts+(ts-s)/2, py=y*ts+(ts-s)/2;
+  g.globalAlpha=a;
+  if(p.draft){
+    g.strokeStyle=tileColor(t,p); g.lineWidth=Math.max(1,ts*0.08);
+    g.strokeRect(px,py,s,s);
+    if(t!==1){g.beginPath();g.moveTo(px,py+s);g.lineTo(px+s,py);g.stroke();}
+  }else{
+    if(p.glow){g.shadowColor=tileColor(t,p);g.shadowBlur=p.glow*sc;}
+    g.fillStyle=tileColor(t,p); g.fillRect(px,py,s,s);
+    g.shadowBlur=0;
+  }
+  g.globalAlpha=1;
+}
+function marker(g,ts,r,kind,a,p){
+  if(a<=0||!r)return;
+  const cx=(r.cx+0.5)*ts, cy=(r.cy+0.5)*ts, s=ts*0.42;
+  g.globalAlpha=a; g.lineWidth=Math.max(1.4,ts*0.09);
+  if(kind==="start"){g.fillStyle="#6ee7b7";g.beginPath();g.moveTo(cx,cy-s);g.lineTo(cx+s,cy+s);g.lineTo(cx-s,cy+s);g.closePath();g.fill();}
+  else if(kind==="exit"){g.fillStyle="#f472b6";g.beginPath();g.moveTo(cx,cy+s);g.lineTo(cx+s,cy-s);g.lineTo(cx-s,cy-s);g.closePath();g.fill();}
+  else{g.fillStyle="#ffd166";g.beginPath();g.arc(cx,cy,ts*0.16,0,7);g.fill();}
+  g.globalAlpha=1;
+}
+function renderTo(g,ts,P,showOverlay){
+  const cur=Math.floor(P), frac=P-cur, p=PALS[palKey];
+  g.fillStyle=p.bg; g.fillRect(0,0,W*ts,H*ts);
+  // faint grid for drafting palettes
+  if(p.draft||p.dark){
+    g.strokeStyle=p.node; g.lineWidth=0.5; g.beginPath();
+    for(let x=0;x<=W;x++){g.moveTo(x*ts,0);g.lineTo(x*ts,H*ts);}
+    for(let y=0;y<=H;y++){g.moveTo(0,y*ts);g.lineTo(W*ts,y*ts);}
+    g.stroke();
+  }
+  // tiles
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const c=x+y*W,t=grid[c]; if(!t)continue;
+    const s=owner[c]; if(s>cur)continue;
+    let a=1,sc=1;
+    if(s===cur){
+      const st=steps[s], l=ord[c], e=clamp((frac-l)/0.22+0.02);
+      if(e<=0)continue; a=e; if(st.type==="room")sc=0.55+0.45*e;
+    }
+    drawTile(g,ts,x,y,t,a,sc,p);
+  }
+  // split lines (the "tree carving itself")
+  const lineA=showOverlay?0.95:Math.max(0,1-Math.max(0,P-nSplit)/Math.max(1,nRoom));
+  if(lineA>0){
+    g.globalAlpha=lineA; g.strokeStyle=p.line; g.lineWidth=Math.max(1,ts*0.11);
+    if(p.draft)g.setLineDash([ts*0.5,ts*0.35]);
+    for(let i=0;i<nSplit&&i<=cur;i++){
+      const st=steps[i]; const grow=(i===cur)?frac:1;
+      g.beginPath();
+      if(st.axis==="v"){const cy=st.y+st.h/2, ext=st.h/2*grow; g.moveTo(st.at*ts,(cy-ext)*ts); g.lineTo(st.at*ts,(cy+ext)*ts);}
+      else{const cx=st.x+st.w/2, ext=st.w/2*grow; g.moveTo((cx-ext)*ts,st.at*ts); g.lineTo((cx+ext)*ts,st.at*ts);}
+      g.stroke();
+    }
+    g.setLineDash([]); g.globalAlpha=1;
+  }
+  // tree overlay: leaf node bounds + blueprint annotations
+  if(showOverlay){
+    g.strokeStyle=p.node; g.lineWidth=1;
+    leavesArr.forEach(n=>g.strokeRect(n.x*ts+1,n.y*ts+1,n.w*ts-2,n.h*ts-2));
+    if(p.draft){
+      g.fillStyle=p.ink; g.font=`${Math.max(8,ts*0.62)}px ui-monospace,monospace`; g.textAlign="center";
+      rooms.forEach(r=>{ if(owner[r.cx+r.cy*W]<=cur||P>=total) g.fillText(r.w+"×"+r.h,(r.cx+0.5)*ts,(r.cy+0.5)*ts+3); });
+      g.textAlign="start";
+    }
+  }
+  // roguelike dressing
+  const dress=clamp((P-(nSplit+nRoom))/Math.max(1,nCorr));
+  if(dress>0){
+    deadEnds.forEach(id=>{const r=rooms.find(rr=>rr.id===id); if(r&&r!==startRoom&&r!==exitRoom)marker(g,ts,r,"dead",dress*0.9,p);});
+    marker(g,ts,startRoom,"start",dress,p); marker(g,ts,exitRoom,"exit",dress,p);
+  }
+}
+function render(){ renderTo(ctx,TS,playhead,$("overlay").checked); }
+function requestRender(){ dirty=true; }
+
+// ---------- loop ----------
+function frame(t){
+  const dt=Math.min(0.05,(t-lastT)/1000||0); lastT=t;
+  if(playing){ playhead=Math.min(total,playhead+speed*dt); if(playhead>=total)playing=false; syncControls(); dirty=true; }
+  if(dirty){ render(); dirty=playing; }   // redraw only when something changed or while animating
+  requestAnimationFrame(frame);
+}
+function phaseName(p){ return p<nSplit?"Splitting":p<nSplit+nRoom?"Rooms":"Corridors"; }
+function syncControls(){
+  $("scrub").value=total?playhead/total*100:100;
+  const cur=Math.min(Math.floor(playhead),total);
+  $("ph").textContent=(total?phaseName(playhead)+" ":"")+cur+"/"+total;
+  $("play").textContent=playing?"⏸":"▶";
+  dirty=true;
+}
+
+// ---------- sizing ----------
+function resizeCanvas(){
+  // fit the canvas to the smaller of the fixed cap and the current viewport width
+  const avail=Math.min(MAXW,Math.max(200,(window.innerWidth||MAXW)-40));
+  TS=Math.max(6,Math.floor(Math.min(avail/W,MAXH/H)));
+  cv.width=W*TS; cv.height=H*TS;
+}
+
+// ---------- controls ----------
+function syncLabels(){
+  // update only the readouts as sliders drag — do NOT touch build globals mid-gen
+  $("wv").textContent=$("pw").value;$("hv").textContent=$("ph2").value;$("dv").textContent=$("pd").value;
+  $("mlv").textContent=$("pml").value;$("ppv").textContent=$("ppad").value;$("cwv").textContent=$("pcw").value;
+  $("spv").textContent=$("pspeed").value+"/s";
+}
+function readControls(){
+  W=+$("pw").value; H=+$("ph2").value; maxDepth=+$("pd").value;
+  minLeaf=+$("pml").value; roomPad=+$("ppad").value; corrW=+$("pcw").value; speed=+$("pspeed").value;
+  syncLabels();
+}
+function updateStats(){
+  let carved=0; for(let i=0;i<grid.length;i++)if(grid[i])carved++;
+  const S=[["Rooms",rooms.length],["Corridors",nCorr],["Dead-ends",deadEnds.size],
+    ["Longest path",longest+1],["Tiles carved",carved],["Tree leaves",leavesArr.length]];
+  $("stats").innerHTML=S.map(([k,v])=>`<div class="stat"><b>${v}</b><span>${k}</span></div>`).join("");
+}
+function syncLegend(){
+  const p=PALS[palKey];
+  $("lg-room").style.background=p.floor; $("lg-corr").style.background=p.corr; $("lg-door").style.background=p.door;
+}
+function renderPhasebar(){
+  const seg=(cls,n)=>`<i class="${cls}" style="flex:${n||0} 0 0"></i>`;
+  $("phasebar").innerHTML=total?seg("ps",nSplit)+seg("pr",nRoom)+seg("pc",nCorr):"";
+}
+function buildPalUI(){
+  $("pals").innerHTML=Object.entries(PALS).map(([k,p])=>
+    `<div class="pal ${k===palKey?'on':''}" data-k="${k}"><span class="sw" style="background:${p.floor}"></span>${p.name}</div>`).join("");
+  [...$("pals").children].forEach(el=>el.onclick=()=>{palKey=el.dataset.k;buildPalUI();syncLegend();updateHash();requestRender();});
+  syncLegend();
+}
+
+// ---------- hash sync ----------
+function updateHash(){
+  const q=new URLSearchParams({seed,w:W,h:H,d:maxDepth,ml:minLeaf,pad:roomPad,cw:corrW,pal:palKey});
+  try{ history.replaceState(null,"","#"+q.toString()); }
+  catch(e){ try{ location.hash=q.toString(); }catch(_){} }   // History API can be blocked in some sandboxes
+}
+function readHash(){
+  const q=new URLSearchParams(location.hash.slice(1));
+  const set=(id,k)=>{ if(q.has(k))$(id).value=q.get(k); };
+  set("pw","w");set("ph2","h");set("pd","d");set("pml","ml");set("ppad","pad");set("pcw","cw");
+  if(q.has("pal")&&PALS[q.get("pal")])palKey=q.get("pal");
+  seed=q.has("seed")?(parseInt(q.get("seed"))>>>0):(Math.random()*4294967296>>>0);
+  $("seed").value=seed;
+}
+
+// ---------- exports ----------
+function toast(btn,msg){const o=btn.textContent;btn.textContent=msg;setTimeout(()=>btn.textContent=o,1100);}
+// clipboard write that survives non-secure contexts (file://, plain http on a LAN)
+function copyText(text,btn){
+  const done=ok=>toast(btn,ok?"✓ Copied":"⚠ Failed");
+  const fallback=()=>{
+    try{
+      const ta=document.createElement("textarea");
+      ta.value=text; ta.style.position="fixed"; ta.style.top="-1000px"; ta.style.opacity="0";
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      const ok=document.execCommand("copy"); document.body.removeChild(ta);
+      if(ok)done(true); else { window.prompt("Copy manually:",text); done(false); }
+    }catch(e){ window.prompt("Copy manually:",text); done(false); }
+  };
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(()=>done(true),fallback);
+  }else fallback();
+}
+function exportPNG(){
+  const ts=Math.max(14,TS), off=document.createElement("canvas");
+  off.width=W*ts; off.height=H*ts;
+  renderTo(off.getContext("2d"),ts,total,$("overlay").checked);
+  const a=document.createElement("a"); a.download=`warren-${seed}.png`; a.href=off.toDataURL("image/png"); a.click();
+}
+function copyGrid(){
+  const rows=[]; for(let y=0;y<H;y++){const r=[];for(let x=0;x<W;x++)r.push(grid[x+y*W]);rows.push(r);}
+  const legend={0:"rock",1:"floor",2:"corridor",3:"door"};
+  const data={name:"warren",seed,width:W,height:H,legend,
+    start:startRoom?{x:startRoom.cx,y:startRoom.cy}:null,exit:exitRoom?{x:exitRoom.cx,y:exitRoom.cy}:null,tiles:rows};
+  copyText(JSON.stringify(data),$("json"));
+}
+
+// ---------- orchestration ----------
+function generate(animate){
+  readControls(); buildAll(); resizeCanvas(); updateStats(); renderPhasebar(); updateHash();
+  playhead=animate?0:total; playing=!!animate; lastT=performance.now(); syncControls();
+}
+// wiring — only relabel while dragging; rebuild on release so the render loop never sees a size mismatch
+["pw","ph2","pd","pml","ppad","pcw"].forEach(id=>{
+  $(id).addEventListener("input",syncLabels);
+  $(id).addEventListener("change",()=>generate(true));
+});
+$("pspeed").addEventListener("input",()=>{speed=+$("pspeed").value;$("spv").textContent=speed+"/s";});
+$("play").onclick=()=>{ if(playhead>=total)playhead=0; playing=!playing; lastT=performance.now(); syncControls(); };
+// step to the next phase boundary (Splitting → Rooms → Corridors → end)
+$("step").onclick=()=>{ playing=false; const bounds=[nSplit,nSplit+nRoom,total]; playhead=bounds.find(b=>b>playhead+1e-6)??total; syncControls(); };
+$("replay").onclick=()=>{ playhead=0; playing=true; lastT=performance.now(); syncControls(); };
+$("instant").onclick=()=>{ playhead=total; playing=false; syncControls(); };
+$("scrub").addEventListener("input",()=>{ playing=false; playhead=(+$("scrub").value)/100*total; syncControls(); });
+$("reseed").onclick=()=>{ seed=Math.random()*4294967296>>>0; $("seed").value=seed; generate(true); };
+$("seed").addEventListener("change",()=>{ const v=parseInt($("seed").value); seed=isNaN(v)?seed:(v>>>0); $("seed").value=seed; generate(true); });
+$("overlay").onchange=requestRender;
+$("permalink").onclick=()=>{ updateHash(); copyText(location.href,$("permalink")); };
+$("png").onclick=exportPNG;
+$("json").onclick=copyGrid;
+// keyboard transport (ignored while editing the seed field)
+addEventListener("keydown",e=>{
+  if(e.target===$("seed"))return;
+  if(e.code==="Space"){ e.preventDefault(); $("play").onclick(); }
+  else if(e.key==="ArrowLeft"){ e.preventDefault(); playing=false; playhead=Math.max(0,Math.floor(playhead)-1); syncControls(); }
+  else if(e.key==="ArrowRight"){ e.preventDefault(); playing=false; playhead=Math.min(total,Math.floor(playhead)+1); syncControls(); }
+  else if(e.key==="r"||e.key==="R"){ $("reseed").onclick(); }
+});
+// keep the canvas fitted to the viewport on resize / rotate
+let rzT; addEventListener("resize",()=>{ clearTimeout(rzT); rzT=setTimeout(()=>{ resizeCanvas(); dirty=true; },120); });
+
+// ---------- init ----------
+readHash(); buildPalUI(); readControls();
+generate(true);
+requestAnimationFrame(t=>{lastT=t;frame(t);});
+</script>
+</body>
+</html>

@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sightline — a Skyscrapers logic puzzle</title>
+<style>
+  :root{
+    --bg:#0e1420; --panel:#161f30; --ink:#e8eef7; --dim:#8fa2bd; --line:#2a3852;
+    --accent:#5ad1c9; --warn:#ff5d6c; --good:#7ee081; --sel:#f7c948;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:radial-gradient(1200px 700px at 50% -10%,#1b2740,#0e1420 60%);
+    color:var(--ink);font:15px/1.45 system-ui,Segoe UI,Roboto,sans-serif;
+    display:flex;flex-direction:column;align-items:center;padding:18px 12px 40px}
+  h1{font-size:22px;margin:0;letter-spacing:.5px;font-weight:800}
+  h1 b{color:var(--accent)}
+  .sub{color:var(--dim);font-size:12.5px;margin:2px 0 14px;text-align:center;max-width:560px}
+  .wrap{width:100%;max-width:560px}
+  .bar{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-bottom:12px}
+  button,select{background:var(--panel);color:var(--ink);border:1px solid var(--line);
+    border-radius:9px;padding:7px 11px;font:inherit;font-size:13px;cursor:pointer;transition:.12s}
+  button:hover,select:hover{border-color:var(--accent);color:#fff}
+  button:disabled,select:disabled{opacity:.5;cursor:default;color:var(--dim)}
+  button:disabled:hover,select:disabled:hover{border-color:var(--line)}
+  button.on{background:var(--accent);color:#08131a;border-color:var(--accent);font-weight:700}
+  .pad{display:none;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:12px}
+  body.touch .pad{display:flex}
+  .pad button{min-width:46px;min-height:46px;font-size:17px;font-weight:700}
+  .stats{display:flex;gap:16px;justify-content:center;color:var(--dim);font-size:13px;margin-bottom:10px;flex-wrap:wrap}
+  .stats b{color:var(--ink);font-variant-numeric:tabular-nums}
+  #boardwrap{display:flex;justify-content:center}
+  #board{display:grid;gap:3px;user-select:none;touch-action:manipulation}
+  .clue{display:flex;align-items:center;justify-content:center;color:var(--dim);
+    font-weight:700;font-size:calc(var(--cs)*.34)}
+  .clue.bad{color:var(--warn)}
+  .clue.hl{color:var(--sel);text-shadow:0 0 10px var(--sel)}
+  .cell{position:relative;width:var(--cs);height:var(--cs);border-radius:7px;
+    background:#101a2c;border:1px solid var(--line);overflow:hidden;cursor:pointer;
+    display:flex;align-items:flex-end;justify-content:center}
+  .cell .fill{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(180deg,var(--c1),var(--c2));
+    transition:height .5s cubic-bezier(.2,.8,.2,1)}
+  .cell .num{position:relative;z-index:2;font-weight:800;font-size:calc(var(--cs)*.42);
+    color:#08131a;text-shadow:0 1px 0 rgba(255,255,255,.35);padding-bottom:4px}
+  .cell.empty .num{display:none}
+  .cell.sel{outline:3px solid var(--sel);outline-offset:-1px;z-index:3}
+  .cell.dup{border-color:var(--warn);box-shadow:inset 0 0 0 2px var(--warn)}
+  .cell.hint{outline:3px solid var(--accent);z-index:3}
+  .cell:hover{border-color:var(--accent)}
+  .pm{position:absolute;inset:0;z-index:2;display:grid;padding:3px;gap:0;
+    color:var(--dim);font-size:calc(var(--cs)*.2);line-height:1;pointer-events:none}
+  .pm.ghost span{opacity:.5}
+  .pm span{display:flex;align-items:center;justify-content:center}
+  #board.win .cell .fill{animation:grow .6s cubic-bezier(.2,.9,.2,1) both}
+  @keyframes grow{from{height:0 !important}}
+  .msg{min-height:20px;text-align:center;color:var(--accent);font-size:13px;margin-top:12px}
+  .msg.warn{color:var(--warn)}
+  .banner{text-align:center;margin-top:10px;font-weight:800;font-size:18px;color:var(--good);
+    opacity:0;transition:.4s;height:0}
+  .banner.show{opacity:1;height:auto}
+  #share{white-space:pre;font:12px/1.4 ui-monospace,Menlo,monospace;background:var(--panel);
+    border:1px solid var(--line);border-radius:9px;padding:10px;margin-top:10px;display:none;
+    color:var(--ink);text-align:center}
+  .foot{color:var(--dim);font-size:11.5px;margin-top:16px;text-align:center;max-width:560px}
+  .foot b{color:var(--accent)}
+  kbd{background:#0a1220;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:11px}
+</style>
+</head>
+<body>
+  <h1><b>Sight</b>line</h1>
+  <div class="sub">A Skyscrapers logic puzzle. Fill each row &amp; column with heights 1–N once each; edge numbers say how many buildings are visible from that side (taller buildings hide shorter ones behind them). Every board is generated fresh and proven to have exactly one solution.</div>
+
+  <div class="wrap">
+    <div class="bar">
+      <select id="size" title="Board size / difficulty">
+        <option value="4">4×4 · Easy</option>
+        <option value="5" selected>5×5 · Medium</option>
+        <option value="6">6×6 · Hard</option>
+      </select>
+      <button id="new">New Game</button>
+      <button id="daily">Daily</button>
+      <button id="restart">Restart</button>
+      <button id="hint">Hint</button>
+      <button id="undo">Undo</button>
+      <button id="redo">Redo</button>
+      <button id="pencil">✏ Pencil</button>
+      <button id="assist" class="on">Candidates</button>
+      <button id="link">Copy Link</button>
+    </div>
+
+    <div class="stats">
+      <span>⏱ <b id="time">0:00</b></span>
+      <span>Moves <b id="moves">0</b></span>
+      <span>Best <b id="best">—</b></span>
+      <span id="streakwrap" style="display:none">🔥 <b id="streak">0</b></span>
+    </div>
+
+    <div id="boardwrap"><div id="board"></div></div>
+    <div id="pad" class="pad"></div>
+
+    <div class="banner" id="banner">🎉 Solved!</div>
+    <div class="msg" id="msg"></div>
+    <div id="share"></div>
+
+    <div class="foot" id="foot">
+      <b>Controls:</b> click a cell to cycle its height, or select it and press <kbd>1</kbd>–<kbd>6</kbd>. <kbd>0</kbd>/<kbd>⌫</kbd> clears, arrows move, <kbd>P</kbd> pencil, <kbd>H</kbd> hint, <kbd>U</kbd> undo. Seed lives in the URL — copy the link to share the exact board.
+    </div>
+  </div>
+
+<script>
+"use strict";
+// ---------- safe storage (Private mode / disabled storage degrade gracefully) ----------
+const LS={get:k=>{try{return localStorage.getItem(k);}catch(e){return null;}},
+          set:(k,v)=>{try{localStorage.setItem(k,v);}catch(e){}}};
+
+// ---------- clipboard with fallback (works on http:// / non-secure origins too) ----------
+function fallbackCopy(text,done){
+  try{
+    const ta=document.createElement("textarea");ta.value=text;
+    ta.style.position="fixed";ta.style.top="-1000px";ta.style.opacity="0";
+    document.body.appendChild(ta);ta.focus();ta.select();
+    const ok=document.execCommand("copy");document.body.removeChild(ta);
+    if(ok){done();return;}
+  }catch(e){}
+  msg("Copy failed — select the text and press Ctrl/Cmd+C.",true);
+}
+function copyText(text,okMsg){
+  const done=()=>msg(okMsg);
+  if(navigator.clipboard&&window.isSecureContext)
+    navigator.clipboard.writeText(text).then(done).catch(()=>fallbackCopy(text,done));
+  else fallbackCopy(text,done);
+}
+
+// ---------- seeded RNG ----------
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+// ---------- sightline helpers ----------
+function visCount(arr){let mx=0,n=0;for(const v of arr){if(v>mx){mx=v;n++;}}return n;}
+// per-cell max height implied by all four edge clues (a valid necessary bound)
+function computeMax(cl,N){
+  const mx=new Array(N*N).fill(N);
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){
+    let m=N;const i=r*N+c;
+    if(cl.top[c])   m=Math.min(m,N-cl.top[c]+1+r);
+    if(cl.bottom[c])m=Math.min(m,N-cl.bottom[c]+1+(N-1-r));
+    if(cl.left[r])  m=Math.min(m,N-cl.left[r]+1+c);
+    if(cl.right[r]) m=Math.min(m,N-cl.right[r]+1+(N-1-c));
+    mx[i]=m;
+  }
+  return mx;
+}
+function clueOf(sol,N){
+  const cl={top:[],bottom:[],left:[],right:[]};
+  for(let c=0;c<N;c++){const col=[];for(let r=0;r<N;r++)col.push(sol[r*N+c]);
+    cl.top[c]=visCount(col);cl.bottom[c]=visCount(col.slice().reverse());}
+  for(let r=0;r<N;r++){const row=sol.slice(r*N,r*N+N);
+    cl.left[r]=visCount(row);cl.right[r]=visCount(row.slice().reverse());}
+  return cl;
+}
+
+// ---------- Latin square generator ----------
+function shuffle(a,rnd){for(let i=a.length-1;i>0;i--){const j=(rnd()*(i+1))|0;[a[i],a[j]]=[a[j],a[i]];}return a;}
+function genLatin(N,rnd){
+  let g=[];for(let r=0;r<N;r++){const row=[];for(let c=0;c<N;c++)row.push((r+c)%N+1);g.push(row);}
+  shuffle(g,rnd);                                   // shuffle rows
+  const cols=shuffle([...Array(N).keys()],rnd);     // shuffle columns
+  const sym=shuffle([...Array(N).keys()],rnd).map(x=>x+1); // relabel heights
+  const out=new Array(N*N);
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++)out[r*N+c]=sym[g[r][cols[c]]-1];
+  return out;
+}
+
+// ---------- uniqueness solver (row-permutation search, counts up to `limit`) ----------
+const _permCache={};
+function permsOf(N){
+  if(_permCache[N])return _permCache[N];
+  const res=[],a=[],used=new Array(N+1).fill(false);
+  (function go(){if(a.length===N){res.push(a.slice());return;}
+    for(let v=1;v<=N;v++)if(!used[v]){used[v]=true;a.push(v);go();a.pop();used[v]=false;}})();
+  return _permCache[N]=res;
+}
+function solveCount(cl,N,limit,budget){
+  budget=budget||Infinity;let steps=0,abort=false;
+  const mx=computeMax(cl,N),perms=permsOf(N),cand=[];
+  for(let r=0;r<N;r++){                 // legal permutations for each row
+    const list=[];
+    for(const p of perms){
+      if(cl.left[r]&&visCount(p)!==cl.left[r])continue;
+      if(cl.right[r]&&visCount(p.slice().reverse())!==cl.right[r])continue;
+      let ok=true;for(let c=0;c<N;c++)if(p[c]>mx[r*N+c]){ok=false;break;}
+      if(ok)list.push(p);
+    }
+    if(!list.length)return 0;
+    cand.push(list);
+  }
+  const colU=new Array(N).fill(0),colMax=new Array(N).fill(0),colVis=new Array(N).fill(0),chosen=[];
+  let count=0;
+  (function rec(r){
+    if(abort||count>=limit)return;
+    if(++steps>budget){abort=true;return;}
+    if(r===N){                          // verify column (top+bottom) clues exactly
+      for(let c=0;c<N;c++){const col=[];for(let k=0;k<N;k++)col.push(chosen[k][c]);
+        if(cl.top[c]&&visCount(col)!==cl.top[c])return;
+        if(cl.bottom[c]&&visCount(col.slice().reverse())!==cl.bottom[c])return;}
+      count++;return;
+    }
+    for(const p of cand[r]){
+      if(abort||count>=limit)return;
+      let ok=true;
+      for(let c=0;c<N;c++){                // column Latin + incremental top-visibility prune
+        const v=p[c];if(colU[c]&(1<<v)){ok=false;break;}
+        const T=cl.top[c];
+        if(T){const nm=v>colMax[c]?v:colMax[c],nv=colVis[c]+(v>colMax[c]?1:0);
+          if(nv>T||(nm===N&&nv!==T)||nv+(N-1-r)<T){ok=false;break;}}
+      }
+      if(!ok)continue;
+      const oM=colMax.slice(),oV=colVis.slice();
+      for(let c=0;c<N;c++){const v=p[c];colU[c]|=1<<v;if(v>colMax[c]){colVis[c]++;colMax[c]=v;}}
+      chosen[r]=p;rec(r+1);
+      for(let c=0;c<N;c++){colMax[c]=oM[c];colVis[c]=oV[c];colU[c]&=~(1<<p[c]);}
+    }
+  })(0);
+  return abort?limit:count;   // abort => assume not-yet-unique (conservative: keep the clue)
+}
+
+// ---------- carve a minimal-ish unique puzzle ----------
+function carve(sol,N,rnd,keepFrac){
+  const full=clueOf(sol,N);
+  const cl={top:full.top.slice(),bottom:full.bottom.slice(),left:full.left.slice(),right:full.right.slice()};
+  const slots=[];for(const s of["top","bottom","left","right"])for(let i=0;i<N;i++)slots.push([s,i]);
+  shuffle(slots,rnd);
+  const removed=[];
+  for(const[s,i]of slots){
+    const save=cl[s][i];cl[s][i]=0;
+    if(solveCount(cl,N,2,60000)===1)removed.push([s,i]);else cl[s][i]=save;
+  }
+  // difficulty: for easier sizes, add back a fraction of removed clues
+  shuffle(removed,rnd);
+  const back=Math.round(removed.length*keepFrac);
+  for(let k=0;k<back;k++){const[s,i]=removed[k];cl[s][i]=full[s][i];}
+  return cl;
+}
+
+// ---------- game state ----------
+const $=id=>document.getElementById(id);
+let N,seed,sol,clue,cellMax,grid,pm,sel,pencil=false,assist=true,daily=false,
+    undoStack,redoStack,moves,startT,tick,done,best;
+
+function palette(v,N){ // rising-bar skyline shading, light→dark by height
+  const h=205-(v-1)/(N-1)*40, l1=78-(v-1)/(N-1)*20, l2=l1-14;
+  return[`hsl(${h} 70% ${l1}%)`,`hsl(${h} 65% ${l2}%)`];
+}
+
+function newBoard(nSize,useSeed,isDaily){
+  N=nSize;seed=useSeed>>>0;daily=!!isDaily;
+  const rnd=mulberry32(seed);
+  // regenerate until the FULL edge-clue board is itself uniquely solvable,
+  // otherwise no set of clues from this square could ever be unique
+  do{ sol=genLatin(N,rnd); }while(solveCount(clueOf(sol,N),N,2)!==1);
+  const kf=N===4?0.55:N===5?0.28:0;   // clue density by difficulty
+  clue=carve(sol,N,rnd,kf);
+  cellMax=computeMax(clue,N);
+  grid=new Array(N*N).fill(0);
+  pm=Array.from({length:N*N},()=>new Set());
+  sel=0;undoStack=[];redoStack=[];moves=0;done=false;
+  startT=Date.now();$("banner").className="banner";$("share").style.display="none";$("msg").textContent="";
+  best=+LS.get(bestKey())||0;
+  location.hash=daily?`daily=${seed}`:`n=${N}&s=${seed}`;
+  buildPad();render();updateStats();
+}
+function buildPad(){
+  const p=$("pad");if(!p)return;p.innerHTML="";
+  for(let v=1;v<=N;v++){const b=document.createElement("button");b.textContent=v;b.onclick=()=>setVal(v);p.appendChild(b);}
+  const e=document.createElement("button");e.textContent="⌫";e.onclick=()=>clearCell();p.appendChild(e);
+}
+function bestKey(){return`sightline:best:${N}:${seed}`;}
+
+// ---------- rendering ----------
+function render(){
+  const b=$("board");b.style.setProperty("--cs",Math.floor(Math.min(500,window.innerWidth-32)/(N+2))+"px");
+  b.style.gridTemplateColumns=`repeat(${N+2},var(--cs))`;
+  const dup=findDups(),cv=clueViolations(),hi=render.hi||{};
+  b.innerHTML="";
+  const clueEl=(txt,side,i)=>{const d=document.createElement("div");d.className="clue";
+    if(txt)d.textContent=txt;
+    if(cv[side]&&cv[side][i])d.classList.add("bad");
+    if(hi.clue&&hi.clue[0]===side&&hi.clue[1]===i)d.classList.add("hl");
+    return d;};
+  const corner=()=>{const d=document.createElement("div");return d;};
+  // top row
+  b.appendChild(corner());
+  for(let c=0;c<N;c++)b.appendChild(clueEl(clue.top[c]||"","top",c));
+  b.appendChild(corner());
+  for(let r=0;r<N;r++){
+    b.appendChild(clueEl(clue.left[r]||"","left",r));
+    for(let c=0;c<N;c++){
+      const i=r*N+c,v=grid[i],cell=document.createElement("div");
+      cell.className="cell"+(v?"":" empty")+(i===sel?" sel":"")+(dup.has(i)?" dup":"")+(hi.cell===i?" hint":"");
+      const f=document.createElement("div");f.className="fill";
+      if(v){const[c1,c2]=palette(v,N);cell.style.setProperty("--c1",c1);cell.style.setProperty("--c2",c2);
+        f.style.height=(40+v/N*60)+"%";}   // min ~50% so the digit always sits on a light fill
+      cell.appendChild(f);
+      const num=document.createElement("div");num.className="num";num.textContent=v||"";cell.appendChild(num);
+      // pencil marks: manual first, else ghost candidates if assist on
+      let marks=null,ghost=false;
+      if(!v){
+        if(pm[i].size){marks=[...pm[i]].sort();}
+        else if(assist){marks=candidates(i);ghost=true;}
+      }
+      if(marks&&marks.length){
+        const g=document.createElement("div");g.className="pm"+(ghost?" ghost":"");
+        const cols=Math.ceil(Math.sqrt(N));g.style.gridTemplateColumns=`repeat(${cols},1fr)`;
+        for(let k=1;k<=N;k++){const s=document.createElement("span");s.textContent=marks.includes(k)?k:"";g.appendChild(s);}
+        cell.appendChild(g);
+      }
+      cell.onclick=()=>onCell(i);
+      b.appendChild(cell);
+    }
+    b.appendChild(clueEl(clue.right[r]||"","right",r));
+  }
+  b.appendChild(corner());
+  for(let c=0;c<N;c++)b.appendChild(clueEl(clue.bottom[c]||"","bottom",c));
+  b.appendChild(corner());
+}
+
+// legal heights for empty cell: Latin (row/col) filtered by sightline bound
+function candidates(i){
+  const r=(i/N)|0,c=i%N,out=[];
+  for(let v=1;v<=cellMax[i];v++){
+    let ok=true;
+    for(let k=0;k<N;k++){if(grid[r*N+k]===v||grid[k*N+c]===v){ok=false;break;}}
+    if(ok)out.push(v);
+  }
+  return out;
+}
+function findDups(){
+  const d=new Set();
+  for(let r=0;r<N;r++)for(let a=0;a<N;a++)for(let b2=a+1;b2<N;b2++){
+    const i=r*N+a,j=r*N+b2;if(grid[i]&&grid[i]===grid[j]){d.add(i);d.add(j);}}
+  for(let c=0;c<N;c++)for(let a=0;a<N;a++)for(let b2=a+1;b2<N;b2++){
+    const i=a*N+c,j=b2*N+c;if(grid[i]&&grid[i]===grid[j]){d.add(i);d.add(j);}}
+  return d;
+}
+function clueViolations(){ // only flag a clue once its whole line is filled
+  const cv={top:{},bottom:{},left:{},right:{}};
+  for(let r=0;r<N;r++){const row=grid.slice(r*N,r*N+N);if(row.every(x=>x)){
+    if(clue.left[r]&&visCount(row)!==clue.left[r])cv.left[r]=1;
+    if(clue.right[r]&&visCount(row.slice().reverse())!==clue.right[r])cv.right[r]=1;}}
+  for(let c=0;c<N;c++){const col=[];for(let r=0;r<N;r++)col.push(grid[r*N+c]);if(col.every(x=>x)){
+    if(clue.top[c]&&visCount(col)!==clue.top[c])cv.top[c]=1;
+    if(clue.bottom[c]&&visCount(col.slice().reverse())!==clue.bottom[c])cv.bottom[c]=1;}}
+  return cv;
+}
+
+// ---------- interaction ----------
+function pushUndo(){undoStack.push({g:grid.slice(),pm:pm.map(s=>[...s])});if(undoStack.length>500)undoStack.shift();redoStack=[];}
+function restore(st){grid=st.g.slice();pm=st.pm.map(a=>new Set(a));}
+function onCell(i){
+  if(done)return;sel=i;render.hi={};
+  if(pencil){render();return;}                 // pencil: click only selects
+  pushUndo();grid[i]=grid[i]>=N?0:grid[i]+1;pm[i].clear();moves++;afterMove();
+}
+function setVal(v){
+  if(done)return;render.hi={};
+  if(pencil){if(grid[sel])return;pushUndo();if(pm[sel].has(v))pm[sel].delete(v);else pm[sel].add(v);render();return;}
+  pushUndo();grid[sel]=v;pm[sel].clear();moves++;afterMove();
+}
+function clearCell(){if(done)return;render.hi={};pushUndo();if(pencil)pm[sel].clear();else{grid[sel]=0;pm[sel].clear();}moves++;afterMove();}
+function afterMove(){msg("");render();updateStats();checkWin();}
+
+function updateStats(){
+  $("moves").textContent=moves;
+  $("best").textContent=best?fmt(best):"—";
+  if(daily){const stk=+LS.get("sightline:daily:streak")||0;$("streakwrap").style.display="";$("streak").textContent=stk;}
+  else $("streakwrap").style.display="none";
+}
+function fmt(ms){const s=Math.floor(ms/1000);return`${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;}
+function startTimer(){clearInterval(tick);tick=setInterval(()=>{if(!done)$("time").textContent=fmt(Date.now()-startT);},250);}
+
+function checkWin(){
+  if(grid.some(x=>!x))return;
+  if(findDups().size)return;
+  const cv=clueViolations();for(const s in cv)if(Object.keys(cv[s]).length)return;
+  win();
+}
+function win(){
+  done=true;const t=Date.now()-startT;
+  $("board").classList.add("win");
+  // stagger the grow animation left→right
+  $("board").querySelectorAll(".cell").forEach((c,idx)=>{const f=c.querySelector(".fill");if(f)f.style.animationDelay=((idx%N)*0.07)+"s";});
+  if(!best||t<best){best=t;LS.set(bestKey(),t);}
+  if(daily)recordDaily(t);
+  $("banner").className="banner show";updateStats();$("time").textContent=fmt(t);
+  buildShare(t);
+}
+function recordDaily(t){
+  const today=dailyId(),last=LS.get("sightline:daily:last");
+  if(last===today)return;
+  let stk=+LS.get("sightline:daily:streak")||0;
+  const y=new Date(Date.now()-864e5);const yid=`${y.getUTCFullYear()}${String(y.getUTCMonth()+1).padStart(2,"0")}${String(y.getUTCDate()).padStart(2,"0")}`;
+  stk=(last===yid)?stk+1:1;
+  LS.set("sightline:daily:streak",stk);LS.set("sightline:daily:last",today);
+  const db=+LS.get("sightline:daily:best")||0;if(!db||t<db)LS.set("sightline:daily:best",t);
+}
+// UTC-derived so the daily board is globally identical per calendar day
+function dailyId(){const d=new Date();return`${d.getUTCFullYear()}${String(d.getUTCMonth()+1).padStart(2,"0")}${String(d.getUTCDate()).padStart(2,"0")}`;}
+
+// ---------- emoji share (Wordle-style) ----------
+const SQ=["","🟫","🟦","🟩","🟨","🟧","🟥"];
+function buildShare(t){
+  let rows="";
+  for(let r=0;r<N;r++){for(let c=0;c<N;c++)rows+=SQ[sol[r*N+c]];rows+="\n";}
+  const head=daily?`Sightline Daily ${dailyId()}`:`Sightline ${N}×${N} #${seed}`;
+  const stk=daily?` · 🔥${LS.get("sightline:daily:streak")||1}`:"";
+  const txt=`${head}\n⏱ ${fmt(t)} · ${moves} moves${stk}\n\n${rows}\n${location.href}`;
+  const el=$("share");el.textContent=txt+"\n\n(click to copy)";el.style.display="block";
+  el.onclick=()=>copyText(txt,"Result copied — challenge a friend!");
+}
+
+// ---------- teaching hint engine ----------
+function hint(){
+  if(done)return;render.hi={};
+  // 1) edge == 1  → the front cell must be the tallest (N)
+  for(const[side,i,ci]of edgeCells()){
+    if(clue[side][ci]===1&&!grid[i]){return applyHint(i,N,[side,ci],
+      `A clue of 1 means only the tallest building is visible from that edge — so the front cell must be ${N}.`);}
+  }
+  // 2) edge == N  → the full 1..N staircase, ascending from that edge
+  for(const line of lines()){
+    if(clue[line.side][line.ci]===N){
+      for(let k=0;k<N;k++){const i=line.cells[k];if(!grid[i])
+        return applyHint(i,k+1,[line.side,line.ci],
+          `A clue of ${N} forces the full 1,2,…,${N} staircase (every building visible). Counting from that edge, this cell is #${k+1}, so it is ${k+1}.`);}
+    }
+  }
+  // 3) sightline-bound elimination → a cell with only one legal candidate
+  for(let i=0;i<N*N;i++){if(!grid[i]){const cand=candidates(i);
+    if(cand.length===1)return applyHint(i,cand[0],null,
+      `Row/column heights plus the sightline height limits from the edge clues rule out every value here except ${cand[0]}.`);}}
+  // fallback: reveal the most-constrained cell from the (unique) solution
+  let bi=-1,bn=99;for(let i=0;i<N*N;i++)if(!grid[i]){const n=candidates(i).length;if(n<bn){bn=n;bi=i;}}
+  if(bi<0){msg("Board is full — check for a rule violation.");return;}
+  applyHint(bi,sol[bi],null,`By elimination across its row, column and the edge clues, this cell resolves to ${sol[bi]}.`);
+}
+function applyHint(i,v,clueRef,why){
+  pushUndo();grid[i]=v;pm[i].clear();sel=i;moves++;
+  render.hi={cell:i,clue:clueRef};render();updateStats();msg("💡 "+why);checkWin();
+}
+function edgeCells(){ // [side, cellIndex, clueIndex] for the front cell of each edge line
+  const out=[];
+  for(let c=0;c<N;c++){out.push(["top",c,c]);out.push(["bottom",(N-1)*N+c,c]);}
+  for(let r=0;r<N;r++){out.push(["left",r*N,r]);out.push(["right",r*N+N-1,r]);}
+  return out;
+}
+function lines(){
+  const out=[];
+  for(let c=0;c<N;c++){const cells=[];for(let r=0;r<N;r++)cells.push(r*N+c);
+    out.push({side:"top",ci:c,cells});out.push({side:"bottom",ci:c,cells:cells.slice().reverse()});}
+  for(let r=0;r<N;r++){const cells=[];for(let c=0;c<N;c++)cells.push(r*N+c);
+    out.push({side:"left",ci:r,cells});out.push({side:"right",ci:r,cells:cells.slice().reverse()});}
+  return out;
+}
+function msg(t,warn){const m=$("msg");m.textContent=t;m.className="msg"+(warn?" warn":"");}
+
+// ---------- wiring ----------
+// Board generation is synchronous and can take up to ~2s on 6×6, so paint a
+// "Generating…" state first (buttons disabled) before running it off the click.
+function busy(on){document.querySelectorAll(".bar button,.bar select").forEach(el=>el.disabled=on);}
+function generate(nSize,useSeed,isDaily,after){
+  msg("Generating a fresh board…");busy(true);
+  requestAnimationFrame(()=>setTimeout(()=>{
+    newBoard(nSize,useSeed,isDaily);busy(false);if(after)after();
+  },0));
+}
+$("new").onclick=()=>generate(+$("size").value,(Math.random()*1e9)>>>0,false);
+$("restart").onclick=()=>generate(N,seed,daily);
+$("daily").onclick=()=>{$("size").value="5";generate(5,+dailyId(),true,()=>msg("Daily challenge — same board worldwide (UTC day)."));};
+$("size").onchange=()=>generate(+$("size").value,(Math.random()*1e9)>>>0,false);
+$("hint").onclick=hint;
+$("undo").onclick=()=>{if(undoStack.length){redoStack.push({g:grid.slice(),pm:pm.map(s=>[...s])});restore(undoStack.pop());done=false;$("board").classList.remove("win");$("banner").className="banner";$("share").style.display="none";render.hi={};msg("");render();updateStats();}};
+$("redo").onclick=()=>{if(redoStack.length){undoStack.push({g:grid.slice(),pm:pm.map(s=>[...s])});restore(redoStack.pop());render.hi={};afterMove();}};
+$("pencil").onclick=()=>{pencil=!pencil;$("pencil").classList.toggle("on",pencil);};
+$("assist").onclick=()=>{assist=!assist;$("assist").classList.toggle("on",assist);render();};
+$("link").onclick=()=>copyText(location.href,"Link copied — share this exact board.");
+
+document.addEventListener("keydown",e=>{
+  // let form controls (size dropdown) keep their native arrow/type-ahead behavior
+  const tn=e.target&&e.target.tagName;
+  if(tn==="SELECT"||tn==="INPUT"||tn==="TEXTAREA")return;
+  const r=(sel/N)|0,c=sel%N;
+  if(e.key>="1"&&e.key<="9"){const v=+e.key;if(v>=1&&v<=N)setVal(v);}
+  else if(e.key==="0"||e.key==="Backspace"||e.key==="Delete")clearCell();
+  else if(e.key==="ArrowUp"&&r>0){sel-=N;render();}
+  else if(e.key==="ArrowDown"&&r<N-1){sel+=N;render();}
+  else if(e.key==="ArrowLeft"&&c>0){sel--;render();}
+  else if(e.key==="ArrowRight"&&c<N-1){sel++;render();}
+  else if(e.key==="p"||e.key==="P")$("pencil").onclick();
+  else if(e.key==="h"||e.key==="H")hint();
+  else if(e.key==="u"||e.key==="U")$("undo").onclick();
+  else return;
+  e.preventDefault();
+});
+window.addEventListener("resize",()=>render());
+
+// ---------- boot ----------
+(function(){
+  if((window.matchMedia&&matchMedia("(pointer:coarse)").matches)||("ontouchstart"in window)){
+    document.body.classList.add("touch");
+    $("foot").innerHTML='<b>Controls:</b> tap a cell to cycle its height, or select it and tap a number on the pad below. <b>⌫</b> clears. Use <b>✏ Pencil</b> for candidate notes and <b>Hint</b> if stuck. The seed lives in the URL — <b>Copy Link</b> to share the exact board.';
+  }
+  const h=new URLSearchParams(location.hash.slice(1));
+  const d=h.get("daily");
+  let n=+h.get("n"),s=h.get("s");
+  if(d!==null&&/^\d+$/.test(d)){$("size").value="5";generate(5,+d,true,()=>msg("Daily challenge — same board worldwide (UTC day)."));}
+  else if(n>=4&&n<=6&&s!==null){$("size").value=n;generate(n,+s>>>0,false);}
+  else generate(5,(Math.random()*1e9)>>>0,false);
+  startTimer();
+})();
+</script>
+</body>
+</html>

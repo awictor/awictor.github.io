@@ -1,0 +1,1233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Plasmata — a continuous-lifeform lab</title>
+<meta name="description" content="Plasmata: a zero-dependency Lenia / continuous cellular-automata lab. Paint, breed, and dissect living organisms — and share any creature as a URL." />
+<style>
+  :root{
+    --bg:#080a0f; --bg2:#0d1017; --panel:#11151e; --panel2:#161b26;
+    --ink:#dfe6f0; --dim:#8a93a6; --faint:#59637a;
+    --line:#232b3a; --line2:#2e3850;
+    --accent:#39e6c3; --accent2:#7c6cff; --warn:#ffb347; --bad:#ff5d6c; --good:#5fe08a;
+    --mono:"SFMono-Regular",ui-monospace,"JetBrains Mono",Consolas,Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:radial-gradient(1200px 800px at 20% -10%,#131a26 0%,var(--bg) 55%) fixed;
+    color:var(--ink);font-family:var(--sans);font-size:13px;line-height:1.45;overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent)}
+  button,select,input{font-family:inherit;font-size:12px;color:var(--ink)}
+  button{
+    background:var(--panel2);border:1px solid var(--line2);border-radius:7px;padding:6px 10px;
+    cursor:pointer;transition:.12s;user-select:none;
+  }
+  button:hover{border-color:var(--accent);color:#fff}
+  button:active{transform:translateY(1px)}
+  button.on{background:linear-gradient(180deg,#1b2740,#141c2e);border-color:var(--accent);color:var(--accent);box-shadow:0 0 0 1px rgba(57,230,195,.25) inset}
+  button.primary{background:linear-gradient(180deg,#12403a,#0e2e2a);border-color:var(--accent);color:var(--accent)}
+  button.small{padding:4px 8px;font-size:11px;border-radius:6px}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  select{background:var(--panel2);border:1px solid var(--line2);border-radius:7px;padding:5px 8px}
+  input[type=range]{-webkit-appearance:none;appearance:none;height:4px;border-radius:3px;background:var(--line2);outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #0b1017}
+  input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #0b1017}
+  input[type=range]:focus-visible,button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  #app{display:flex;height:100vh;width:100vw}
+
+  /* ---- stage ---- */
+  #stage{flex:1;position:relative;display:flex;flex-direction:column;min-width:0}
+  #topbar{
+    display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,rgba(18,23,33,.9),rgba(11,15,22,.7));-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);z-index:5;
+  }
+  #logo{font-weight:800;letter-spacing:.5px;font-size:16px;display:flex;align-items:center;gap:9px}
+  #logo .dot{width:12px;height:12px;border-radius:50%;
+    background:radial-gradient(circle at 35% 30%,#9dffe9,var(--accent) 45%,var(--accent2));
+    box-shadow:0 0 14px rgba(57,230,195,.8);animation:pulse 3.2s ease-in-out infinite}
+  @keyframes pulse{0%,100%{transform:scale(1);filter:hue-rotate(0)}50%{transform:scale(1.18);filter:hue-rotate(40deg)}}
+  #logo small{font-weight:500;color:var(--dim);font-size:11px;letter-spacing:.3px}
+  #topbar .spacer{flex:1}
+  #status-pill{font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:20px;border:1px solid var(--line2);background:var(--panel)}
+  #status-pill b{color:var(--good)}
+
+  #canvas-wrap{flex:1;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center}
+  #grid-bg{position:absolute;inset:0;background-image:radial-gradient(circle,rgba(255,255,255,.03) 1px,transparent 1px);background-size:26px 26px;pointer-events:none}
+  #sim{image-rendering:pixelated;image-rendering:crisp-edges;border:1px solid var(--line2);border-radius:6px;
+       box-shadow:0 12px 60px rgba(0,0,0,.6),0 0 0 1px rgba(57,230,195,.08);cursor:crosshair;touch-action:none;background:#000}
+
+  #hud{position:absolute;left:14px;bottom:14px;display:flex;gap:8px;flex-wrap:wrap;font-family:var(--mono);font-size:11px;pointer-events:none}
+  #hud .chip{background:rgba(12,16,24,.78);border:1px solid var(--line2);border-radius:6px;padding:4px 8px;-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
+  #hud .chip b{color:var(--accent);font-weight:600}
+  #verdict{position:absolute;right:14px;bottom:14px;font-family:var(--mono);font-size:12px;padding:6px 12px;border-radius:8px;
+    background:rgba(12,16,24,.8);border:1px solid var(--line2);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
+  #brushring{position:absolute;border:1.5px solid rgba(57,230,195,.7);border-radius:50%;pointer-events:none;display:none;box-shadow:0 0 10px rgba(57,230,195,.4)}
+
+  /* transport bar */
+  #transport{display:flex;align-items:center;gap:8px;padding:9px 16px;border-top:1px solid var(--line);
+    background:linear-gradient(0deg,rgba(18,23,33,.92),rgba(11,15,22,.6));flex-wrap:wrap}
+  #transport .grp{display:flex;align-items:center;gap:6px}
+  #transport label{color:var(--dim);font-size:11px}
+  #playbtn{width:40px;height:34px;display:flex;align-items:center;justify-content:center;font-size:14px}
+
+  /* ---- side panel ---- */
+  #panel{width:360px;flex:none;border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;overflow:hidden}
+  #panel .scroll{overflow-y:auto;overflow-x:hidden;padding:0 0 24px}
+  #panel .scroll::-webkit-scrollbar{width:9px}
+  #panel .scroll::-webkit-scrollbar-thumb{background:var(--line2);border-radius:5px}
+  section.card{border-bottom:1px solid var(--line);padding:13px 16px}
+  section.card h3{margin:0 0 10px;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--accent);
+    display:flex;align-items:center;gap:8px;cursor:pointer}
+  section.card h3 .caret{margin-left:auto;color:var(--dim);transition:.15s;font-size:10px}
+  section.card.collapsed h3 .caret{transform:rotate(-90deg)}
+  section.card.collapsed .body{display:none}
+  .row{display:flex;align-items:center;gap:9px;margin:7px 0}
+  .row label{width:74px;flex:none;color:var(--dim);font-size:11px}
+  .row input[type=range]{flex:1}
+  .row .val{width:52px;flex:none;text-align:right;font-family:var(--mono);font-size:11px;color:var(--ink)}
+  .btnrow{display:flex;gap:6px;flex-wrap:wrap}
+  .plots{display:flex;gap:10px}
+  .plot{flex:1;background:var(--bg2);border:1px solid var(--line2);border-radius:7px;padding:7px}
+  .plot .cap{font-size:10px;color:var(--dim);margin-bottom:4px;font-family:var(--mono)}
+  .plot canvas{width:100%;display:block;cursor:ns-resize;border-radius:3px}
+  .hint{color:var(--dim);font-size:11.5px;margin-top:6px;line-height:1.55}
+  .swatches{display:flex;flex-wrap:wrap;gap:6px}
+  .swatches.disabled{opacity:.4;pointer-events:none}
+  #empty-state{position:absolute;inset:0;display:none;align-items:center;justify-content:center;pointer-events:none;z-index:3}
+  #empty-state.show{display:flex}
+  #empty-state .msg{font-family:var(--mono);font-size:12.5px;color:var(--dim);background:rgba(12,16,24,.7);
+    border:1px solid var(--line2);border-radius:10px;padding:12px 18px;-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);text-align:center}
+  .sw{width:30px;height:20px;border-radius:5px;border:1px solid var(--line2);cursor:pointer;position:relative}
+  .sw.on{outline:2px solid var(--accent);outline-offset:1px}
+  .tool{flex:1;min-width:64px;text-align:center}
+
+  /* gallery drawer */
+  #gallery{position:absolute;top:0;left:0;bottom:0;width:340px;background:linear-gradient(180deg,#0f141d,#0b0e15);
+    border-right:1px solid var(--line2);z-index:20;transform:translateX(-104%);transition:.28s cubic-bezier(.2,.7,.2,1);
+    display:flex;flex-direction:column;box-shadow:8px 0 40px rgba(0,0,0,.5)}
+  #gallery.open{transform:translateX(0)}
+  #gallery .ghead{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+  #gallery .ghead h2{margin:0;font-size:14px}
+  #gallery .ghead p{margin:2px 0 0;font-size:10.5px;color:var(--dim)}
+  #gallery .glist{overflow-y:auto;padding:10px 12px;display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  #gallery .glist::-webkit-scrollbar{width:9px}
+  #gallery .glist::-webkit-scrollbar-thumb{background:var(--line2);border-radius:5px}
+  .creature{background:var(--panel2);border:1px solid var(--line2);border-radius:9px;padding:8px;cursor:pointer;transition:.14s;overflow:hidden}
+  .creature:hover{border-color:var(--accent);transform:translateY(-2px)}
+  .creature canvas{width:100%;height:96px;display:block;border-radius:6px;background:#000;image-rendering:pixelated}
+  .creature .nm{font-size:11.5px;font-weight:600;margin-top:6px}
+  .creature .mt{font-size:9.5px;color:var(--dim);font-family:var(--mono);margin-top:1px}
+  .creature .badge{display:inline-block;font-size:8.5px;padding:1px 5px;border-radius:10px;border:1px solid var(--line2);color:var(--dim);margin-top:4px}
+  .creature .badge.rgb{color:var(--accent2);border-color:var(--accent2)}
+
+  /* modal / toast */
+  #modal{position:fixed;inset:0;background:rgba(4,6,10,.72);z-index:40;display:none;align-items:center;justify-content:center;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+  #modal.open{display:flex}
+  #modal .box{background:var(--panel);border:1px solid var(--line2);border-radius:12px;padding:20px;width:min(560px,92vw);box-shadow:0 24px 80px rgba(0,0,0,.6)}
+  #modal h2{margin:0 0 6px;font-size:15px}
+  #modal p{color:var(--dim);font-size:12px;margin:0 0 12px}
+  #modal textarea{width:100%;height:88px;background:var(--bg2);border:1px solid var(--line2);border-radius:8px;color:var(--ink);
+    font-family:var(--mono);font-size:11px;padding:9px;resize:vertical}
+  #modal .mfoot{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap}
+  #toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);background:var(--panel2);
+    border:1px solid var(--accent);color:var(--ink);padding:9px 16px;border-radius:9px;font-size:12px;z-index:60;
+    opacity:0;transition:.25s;pointer-events:none;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  .dissect p{margin:0 0 9px;color:var(--dim);font-size:11.5px;line-height:1.6}
+  .dissect code{background:var(--bg2);border:1px solid var(--line2);border-radius:4px;padding:1px 5px;font-family:var(--mono);color:var(--accent);font-size:11px}
+  .kv{font-family:var(--mono);font-size:11px;color:var(--ink)}
+  .rec-dot{width:8px;height:8px;border-radius:50%;background:var(--bad);display:inline-block;margin-right:5px;animation:blink 1s infinite}
+  @keyframes blink{50%{opacity:.25}}
+  @media(max-width:900px){#panel{width:300px}}
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- ===== STAGE ===== -->
+  <div id="stage">
+    <div id="topbar">
+      <div id="logo"><span class="dot"></span>Plasmata<small>continuous&nbsp;lifeform&nbsp;lab</small></div>
+      <button id="galleryBtn" class="small">◨ Gallery</button>
+      <div class="spacer"></div>
+      <div id="status-pill">species: <b id="curname">Orbium</b></div>
+      <button id="shareBtn" class="primary small">⧉ Share URL</button>
+    </div>
+
+    <div id="canvas-wrap">
+      <div id="grid-bg"></div>
+      <canvas id="sim"></canvas>
+      <div id="brushring"></div>
+      <div id="hud">
+        <div class="chip">gen <b id="s-gen">0</b></div>
+        <div class="chip">mass <b id="s-mass">0</b></div>
+        <div class="chip">active <b id="s-active">0</b></div>
+        <div class="chip">fps <b id="s-fps">0</b></div>
+        <div class="chip">sps <b id="s-sps">0</b></div>
+      </div>
+      <div id="verdict">—</div>
+      <div id="empty-state"><div class="msg">Empty field — paint, ⊕ Inject a species,<br>or 🎲 Random to seed life</div></div>
+    </div>
+
+    <div id="transport">
+      <button id="playbtn" title="Play / Pause (space)">▶</button>
+      <button id="stepbtn" class="small" title="Single step (→)">Step</button>
+      <div class="grp">
+        <label>speed</label>
+        <input id="spsRange" type="range" min="1" max="120" value="30" style="width:120px">
+        <span class="val kv" id="spsVal">30/s</span>
+      </div>
+      <div class="grp">
+        <label>zoom</label>
+        <input id="zoomRange" type="range" min="1" max="8" step="1" value="4" style="width:80px">
+        <span class="val kv" id="zoomVal">4×</span>
+      </div>
+      <button id="randbtn" class="small" title="Random soup (r)">🎲 Random</button>
+      <button id="clearbtn" class="small" title="Clear the field (c)">Clear</button>
+      <button id="safaribtn" class="small" title="Auto-follow a roaming organism">🛰 Safari</button>
+      <div class="spacer" style="flex:1"></div>
+      <button id="recbtn" class="small">● Record</button>
+      <button id="snapbtn" class="small">📷 PNG</button>
+    </div>
+  </div>
+
+  <!-- ===== PANEL ===== -->
+  <div id="panel">
+    <div class="scroll" id="panelScroll">
+
+      <section class="card" data-key="genome">
+        <h3>Genome — the rule <span class="caret">▾</span></h3>
+        <div class="body">
+          <div class="row"><label>growth μ</label><input id="muR" type="range" min="0" max="0.5" step="0.001" value="0.15"><span class="val" id="muV">0.150</span></div>
+          <div class="row"><label>growth σ</label><input id="sigR" type="range" min="0.001" max="0.1" step="0.0005" value="0.015"><span class="val" id="sigV">0.0150</span></div>
+          <div class="row"><label>time dt</label><input id="dtR" type="range" min="0.02" max="0.5" step="0.005" value="0.1"><span class="val" id="dtV">0.100</span></div>
+          <div class="row"><label>kernel R</label><input id="rR" type="range" min="4" max="24" step="1" value="13"><span class="val" id="rV">13</span></div>
+          <div class="row"><label>shells</label><input id="shR" type="range" min="1" max="3" step="1" value="1"><span class="val" id="shV">1</span></div>
+          <div class="row"><label>ring b₀</label><input id="b0R" type="range" min="0.05" max="1" step="0.01" value="1"><span class="val" id="b0V">1.00</span></div>
+          <div class="row" id="b1row"><label>ring b₁</label><input id="b1R" type="range" min="0" max="1" step="0.01" value="0.5"><span class="val" id="b1V">0.50</span></div>
+          <div class="row" id="b2row"><label>ring b₂</label><input id="b2R" type="range" min="0" max="1" step="0.01" value="0.25"><span class="val" id="b2V">0.25</span></div>
+          <div class="hint">Every parameter here is baked into the share URL. Nudge μ / σ and watch the creature morph, drift, or dissolve in real time.</div>
+        </div>
+      </section>
+
+      <section class="card" data-key="plots">
+        <h3>Kernel &amp; growth <span class="caret">▾</span></h3>
+        <div class="body">
+          <div class="plots">
+            <div class="plot"><div class="cap">kernel K(r)</div><canvas id="kplot" width="150" height="110"></canvas></div>
+            <div class="plot"><div class="cap">growth G(u) · drag ↕ σ</div><canvas id="gplot" width="150" height="110"></canvas></div>
+          </div>
+          <div class="hint">Left: the convolution ring the creature "feels". Right: the Gaussian growth map — cells whose neighborhood sums near μ grow, others die. Drag the growth plot vertically to widen/narrow σ; click to set μ.</div>
+        </div>
+      </section>
+
+      <section class="card" data-key="paint">
+        <h3>Paint &amp; seed <span class="caret">▾</span></h3>
+        <div class="body">
+          <div class="btnrow" style="margin-bottom:8px">
+            <button class="tool on small" data-tool="draw">✎ Draw</button>
+            <button class="tool small" data-tool="erase">⌫ Erase</button>
+            <button class="tool small" data-tool="spray">✳ Spray</button>
+            <button class="tool small" data-tool="blur">≈ Blur</button>
+            <button class="tool small" data-tool="inject">⊕ Inject</button>
+          </div>
+          <div class="row"><label>brush</label><input id="brushR" type="range" min="1" max="30" step="1" value="7"><span class="val" id="brushV">7</span></div>
+          <div class="row"><label>strength</label><input id="strR" type="range" min="0.05" max="1" step="0.05" value="0.6"><span class="val" id="strV">0.60</span></div>
+          <div class="hint"><b>Inject</b> stamps the current species seed wherever you click — drop a whole colony, then watch them interact.</div>
+        </div>
+      </section>
+
+      <section class="card" data-key="render">
+        <h3>Render <span class="caret">▾</span></h3>
+        <div class="body">
+          <div class="row" style="align-items:flex-start"><label style="margin-top:2px" id="cmapLabel">colormap</label>
+            <div class="swatches" id="swatches" style="flex:1"></div>
+          </div>
+          <div class="btnrow" style="margin-top:8px">
+            <button id="rgbToggle" class="small">🌈 Color Lenia (RGB · 3 channels)</button>
+          </div>
+          <div class="btnrow" style="margin-top:6px">
+            <button id="koverlay" class="small">◎ Kernel footprint overlay</button>
+          </div>
+          <div class="hint">Color Lenia runs three cross-coupled fields (R/G/B), each with its own μ, so organisms shimmer iridescent instead of mapping one scalar through a colormap. It reuses the same convolution engine and is off by default for speed.</div>
+        </div>
+      </section>
+
+      <section class="card" data-key="breed">
+        <h3>Breeder &amp; evolution <span class="caret">▾</span></h3>
+        <div class="body">
+          <div class="btnrow">
+            <button id="mutateBtn" class="small">🧬 Mutate genome</button>
+            <button id="assessBtn" class="small">🩺 Assess viability</button>
+          </div>
+          <div class="row"><label>mutation</label><input id="mutR" type="range" min="0.01" max="0.5" step="0.01" value="0.12"><span class="val" id="mutV">0.12</span></div>
+          <div class="btnrow" style="margin-top:4px">
+            <button id="evolveBtn" class="small primary">▶ Auto-breeder: evolve</button>
+          </div>
+          <div id="evoOut" class="hint" style="margin-top:8px">Auto-breeder mutates the genome, scores each candidate on survival &amp; mass-stability over a headless run, and surfaces the fittest stable creature as a ready-to-share link.</div>
+          <div id="evoBest" style="display:none;margin-top:8px;padding:8px;background:var(--bg2);border:1px solid var(--line2);border-radius:8px">
+            <div class="kv" id="evoBestTxt"></div>
+            <div class="btnrow" style="margin-top:6px">
+              <button id="evoAdopt" class="small on">Adopt fittest</button>
+              <button id="evoShare" class="small">⧉ Share it</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" data-key="dissect">
+        <h3>Dissect — why it moves <span class="caret">▾</span></h3>
+        <div class="body dissect" id="dissect"></div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<!-- gallery drawer -->
+<div id="gallery">
+  <div class="ghead">
+    <div style="flex:1"><h2>Creature gallery</h2><p>One click boots straight into the crawling organism with its full editable genome.</p></div>
+    <button id="galleryClose" class="small">✕</button>
+  </div>
+  <div class="glist" id="glist"></div>
+</div>
+
+<!-- share modal -->
+<div id="modal">
+  <div class="box">
+    <h2 id="modalTitle">Share this lifeform</h2>
+    <p id="modalDesc">This URL boots straight into the crawling organism with its full editable genome. Paste it anywhere.</p>
+    <textarea id="shareText" readonly></textarea>
+    <div class="mfoot">
+      <label style="margin-right:auto;color:var(--dim);font-size:11px;display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="includeState" checked> include painted state (RLE)
+      </label>
+      <button id="copyLink" class="primary small">Copy link</button>
+      <button id="openLink" class="small">Open</button>
+      <button id="modalClose" class="small">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* =========================================================================
+   PLASMATA — continuous cellular automata (Lenia / SmoothLife family).
+   Zero dependencies. Pure typed-array convolution on a toroidal float field.
+   ========================================================================= */
+
+/* ---------- tiny DOM helper ---------- */
+const $ = id => document.getElementById(id);
+const clamp = (v,a,b)=> v<a?a:(v>b?b:v);
+
+/* ================= COLORMAPS ================= */
+/* control points -> 256-entry LUT (Uint8 rgb triplets) */
+const CMAPS = {
+  viridis:[[68,1,84],[59,82,139],[33,145,140],[94,201,98],[253,231,37]],
+  magma:[[0,0,4],[81,18,124],[183,55,121],[252,137,97],[252,253,191]],
+  inferno:[[0,0,4],[87,16,110],[188,55,84],[249,142,9],[252,255,164]],
+  plasma:[[13,8,135],[126,3,168],[204,71,120],[248,149,64],[240,249,33]],
+  turbo:[[48,18,59],[35,138,244],[24,224,93],[248,231,28],[196,32,4]],
+  ice:[[3,5,26],[20,66,140],[38,158,214],[136,224,236],[240,255,255]],
+  ember:[[8,3,3],[92,17,10],[201,66,17],[250,166,55],[255,247,213]],
+  mono:[[0,0,0],[64,64,64],[128,128,128],[196,196,196],[255,255,255]],
+};
+function buildLUT(name){
+  const cp = CMAPS[name]||CMAPS.viridis, n=cp.length-1, lut=new Uint8Array(256*3);
+  for(let i=0;i<256;i++){
+    const t=i/255*n, k=Math.min(n-1,Math.floor(t)), f=t-k;
+    const a=cp[k], b=cp[k+1];
+    lut[i*3]  =a[0]+(b[0]-a[0])*f;
+    lut[i*3+1]=a[1]+(b[1]-a[1])*f;
+    lut[i*3+2]=a[2]+(b[2]-a[2])*f;
+  }
+  return lut;
+}
+let colormap='viridis', LUT=buildLUT(colormap);
+
+/* ================= STATE / GENOME ================= */
+const S = {
+  gw:128, gh:128,        // grid dims
+  A:null, B:null,        // scalar fields (double-buffer)
+  R:[null,null,null],    // rgb channel fields (index0=R,1=G,2=B) used in color mode
+  Rb:[null,null,null],   // rgb back buffers
+  uBuf:[null,null,null], // convolution scratch per channel
+  genome:{
+    mu:0.15, sigma:0.015, dt:0.1, R:13, shells:1, beta:[1,0.5,0.25], colormap:'viridis', rgb:false
+  },
+  kernel:{kdx:null,kdy:null,kw:null,len:0,R:0},
+  running:false, generation:0, tool:'draw', brush:7, strength:0.6,
+  scale:4, safari:false, showKernel:false,
+  sps:30, curname:'Orbium',
+};
+
+/* ================= KERNEL ================= */
+function kernelCore(x){ // smooth bump peaking at 0.5, zero at 0 and 1
+  if(x<=0||x>=1) return 0;
+  return Math.exp(4 - 1/(x*(1-x)));
+}
+function computeKernel(){
+  const g=S.genome, R=g.R, B=g.shells, beta=g.beta;
+  const kdx=[],kdy=[],kw=[]; let sum=0;
+  for(let dy=-R;dy<=R;dy++){
+    for(let dx=-R;dx<=R;dx++){
+      const dist=Math.sqrt(dx*dx+dy*dy)/R;
+      if(dist>=1) continue;
+      const br=dist*B, i=Math.min(B-1,Math.floor(br)), frac=br-Math.floor(br);
+      const w=(beta[i]||0)*kernelCore(frac);
+      if(!(w>0)) continue;
+      kdx.push(dx); kdy.push(dy); kw.push(w); sum+=w;
+    }
+  }
+  const n=kw.length;
+  if(n===0||!(sum>0)){ // degenerate kernel (all ring weights 0): keep previous kernel to avoid NaN field
+    if(S.kernel&&S.kernel.len) return;
+    sum=1; // first-ever build with no weights — fall through with harmless normalizer
+  }
+  const KDX=new Int32Array(n),KDY=new Int32Array(n),KW=new Float32Array(n);
+  for(let i=0;i<n;i++){KDX[i]=kdx[i];KDY[i]=kdy[i];KW[i]=kw[i]/sum;}
+  S.kernel={kdx:KDX,kdy:KDY,kw:KW,len:n,R:R};
+}
+
+/* ================= FIELD ALLOC ================= */
+function allocFields(){
+  const N=S.gw*S.gh;
+  S.A=new Float32Array(N); S.B=new Float32Array(N);
+  for(let c=0;c<3;c++){S.R[c]=new Float32Array(N);S.Rb[c]=new Float32Array(N);S.uBuf[c]=new Float32Array(N);}
+}
+
+/* ================= GROWTH ================= */
+function growth(u,mu,sigma){ return 2*Math.exp(-((u-mu)*(u-mu))/(2*sigma*sigma))-1; }
+
+/* ================= STEP (scalar) ================= */
+function stepScalar(){
+  const {kdx,kdy,kw,len}=S.kernel, W=S.gw,H=S.gh, A=S.A,B=S.B,
+        mu=S.genome.mu, sig=S.genome.sigma, dt=S.genome.dt;
+  const inv2s2 = 1/(2*sig*sig);
+  for(let y=0;y<H;y++){
+    const row=y*W;
+    for(let x=0;x<W;x++){
+      let u=0;
+      for(let k=0;k<len;k++){
+        let sx=x+kdx[k]; if(sx<0)sx+=W; else if(sx>=W)sx-=W;
+        let sy=y+kdy[k]; if(sy<0)sy+=H; else if(sy>=H)sy-=H;
+        u+=A[sy*W+sx]*kw[k];
+      }
+      const d=u-mu, g=2*Math.exp(-(d*d)*inv2s2)-1;
+      let v=A[row+x]+dt*g;
+      B[row+x]= v<0?0:(v>1?1:v);
+    }
+  }
+  S.A=B; S.B=A;
+}
+
+/* ================= STEP (color / 3-channel cross-coupled) ================= */
+const CH_MU_OFFSET=[-0.006,0,0.006], CH_COUPLE=0.10;
+function stepColor(){
+  const {kdx,kdy,kw,len}=S.kernel, W=S.gw,H=S.gh, dt=S.genome.dt,
+        mu=S.genome.mu, sig=S.genome.sigma, inv2s2=1/(2*sig*sig);
+  const R=S.R, U=S.uBuf;
+  // convolution per channel
+  for(let c=0;c<3;c++){
+    const A=R[c], u=U[c];
+    for(let y=0;y<H;y++){
+      const row=y*W;
+      for(let x=0;x<W;x++){
+        let s=0;
+        for(let k=0;k<len;k++){
+          let sx=x+kdx[k]; if(sx<0)sx+=W; else if(sx>=W)sx-=W;
+          let sy=y+kdy[k]; if(sy<0)sy+=H; else if(sy>=H)sy-=H;
+          s+=A[sy*W+sx]*kw[k];
+        }
+        u[row+x]=s;
+      }
+    }
+  }
+  // cross-couple + growth + integrate
+  for(let c=0;c<3;c++){
+    const A=R[c], out=S.Rb[c], u=U[c], uP=U[(c+2)%3], uN=U[(c+1)%3];
+    const mc=mu+CH_MU_OFFSET[c];
+    const N=W*H;
+    for(let i=0;i<N;i++){
+      const pot=u[i]*(1-2*CH_COUPLE)+CH_COUPLE*(uP[i]+uN[i]);
+      const d=pot-mc, g=2*Math.exp(-(d*d)*inv2s2)-1;
+      let v=A[i]+dt*g;
+      out[i]= v<0?0:(v>1?1:v);
+    }
+  }
+  for(let c=0;c<3;c++){const t=S.R[c];S.R[c]=S.Rb[c];S.Rb[c]=t;}
+}
+
+function step(){ S.genome.rgb?stepColor():stepScalar(); S.generation++; }
+
+/* ================= RENDER ================= */
+const sim=$('sim'), sctx=sim.getContext('2d',{alpha:false});
+const off=document.createElement('canvas'); let octx;
+function ensureOff(){ if(off.width!==S.gw||off.height!==S.gh){off.width=S.gw;off.height=S.gh;octx=off.getContext('2d');} }
+let imgData=null;
+function render(){
+  ensureOff();
+  if(!imgData||imgData.width!==S.gw||imgData.height!==S.gh) imgData=octx.createImageData(S.gw,S.gh);
+  const px=imgData.data, N=S.gw*S.gh;
+  if(S.genome.rgb){
+    const R=S.R;
+    for(let i=0;i<N;i++){
+      const j=i<<2;
+      px[j]  =R[0][i]*255;
+      px[j+1]=R[1][i]*255;
+      px[j+2]=R[2][i]*255;
+      px[j+3]=255;
+    }
+  } else {
+    const A=S.A;
+    for(let i=0;i<N;i++){
+      let idx=(A[i]*255)|0; if(idx>255)idx=255; idx*=3;
+      const j=i<<2;
+      px[j]=LUT[idx]; px[j+1]=LUT[idx+1]; px[j+2]=LUT[idx+2]; px[j+3]=255;
+    }
+  }
+  octx.putImageData(imgData,0,0);
+  sctx.imageSmoothingEnabled=false;
+  sctx.drawImage(off,0,0,S.gw,S.gh,0,0,sim.width,sim.height);
+  if(S.showKernel) drawKernelOverlay();
+}
+function drawKernelOverlay(){
+  const sc=S.scale, R=S.kernel.R, cx=(S.gw>>1)*sc, cy=(S.gh>>1)*sc;
+  sctx.save();
+  sctx.strokeStyle='rgba(57,230,195,.5)'; sctx.lineWidth=1;
+  sctx.beginPath(); sctx.arc(cx,cy,R*sc,0,Math.PI*2); sctx.stroke();
+  sctx.strokeStyle='rgba(57,230,195,.2)';
+  const B=S.genome.shells;
+  for(let b=1;b<B;b++){sctx.beginPath();sctx.arc(cx,cy,R*sc*(b/B),0,Math.PI*2);sctx.stroke();}
+  sctx.fillStyle='rgba(57,230,195,.9)'; sctx.beginPath(); sctx.arc(cx,cy,2,0,Math.PI*2); sctx.fill();
+  sctx.restore();
+}
+function resizeCanvas(){
+  sim.width=S.gw*S.scale; sim.height=S.gh*S.scale;
+  imgData=null;
+}
+
+/* ================= STATS ================= */
+function fieldMass(){
+  let m=0; const N=S.gw*S.gh;
+  if(S.genome.rgb){ for(let c=0;c<3;c++){const A=S.R[c];for(let i=0;i<N;i++)m+=A[i];} m/=3; }
+  else { const A=S.A; for(let i=0;i<N;i++)m+=A[i]; }
+  return m;
+}
+function activeCells(){
+  let a=0; const N=S.gw*S.gh, A=S.genome.rgb?S.R[1]:S.A;
+  for(let i=0;i<N;i++) if(A[i]>0.02)a++;
+  return a;
+}
+
+/* ================= PATTERN PLACEMENT ================= */
+function placeCells(cells, cxFrac=0.5, cyFrac=0.5){
+  const ph=cells.length, pw=cells[0].length;
+  const ox=Math.round(S.gw*cxFrac-pw/2), oy=Math.round(S.gh*cyFrac-ph/2);
+  const put=(A)=>{
+    for(let y=0;y<ph;y++)for(let x=0;x<pw;x++){
+      const gx=((ox+x)%S.gw+S.gw)%S.gw, gy=((oy+y)%S.gh+S.gh)%S.gh;
+      A[gy*S.gw+gx]=cells[y][x];
+    }
+  };
+  if(S.genome.rgb){ for(let c=0;c<3;c++){const A=S.R[c];for(let y=0;y<ph;y++)for(let x=0;x<pw;x++){const gx=((ox+x)%S.gw+S.gw)%S.gw,gy=((oy+y)%S.gh+S.gh)%S.gh;A[gy*S.gw+gx]=cells[y][x];}} }
+  else put(S.A);
+  emptySinceClear=false;
+}
+function clearField(){
+  S.A.fill(0);
+  for(let c=0;c<3;c++)S.R[c].fill(0);
+  S.generation=0;
+  emptySinceClear=true;
+}
+
+/* ================= RANDOM SEED ================= */
+function randomSeed(){
+  clearField();
+  const cx=S.gw*(0.35+Math.random()*0.3), cy=S.gh*(0.35+Math.random()*0.3);
+  const rad=8+Math.random()*10;
+  const fill=(A,ph)=>{
+    for(let y=0;y<S.gh;y++)for(let x=0;x<S.gw;x++){
+      const dx=x-cx,dy=y-cy,d=Math.sqrt(dx*dx+dy*dy);
+      if(d<rad){
+        const ang=Math.atan2(dy,dx);
+        const v=Math.max(0,(1-d/rad))*(0.5+0.5*Math.sin(ang*2+ph)+0.3*Math.random());
+        A[y*S.gw+x]=clamp(v,0,1);
+      }
+    }
+  };
+  if(S.genome.rgb){ for(let c=0;c<3;c++)fill(S.R[c],c*2); }
+  else fill(S.A,0);
+  S.generation=0;
+  emptySinceClear=false;
+}
+
+/* ================= ORBIUM canonical seed (Bert Chan, Lenia) ================= */
+const ORBIUM=[
+[0,0,0,0,0,0,0.1,0.14,0.1,0,0,0.03,0.03,0,0,0.3,0,0,0,0],
+[0,0,0,0,0,0.08,0.24,0.3,0.3,0.18,0.14,0.15,0.16,0.15,0.09,0.2,0,0,0,0],
+[0,0,0,0,0,0.15,0.34,0.44,0.46,0.38,0.18,0.14,0.11,0.13,0.19,0.18,0.45,0,0,0],
+[0,0,0,0,0.06,0.13,0.39,0.5,0.5,0.37,0.06,0,0,0,0.02,0.16,0.68,0,0,0],
+[0,0,0,0.11,0.17,0.17,0.33,0.4,0.38,0.28,0.14,0,0,0,0,0,0.18,0.42,0,0],
+[0,0,0.09,0.2,0.24,0.3,0.3,0.15,0.05,0,0,0,0,0,0,0.08,0.21,0.21,0.1,0],
+[0,0.05,0.24,0.3,0.36,0.5,0.55,0.32,0.05,0,0,0,0,0,0,0.06,0.27,0.16,0.1,0],
+[0.11,0.17,0.35,0.5,0.62,0.75,0.79,0.5,0.19,0,0,0,0,0,0,0.09,0.22,0.15,0.02,0],
+[0.16,0.24,0.44,0.62,0.72,0.83,0.82,0.5,0.18,0,0,0,0,0,0,0.09,0.27,0.14,0.02,0],
+[0.19,0.28,0.47,0.65,0.75,0.85,0.83,0.42,0.15,0,0,0,0,0,0,0.12,0.29,0.15,0.03,0],
+[0.19,0.28,0.46,0.63,0.72,0.82,0.79,0.36,0.12,0,0,0,0,0,0.01,0.19,0.32,0.15,0.03,0],
+[0.16,0.26,0.41,0.56,0.64,0.72,0.68,0.28,0.08,0,0,0,0,0,0.05,0.28,0.33,0.12,0.02,0],
+[0.11,0.22,0.34,0.44,0.5,0.55,0.5,0.19,0.03,0,0,0,0,0.01,0.13,0.36,0.29,0.07,0,0],
+[0.05,0.16,0.25,0.32,0.36,0.38,0.32,0.09,0,0,0,0,0,0.06,0.24,0.37,0.2,0.01,0,0],
+[0,0.09,0.16,0.21,0.23,0.24,0.18,0.02,0,0,0,0,0.02,0.14,0.31,0.32,0.09,0,0,0],
+[0,0.03,0.08,0.12,0.13,0.13,0.07,0,0,0,0,0,0.09,0.24,0.34,0.2,0.01,0,0,0],
+[0,0,0.02,0.04,0.05,0.04,0.01,0,0,0,0,0.05,0.18,0.3,0.27,0.07,0,0,0,0],
+[0,0,0,0,0,0,0,0,0,0,0.02,0.13,0.26,0.32,0.16,0.02,0,0,0,0],
+[0,0,0,0,0,0,0,0,0,0,0.06,0.19,0.3,0.22,0.06,0,0,0,0,0],
+[0,0,0,0,0,0,0,0,0,0,0.05,0.16,0.24,0.14,0.02,0,0,0,0,0]];
+
+function rot90(m){ const h=m.length,w=m[0].length,o=[]; for(let x=0;x<w;x++){o.push([]);for(let y=h-1;y>=0;y--)o[x].push(m[y][x]);} return o; }
+function scaleCells(m,k){ // nearest-neighbor upscale for larger-R creatures
+  if(k===1)return m; const o=[];
+  for(let y=0;y<m.length*k;y++){o.push([]);for(let x=0;x<m[0].length*k;x++)o[y].push(m[(y/k)|0][(x/k)|0]);}
+  return o;
+}
+
+/* ================= GALLERY (curated, hand-tuned) ================= */
+/* Each has a base genome + a seed generator. All boot into a living creature. */
+const GALLERY=[
+  {name:'Orbium',       note:'the classic glider',   g:{mu:0.15, sigma:0.015, dt:0.1,  R:10, shells:1, beta:[1], colormap:'viridis'}, seed:()=>ORBIUM},
+  {name:'Gyrorbium',    note:'rolling soliton',      g:{mu:0.15, sigma:0.017, dt:0.09, R:10, shells:1, beta:[1], colormap:'ice'},     seed:()=>ORBIUM},
+  {name:'Orbium turbo', note:'high-metabolism dash', g:{mu:0.15, sigma:0.015, dt:0.14, R:10, shells:1, beta:[1], colormap:'turbo'},   seed:()=>ORBIUM},
+  {name:'Orbium drift', note:'slow warm glide',      g:{mu:0.15, sigma:0.015, dt:0.08, R:10, shells:1, beta:[1], colormap:'ember'},   seed:()=>ORBIUM},
+  {name:'Scutium',      note:'compact shield-blob',  g:{mu:0.14, sigma:0.015, dt:0.1,  R:9,  shells:1, beta:[1], colormap:'magma'},    seed:()=>ORBIUM},
+  {name:'Volvox',       note:'giant upscaled orb',   g:{mu:0.15, sigma:0.015, dt:0.1,  R:20, shells:1, beta:[1], colormap:'inferno'}, seed:()=>scaleCells(ORBIUM,2)},
+  {name:'Kelp bloom',   note:'growing culture',      g:{mu:0.12, sigma:0.03,  dt:0.1,  R:13, shells:1, beta:[1], colormap:'viridis'}, seed:()=>soupSeed(0.40,7)},
+  {name:'Nebula',       note:'sparse wandering cells',g:{mu:0.14,sigma:0.032, dt:0.1,  R:13, shells:1, beta:[1], colormap:'magma'},    seed:()=>soupSeed(0.25,42)},
+  {name:'Coral reef',   note:'dense self-organizing',g:{mu:0.13, sigma:0.028, dt:0.1,  R:13, shells:1, beta:[1], colormap:'ember'},    seed:()=>soupSeed(0.50,99)},
+  {name:'Plasma sea',   note:'churning membrane',    g:{mu:0.15, sigma:0.036, dt:0.12, R:14, shells:1, beta:[1], colormap:'plasma'},   seed:()=>soupSeed(0.35,5)},
+  {name:'Iris (RGB)',   note:'iridescent color Lenia',g:{mu:0.14,sigma:0.03,  dt:0.1,  R:13, shells:1, beta:[1], colormap:'viridis', rgb:true}, seed:()=>soupSeed(0.40,7)},
+  {name:'Aurora (RGB)', note:'shimmering color soup',g:{mu:0.15, sigma:0.032, dt:0.12, R:13, shells:1, beta:[1], colormap:'ice', rgb:true},     seed:()=>soupSeed(0.30,42)},
+];
+// deterministic soup so gallery clicks & thumbnails are reproducible
+function soupSeed(density,seed){
+  let s=(seed||1)>>>0; const rnd=()=>{s=(s*1664525+1013904223)>>>0;return s/4294967296;};
+  const w=48,h=48,m=[];
+  for(let y=0;y<h;y++){m.push([]);for(let x=0;x<w;x++){m[y].push(rnd()<density?rnd():0);}}
+  return m;
+}
+
+/* ================= URL HASH CODEC ================= */
+/* genome -> compact; field -> quantized RLE -> base64url */
+function bytesToB64(b){let s='';const CH=0x8000;for(let i=0;i<b.length;i+=CH)s+=String.fromCharCode.apply(null,b.subarray(i,i+CH));return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+function b64ToBytes(s){s=s.replace(/-/g,'+').replace(/_/g,'/');const bin=atob(s),a=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)a[i]=bin.charCodeAt(i);return a;}
+
+function encodeGenome(){
+  const g=S.genome;
+  const o={m:g.mu,s:g.sigma,dt:g.dt,R:g.R,sh:g.shells,b:g.beta.slice(0,g.shells),cm:g.colormap,rgb:g.rgb?1:0,w:S.gw,h:S.gh,n:S.curname};
+  return bytesToB64(new TextEncoder().encode(JSON.stringify(o)));
+}
+function encodeField(){
+  // quantize to bytes, RLE (count 1..255, value)
+  const N=S.gw*S.gh, out=[];
+  const q=new Uint8Array(N);
+  if(S.genome.rgb){ // encode 3 channels sequentially
+    for(let c=0;c<3;c++){const A=S.R[c];for(let i=0;i<N;i++){let v=(A[i]*255)|0;q[i]=v>255?255:v;}rleInto(q,N,out);}
+  } else {
+    const A=S.A; for(let i=0;i<N;i++){let v=(A[i]*255)|0;q[i]=v>255?255:v;}
+    rleInto(q,N,out);
+  }
+  return bytesToB64(new Uint8Array(out));
+}
+function rleInto(q,N,out){
+  let i=0;
+  while(i<N){
+    const val=q[i]; let run=1;
+    while(i+run<N && q[i+run]===val && run<255) run++;
+    out.push(run,val); i+=run;
+  }
+}
+function decodeField(bytes){
+  const N=S.gw*S.gh;
+  if(S.genome.rgb){
+    let off=0;
+    for(let c=0;c<3;c++){
+      const A=S.R[c]; let i=off,pos=0;
+      while(pos<N && i+1<bytes.length){const run=bytes[i],val=bytes[i+1];i+=2;for(let k=0;k<run&&pos<N;k++)A[pos++]=val/255;}
+      off=i;
+    }
+  } else {
+    const A=S.A; let i=0,pos=0;
+    while(pos<N && i+1<bytes.length){const run=bytes[i],val=bytes[i+1];i+=2;for(let k=0;k<run&&pos<N;k++)A[pos++]=val/255;}
+  }
+}
+
+function buildHash(includeState){
+  let h='#g='+encodeGenome();
+  if(includeState){
+    const f=encodeField();
+    if(f.length<20000) h+='&f='+f;   // bounded; else genome-only fallback
+  }
+  return h;
+}
+function applyGenomeObj(o){
+  const g=S.genome;
+  g.mu=o.m; g.sigma=o.s; g.dt=o.dt; g.R=o.R; g.shells=o.sh;
+  g.beta=(o.b&&o.b.length)?o.b.slice():[1]; while(g.beta.length<3)g.beta.push(0.3);
+  g.colormap=o.cm||'viridis'; g.rgb=!!o.rgb;
+  colormap=g.colormap; LUT=buildLUT(colormap);
+  if(o.w&&o.h&&(o.w!==S.gw||o.h!==S.gh)){S.gw=o.w;S.gh=o.h;allocFields();resizeCanvas();}
+  S.curname=o.n||'Custom';
+  computeKernel();
+}
+function loadFromHash(){
+  const h=location.hash.slice(1); if(!h) return false;
+  const params={}; h.split('&').forEach(p=>{const i=p.indexOf('=');if(i>0)params[p.slice(0,i)]=p.slice(i+1);});
+  if(!params.g) return false;
+  try{
+    const o=JSON.parse(new TextDecoder().decode(b64ToBytes(params.g)));
+    applyGenomeObj(o);
+    clearField();
+    if(params.f){ decodeField(b64ToBytes(params.f)); }
+    else if(o.n && GALLERY.find(x=>x.name===o.n)){ placeCells(GALLERY.find(x=>x.name===o.n).seed()); }
+    else placeCells(ORBIUM);
+    syncUIFromGenome();
+    return true;
+  }catch(e){ console.warn('hash parse failed',e); return false; }
+}
+
+/* ================= LOAD A GALLERY CREATURE ================= */
+function loadCreature(entry){
+  const g=S.genome;
+  Object.assign(g,{mu:0.15,sigma:0.015,dt:0.1,R:13,shells:1,beta:[1,0.5,0.25],rgb:false});
+  Object.assign(g,entry.g);
+  if(!Array.isArray(g.beta)) g.beta=[1];
+  g.beta=g.beta.slice(); while(g.beta.length<3)g.beta.push(0.25);
+  colormap=g.colormap||'viridis'; LUT=buildLUT(colormap);
+  S.genome.rgb=!!entry.g.rgb;
+  S.curname=entry.name;
+  computeKernel();
+  clearField();
+  placeCells(entry.seed());
+  S.generation=0;
+  syncUIFromGenome();
+  history.replaceState(null,'',buildHash(true));
+}
+
+/* ================= VIABILITY SCORING (headless) ================= */
+/* run a genome on a temp field, classify alive/dead/exploded + stability */
+function assess(genome, seedCells, steps){
+  // temp single-channel sim (color assessed on green proxy for speed)
+  const W=S.gw,H=S.gh,N=W*H;
+  const A=new Float32Array(N), B=new Float32Array(N);
+  // place seed centered
+  const ph=seedCells.length,pw=seedCells[0].length, ox=(W>>1)-(pw>>1), oy=(H>>1)-(ph>>1);
+  for(let y=0;y<ph;y++)for(let x=0;x<pw;x++){const gx=((ox+x)%W+W)%W,gy=((oy+y)%H+H)%H;A[gy*W+gx]=seedCells[y][x];}
+  // temp kernel
+  const savedG=S.genome, savedK=S.kernel;
+  S.genome=genome; computeKernel(); const K=S.kernel;
+  const mu=genome.mu,sig=genome.sigma,dt=genome.dt,inv2s2=1/(2*sig*sig);
+  const {kdx,kdy,kw,len}=K;
+  let cur=A,nxt=B; const masses=[];
+  for(let s=0;s<steps;s++){
+    for(let y=0;y<H;y++){const row=y*W;
+      for(let x=0;x<W;x++){
+        let u=0;
+        for(let k=0;k<len;k++){let sx=x+kdx[k];if(sx<0)sx+=W;else if(sx>=W)sx-=W;let sy=y+kdy[k];if(sy<0)sy+=H;else if(sy>=H)sy-=H;u+=cur[sy*W+sx]*kw[k];}
+        const d=u-mu,g=2*Math.exp(-(d*d)*inv2s2)-1;let v=cur[row+x]+dt*g;nxt[row+x]=v<0?0:(v>1?1:v);
+      }
+    }
+    const t=cur;cur=nxt;nxt=t;
+    if(s%4===0){let m=0;for(let i=0;i<N;i++)m+=cur[i];masses.push(m);}
+  }
+  // restore
+  S.genome=savedG; S.kernel=savedK;
+  const m0=masses[0]||0.001, mE=masses[masses.length-1]||0;
+  // saturation check
+  let sat=0;for(let i=0;i<N;i++)if(cur[i]>0.98)sat++;
+  let status,score;
+  if(mE<m0*0.06 || mE<2){ status='dead'; score=0; }
+  else if(sat>N*0.25 || mE>m0*6){ status='explode'; score=0.1; }
+  else {
+    // stability: low relative variance of tail masses = good
+    const tail=masses.slice(Math.floor(masses.length/2));
+    const mean=tail.reduce((a,b)=>a+b,0)/tail.length;
+    let varr=0;tail.forEach(v=>varr+=(v-mean)*(v-mean));varr/=tail.length;
+    const cv=Math.sqrt(varr)/(mean||1);
+    status='alive';
+    score=clamp(1-cv*3,0,1)*clamp(mE/m0,0,1.2);
+  }
+  return {status,score,massStart:m0,massEnd:mE};
+}
+
+function currentSeedCells(){
+  const e=GALLERY.find(x=>x.name===S.curname);
+  return e?e.seed():ORBIUM;
+}
+
+/* ================= BREEDER: mutate ================= */
+function gaussian(){let u=0,v=0;while(u===0)u=Math.random();while(v===0)v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+function mutateGenome(base, amt){
+  const g=JSON.parse(JSON.stringify(base));
+  g.mu=clamp(g.mu+gaussian()*0.02*amt*3,0.05,0.35);
+  g.sigma=clamp(g.sigma+gaussian()*0.004*amt*3,0.004,0.06);
+  g.dt=clamp(g.dt+gaussian()*0.02*amt*2,0.03,0.3);
+  if(Math.random()<0.3*amt) g.R=clamp(g.R+(Math.random()<0.5?-1:1),6,22);
+  for(let i=0;i<g.shells;i++) g.beta[i]=clamp(g.beta[i]+gaussian()*0.1*amt,0,1);
+  g.beta[0]=1; // anchor primary ring
+  return g;
+}
+
+/* ================= UI SYNC ================= */
+function setVal(id,v){$(id).textContent=v;}
+function syncColormapUI(){ // the LUT is ignored in RGB mode — reflect that in the UI
+  const rgb=S.genome.rgb;
+  $('swatches').classList.toggle('disabled',rgb);
+  $('cmapLabel').textContent=rgb?'colormap (RGB uses channel fields)':'colormap';
+}
+function syncUIFromGenome(){
+  const g=S.genome;
+  $('muR').value=g.mu; setVal('muV',g.mu.toFixed(3));
+  $('sigR').value=g.sigma; setVal('sigV',g.sigma.toFixed(4));
+  $('dtR').value=g.dt; setVal('dtV',g.dt.toFixed(3));
+  $('rR').value=g.R; setVal('rV',g.R);
+  $('shR').value=g.shells; setVal('shV',g.shells);
+  $('b0R').value=g.beta[0]; setVal('b0V',(g.beta[0]||0).toFixed(2));
+  $('b1R').value=g.beta[1]||0; setVal('b1V',(g.beta[1]||0).toFixed(2));
+  $('b2R').value=g.beta[2]||0; setVal('b2V',(g.beta[2]||0).toFixed(2));
+  $('b1row').style.display=g.shells>=2?'':'none';
+  $('b2row').style.display=g.shells>=3?'':'none';
+  $('curname').textContent=S.curname;
+  $('rgbToggle').classList.toggle('on',g.rgb);
+  document.querySelectorAll('#swatches .sw').forEach(s=>s.classList.toggle('on',s.dataset.cm===g.colormap));
+  syncColormapUI();
+  drawPlots(); updateDissect();
+}
+function readGenomeFromUI(){
+  const g=S.genome;
+  g.mu=parseFloat($('muR').value); g.sigma=parseFloat($('sigR').value);
+  g.dt=parseFloat($('dtR').value); g.R=parseInt($('rR').value); g.shells=parseInt($('shR').value);
+  g.beta[0]=parseFloat($('b0R').value); g.beta[1]=parseFloat($('b1R').value); g.beta[2]=parseFloat($('b2R').value);
+  computeKernel();
+  syncUIFromGenome();
+}
+
+/* ================= PLOTS ================= */
+function drawPlots(){
+  // kernel
+  const kc=$('kplot'), kx=kc.getContext('2d'), W=kc.width,H=kc.height;
+  kx.clearRect(0,0,W,H); kx.fillStyle='#0a0d13'; kx.fillRect(0,0,W,H);
+  kx.strokeStyle='rgba(255,255,255,.06)'; for(let i=1;i<4;i++){kx.beginPath();kx.moveTo(0,H*i/4);kx.lineTo(W,H*i/4);kx.stroke();}
+  const g=S.genome,B=g.shells,beta=g.beta;
+  kx.beginPath(); kx.strokeStyle='#39e6c3'; kx.lineWidth=2;
+  let maxv=0.0001, vals=[];
+  for(let i=0;i<=W;i++){const r=i/W;const br=r*B,idx=Math.min(B-1,Math.floor(br)),frac=br-Math.floor(br);const v=(beta[idx]||0)*kernelCore(frac);vals.push(v);if(v>maxv)maxv=v;}
+  for(let i=0;i<=W;i++){const x=i;const y=H-4-(vals[i]/maxv)*(H-8);i?kx.lineTo(x,y):kx.moveTo(x,y);}
+  kx.stroke();
+  kx.fillStyle='rgba(57,230,195,.12)'; kx.lineTo(W,H); kx.lineTo(0,H); kx.fill();
+
+  // growth
+  const gc=$('gplot'), gxr=gc.getContext('2d'); const GW=gc.width,GH=gc.height;
+  gxr.clearRect(0,0,GW,GH); gxr.fillStyle='#0a0d13'; gxr.fillRect(0,0,GW,GH);
+  gxr.strokeStyle='rgba(255,255,255,.06)'; gxr.beginPath();gxr.moveTo(0,GH/2);gxr.lineTo(GW,GH/2);gxr.stroke();
+  // domain u in [0,0.4]
+  const umax=0.4;
+  gxr.beginPath(); gxr.strokeStyle='#7c6cff'; gxr.lineWidth=2;
+  for(let i=0;i<=GW;i++){const u=i/GW*umax;const gv=growth(u,g.mu,g.sigma);const y=GH/2-gv*(GH/2-4);i?gxr.lineTo(i,y):gxr.moveTo(i,y);}
+  gxr.stroke();
+  // mu marker
+  const mx=g.mu/umax*GW;
+  gxr.strokeStyle='rgba(57,230,195,.7)'; gxr.setLineDash([3,3]); gxr.beginPath();gxr.moveTo(mx,0);gxr.lineTo(mx,GH);gxr.stroke();gxr.setLineDash([]);
+  gxr.fillStyle='#39e6c3';gxr.font='9px monospace';gxr.fillText('μ',mx+2,10);
+}
+
+/* ================= DISSECT ================= */
+function updateDissect(){
+  const g=S.genome;
+  $('dissect').innerHTML=
+  `<p>Each cell holds a floating-point <b>mass</b> in <code>[0,1]</code>. Every step, Plasmata convolves the field with a radial kernel <code>K</code> to get a local neighborhood potential <code>u</code>, then updates:</p>
+   <p style="text-align:center"><code>Aₜ₊₁ = clamp( A + dt · G(K∗A) )</code></p>
+   <p>The growth map <code>G(u) = 2·exp(−(u−μ)²/2σ²) − 1</code> is the engine of life. Cells whose neighborhood mass lands near <b>μ = ${g.mu.toFixed(3)}</b> gain mass; too sparse or too dense and <code>G</code> goes negative — they die back. That balance is what makes a blob <i>self-healing</i>.</p>
+   <p><b>σ = ${g.sigma.toFixed(4)}</b> sets tolerance: widen it and the creature grows fat and sluggish; narrow it and it starves into filaments. <b>dt = ${g.dt.toFixed(3)}</b> is the integration step — bigger = faster metabolism but easier to blow up.</p>
+   <p><b>R = ${g.R}</b> is how far each cell "sees"; the <b>${g.shells}-ring</b> kernel profile decides whether the organism glides, spins, or pulses. Asymmetry in the seed is what breaks symmetry and makes it <i>crawl</i>.</p>`;
+}
+
+/* ================= MAIN LOOP ================= */
+let acc=0, lastT=performance.now(), fpsT=performance.now(), frames=0, stepsThisSec=0, spsT=performance.now();
+let lastMass=0, verdictState='—', emptySinceClear=false;
+function tick(now){
+  const dt=(now-lastT)/1000; lastT=now;
+  frames++;
+  if(S.running){
+    acc+=dt*S.sps;
+    let budget=Math.min(acc|0, 14); // cap steps per frame to protect fps
+    while(budget-->0){ step(); acc--; stepsThisSec++; }
+    if(acc>4)acc=4;
+    if(S.safari && (S.generation&3)===0) recenter();
+  }
+  render();
+  // stats ~4x/sec
+  if(now-fpsT>250){
+    const fps=Math.round(frames/((now-fpsT)/1000)); frames=0; fpsT=now;
+    setVal('s-fps',fps);
+    const m=fieldMass();
+    setVal('s-gen',S.generation);
+    setVal('s-mass',m.toFixed(0));
+    setVal('s-active',activeCells());
+    // verdict
+    const g=S.genome, sat=m>(S.gw*S.gh*0.35);
+    const empty=m<0.5;
+    $('empty-state').classList.toggle('show',empty);
+    let v,cls;
+    if(empty && emptySinceClear){v='· empty field';cls='var(--dim)';}
+    else if(m<2){v='☠ dead';cls='var(--bad)';}
+    else if(sat){v='✸ exploded';cls='var(--warn)';}
+    else {const dm=Math.abs(m-lastMass);v=dm<m*0.03?'✔ stable · alive':'~ evolving';cls=dm<m*0.03?'var(--good)':'var(--accent)';}
+    const vd=$('verdict'); vd.textContent=v; vd.style.color=cls; vd.style.borderColor=cls;
+    lastMass=m;
+  }
+  if(now-spsT>1000){ setVal('s-sps',stepsThisSec); stepsThisSec=0; spsT=now; }
+  requestAnimationFrame(tick);
+}
+
+/* ================= SAFARI recenter (roll field to center of mass) ================= */
+function comOf(A){
+  const W=S.gw,H=S.gh; let sx=0,sy=0,sc=0,ss=0,tx=0,ty=0,m=0;
+  // circular mean for toroidal wrap
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const v=A[y*W+x];if(v<0.01)continue;
+    const ax=x/W*2*Math.PI,ay=y/H*2*Math.PI; sx+=Math.cos(ax)*v;ss+=Math.sin(ax)*v;tx+=Math.cos(ay)*v;ty+=Math.sin(ay)*v;m+=v;}
+  if(m<1)return null;
+  const cx=(Math.atan2(ss,sx)/(2*Math.PI)+1)%1*W, cy=(Math.atan2(ty,tx)/(2*Math.PI)+1)%1*H;
+  return {cx,cy};
+}
+function rollField(A,dx,dy){
+  const W=S.gw,H=S.gh,tmp=new Float32Array(W*H);
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const nx=((x+dx)%W+W)%W,ny=((y+dy)%H+H)%H;tmp[ny*W+nx]=A[y*W+x];}
+  A.set(tmp);
+}
+function recenter(){
+  const ref=S.genome.rgb?S.R[1]:S.A;
+  const com=comOf(ref); if(!com)return;
+  const dx=Math.round(S.gw/2-com.cx), dy=Math.round(S.gh/2-com.cy);
+  if(dx===0&&dy===0)return;
+  if(S.genome.rgb){for(let c=0;c<3;c++)rollField(S.R[c],dx,dy);}else rollField(S.A,dx,dy);
+}
+
+/* ================= PAINT ================= */
+let painting=false;
+function canvasToGrid(e){
+  const r=sim.getBoundingClientRect();
+  const cx=(e.touches?e.touches[0].clientX:e.clientX)-r.left;
+  const cy=(e.touches?e.touches[0].clientY:e.clientY)-r.top;
+  return {gx:Math.floor(cx/sim.width*S.gw), gy:Math.floor(cy/sim.height*S.gh), px:cx, py:cy};
+}
+function applyBrush(gx,gy){
+  const br=S.brush, st=S.strength;
+  if(S.tool!=='erase') emptySinceClear=false;
+  if(S.tool==='inject'){ // stamp species seed here
+    const cells=currentSeedCells(), ph=cells.length,pw=cells[0].length;
+    const ox=gx-(pw>>1), oy=gy-(ph>>1);
+    const put=(A)=>{for(let y=0;y<ph;y++)for(let x=0;x<pw;x++){const X=((ox+x)%S.gw+S.gw)%S.gw,Y=((oy+y)%S.gh+S.gh)%S.gh;A[Y*S.gw+X]=Math.max(A[Y*S.gw+X],cells[y][x]);}};
+    if(S.genome.rgb){for(let c=0;c<3;c++)put(S.R[c]);}else put(S.A);
+    return;
+  }
+  const targets=S.genome.rgb?S.R:[S.A];
+  for(let dy=-br;dy<=br;dy++)for(let dx=-br;dx<=br;dx++){
+    const d=Math.sqrt(dx*dx+dy*dy); if(d>br)continue;
+    const X=((gx+dx)%S.gw+S.gw)%S.gw, Y=((gy+dy)%S.gh+S.gh)%S.gh, idx=Y*S.gw+X;
+    const fall=1-d/br;
+    targets.forEach((A)=>{
+      if(S.tool==='draw') A[idx]=clamp(A[idx]+st*fall,0,1);
+      else if(S.tool==='erase') A[idx]=clamp(A[idx]-st*fall,0,1);
+      else if(S.tool==='spray'){ if(Math.random()<fall*0.5) A[idx]=clamp(A[idx]+st*Math.random(),0,1); }
+      else if(S.tool==='blur'){
+        const l=A[((X-1+S.gw)%S.gw)+Y*S.gw],rr=A[((X+1)%S.gw)+Y*S.gw],up=A[X+((Y-1+S.gh)%S.gh)*S.gw],dn=A[X+((Y+1)%S.gh)*S.gw];
+        A[idx]=A[idx]*(1-st*fall)+((l+rr+up+dn)/4)*st*fall;
+      }
+    });
+  }
+}
+sim.addEventListener('pointerdown',e=>{painting=true;sim.setPointerCapture(e.pointerId);const p=canvasToGrid(e);applyBrush(p.gx,p.gy);});
+sim.addEventListener('pointermove',e=>{
+  const p=canvasToGrid(e);
+  const ring=$('brushring'); const r=sim.getBoundingClientRect(); const wrapR=$('canvas-wrap').getBoundingClientRect();
+  if(S.tool!=='inject'){const size=S.brush*2*(sim.width/S.gw);ring.style.display='block';ring.style.width=ring.style.height=size+'px';ring.style.left=(r.left-wrapR.left+p.px-size/2)+'px';ring.style.top=(r.top-wrapR.top+p.py-size/2)+'px';}
+  else ring.style.display='none';
+  if(painting)applyBrush(p.gx,p.gy);
+});
+window.addEventListener('pointerup',()=>{painting=false;});
+sim.addEventListener('pointerleave',()=>{$('brushring').style.display='none';});
+
+/* ================= CONTROLS WIRING ================= */
+function togglePlay(){S.running=!S.running;$('playbtn').textContent=S.running?'❚❚':'▶';$('playbtn').classList.toggle('on',S.running);}
+$('playbtn').onclick=togglePlay;
+$('stepbtn').onclick=()=>{step();render();};
+$('randbtn').onclick=()=>{randomSeed();S.curname='Random soup';$('curname').textContent=S.curname;toast('Random soup seeded 🎲');};
+$('clearbtn').onclick=()=>{clearField();toast('Field cleared — paint or seed to begin');};
+$('safaribtn').onclick=function(){S.safari=!S.safari;this.classList.toggle('on',S.safari);};
+$('spsRange').oninput=function(){S.sps=+this.value;setVal('spsVal',this.value+'/s');};
+$('zoomRange').oninput=function(){S.scale=+this.value;resizeCanvas();setVal('zoomVal',this.value+'×');};
+
+['muR','sigR','dtR','rR','b0R','b1R','b2R'].forEach(id=>$(id).addEventListener('input',readGenomeFromUI));
+$('shR').addEventListener('input',function(){S.genome.shells=+this.value;readGenomeFromUI();});
+
+// paint tools
+document.querySelectorAll('.tool').forEach(b=>b.onclick=function(){
+  document.querySelectorAll('.tool').forEach(x=>x.classList.remove('on'));this.classList.add('on');S.tool=this.dataset.tool;
+});
+$('brushR').oninput=function(){S.brush=+this.value;setVal('brushV',this.value);};
+$('strR').oninput=function(){S.strength=+this.value;setVal('strV',(+this.value).toFixed(2));};
+
+// colormap swatches
+(function(){
+  const wrap=$('swatches');
+  Object.keys(CMAPS).forEach(name=>{
+    const lut=buildLUT(name), sw=document.createElement('div'); sw.className='sw'; sw.dataset.cm=name; sw.title=name;
+    let grad='linear-gradient(90deg,';
+    for(let i=0;i<=4;i++){const c=lut[Math.floor(i/4*255)*3],a=lut[Math.floor(i/4*255)*3+1],b=lut[Math.floor(i/4*255)*3+2];grad+=`rgb(${c},${a},${b}) ${i/4*100}%${i<4?',':''}`;}
+    sw.style.background=grad+')';
+    if(name===colormap)sw.classList.add('on');
+    sw.onclick=()=>{colormap=name;LUT=buildLUT(name);S.genome.colormap=name;document.querySelectorAll('#swatches .sw').forEach(s=>s.classList.remove('on'));sw.classList.add('on');};
+    wrap.appendChild(sw);
+  });
+})();
+
+$('rgbToggle').onclick=function(){
+  const g=S.genome; g.rgb=!g.rgb; this.classList.toggle('on',g.rgb);
+  // migrate field: scalar->rgb copies A into all channels; rgb->scalar averages
+  if(g.rgb){for(let c=0;c<3;c++)S.R[c].set(S.A);}
+  else{const N=S.gw*S.gh;for(let i=0;i<N;i++)S.A[i]=(S.R[0][i]+S.R[1][i]+S.R[2][i])/3;}
+  imgData=null; syncColormapUI(); updateDissect();
+};
+$('koverlay').onclick=function(){S.showKernel=!S.showKernel;this.classList.toggle('on',S.showKernel);};
+
+// growth plot interaction: click sets mu, drag vertical sets sigma
+(function(){
+  const gc=$('gplot'); let drag=false, startY=0, startSig=0;
+  gc.addEventListener('pointerdown',e=>{drag=true;gc.setPointerCapture(e.pointerId);startY=e.offsetY;startSig=S.genome.sigma;
+    const u=e.offsetX/gc.getBoundingClientRect().width*0.4;S.genome.mu=clamp(u,0.02,0.35);$('muR').value=S.genome.mu;setVal('muV',S.genome.mu.toFixed(3));computeKernel();drawPlots();updateDissect();});
+  gc.addEventListener('pointermove',e=>{if(!drag)return;const dy=(e.offsetY-startY);S.genome.sigma=clamp(startSig+dy*0.0006,0.004,0.06);$('sigR').value=S.genome.sigma;setVal('sigV',S.genome.sigma.toFixed(4));drawPlots();updateDissect();});
+  window.addEventListener('pointerup',()=>drag=false);
+})();
+
+/* ---- collapsible sections ---- */
+document.querySelectorAll('section.card h3').forEach(h=>h.onclick=()=>h.parentElement.classList.toggle('collapsed'));
+
+/* ---- keyboard ---- */
+window.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;
+  if(e.code==='Space'){e.preventDefault();togglePlay();}
+  else if(e.code==='ArrowRight'){step();render();}
+  else if(e.key==='r'){$('randbtn').click();}
+  else if(e.key==='c'){$('clearbtn').click();}
+});
+
+/* ================= GALLERY UI ================= */
+function buildGallery(){
+  const list=$('glist'); list.innerHTML='';
+  GALLERY.forEach(entry=>{
+    const card=document.createElement('div'); card.className='creature';
+    const cv=document.createElement('canvas'); cv.width=64;cv.height=64;
+    renderThumb(cv,entry);
+    card.appendChild(cv);
+    card.insertAdjacentHTML('beforeend',
+      `<div class="nm">${entry.name}</div><div class="mt">${entry.note}</div>`+
+      (entry.g.rgb?'<span class="badge rgb">RGB</span>':`<span class="badge">${entry.g.colormap}</span>`));
+    card.onclick=()=>{loadCreature(entry);closeGallery();if(!S.running)togglePlay();toast('Loaded '+entry.name);};
+    list.appendChild(card);
+  });
+}
+function renderThumb(cv,entry){
+  // quick headless render: seed + a few steps in a small temp grid for a lively thumbnail
+  const W=48,H=48,N=W*H;
+  const g={...{mu:0.15,sigma:0.015,dt:0.1,R:13,shells:1,beta:[1,0.5,0.25]},...entry.g};
+  g.beta=(Array.isArray(g.beta)?g.beta.slice():[1]);while(g.beta.length<3)g.beta.push(0.25);
+  // temp kernel
+  const R=Math.min(g.R,10);const kdx=[],kdy=[],kw=[];let sum=0;
+  for(let dy=-R;dy<=R;dy++)for(let dx=-R;dx<=R;dx++){const dist=Math.sqrt(dx*dx+dy*dy)/R;if(dist>=1)continue;const br=dist*g.shells,i=Math.min(g.shells-1,Math.floor(br)),fr=br-Math.floor(br);const w=(g.beta[i]||0)*kernelCore(fr);if(w>0){kdx.push(dx);kdy.push(dy);kw.push(w);sum+=w;}}
+  for(let i=0;i<kw.length;i++)kw[i]/=sum;
+  let A=new Float32Array(N),B=new Float32Array(N);
+  const cells=entry.seed(),ph=cells.length,pw=cells[0].length,ox=(W>>1)-(pw>>1),oy=(H>>1)-(ph>>1);
+  for(let y=0;y<ph;y++)for(let x=0;x<pw;x++){const X=((ox+x)%W+W)%W,Y=((oy+y)%H+H)%H;A[Y*W+X]=cells[y][x];}
+  const mu=g.mu,sig=g.sigma,inv2s2=1/(2*sig*sig);
+  for(let s=0;s<25;s++){
+    for(let y=0;y<H;y++)for(let x=0;x<W;x++){let u=0;for(let k=0;k<kdx.length;k++){let sx=x+kdx[k];if(sx<0)sx+=W;else if(sx>=W)sx-=W;let sy=y+kdy[k];if(sy<0)sy+=H;else if(sy>=H)sy-=H;u+=A[sy*W+sx]*kw[k];}const d=u-mu,gr=2*Math.exp(-(d*d)*inv2s2)-1;let v=A[y*W+x]+g.dt*gr;B[y*W+x]=v<0?0:(v>1?1:v);}
+    const t=A;A=B;B=t;
+  }
+  const lut=buildLUT(g.colormap||'viridis');
+  const ctx=cv.getContext('2d'),img=ctx.createImageData(W,H),px=img.data;
+  for(let i=0;i<N;i++){const j=i<<2;if(entry.g.rgb){px[j]=A[i]*255;px[j+1]=A[i]*180+40;px[j+2]=(1-A[i])*255;}else{let id=Math.min(255,(A[i]*255)|0)*3;px[j]=lut[id];px[j+1]=lut[id+1];px[j+2]=lut[id+2];}px[j+3]=255;}
+  const tmp=document.createElement('canvas');tmp.width=W;tmp.height=H;tmp.getContext('2d').putImageData(img,0,0);
+  ctx.imageSmoothingEnabled=false;ctx.drawImage(tmp,0,0,W,H,0,0,cv.width,cv.height);
+}
+function openGallery(){$('gallery').classList.add('open');}
+function closeGallery(){$('gallery').classList.remove('open');}
+$('galleryBtn').onclick=openGallery; $('galleryClose').onclick=closeGallery;
+
+/* ================= SHARE ================= */
+let staticShareURL=null; // when set, the modal shows a prebuilt link and leaves live state untouched
+function openShare(title,desc,fixedURL){
+  staticShareURL=fixedURL||null;
+  $('modalTitle').textContent=title||'Share this lifeform';
+  $('modalDesc').textContent=desc||'This URL boots straight into the crawling organism with its full editable genome. Paste it anywhere.';
+  // the include-state toggle only applies to live sharing
+  $('includeState').closest('label').style.display=staticShareURL?'none':'';
+  refreshShareText(); $('modal').classList.add('open');
+}
+function refreshShareText(){
+  if(staticShareURL){ $('shareText').value=staticShareURL; return; }
+  const inc=$('includeState').checked;
+  const hash=buildHash(inc);
+  const url=location.href.split('#')[0]+hash; // file:// safe (location.origin is "null" there)
+  history.replaceState(null,'',hash);
+  const ta=$('shareText'); ta.value=url;
+  // warn if state dropped
+  if(inc && hash.indexOf('&f=')===-1){ $('modalDesc').textContent='Painted state was too large to pack into the URL — sharing the genome only (creature will re-seed from its species). Toggle off "include state" to silence this.'; }
+}
+/* Build a full share URL for an arbitrary genome+seed WITHOUT disturbing live state. */
+function buildShareURLFor(genome,seedCells,name){
+  const savedG=S.genome, savedK=S.kernel, savedName=S.curname, savedGen=S.generation, savedCM=colormap, savedLUT=LUT;
+  const savedA=S.A.slice(), savedR=S.R.map(c=>c.slice());
+  const g=JSON.parse(JSON.stringify(genome));
+  if(!Array.isArray(g.beta))g.beta=[1];
+  g.beta=g.beta.slice(); while(g.beta.length<3)g.beta.push(0.25);
+  S.genome=g; S.curname=name||'Bred';
+  colormap=g.colormap||'viridis'; LUT=buildLUT(colormap);
+  computeKernel(); clearField(); placeCells(seedCells);
+  const hash=buildHash(true);
+  // restore live state exactly
+  S.genome=savedG; S.kernel=savedK; S.curname=savedName; S.generation=savedGen;
+  colormap=savedCM; LUT=savedLUT;
+  S.A.set(savedA); for(let c=0;c<3;c++)S.R[c].set(savedR[c]);
+  return location.href.split('#')[0]+hash;
+}
+$('shareBtn').onclick=()=>openShare();
+$('includeState').onchange=refreshShareText;
+$('copyLink').onclick=()=>{const ta=$('shareText');ta.select();navigator.clipboard?.writeText(ta.value).then(()=>toast('Link copied ✔')).catch(()=>{document.execCommand('copy');toast('Link copied ✔');});};
+$('openLink').onclick=()=>window.open($('shareText').value,'_blank');
+$('modalClose').onclick=()=>$('modal').classList.remove('open');
+$('modal').onclick=e=>{if(e.target.id==='modal')$('modal').classList.remove('open');};
+
+/* ================= BREEDER controls ================= */
+$('mutR').oninput=function(){setVal('mutV',(+this.value).toFixed(2));};
+$('mutateBtn').onclick=()=>{
+  const g=mutateGenome(S.genome,parseFloat($('mutR').value));
+  Object.assign(S.genome,g); computeKernel(); S.curname='Mutant'; syncUIFromGenome();
+  toast('Genome mutated 🧬');
+};
+$('assessBtn').onclick=()=>{
+  const res=assess(JSON.parse(JSON.stringify(S.genome)),currentSeedCells(),120);
+  const icon=res.status==='alive'?'✔':(res.status==='dead'?'☠':'✸');
+  $('evoOut').innerHTML=`Viability: <b style="color:${res.status==='alive'?'var(--good)':(res.status==='dead'?'var(--bad)':'var(--warn)')}">${icon} ${res.status}</b> · fitness ${res.score.toFixed(3)} · mass ${res.massStart.toFixed(0)}→${res.massEnd.toFixed(0)}`;
+};
+
+/* ---- auto-breeder ---- */
+let evolving=false, evoTimer=null, evoBest=null, evoGen=0, evoBaseSeed=null;
+function startEvolve(){
+  evolving=true; evoGen=0; evoBest=null; evoBaseSeed=currentSeedCells();
+  $('evolveBtn').textContent='⏸ Stop evolving'; $('evolveBtn').classList.add('on');
+  $('evoBest').style.display='none';
+  // seed best with current
+  const cur=assess(JSON.parse(JSON.stringify(S.genome)),evoBaseSeed,100);
+  evoBest={genome:JSON.parse(JSON.stringify(S.genome)),res:cur};
+  evoLoop();
+}
+function stopEvolve(){
+  evolving=false; $('evolveBtn').textContent='▶ Auto-breeder: evolve'; $('evolveBtn').classList.remove('on');
+  if(evoTimer)clearTimeout(evoTimer);
+  if(evoBest){showEvoBest();}
+}
+function evoLoop(){
+  if(!evolving)return;
+  const CAND=5;
+  for(let i=0;i<CAND;i++){
+    evoGen++;
+    const cand=mutateGenome(evoBest.genome,parseFloat($('mutR').value));
+    const res=assess(cand,evoBaseSeed,90);
+    if(res.status==='alive' && res.score>evoBest.res.score){
+      evoBest={genome:cand,res};
+    }
+  }
+  $('evoOut').innerHTML=`Evolving… gen <b>${evoGen}</b> · best fitness <b style="color:var(--good)">${evoBest.res.score.toFixed(3)}</b> (${evoBest.res.status})`;
+  showEvoBest();
+  evoTimer=setTimeout(evoLoop,20);
+}
+function showEvoBest(){
+  if(!evoBest)return;
+  const g=evoBest.genome;
+  $('evoBest').style.display='';
+  $('evoBestTxt').innerHTML=`Fittest: μ ${g.mu.toFixed(3)} · σ ${g.sigma.toFixed(4)} · dt ${g.dt.toFixed(3)} · R ${g.R} · fitness ${evoBest.res.score.toFixed(3)}`;
+}
+$('evolveBtn').onclick=()=>{evolving?stopEvolve():startEvolve();};
+$('evoAdopt').onclick=()=>{
+  if(!evoBest)return;
+  Object.assign(S.genome,JSON.parse(JSON.stringify(evoBest.genome)));
+  computeKernel(); clearField(); placeCells(evoBaseSeed||ORBIUM); S.curname='Bred #'+evoGen; syncUIFromGenome();
+  if(!S.running)togglePlay(); toast('Adopted fittest creature');
+};
+$('evoShare').onclick=()=>{
+  if(!evoBest)return;
+  const url=buildShareURLFor(evoBest.genome,evoBaseSeed||ORBIUM,'Bred #'+evoGen);
+  openShare('Share your bred creature','A fresh organism the auto-breeder just discovered. This link boots straight into it — your current creature stays put.',url);
+};
+
+/* ================= RECORDING (WebM via MediaRecorder) + PNG ================= */
+let recorder=null, recChunks=[], recording=false;
+$('recbtn').onclick=()=>{
+  if(recording){ stopRec(); return; }
+  if(!sim.captureStream){ toast('WebM capture unsupported in this browser'); return; }
+  try{
+    const stream=sim.captureStream(30);
+    const mime=MediaRecorder.isTypeSupported('video/webm;codecs=vp9')?'video/webm;codecs=vp9':'video/webm';
+    recorder=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:6000000});
+    recChunks=[];
+    recorder.ondataavailable=e=>{if(e.data.size)recChunks.push(e.data);};
+    recorder.onstop=()=>{
+      const blob=new Blob(recChunks,{type:'video/webm'});
+      const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='plasmata-'+S.curname.replace(/\s+/g,'_')+'.webm';a.click();
+      setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+      toast('WebM saved ✔');
+    };
+    recorder.start();
+    recording=true; $('recbtn').innerHTML='<span class="rec-dot"></span>Stop';$('recbtn').classList.add('on');
+    if(!S.running)togglePlay();
+  }catch(err){toast('Recording failed: '+err.message);}
+};
+function stopRec(){ if(recorder&&recorder.state!=='inactive')recorder.stop(); recording=false; $('recbtn').textContent='● Record';$('recbtn').classList.remove('on'); }
+$('snapbtn').onclick=()=>{
+  const a=document.createElement('a');a.href=sim.toDataURL('image/png');a.download='plasmata-'+S.curname.replace(/\s+/g,'_')+'.png';a.click();
+  toast('PNG snapshot saved ✔');
+};
+
+/* ================= TOAST ================= */
+let toastT=null;
+function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2000);}
+
+/* ================= BOOT ================= */
+function boot(){
+  allocFields();
+  resizeCanvas();
+  buildGallery();
+  // load from URL, else default Orbium
+  if(!loadFromHash()){
+    loadCreature(GALLERY[0]);
+  } else {
+    if(!S.kernel.len)computeKernel();
+  }
+  syncUIFromGenome();
+  S.running=true; $('playbtn').textContent='❚❚'; $('playbtn').classList.add('on');
+  requestAnimationFrame(tick);
+}
+window.addEventListener('hashchange',()=>{ if(loadFromHash()){ if(!S.running)togglePlay(); } });
+boot();
+</script>
+</body>
+</html>

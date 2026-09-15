@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XorCipher — Repeating-Key XOR Encoder / Decoder</title>
+<meta name="description" content="XOR text or hex against a repeating key and get the result in hex — the classic CTF and reverse-engineering primitive. Self-inverse, 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('xor-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#6d28d9;
+    --bg:#f6f4fb; --card:#ffffff; --fg:#1b1723; --muted:#635a70; --line:#e8e2f0; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#100c17; --card:#191320; --fg:#efeaf7; --muted:#998fac; --line:#261e33; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:700px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#5b21b6);display:flex;align-items:center;justify-content:center;font-size:20px;color:#fff;font-weight:800}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:700px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  textarea,input{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  textarea{min-height:90px;resize:vertical;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  .modes{display:flex;gap:6px;margin:12px 0}
+  .modes button{flex:1;padding:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;cursor:pointer;font:inherit;font-size:.9rem}
+  .modes button.active{background:var(--c);color:#fff;border-color:var(--c)}
+  .keyrow{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end}
+  .out{margin-top:6px;background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--c);border-radius:8px;padding:12px;white-space:pre-wrap;word-break:break-all;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;min-height:44px}
+  .copy{margin-top:10px;background:var(--c);color:#fff;border:0;border-radius:8px;padding:9px 16px;cursor:pointer;font:inherit}
+  .err{color:#dc2626;font-size:.85rem;margin-top:8px}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:700px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo mono">⊕</div>
+    <div><h1>XorCipher</h1><div class="sub">Repeating-key XOR</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="modes" id="modes">
+      <button data-m="enc" class="active" type="button">Text → hex</button>
+      <button data-m="dec" type="button">Hex → text</button>
+    </div>
+    <label for="input" id="inLabel">Text</label>
+    <textarea id="input" spellcheck="false">Attack at dawn</textarea>
+    <div class="keyrow" style="margin-top:12px">
+      <div><label for="key">Key</label><input class="mono" id="key" value="secret" spellcheck="false"></div>
+      <div class="modes" style="margin:0">
+        <button id="kText" class="active" type="button">text key</button>
+        <button id="kHex" type="button">hex key</button>
+      </div>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card">
+    <label id="outLabel">XOR result (hex)</label>
+    <div class="out" id="out"></div>
+    <button class="copy" id="copyBtn" type="button">Copy</button>
+  </div>
+</main>
+<footer>
+  XOR is self-inverse: XORing the output with the same key returns the original. This is a low-level primitive for CTFs and reverse engineering — <strong>not secure</strong> on its own. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/xor-cipher">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  function hexToBytes(hex){
+    const s = String(hex).replace(/0x/gi, '').replace(/[\s:]/g, '');
+    if(!/^[0-9a-fA-F]*$/.test(s)) throw new Error('invalid hex');
+    if(s.length % 2 !== 0) throw new Error('hex needs an even number of digits');
+    const out = [];
+    for(let i = 0; i < s.length; i += 2) out.push(parseInt(s.slice(i, i + 2), 16));
+    return out;
+  }
+  const bytesToHex = bytes => bytes.map(b => (b & 0xff).toString(16).padStart(2, '0')).join('');
+  const textToBytes = s => [...new TextEncoder().encode(String(s))];
+  const bytesToText = bytes => new TextDecoder().decode(new Uint8Array(bytes));
+
+  // Repeating-key XOR over byte arrays.
+  function xor(bytes, keyBytes){
+    if(!keyBytes.length) throw new Error('key must not be empty');
+    return bytes.map((b, i) => b ^ keyBytes[i % keyBytes.length]);
+  }
+
+  // Encode text with a key → hex.
+  function xorTextToHex(text, key, keyIsHex = false){
+    const kb = keyIsHex ? hexToBytes(key) : textToBytes(key);
+    return bytesToHex(xor(textToBytes(text), kb));
+  }
+  // Decode hex with a key → text.
+  function xorHexToText(hex, key, keyIsHex = false){
+    const kb = keyIsHex ? hexToBytes(key) : textToBytes(key);
+    return bytesToText(xor(hexToBytes(hex), kb));
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('out')){
+    const $ = id => document.getElementById(id);
+    let mode = 'enc', keyHex = false;
+
+    function render(){
+      try{
+        $('out').textContent = mode === 'enc'
+          ? xorTextToHex($('input').value, $('key').value, keyHex)
+          : xorHexToText($('input').value, $('key').value, keyHex);
+        $('err').textContent = '';
+      }catch(e){ $('out').textContent = ''; $('err').textContent = e.message; }
+    }
+    $('modes').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+      mode = b.dataset.m;
+      $('modes').querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
+      $('inLabel').textContent = mode === 'enc' ? 'Text' : 'Hex';
+      $('outLabel').textContent = mode === 'enc' ? 'XOR result (hex)' : 'Decoded text';
+      render();
+    }));
+    $('kText').addEventListener('click', () => { keyHex = false; $('kText').classList.add('active'); $('kHex').classList.remove('active'); render(); });
+    $('kHex').addEventListener('click', () => { keyHex = true; $('kHex').classList.add('active'); $('kText').classList.remove('active'); render(); });
+    ['input', 'key'].forEach(id => $(id).addEventListener('input', render));
+    $('copyBtn').addEventListener('click', () => {
+      navigator.clipboard?.writeText($('out').textContent);
+      $('copyBtn').textContent = 'Copied!'; setTimeout(() => $('copyBtn').textContent = 'Copy', 1200);
+    });
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('xor-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { hexToBytes, bytesToHex, xor, xorTextToHex, xorHexToText };
+</script>
+</body>
+</html>

@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Battery C-Rate 🔋 — Charge/Discharge Current &amp; Runtime</title>
+<meta name="description" content="Convert between battery capacity, C-rate, current, and runtime for LiPo, Li-ion, and other packs. Offline, private, single file.">
+<style>
+:root{
+  --c:#d97706;
+  --bg:#f6f8fa; --card:#fff; --fg:#1a1f24; --muted:#5a6470; --line:#e2e6ea;
+}
+[data-theme="dark"]{
+  --bg:#0b1016; --card:#141b23; --fg:#e6edf3; --muted:#8b98a6; --line:#232d38;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.55;transition:background .2s,color .2s}
+.wrap{max-width:640px;margin:0 auto;padding:24px 18px 60px}
+header{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.logo{font-size:2.2rem;line-height:1}
+h1{font-size:1.5rem;margin:0}
+.tag{color:var(--muted);margin:2px 0 22px;font-size:.98rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:18px}
+label{display:block;font-weight:600;margin:14px 0 6px;font-size:.92rem}
+input,select{width:100%;padding:11px 12px;font-size:1rem;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--fg)}
+input:focus,select:focus{outline:2px solid var(--c);border-color:var(--c)}
+.out{margin-top:20px;padding:18px;border-radius:12px;background:linear-gradient(135deg,var(--c)20,transparent);border:1px solid var(--c)}
+.big{font-size:2rem;font-weight:700;color:#b45309}
+[data-theme="dark"] .big{color:#fcd34d}
+.sub{color:var(--muted);font-size:.9rem;margin-top:4px}
+table{width:100%;border-collapse:collapse;margin-top:8px;font-size:.95rem}
+th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:600}
+td:last-child{text-align:right;font-weight:700}
+.explain{font-size:.9rem;color:var(--muted)}
+.explain h2{font-size:1rem;color:var(--fg);margin:0 0 8px}
+.explain li{margin:4px 0}
+footer{text-align:center;color:var(--muted);font-size:.85rem;margin-top:30px}
+footer a{color:var(--c);text-decoration:none}
+.theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:7px 11px;cursor:pointer;font-size:1.1rem}
+.note{background:var(--bg);border:1px dashed var(--c);border-radius:9px;padding:10px 12px;font-size:.86rem;color:var(--muted);margin-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <span class="logo">🔋</span>
+  <h1>Battery C-Rate</h1>
+  <button class="theme" id="themeBtn" title="Toggle theme">🌙</button>
+</header>
+<p class="tag">Turn capacity and C-rate into current and runtime, for any pack.</p>
+
+<div class="card">
+  <label for="cap">Pack capacity (Ah)</label>
+  <input type="number" id="cap" value="5" min="0.01" step="0.1">
+
+  <label for="crate">C-rate (e.g. 2 for 2C)</label>
+  <input type="number" id="crate" value="2" min="0.01" step="0.5">
+
+  <div class="out">
+    <div class="big" id="curOut">—</div>
+    <div class="sub">Charge / discharge current</div>
+    <table>
+      <tr><th>Detail</th><th>Value</th></tr>
+      <tr><td>Runtime at this rate</td><td id="rtOut">—</td></tr>
+      <tr><td>1C reference current</td><td id="refOut">—</td></tr>
+    </table>
+    <div class="note" id="note"></div>
+  </div>
+</div>
+
+<div class="card explain">
+  <h2>How it works</h2>
+  <ul>
+    <li><strong>C-rate</strong> is current expressed as a multiple of capacity. 1C drains a pack in one hour; 2C in half an hour; 0.5C in two.</li>
+    <li>Current (A) = capacity (Ah) &times; C-rate. A 5&nbsp;Ah pack at 2C delivers 10&nbsp;A.</li>
+    <li>Ideal runtime (hours) = 1 &divide; C-rate — so a higher C-rate means a shorter run.</li>
+    <li>Every cell has a <strong>max continuous C-rate</strong> (LiPo packs print it, e.g. &ldquo;50C&rdquo;). Exceeding it overheats and damages the pack.</li>
+    <li>Real runtime is a bit less than ideal — high currents lose capacity to heat and voltage sag (the Peukert effect).</li>
+  </ul>
+</div>
+
+<footer>Part of the <a href="https://awictor.github.io/toolkit/" target="_blank" rel="noopener">Toolkit</a> · offline &amp; private · no data leaves your device</footer>
+</div>
+
+<script>
+function currentFromCRate(capacityAh, cRate){
+  if(!(capacityAh > 0)) throw new Error("capacity must be positive");
+  if(!(cRate > 0)) throw new Error("C-rate must be positive");
+  return capacityAh * cRate;
+}
+function cRateFromCurrent(capacityAh, currentA){
+  if(!(capacityAh > 0)) throw new Error("capacity must be positive");
+  if(!(currentA >= 0)) throw new Error("current must be zero or more");
+  return currentA / capacityAh;
+}
+function runtimeHours(cRate){
+  if(!(cRate > 0)) throw new Error("C-rate must be positive");
+  return 1 / cRate;
+}
+function runtimeFromCurrent(capacityAh, currentA){
+  if(!(capacityAh > 0)) throw new Error("capacity must be positive");
+  if(!(currentA > 0)) throw new Error("current must be positive");
+  return capacityAh / currentA;
+}
+function formatRuntime(hours){
+  var mins = hours * 60;
+  if(mins < 60) return (Math.round(mins * 10) / 10) + " min";
+  return (Math.round(hours * 100) / 100) + " h";
+}
+
+function render(){
+  var cap = parseFloat(document.getElementById("cap").value);
+  var cr = parseFloat(document.getElementById("crate").value);
+  var cO = document.getElementById("curOut"), rO = document.getElementById("rtOut"),
+      fO = document.getElementById("refOut"), note = document.getElementById("note");
+  try{
+    cO.textContent = (Math.round(currentFromCRate(cap, cr) * 100) / 100) + " A";
+    rO.textContent = formatRuntime(runtimeHours(cr));
+    fO.textContent = (Math.round(currentFromCRate(cap, 1) * 100) / 100) + " A (1C)";
+    note.textContent = "Stay within the pack's rated max C-rate to avoid overheating.";
+  }catch(e){
+    cO.textContent = "—"; rO.textContent = "—"; fO.textContent = "—";
+    note.textContent = "Enter a capacity and C-rate greater than zero.";
+  }
+}
+
+(function(){
+  if(typeof document === "undefined") return;
+  var th = localStorage.getItem("cRateTheme") || "dark";
+  document.documentElement.setAttribute("data-theme", th);
+  var btn = document.getElementById("themeBtn");
+  btn.textContent = th === "dark" ? "☀️" : "🌙";
+  btn.addEventListener("click", function(){
+    var cur = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", cur);
+    localStorage.setItem("cRateTheme", cur);
+    btn.textContent = cur === "dark" ? "☀️" : "🌙";
+  });
+  document.getElementById("cap").addEventListener("input", render);
+  document.getElementById("crate").addEventListener("input", render);
+  render();
+})();
+
+if(typeof module !== 'undefined') module.exports = { currentFromCRate, cRateFromCurrent, runtimeHours, runtimeFromCurrent, formatRuntime };
+</script>
+</body>
+</html>

@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Everywhen — See the shape of a cron schedule</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#11151f; --panel2:#161b28; --line:#232b3d;
+    --txt:#dbe2ef; --muted:#7c88a1; --accent:#ff6100; --accentdim:#2a1c10;
+    --cyan:#28c8dc; --purple:#aa6eff; --err:#ff5470; --ok:#37d67a;
+    --mono:'SF Mono',ui-monospace,'Cascadia Code','Fira Code',Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 70% -10%,#141a29,var(--bg));
+    color:var(--txt);font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    padding:28px 20px 60px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1020px;margin:0 auto}
+  header{margin-bottom:22px}
+  h1{font-size:26px;margin:0;letter-spacing:-.5px;font-weight:700}
+  h1 .dot{color:var(--accent)}
+  .tag{color:var(--muted);font-size:14px;margin-top:2px}
+  .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);
+    border-radius:12px;padding:16px;margin-bottom:16px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  label.lbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+  input#cron,input#cronB{flex:1;min-width:220px;font-family:var(--mono);font-size:20px;font-weight:600;
+    background:#0a0d13;border:1px solid var(--line);color:var(--txt);border-radius:9px;padding:12px 14px;
+    letter-spacing:1px;outline:none;transition:border-color .15s,box-shadow .15s}
+  input#cron:focus,input#cronB:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accentdim)}
+  input.bad{border-color:var(--err)!important;box-shadow:0 0 0 3px #2a1017!important}
+  select,button{font:inherit}
+  select{background:#0a0d13;border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:9px 10px;outline:none}
+  button{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;
+    padding:8px 12px;cursor:pointer;transition:.12s;font-size:13px}
+  button:hover{border-color:var(--accent);color:#fff}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#111;font-weight:600}
+  button.primary:hover{filter:brightness(1.1)}
+  button.on{background:var(--accentdim);border-color:var(--accent);color:var(--accent)}
+  .english{font-size:19px;font-weight:600;margin:14px 0 4px;line-height:1.35}
+  .english.err{color:var(--err);font-size:15px;font-weight:500}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .chip{background:#0a0d13;border:1px solid var(--line);border-radius:8px;padding:7px 11px;min-width:78px;cursor:default}
+  .chip .k{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+  .chip .v{font-family:var(--mono);font-size:16px;font-weight:600;color:var(--accent)}
+  .chip.badf{border-color:var(--err)}.chip.badf .v{color:var(--err)}
+  .health{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+  .hchip{background:#0a0d13;border:1px solid var(--line);border-radius:8px;padding:7px 11px}
+  .hchip .k{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+  .hchip .v{font-size:15px;font-weight:600}
+  .status{font-weight:700}
+  .status.ok{color:var(--ok)}.status.warn{color:var(--accent)}.status.err{color:var(--err)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  .section-h{font-size:12px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin:0 0 10px}
+  ul.fires{list-style:none;margin:0;padding:0}
+  ul.fires li{display:flex;justify-content:space-between;font-family:var(--mono);font-size:14px;
+    padding:7px 4px;border-bottom:1px solid var(--line)}
+  ul.fires li:last-child{border-bottom:none}
+  ul.fires .rel{color:var(--accent)}
+  canvas{display:block;width:100%;height:auto;image-rendering:auto}
+  .badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;background:#0a0d13;border:1px solid var(--line);
+    border-radius:20px;padding:5px 11px;color:var(--muted)}
+  .badge b{color:var(--txt);font-weight:600}
+  .dstwarn{border-color:var(--accent);color:var(--accent)}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--muted)}
+  .legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  .presets{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+  .pcat{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);margin:12px 0 6px}
+  .pbtn{text-align:left;display:flex;flex-direction:column;gap:2px}
+  .pbtn .pc{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);opacity:0;
+    background:var(--accent);color:#111;font-weight:600;padding:10px 18px;border-radius:8px;transition:.25s;pointer-events:none}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  a{color:var(--accent)}
+  .english.hint{color:var(--muted);font-size:15px;font-weight:500}
+  .ablabel{font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin:14px 0 -2px;font-weight:700}
+  .ablabel.a{color:var(--cyan)} .ablabel.b{color:var(--accent)}
+  .abdiv{border-top:1px solid var(--line);margin:16px 0 0}
+  .firescols{display:flex;gap:18px}
+  .firescols>div{flex:1;min-width:0}
+  .firehead{font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;font-weight:700}
+  .firehead.a{color:var(--cyan)} .firehead.b{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Every<span class="dot">·</span>when</h1>
+    <div class="tag">See the shape of a cron schedule — the fire fingerprint of any expression.</div>
+  </header>
+
+  <div class="panel">
+    <div class="row">
+      <input id="cron" spellcheck="false" autocomplete="off" value="30 3 * * 1,5" aria-label="cron expression A">
+      <select id="tz" title="Timezone for next-fire times"></select>
+      <button id="diffBtn" title="Compare two schedules">⇄ Diff</button>
+    </div>
+    <div class="row" id="cronBrow" style="display:none;margin-top:10px">
+      <input id="cronB" spellcheck="false" autocomplete="off" value="0 * * * *" aria-label="cron expression B">
+      <span class="badge"><i style="width:10px;height:10px;background:var(--cyan);border-radius:2px"></i>A &nbsp;<i style="width:10px;height:10px;background:var(--accent);border-radius:2px"></i>B</span>
+    </div>
+    <div class="ablabel a" id="labelA" style="display:none">Schedule A</div>
+    <div class="english" id="english"></div>
+    <div class="row" style="margin-top:8px">
+      <span class="badge" id="offBadge"></span>
+      <span class="badge dstwarn" id="dstBadge"></span>
+    </div>
+    <div class="chips" id="chips"></div>
+    <div class="health" id="health" style="margin-top:12px"></div>
+    <div id="bInfo" style="display:none">
+      <div class="abdiv"></div>
+      <div class="ablabel b">Schedule B</div>
+      <div class="english" id="englishB"></div>
+      <div class="chips" id="chipsB"></div>
+      <div class="health" id="healthB" style="margin-top:12px"></div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <div class="section-h">Fire fingerprint · day-of-week × hour</div>
+      <canvas id="fp" width="720" height="260"></canvas>
+      <div class="legend" id="legend"></div>
+      <div class="toolbar">
+        <button id="pngBtn">⭳ PNG</button>
+        <button id="svgBtn">⭳ SVG</button>
+        <button id="copyLine">⧉ Copy crontab + comment</button>
+        <button id="copyCron">⧉ Copy cron</button>
+        <button id="share">🔗 Share link</button>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="section-h">Next 10 fire times · <span id="tzlabel"></span></div>
+      <div class="firescols">
+        <div>
+          <div class="firehead a" id="fireheadA" style="display:none">A</div>
+          <ul class="fires" id="fires"></ul>
+        </div>
+        <div id="firesBwrap" style="display:none">
+          <div class="firehead b">B</div>
+          <ul class="fires" id="firesB"></ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="section-h">Preset gallery</div>
+    <div id="gallery"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* ---------- constants ---------- */
+const DOWNAMES=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const DOWFULL=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const MONFULL=['','January','February','March','April','May','June','July','August','September','October','November','December'];
+const DOWMAP={SUN:0,MON:1,TUE:2,WED:3,THU:4,FRI:5,SAT:6};
+const MONMAP={JAN:1,FEB:2,MAR:3,APR:4,MAY:5,JUN:6,JUL:7,AUG:8,SEP:9,OCT:10,NOV:11,DEC:12};
+const MACROS={'@hourly':'0 * * * *','@daily':'0 0 * * *','@midnight':'0 0 * * *','@weekly':'0 0 * * 0','@monthly':'0 0 1 * *','@yearly':'0 0 1 1 *','@annually':'0 0 1 1 *'};
+const FIELDS=[
+  {key:'minute',label:'min',min:0,max:59},
+  {key:'hour',label:'hour',min:0,max:23},
+  {key:'dom',label:'dom',min:1,max:31},
+  {key:'month',label:'month',min:1,max:12,names:MONMAP},
+  {key:'dow',label:'dow',min:0,max:6,names:DOWMAP,wrap:7}
+];
+const REFY=2024; // leap year, Jan 1 2024 = Monday
+
+/* ---------- parser ---------- */
+function parseField(raw,cfg){
+  const set=new Set();
+  const addMax=cfg.wrap!=null?cfg.wrap:cfg.max; // dow accepts 7 (an alias for Sunday) during expansion
+  const add=v=>{ if(v<cfg.min||v>addMax) throw new Error(`value ${v} out of range ${cfg.min}-${cfg.max}`); set.add(v===cfg.wrap?0:v); };
+  const tok=v=>{
+    v=v.trim().toUpperCase();
+    if(cfg.names&&cfg.names[v]!=null) return cfg.names[v];
+    if(!/^-?\d+$/.test(v)) throw new Error(`"${v}" is not a number or valid name`);
+    return +v; // 7->0 normalization deferred to add() so ranges like 5-7 and 0-7 expand correctly
+  };
+  for(const part of raw.split(',')){
+    if(part==='') throw new Error('empty list item (stray comma?)');
+    let body=part, step=1; const hasStep=part.includes('/');
+    if(hasStep){
+      const [b,s]=part.split('/');
+      if(part.split('/').length!==2||s==='') throw new Error(`bad step in "${part}"`);
+      if(!/^\d+$/.test(s)||+s===0) throw new Error(`step must be a positive integer in "${part}"`);
+      body=b; step=+s;
+    }
+    let lo,hi;
+    if(body==='*'){ lo=cfg.min; hi=cfg.max; }
+    else if(body.includes('-')){
+      const seg=body.split('-'); if(seg.length!==2) throw new Error(`bad range "${body}"`);
+      lo=tok(seg[0]); hi=tok(seg[1]);
+      if(lo>hi) throw new Error(`range start ${lo} greater than end ${hi}`);
+    } else {
+      // N/step means "N through field-max, stepping by step"; a bare N is just {N}
+      lo=tok(body); hi=hasStep?cfg.max:lo;
+    }
+    for(let v=lo;v<=hi;v+=step) add(v);
+  }
+  if(!set.size) throw new Error('no values matched');
+  return {set,restricted:raw!=='*',raw};
+}
+
+function parseCron(input){
+  let str=input.trim().replace(/\s+/g,' ');
+  if(!str) return {ok:false,idx:-1,empty:true,message:'Enter a cron expression',fields:['','','','','']};
+  if(str[0]==='@'){
+    const m=MACROS[str.toLowerCase()];
+    if(!m) return {ok:false,idx:-1,message:`Unknown macro "${str}". Try @hourly @daily @weekly @monthly @yearly`,fields:['','','','','']};
+    str=m;
+  }
+  const parts=str.split(' ');
+  if(parts.length!==5) return {ok:false,idx:-1,message:`Expected 5 fields (min hour dom month dow), got ${parts.length}`,fields:parts.concat(['','','','','']).slice(0,5)};
+  const spec={};
+  for(let i=0;i<5;i++){
+    try{ spec[FIELDS[i].key]=parseField(parts[i],FIELDS[i]); }
+    catch(e){ return {ok:false,idx:i,message:`${FIELDS[i].label} field: ${e.message}`,fields:parts}; }
+  }
+  return {ok:true,spec,fields:parts,normalized:str};
+}
+
+/* ---------- wall-clock stepping ---------- */
+const DIM=[31,28,31,30,31,30,31,31,30,31,30,31];
+const dim=(y,mo)=> mo===2 ? (((y%4===0&&y%100!==0)||y%400===0)?29:28) : DIM[mo-1];
+const dowOf=(y,mo,d)=> new Date(Date.UTC(y,mo-1,d)).getUTCDay();
+function incMin(t){ if(++t.mi>59){t.mi=0; if(++t.h>23){t.h=0; if(++t.d>dim(t.y,t.mo)){t.d=1; if(++t.mo>12){t.mo=1;t.y++;}}}} }
+function matches(spec,t){
+  if(!spec.minute.set.has(t.mi)) return false;
+  if(!spec.hour.set.has(t.h)) return false;
+  if(!spec.month.set.has(t.mo)) return false;
+  const dR=spec.dom.restricted, wR=spec.dow.restricted;
+  const dM=spec.dom.set.has(t.d), wM=spec.dow.set.has(dowOf(t.y,t.mo,t.d));
+  if(dR&&wR) return dM||wM;   // classic OR when both restricted
+  if(dR) return dM;
+  if(wR) return wM;
+  return true;
+}
+
+/* ---------- timezone helpers ---------- */
+function partsInZone(ms,tz){
+  const f=new Intl.DateTimeFormat('en-CA',{timeZone:tz,hourCycle:'h23',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+  const p={}; for(const x of f.formatToParts(ms)) if(x.type!=='literal') p[x.type]=x.value;
+  return {y:+p.year,mo:+p.month,d:+p.day,h:+p.hour%24,mi:+p.minute};
+}
+function tzOffsetMin(ms,tz){ const base=Math.floor(ms/60000)*60000, p=partsInZone(base,tz); return Math.round((Date.UTC(p.y,p.mo-1,p.d,p.h,p.mi)-base)/60000); }
+function wallToEpoch(t,tz){
+  let guess=Date.UTC(t.y,t.mo-1,t.d,t.h,t.mi);
+  let epoch=guess-tzOffsetMin(guess,tz)*60000;
+  epoch=guess-tzOffsetMin(epoch,tz)*60000;
+  return epoch;
+}
+const hasDST=tz=> tzOffsetMin(Date.UTC(REFY,0,1),tz)!==tzOffsetMin(Date.UTC(REFY,6,1),tz);
+function offStr(min){ const s=min<0?'-':'+',a=Math.abs(min); return `UTC${s}${String(Math.floor(a/60)).padStart(2,'0')}:${String(a%60).padStart(2,'0')}`; }
+
+/* ---------- analysis: fingerprint grid + health over a full ref year ---------- */
+function analyze(spec){
+  const grid=Array.from({length:7},()=>new Array(24).fill(0));
+  const t={y:REFY,mo:1,d:1,h:0,mi:0};
+  let count=0,last=-1,minGap=Infinity,maxGap=0,first=-1;
+  const total=366*1440;
+  for(let i=0;i<total;i++){
+    if(matches(spec,t)){
+      grid[dowOf(t.y,t.mo,t.d)][t.h]++; count++;
+      if(last>=0){const g=i-last; if(g<minGap)minGap=g; if(g>maxGap)maxGap=g;} else first=i;
+      last=i;
+    }
+    incMin(t);
+  }
+  const perWeek=count/(366/7), perDay=count/366;
+  const meanGap=count>1?(last-first)/(count-1):null;
+  return {grid,count,perWeek,perDay,meanGap,maxGap:count>1?maxGap:null};
+}
+
+/* ---------- next fire times ---------- */
+function nextFires(spec,tz,n){
+  const t=partsInZone(Date.now(),tz); incMin(t);
+  const out=[]; let guard=0;
+  while(out.length<n && guard<367*1440){ if(matches(spec,t)) out.push({...t}); incMin(t); guard++; }
+  return out;
+}
+
+/* ---------- English translator ---------- */
+function listNames(set,names){ return [...set].sort((a,b)=>a-b).map(v=>names[v]).join(', ').replace(/,([^,]*)$/,' and$1'); }
+function joinNums(set){ const a=[...set].sort((x,y)=>x-y); return a.length>6?`${a.length} values`:a.join(', ').replace(/,([^,]*)$/,' and$1'); }
+function isStep(field){ const m=field.raw.match(/^\*\/(\d+)$/); return m?+m[1]:null; }
+function describe(spec,fields){
+  const mn=spec.minute, hr=spec.hour, dm=spec.dom, mo=spec.month, dw=spec.dow;
+  const mnF={raw:fields[0]}, hrF={raw:fields[1]};
+  const stepM=isStep(mnF), stepH=isStep(hrF);
+  const oneMin=mn.set.size===1, oneHr=hr.set.size===1;
+  const [MV]=[...mn.set], [HV]=[...hr.set];
+  const hhmm=(h,m)=>`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  let time;
+  if(mnF.raw==='*'&&hrF.raw==='*') time='Every minute';
+  else if(stepM&&hrF.raw==='*') time=`Every ${stepM} minute${stepM>1?'s':''}`;
+  else if(oneMin&&hrF.raw==='*') time=`At ${MV} minute${MV===1?'':'s'} past every hour`;
+  else if(oneMin&&stepH) time=`At minute ${MV} past every ${stepH} hour${stepH>1?'s':''}`;
+  else if(oneMin&&oneHr) time=`At ${hhmm(HV,MV)}`;
+  else if(oneMin) time=`At minute ${MV} past hour ${joinNums(hr.set)}`;
+  else time=`At minute ${joinNums(mn.set)} past hour ${hrF.raw==='*'?'every':joinNums(hr.set)}`;
+  const clauses=[];
+  const dR=dm.restricted, wR=dw.restricted;
+  if(dR&&wR) clauses.push(`on day-of-month ${joinNums(dm.set)} and on ${listNames(dw.set,DOWFULL)}`);
+  else if(wR) clauses.push(`on ${listNames(dw.set,DOWFULL)}`);
+  else if(dR) clauses.push(`on day-of-month ${joinNums(dm.set)}`);
+  if(mo.restricted) clauses.push(`in ${listNames(mo.set,MONFULL)}`);
+  return (time+(clauses.length?' '+clauses.join(' '):'')).replace(/\s+/g,' ').trim();
+}
+
+/* ---------- rendering ---------- */
+const $=id=>document.getElementById(id);
+let diffOn=false, resA=null, resB=null;
+// cache analyze() per parsed result so the full-year scan runs once per parse, not 2-3x per keystroke
+function ana(res){ if(res&&res.ok){ if(!res._ana) res._ana=analyze(res.spec); return res._ana; } return null; }
+
+function fmtDur(min){
+  if(min==null) return '—';
+  if(min<60) return `${min}m`;
+  if(min<1440) return `${Math.floor(min/60)}h${min%60?' '+(min%60)+'m':''}`;
+  const d=Math.floor(min/1440), h=Math.floor((min%1440)/60);
+  return `${d}d${h?' '+h+'h':''}`;
+}
+function relStr(ms){
+  if(ms<=0) return 'now';
+  let s=Math.round(ms/1000);
+  const d=Math.floor(s/86400); s-=d*86400;
+  const h=Math.floor(s/3600); s-=h*3600;
+  const m=Math.floor(s/60); s-=m*60;
+  if(d>0) return `in ${d}d ${h}h`;
+  if(h>0) return `in ${h}h ${m}m`;
+  if(m>0) return `in ${m}m ${s}s`;
+  return `in ${s}s`;
+}
+
+function renderChips(res,cid){
+  const c=$(cid); c.innerHTML='';
+  FIELDS.forEach((f,i)=>{
+    const raw=(res.fields[i]||'').trim()||'∅';
+    const bad=!res.ok&&res.idx===i;
+    let title='';
+    if(res.ok){
+      const fs=res.spec[f.key];
+      title=f.names?listNames(fs.set, f.key==='month'?MONFULL:DOWFULL):[...fs.set].sort((a,b)=>a-b).join(', ');
+    }
+    const el=document.createElement('div');
+    el.className='chip'+(bad?' badf':'');
+    el.title=res.ok?`resolves to: ${title}`:(bad?res.message:'');
+    el.innerHTML=`<div class="k">${f.label}</div><div class="v">${raw}</div>`;
+    c.appendChild(el);
+  });
+}
+
+function renderHealth(a,hid){
+  const h=$(hid); h.innerHTML='';
+  const chip=(k,v,cls='')=>`<div class="hchip"><div class="k">${k}</div><div class="v ${cls}">${v}</div></div>`;
+  let status='Healthy', scls='ok';
+  if(a.count===0){status='Never fires — impossible schedule';scls='err';}
+  else if(a.perDay>=1440*0.95){status='Fires every minute';scls='warn';}
+  else if(a.perDay>24){status=`High frequency (${Math.round(a.perDay)}/day)`;scls='warn';}
+  h.innerHTML=
+    chip('per week', a.count===0?'0':(a.perWeek>=10?Math.round(a.perWeek):a.perWeek.toFixed(1)))+
+    chip('mean gap', fmtDur(a.meanGap==null?null:Math.round(a.meanGap)))+
+    chip('longest quiet gap', fmtDur(a.maxGap))+
+    `<div class="hchip"><div class="k">status</div><div class="v status ${scls}">${status}</div></div>`;
+}
+
+let liveFires=[]; // {epoch, el} — cached so the 1s tick relabels without rescanning
+function renderFires(res,tz,ulId){
+  const ul=$(ulId); ul.innerHTML='';
+  const fires=nextFires(res.spec,tz,10);
+  if(!fires.length){ ul.innerHTML='<li><span>Never fires within the next year.</span></li>'; return; }
+  const now=Date.now();
+  for(const t of fires){
+    const dw=DOWNAMES[dowOf(t.y,t.mo,t.d)];
+    const wall=`${dw} ${t.y}-${String(t.mo).padStart(2,'0')}-${String(t.d).padStart(2,'0')} ${String(t.h).padStart(2,'0')}:${String(t.mi).padStart(2,'0')}`;
+    const epoch=wallToEpoch(t,tz);
+    const li=document.createElement('li');
+    li.innerHTML=`<span>${wall}</span><span class="rel">${relStr(epoch-now)}</span>`;
+    ul.appendChild(li);
+    liveFires.push({epoch,el:li.querySelector('.rel')});
+  }
+}
+let lastMin=-1;
+function renderAllFires(tz){
+  lastMin=Math.floor(Date.now()/60000);
+  liveFires=[];
+  if(resA&&resA.ok) renderFires(resA,tz,'fires'); else $('fires').innerHTML='';
+  if(diffOn){ if(resB&&resB.ok) renderFires(resB,tz,'firesB'); else $('firesB').innerHTML=''; }
+}
+function tick(){
+  if(Math.floor(Date.now()/60000)!==lastMin) renderAllFires($('tz').value);
+  const now=Date.now();
+  for(const f of liveFires) f.el.textContent=relStr(f.epoch-now);
+}
+
+/* fingerprint canvas + shared draw used by SVG export */
+const CELL=26, LX=44, TY=22, ROWS=7, COLS=24;
+function cellColor(intensity){ // 0..1 -> dark base to accent
+  const b=[16,20,30], a=[255,97,0], i=Math.sqrt(Math.max(0,Math.min(1,intensity)));
+  return `rgb(${Math.round(b[0]+(a[0]-b[0])*i)},${Math.round(b[1]+(a[1]-b[1])*i)},${Math.round(b[2]+(a[2]-b[2])*i)})`;
+}
+function drawGrid(ctx,gridA,gridB,diff){
+  const W=LX+COLS*CELL, H=TY+ROWS*CELL;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#0b0e14'; ctx.fillRect(0,0,W,H);
+  ctx.font='10px monospace'; ctx.textBaseline='middle';
+  let maxA=1; for(const r of gridA) for(const v of r) if(v>maxA)maxA=v;
+  // hour labels
+  ctx.fillStyle='#7c88a1'; ctx.textAlign='center';
+  for(let h=0;h<COLS;h+=3) ctx.fillText(String(h).padStart(2,'0'), LX+h*CELL+CELL/2, TY-9);
+  ctx.textAlign='right';
+  for(let r=0;r<ROWS;r++) ctx.fillText(DOWNAMES[r], LX-8, TY+r*CELL+CELL/2);
+  for(let r=0;r<ROWS;r++) for(let h=0;h<COLS;h++){
+    const x=LX+h*CELL, y=TY+r*CELL;
+    let col;
+    if(diff){
+      const av=gridA[r][h]>0, bv=gridB[r][h]>0;
+      col = av&&bv ? '#aa6eff' : av ? '#28c8dc' : bv ? '#ff6100' : '#12161f';
+    } else col=cellColor(gridA[r][h]/maxA);
+    ctx.fillStyle=col; ctx.fillRect(x+1,y+1,CELL-2,CELL-2);
+  }
+  return {W,H};
+}
+function renderFingerprint(){
+  const cv=$('fp'), ctx=cv.getContext('2d');
+  const W=LX+COLS*CELL, H=TY+ROWS*CELL;
+  cv.width=W; cv.height=H; cv.style.maxWidth=W+'px';
+  const aA=ana(resA), gA=aA?aA.grid:Array.from({length:7},()=>new Array(24).fill(0));
+  const useDiff=diffOn&&resB&&resB.ok;
+  const aB=useDiff?ana(resB):null, gB=aB?aB.grid:null;
+  drawGrid(ctx,gA,gB,useDiff);
+  const lg=$('legend');
+  if(useDiff) lg.innerHTML=`<span><i style="background:#28c8dc"></i>A only</span><span><i style="background:#ff6100"></i>B only</span><span><i style="background:#aa6eff"></i>both</span>`;
+  else lg.innerHTML=`<span><i style="background:${cellColor(0)}"></i>no fire</span><span><i style="background:${cellColor(.35)}"></i>some</span><span><i style="background:${cellColor(1)}"></i>most fires</span> &nbsp;· cell = fires that hour over a year`;
+}
+
+/* ---------- main update ---------- */
+function renderScheduleText(res,engId,healthId){
+  const eng=$(engId);
+  if(res.ok){ eng.className='english'; eng.textContent=describe(res.spec,res.fields); renderHealth(ana(res),healthId); }
+  else if(res.empty){ eng.className='english hint'; eng.textContent='Enter a cron expression'; $(healthId).innerHTML=''; }
+  else { eng.className='english err'; eng.textContent='⚠ '+res.message; $(healthId).innerHTML=''; }
+}
+function update(pushHash){
+  resA=parseCron($('cron').value);
+  resB=diffOn?parseCron($('cronB').value):null;
+  const tz=$('tz').value;
+  // an empty box is a neutral prompt, not an error
+  $('cron').classList.toggle('bad',!resA.ok&&!resA.empty);
+  renderScheduleText(resA,'english','health');
+  renderChips(resA,'chips');
+  // diff B panels
+  const on=diffOn;
+  $('bInfo').style.display=on?'':'none';
+  $('labelA').style.display=on?'':'none';
+  $('fireheadA').style.display=on?'':'none';
+  $('firesBwrap').style.display=on?'':'none';
+  if(on){
+    $('cronB').classList.toggle('bad',!resB.ok&&!resB.empty);
+    renderScheduleText(resB,'englishB','healthB');
+    renderChips(resB,'chipsB');
+  }
+  renderAllFires(tz);
+  renderFingerprint();
+  // badges
+  const off=tzOffsetMin(Date.now(),tz);
+  $('offBadge').innerHTML=`<b>${tz}</b> · ${offStr(off)}`;
+  const db=$('dstBadge');
+  if(hasDST(tz)){ db.style.display=''; db.className='badge dstwarn'; db.innerHTML='⚠ observes DST — local times may skip (spring-fwd) or repeat (fall-back) at transitions'; }
+  else { db.style.display=''; db.className='badge'; db.textContent='no DST — fixed offset year-round'; }
+  $('tzlabel').textContent=tz;
+  if(pushHash) writeHash();
+}
+
+/* ---------- hash sharing ---------- */
+function writeHash(){
+  const p=new URLSearchParams();
+  p.set('a',$('cron').value); p.set('tz',$('tz').value);
+  if(diffOn){ p.set('b',$('cronB').value); p.set('diff','1'); }
+  history.replaceState(null,'','#'+p.toString());
+}
+function readHash(){
+  if(!location.hash) return;
+  const p=new URLSearchParams(location.hash.slice(1));
+  if(p.get('a')) $('cron').value=p.get('a');
+  if(p.get('b')) $('cronB').value=p.get('b');
+  if(p.get('diff')==='1'){ diffOn=true; $('cronBrow').style.display=''; $('diffBtn').classList.add('on'); }
+  return p.get('tz');
+}
+
+/* ---------- export / clipboard ---------- */
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1600); }
+function fallbackCopy(text){ try{ const ta=document.createElement('textarea'); ta.value=text; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.focus(); ta.select(); const ok=document.execCommand('copy'); ta.remove(); return ok; }catch(e){ return false; } }
+function copy(text,msg){
+  const done=()=>toast(msg), fail=()=>toast(fallbackCopy(text)?msg:'Copy failed');
+  if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done,fail);
+  else fail();
+}
+function downloadBlob(blob,name){ const u=URL.createObjectURL(blob),a=document.createElement('a'); a.href=u; a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(u),1000); }
+function buildSVG(){
+  const aA=ana(resA), gA=aA?aA.grid:Array.from({length:7},()=>new Array(24).fill(0));
+  const useDiff=diffOn&&resB&&resB.ok, aB=useDiff?ana(resB):null, gB=aB?aB.grid:null;
+  let maxA=1; for(const r of gA) for(const v of r) if(v>maxA)maxA=v;
+  const W=LX+COLS*CELL, H=TY+ROWS*CELL;
+  let s=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" font-family="monospace" font-size="10">`;
+  s+=`<rect width="${W}" height="${H}" fill="#0b0e14"/>`;
+  for(let h=0;h<COLS;h+=3) s+=`<text x="${LX+h*CELL+CELL/2}" y="${TY-6}" fill="#7c88a1" text-anchor="middle">${String(h).padStart(2,'0')}</text>`;
+  for(let r=0;r<ROWS;r++) s+=`<text x="${LX-8}" y="${TY+r*CELL+CELL/2+3}" fill="#7c88a1" text-anchor="end">${DOWNAMES[r]}</text>`;
+  for(let r=0;r<ROWS;r++) for(let h=0;h<COLS;h++){
+    let col; if(useDiff){const av=gA[r][h]>0,bv=gB[r][h]>0; col=av&&bv?'#aa6eff':av?'#28c8dc':bv?'#ff6100':'#12161f';} else col=cellColor(gA[r][h]/maxA);
+    s+=`<rect x="${LX+h*CELL+1}" y="${TY+r*CELL+1}" width="${CELL-2}" height="${CELL-2}" fill="${col}"/>`;
+  }
+  return s+'</svg>';
+}
+
+/* ---------- presets ---------- */
+const PRESETS={
+  Backups:[['Nightly backup','30 3 * * *'],['Weekly (Sun 2am)','0 2 * * 0'],['First of month','0 0 1 * *'],['Quarterly','0 0 1 1,4,7,10 *']],
+  Polling:[['Every minute','* * * * *'],['Every 5 min','*/5 * * * *'],['Every 15 min','*/15 * * * *'],['Every 6 hours','0 */6 * * *']],
+  'Business hours':[['Hourly 9–5 wkdays','0 9-17 * * MON-FRI'],['Twice daily','0 9,17 * * *'],['Mon standup','30 9 * * MON'],['Every 30m wkdays','*/30 9-17 * * 1-5']],
+  Cleanup:[['Weekly Sun 4am','0 4 * * 0'],['Month-end-ish','0 1 28 * *'],['Yearly','@yearly'],['Fri 6pm','0 18 * * FRI']]
+};
+function buildGallery(){
+  const g=$('gallery'); g.innerHTML='';
+  for(const cat in PRESETS){
+    const h=document.createElement('div'); h.className='pcat'; h.textContent=cat; g.appendChild(h);
+    const grid=document.createElement('div'); grid.className='presets';
+    for(const [label,cron] of PRESETS[cat]){
+      const b=document.createElement('button'); b.className='pbtn';
+      b.innerHTML=`<span>${label}</span><span class="pc">${cron}</span>`;
+      b.onclick=()=>{ $('cron').value=cron; update(true); };
+      grid.appendChild(b);
+    }
+    g.appendChild(grid);
+  }
+}
+
+/* ---------- init ---------- */
+function initTZ(){
+  const sel=$('tz');
+  let list=['UTC','America/Los_Angeles','America/Denver','America/Chicago','America/New_York','America/Sao_Paulo','Europe/London','Europe/Paris','Europe/Berlin','Europe/Moscow','Asia/Dubai','Asia/Kolkata','Asia/Shanghai','Asia/Tokyo','Asia/Singapore','Australia/Sydney','Pacific/Auckland'];
+  let local='UTC';
+  try{ local=Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'; }catch(e){}
+  if(!list.includes(local)) list.unshift(local);
+  for(const z of list){ const o=document.createElement('option'); o.value=z; o.textContent=z; sel.appendChild(o); }
+  return local;
+}
+
+function init(){
+  const local=initTZ();
+  const hashTz=readHash();
+  $('tz').value=(hashTz&&[...$('tz').options].some(o=>o.value===hashTz))?hashTz:local;
+  buildGallery();
+  $('cron').addEventListener('input',()=>update(true));
+  $('cronB').addEventListener('input',()=>update(true));
+  $('tz').addEventListener('change',()=>update(true));
+  $('diffBtn').onclick=()=>{ diffOn=!diffOn; $('cronBrow').style.display=diffOn?'':'none'; $('diffBtn').classList.toggle('on',diffOn); update(true); };
+  $('copyCron').onclick=()=>{ const v=$('cron').value.trim(); copy(v, resA&&resA.ok?'Cron copied':'Copied (not valid cron)'); };
+  $('copyLine').onclick=()=>{ if(!resA.ok){toast('Fix the cron first');return;} copy(`${resA.normalized}  # ${describe(resA.spec,resA.fields)}`,'Crontab line copied'); };
+  $('share').onclick=()=>{ writeHash(); copy(location.href,'Share link copied'); };
+  $('pngBtn').onclick=()=>{ $('fp').toBlob(b=>downloadBlob(b,'fingerprint.png')); };
+  $('svgBtn').onclick=()=>downloadBlob(new Blob([buildSVG()],{type:'image/svg+xml'}),'fingerprint.svg');
+  update(false);
+  // relabel countdowns every second; only rescan for fire times when the wall-clock minute rolls over
+  setInterval(tick,1000);
+}
+init();
+</script>
+</body>
+</html>

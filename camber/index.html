@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Camber — easing curve editor</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --line:#2a323d;
+    --ink:#e6edf3; --dim:#8b98a5; --accent:#ff7a3d; --accent2:#4aa8ff;
+    --ghost:#5a6472; --ok:#3fb950;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--ink);font:14px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent2)}
+  h1{font-size:18px;margin:0;letter-spacing:.5px}
+  h1 b{color:var(--accent)}
+  .tag{color:var(--dim);font-size:12px}
+  header{display:flex;align-items:baseline;gap:14px;padding:14px 20px;border-bottom:1px solid var(--line)}
+  main{display:grid;grid-template-columns:380px 1fr;gap:18px;padding:18px 20px;align-items:start}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--dim);margin:0 0 10px}
+  /* editor */
+  #editorWrap{position:relative;width:100%;max-width:340px;height:300px;margin:0 auto;touch-action:none}
+  canvas{position:absolute;inset:0;width:100%;height:100%}
+  .handle{position:absolute;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;
+    background:var(--accent);border:2px solid #fff;cursor:grab;box-shadow:0 0 0 1px #0008;outline:none}
+  .handle:nth-child(3){background:var(--accent2)}
+  .handle:focus-visible{box-shadow:0 0 0 3px #fff6}
+  #velo{width:100%;max-width:340px;height:56px;position:relative;display:block;margin:6px auto 0}
+  .veloLbl{width:100%;max-width:340px;margin:2px auto 0;display:flex;justify-content:space-between;color:var(--dim);font-size:11px}
+  /* tabs */
+  .tabs{display:flex;gap:6px;margin-bottom:12px}
+  .tabs button{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--dim);
+    padding:7px;border-radius:7px;cursor:pointer;font-weight:600}
+  .tabs button[aria-selected=true]{background:var(--accent);color:#111;border-color:var(--accent)}
+  .row{display:flex;align-items:center;gap:8px;margin:8px 0}
+  .row label{width:78px;color:var(--dim);font-size:12px}
+  .row input[type=range]{flex:1;accent-color:var(--accent)}
+  .row input[type=number]{width:64px;background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+    border-radius:6px;padding:4px 6px}
+  .val{width:44px;text-align:right;color:var(--ink);font-variant-numeric:tabular-nums}
+  .grid4{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  select{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:5px 8px}
+  /* output */
+  .token{display:flex;gap:8px;align-items:stretch;margin-top:4px}
+  .token code{flex:1;background:#0a0d12;border:1px solid var(--line);border-radius:7px;padding:10px 12px;
+    font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:#ffd7be;word-break:break-all;overflow:auto;max-height:70px}
+  button.act{background:var(--accent);color:#111;border:0;border-radius:7px;padding:0 14px;font-weight:700;cursor:pointer;white-space:nowrap}
+  button.mini{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:6px 9px;cursor:pointer;font-size:12px}
+  button.mini:hover,button.act:hover{filter:brightness(1.1)}
+  .presets{display:flex;flex-wrap:wrap;gap:6px}
+  .presets button{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:20px;
+    padding:5px 11px;cursor:pointer;font-size:12px}
+  .presets button:hover{border-color:var(--accent);color:var(--accent)}
+  .imp{display:flex;gap:8px;margin-top:6px}
+  .imp input{flex:1;background:#0a0d12;border:1px solid var(--line);color:var(--ink);border-radius:7px;
+    padding:9px 11px;font:12px ui-monospace,monospace}
+  .exp{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  /* demos */
+  .demos{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+  .demo{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px;overflow:hidden}
+  .demo h3{margin:0 0 8px;font-size:12px;color:var(--dim);font-weight:600;letter-spacing:.4px}
+  .stage{position:relative;height:88px;border-radius:6px;background:#0a0d12;overflow:hidden;display:flex;align-items:center;justify-content:center}
+  .box{position:absolute;will-change:transform,opacity}
+  .modalCard{width:70px;height:52px;border-radius:8px;background:linear-gradient(160deg,#ff7a3d,#ff9d6b);box-shadow:0 6px 18px #0007}
+  .toast{width:150px;height:34px;right:14px;top:14px;border-radius:8px;background:#243244;border:1px solid #35506e;display:flex;align-items:center;padding:0 12px;color:#cfe3ff;font-size:12px}
+  .track{position:absolute;left:14px;right:14px;height:6px;top:50%;margin-top:-3px;background:#232c37;border-radius:3px}
+  .knob{width:20px;height:20px;border-radius:50%;background:var(--accent);top:50%;margin-top:-10px;left:0;box-shadow:0 3px 8px #0008}
+  .stagger{position:absolute;left:0;right:0;padding:0 14px;display:flex;flex-direction:column;gap:6px}
+  .bar{height:11px;border-radius:4px;background:linear-gradient(90deg,#4aa8ff,#8fd0ff)}
+  .ref{opacity:.28!important;filter:grayscale(.4)}
+  .refCard{background:#48525f!important}
+  .refKnob{background:var(--ghost)!important;box-shadow:none!important}
+  .clock{grid-column:1/-1;display:flex;align-items:center;gap:12px;margin-top:2px}
+  .clock input[type=range]{flex:1;accent-color:var(--accent2)}
+  #play{min-width:76px;text-align:left}
+  .toastmsg{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);opacity:0;
+    background:var(--ok);color:#04220c;padding:9px 16px;border-radius:8px;font-weight:700;transition:.25s;pointer-events:none;z-index:9}
+  .toastmsg.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .hint{color:var(--dim);font-size:11px;margin-top:8px}
+  @media (max-width:820px){main{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1><b>Camber</b></h1>
+  <span class="tag">Hand-tune the curve your UI moves on, then copy the exact CSS.</span>
+</header>
+<main>
+  <!-- LEFT: editor + controls -->
+  <div style="display:flex;flex-direction:column;gap:18px">
+    <div class="card">
+      <h2>Curve</h2>
+      <div class="tabs" role="tablist">
+        <button role="tab" data-mode="bezier" aria-selected="true">cubic-bezier</button>
+        <button role="tab" data-mode="spring">spring → linear()</button>
+        <button role="tab" data-mode="steps">steps()</button>
+      </div>
+      <div id="editorWrap">
+        <canvas id="cv"></canvas>
+        <div class="handle" id="h1" tabindex="0" role="slider" aria-label="Control point 1"></div>
+        <div class="handle" id="h2" tabindex="0" role="slider" aria-label="Control point 2"></div>
+      </div>
+      <canvas id="velo"></canvas>
+      <div class="veloLbl"><span>velocity — slower</span><span>faster · overshoot below line</span></div>
+
+      <!-- mode params -->
+      <div id="pBezier" class="params">
+        <div class="grid4" style="margin-top:12px">
+          <div class="row"><label>x1</label><input type="number" id="bx1" step="0.01" min="0" max="1"></div>
+          <div class="row"><label>y1</label><input type="number" id="by1" step="0.01" min="-1.5" max="2.5"></div>
+          <div class="row"><label>x2</label><input type="number" id="bx2" step="0.01" min="0" max="1"></div>
+          <div class="row"><label>y2</label><input type="number" id="by2" step="0.01" min="-1.5" max="2.5"></div>
+        </div>
+      </div>
+      <div id="pSpring" class="params" hidden>
+        <div class="row"><label>mass</label><input type="range" id="sm" min="0.2" max="5" step="0.1"><span class="val" id="smv"></span></div>
+        <div class="row"><label>stiffness</label><input type="range" id="ss" min="20" max="400" step="1"><span class="val" id="ssv"></span></div>
+        <div class="row"><label>damping</label><input type="range" id="sd" min="1" max="50" step="0.5"><span class="val" id="sdv"></span></div>
+      </div>
+      <div id="pSteps" class="params" hidden>
+        <div class="row"><label>steps</label><input type="range" id="stn" min="1" max="12" step="1"><span class="val" id="stnv"></span></div>
+        <div class="row"><label>jump</label>
+          <select id="stj">
+            <option>jump-start</option><option selected>jump-end</option>
+            <option>jump-both</option><option>jump-none</option>
+          </select>
+        </div>
+      </div>
+      <div class="hint">Drag handles or focus one and use arrow keys (Shift = ×5).</div>
+    </div>
+
+    <div class="card">
+      <h2>Presets</h2>
+      <div class="presets" id="presets"></div>
+    </div>
+  </div>
+
+  <!-- RIGHT: output + demos -->
+  <div style="display:flex;flex-direction:column;gap:18px">
+    <div class="card">
+      <h2>Output CSS</h2>
+      <div class="token"><code id="token"></code><button class="act" id="copy">Copy</button></div>
+      <div class="imp">
+        <input id="importIn" placeholder="paste cubic-bezier(…), linear(…) or steps(…) to import & tweak">
+        <button class="mini" id="importBtn">Import</button>
+      </div>
+      <div class="exp">
+        <button class="mini" data-exp="keyframes">@keyframes</button>
+        <button class="mini" data-exp="waapi">Web Animations</button>
+        <button class="mini" data-exp="framer">Framer / JS</button>
+        <button class="mini" data-exp="svg">Download SVG</button>
+        <button class="mini" data-exp="link">Copy share link</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Feel it — live demo bank</h2>
+      <div class="demos">
+        <div class="demo"><h3>Modal enter</h3><div class="stage" id="dModal">
+          <div class="box modalCard ref refCard" data-ref></div><div class="box modalCard" data-prim></div></div></div>
+        <div class="demo"><h3>Toast slide-in</h3><div class="stage" id="dToast">
+          <div class="box toast ref" data-ref>notification</div><div class="box toast" data-prim>notification</div></div></div>
+        <div class="demo"><h3>Button / travel</h3><div class="stage" id="dBtn">
+          <div class="track"></div><div class="box knob refKnob ref" data-ref></div><div class="box knob" data-prim></div></div></div>
+        <div class="demo"><h3>List stagger</h3><div class="stage" id="dList"><div class="stagger" id="listBars"></div></div></div>
+
+        <div class="clock">
+          <button class="mini" id="play"></button>
+          <input type="range" id="scrub" min="0" max="1000" value="0">
+          <span style="display:flex;align-items:center;gap:6px;color:var(--dim);font-size:12px">dur
+            <input type="range" id="dur" min="150" max="2200" step="50" style="width:90px;accent-color:var(--accent)">
+            <span class="val" id="durv"></span></span>
+          <span style="display:flex;align-items:center;gap:6px;color:var(--dim);font-size:12px">A/B vs
+            <select id="ref">
+              <option value="none">none</option><option value="ghost">ghost (previous)</option>
+              <option value="ease">ease</option><option value="ease-in-out" selected>ease-in-out</option>
+              <option value="ease-in">ease-in</option><option value="ease-out">ease-out</option>
+              <option value="linear">linear</option>
+            </select></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+<div class="toastmsg" id="msg"></div>
+
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const round=v=>{const s=(+(+v).toFixed(3)).toString();return s;};
+
+// ---------- state ----------
+const KW={ease:[.25,.1,.25,1],'ease-in':[.42,0,1,1],'ease-out':[0,0,.58,1],'ease-in-out':[.42,0,.58,1],linear:[0,0,1,1]};
+const PRESETS=[
+  ['ease',[.25,.1,.25,1]],['ease-in',[.42,0,1,1]],['ease-out',[0,0,.58,1]],
+  ['ease-in-out',[.42,0,.58,1]],['linear',[0,0,1,1]],
+  ['easeInOutCubic',[.65,0,.35,1]],['easeOutBack ⤴',[.34,1.56,.64,1]],['anticipate',[.68,-.55,.27,1.55]]
+];
+const state={
+  mode:'bezier',
+  b:[.42,0,.58,1],
+  ghost:[.25,.1,.25,1],
+  spring:{mass:1,stiffness:170,damping:16},
+  importedLinear:null,       // parsed linear() values, cleared when sliders move
+  steps:{n:4,jump:'jump-end'},
+  dur:600, ref:'ease-in-out'
+};
+
+// ---------- easing math ----------
+function cubicBezier(x1,y1,x2,y2){
+  const A=(a,b)=>1-3*b+3*a, B=(a,b)=>3*b-6*a, C=a=>3*a;
+  const calc=(t,a,b)=>((A(a,b)*t+B(a,b))*t+C(a))*t;
+  const slope=(t,a,b)=>3*A(a,b)*t*t+2*B(a,b)*t+C(a);
+  function solve(x){
+    let t=x;
+    for(let i=0;i<8;i++){const e=calc(t,x1,x2)-x;if(Math.abs(e)<1e-6)return t;const d=slope(t,x1,x2);if(Math.abs(d)<1e-6)break;t-=e/d;}
+    let lo=0,hi=1;t=x;
+    for(let i=0;i<24;i++){const e=calc(t,x1,x2);if(Math.abs(e-x)<1e-6)break;if(x>e)lo=t;else hi=t;t=(lo+hi)/2;}
+    return t;
+  }
+  return x=>x<=0?0:x>=1?1:calc(solve(x),y1,y2);
+}
+function computeSpring(p){
+  const dt=1/240; let x=1,v=0,t=0; const raw=[]; const maxT=12;
+  while(t<maxT){
+    const a=(-p.stiffness*x - p.damping*v)/p.mass;
+    v+=a*dt; x+=v*dt; t+=dt; raw.push([t,1-x]);
+    if(Math.abs(x)<8e-4 && Math.abs(v)<8e-4) break;
+  }
+  const dur=raw.length?raw[raw.length-1][0]:1, N=48, vals=[];
+  let j=0;
+  for(let i=0;i<=N;i++){
+    const target=(i/N)*dur;
+    while(j<raw.length-1 && raw[j+1][0]<target) j++;
+    if(j>=raw.length-1){vals.push(raw.length?raw[raw.length-1][1]:1);continue;}
+    const [t0,y0]=raw[j],[t1,y1]=raw[j+1];
+    const f=t1===t0?0:(target-t0)/(t1-t0);
+    vals.push(y0+(y1-y0)*f);
+  }
+  vals[0]=0;                 // a spring starts at rest
+  vals[vals.length-1]=1;     // and settles at its target
+  return vals;
+}
+function interpVals(vals,t){
+  t=clamp(t,0,1); const n=vals.length-1, i=t*n, lo=Math.floor(i), f=i-lo;
+  return lo>=n?vals[n]:vals[lo]+(vals[lo+1]-vals[lo])*f;
+}
+function stepVal(t,n,jump){
+  t=clamp(t,0,1); const k=t>=1?n:Math.floor(t*n); let v;
+  if(jump==='jump-start') v=(k+1)/n;
+  else if(jump==='jump-both') v=(k+1)/(n+1);
+  else if(jump==='jump-none') v=n>1?Math.min(k,n-1)/(n-1):(t>=1?1:0);
+  else v=k/n; // jump-end
+  return clamp(v,0,1);
+}
+let springCache=null, springKey='';
+function ease(){
+  if(state.mode==='bezier') return cubicBezier(...state.b);
+  if(state.mode==='steps'){const{n,jump}=state.steps;return t=>stepVal(t,n,jump);}
+  // spring / imported linear
+  if(state.importedLinear) return t=>interpVals(state.importedLinear,t);
+  const key=JSON.stringify(state.spring);
+  if(key!==springKey){springCache=computeSpring(state.spring);springKey=key;}
+  return t=>interpVals(springCache,t);
+}
+function refEase(){
+  if(state.ref==='none') return null;
+  const b=state.ref==='ghost'?state.ghost:KW[state.ref];
+  return cubicBezier(...b);
+}
+
+// ---------- output token ----------
+function springVals(){
+  if(state.importedLinear) return state.importedLinear;
+  const key=JSON.stringify(state.spring);
+  if(key!==springKey){springCache=computeSpring(state.spring);springKey=key;}
+  return springCache;
+}
+function token(){
+  if(state.mode==='bezier') return `cubic-bezier(${state.b.map(round).join(', ')})`;
+  if(state.mode==='steps') return `steps(${state.steps.n}, ${state.steps.jump})`;
+  return `linear(${springVals().map(v=>round(v)).join(', ')})`;
+}
+
+// ---------- canvas drawing ----------
+const cv=$('cv'), ctx=cv.getContext('2d');
+const velo=$('velo'), vctx=velo.getContext('2d');
+const VMIN=-0.35, VMAX=1.35, PADX=26, PADT=34, PADB=34;
+let W=0,H=0;
+function fit(c){const r=c.getBoundingClientRect(),dpr=devicePixelRatio||1;c.width=r.width*dpr;c.height=r.height*dpr;c.getContext('2d').setTransform(dpr,0,0,dpr,0,0);return[r.width,r.height];}
+function vx(x){return PADX + x*(W-2*PADX);}
+function vy(v){return PADT + (VMAX-v)/(VMAX-VMIN)*(H-PADT-PADB);}
+function drawEditor(){
+  ctx.clearRect(0,0,W,H);
+  // grid
+  ctx.strokeStyle='#232b36';ctx.lineWidth=1;
+  for(let i=0;i<=4;i++){const x=vx(i/4);ctx.beginPath();ctx.moveTo(x,vy(VMAX));ctx.lineTo(x,vy(VMIN));ctx.stroke();}
+  // 0 and 1 value lines
+  ctx.strokeStyle='#39424f';ctx.setLineDash([4,4]);
+  [0,1].forEach(v=>{ctx.beginPath();ctx.moveTo(vx(0),vy(v));ctx.lineTo(vx(1),vy(v));ctx.stroke();});
+  ctx.setLineDash([]);
+  // ghost curve (bezier mode only)
+  if(state.mode==='bezier'){plotFn(cubicBezier(...state.ghost),'#3a4250',1.5);}
+  // main easing curve
+  if(state.mode==='steps')drawSteps('#ffb08a',2.5);
+  else plotFn(ease(),state.mode==='bezier'?'#ff7a3d':'#ffb08a',2.5);
+  // control handle lines (bezier)
+  if(state.mode==='bezier'){
+    const[x1,y1,x2,y2]=state.b;
+    ctx.strokeStyle='#ff7a3d88';ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(vx(0),vy(0));ctx.lineTo(vx(x1),vy(y1));ctx.stroke();
+    ctx.strokeStyle='#4aa8ff88';
+    ctx.beginPath();ctx.moveTo(vx(1),vy(1));ctx.lineTo(vx(x2),vy(y2));ctx.stroke();
+  }
+}
+function plotFn(fn,color,lw){
+  ctx.strokeStyle=color;ctx.lineWidth=lw;ctx.beginPath();
+  for(let i=0;i<=120;i++){const t=i/120,x=vx(t),y=vy(fn(t));i?ctx.lineTo(x,y):ctx.moveTo(x,y);}
+  ctx.stroke();
+}
+// crisp staircase (horizontal treads + vertical risers) matching the emitted steps() token
+function drawSteps(color,lw){
+  const{n,jump}=state.steps;
+  ctx.strokeStyle=color;ctx.lineWidth=lw;ctx.lineJoin='miter';ctx.beginPath();
+  for(let k=0;k<n;k++){
+    const y=vy(stepVal((k+0.5)/n,n,jump));
+    ctx.lineTo(vx(k/n),y);      // riser up to this tread (moveTo on first iteration)
+    ctx.lineTo(vx((k+1)/n),y);  // tread
+  }
+  ctx.stroke();
+}
+function drawVelo(){
+  const w=velo.clientWidth,h=velo.clientHeight;vctx.clearRect(0,0,w,h);
+  const fn=ease(),N=140,d=[]; let max=1e-6;
+  for(let i=0;i<N;i++){const t0=i/N,t1=(i+1)/N,dv=(fn(t1)-fn(t0))*N;d.push(dv);max=Math.max(max,Math.abs(dv));}
+  const mid=h*0.62;
+  vctx.strokeStyle='#39424f';vctx.beginPath();vctx.moveTo(0,mid);vctx.lineTo(w,mid);vctx.stroke();
+  vctx.beginPath();vctx.moveTo(0,mid);
+  for(let i=0;i<N;i++){const x=i/N*w,y=mid-(d[i]/max)*(mid-4);vctx.lineTo(x,y);}
+  vctx.lineTo(w,mid);vctx.closePath();
+  const g=vctx.createLinearGradient(0,0,0,h);g.addColorStop(0,'#ff7a3d55');g.addColorStop(1,'#ff7a3d10');
+  vctx.fillStyle=g;vctx.fill();
+  vctx.strokeStyle='#ff9d6b';vctx.lineWidth=1.5;
+  vctx.beginPath();for(let i=0;i<N;i++){const x=i/N*w,y=mid-(d[i]/max)*(mid-4);i?vctx.lineTo(x,y):vctx.moveTo(x,y);}vctx.stroke();
+}
+
+// ---------- handles ----------
+function placeHandles(){
+  const on=state.mode==='bezier';
+  [$('h1'),$('h2')].forEach((h,i)=>{h.style.display=on?'block':'none';
+    if(!on)return;const p=i?[state.b[2],state.b[3]]:[state.b[0],state.b[1]];
+    h.style.left=vx(p[0])+'px';h.style.top=vy(p[1])+'px';
+    h.setAttribute('aria-valuetext',`x ${round(p[0])}, y ${round(p[1])}`);});
+}
+function bindHandle(el,idx){
+  const setFromEvent=e=>{
+    const r=cv.getBoundingClientRect();
+    let x=clamp(((e.clientX-r.left)-PADX)/(W-2*PADX),0,1);
+    let y=VMAX-((e.clientY-r.top)-PADT)/(H-PADT-PADB)*(VMAX-VMIN);
+    y=clamp(y,-1.5,2.5);
+    state.b[idx*2]=x;state.b[idx*2+1]=y;update();
+  };
+  el.addEventListener('pointerdown',e=>{state.ghost=state.b.slice();el.setPointerCapture(e.pointerId);el.style.cursor='grabbing';setFromEvent(e);});
+  el.addEventListener('pointermove',e=>{if(el.hasPointerCapture(e.pointerId))setFromEvent(e);});
+  el.addEventListener('pointerup',e=>{el.releasePointerCapture(e.pointerId);el.style.cursor='grab';});
+  let kbBurst=false;
+  el.addEventListener('keydown',e=>{
+    const step=e.shiftKey?0.05:0.01;
+    let dx=0,dy=0;
+    if(e.key==='ArrowLeft')dx=-step;else if(e.key==='ArrowRight')dx=step;
+    else if(e.key==='ArrowUp')dy=step;else if(e.key==='ArrowDown')dy=-step;else return;
+    e.preventDefault();
+    // snapshot the pre-edit curve once per nudge burst so the ghost trail renders for keyboard users too
+    if(!kbBurst){state.ghost=state.b.slice();kbBurst=true;}
+    state.b[idx*2]=clamp(state.b[idx*2]+dx,0,1);
+    state.b[idx*2+1]=clamp(state.b[idx*2+1]+dy,-1.5,2.5);update();
+  });
+  el.addEventListener('keyup',()=>{kbBurst=false;});
+  el.addEventListener('blur',()=>{kbBurst=false;});
+}
+
+// ---------- demos ----------
+const N_BARS=5;
+(function(){const c=$('listBars');for(let i=0;i<N_BARS;i++){const b=document.createElement('div');b.className='box bar';b.style.position='relative';c.appendChild(b);}})();
+function renderDemos(t){
+  const fn=ease(), rf=refEase();
+  const p=fn(t), rp=rf?rf(t):0;
+  const set=(id,sel)=>document.querySelector('#'+id+' '+sel);
+  // modal
+  set('dModal','[data-prim]').style.cssText='';set('dModal','[data-prim]').style.transform=`scale(${(0.78+0.22*p).toFixed(4)})`;set('dModal','[data-prim]').style.opacity=clamp(p*1.4,0,1);
+  const mr=set('dModal','[data-ref]');mr.style.display=rf?'block':'none';if(rf){mr.style.transform=`scale(${(0.78+0.22*rp).toFixed(4)})`;mr.style.opacity=clamp(rp*1.4,0,1)*.5;}
+  // toast
+  set('dToast','[data-prim]').style.transform=`translateX(${((1-p)*180).toFixed(2)}%)`;set('dToast','[data-prim]').style.opacity=clamp(p*1.6,0,1);
+  const tr=set('dToast','[data-ref]');tr.style.display=rf?'flex':'none';if(rf){tr.style.transform=`translateX(${((1-rp)*180).toFixed(2)}%)`;tr.style.opacity=clamp(rp*1.6,0,1)*.5;}
+  // knob travel
+  const tw=set('dBtn','.track').clientWidth-20;
+  set('dBtn','[data-prim]').style.transform=`translateX(${(p*tw).toFixed(2)}px)`;set('dBtn','[data-prim]').style.left='14px';
+  const kr=set('dBtn','[data-ref]');kr.style.display=rf?'block':'none';if(rf){kr.style.left='14px';kr.style.transform=`translateX(${(rp*tw).toFixed(2)}px)`;}
+  // list stagger
+  const bars=document.querySelectorAll('#listBars .bar'),spread=0.55;
+  bars.forEach((b,i)=>{const off=i/(N_BARS-1)*spread;const pi=fn(clamp((t-off)/(1-spread),0,1));
+    b.style.transform=`translateX(${(-46*(1-pi)).toFixed(2)}px)`;b.style.opacity=clamp(pi*1.5,0,1);b.style.width=(55+pi*35)+'%';});
+}
+
+// ---------- animation clock ----------
+let playing=false, t0=0, raf=0;
+const REDUCED=matchMedia('(prefers-reduced-motion: reduce)').matches;
+function loop(){
+  const t=(((performance.now()-t0)%state.dur)/state.dur);
+  $('scrub').value=Math.round(t*1000);renderDemos(t);
+  raf=requestAnimationFrame(loop);
+}
+function play(){if(playing)return;playing=true;$('play').textContent='⏸ pause';t0=performance.now()-($('scrub').value/1000)*state.dur;raf=requestAnimationFrame(loop);}
+function pause(){playing=false;$('play').textContent='▶ play';cancelAnimationFrame(raf);}
+
+// ---------- update / sync ----------
+function syncInputs(){
+  $('bx1').value=round(state.b[0]);$('by1').value=round(state.b[1]);$('bx2').value=round(state.b[2]);$('by2').value=round(state.b[3]);
+  $('sm').value=state.spring.mass;$('smv').textContent=state.spring.mass;
+  $('ss').value=state.spring.stiffness;$('ssv').textContent=state.spring.stiffness;
+  $('sd').value=state.spring.damping;$('sdv').textContent=state.spring.damping;
+  $('stn').value=state.steps.n;$('stnv').textContent=state.steps.n;$('stj').value=state.steps.jump;
+  $('dur').value=state.dur;$('durv').textContent=state.dur+'ms';$('ref').value=state.ref;
+  $('pBezier').hidden=state.mode!=='bezier';$('pSpring').hidden=state.mode!=='spring';$('pSteps').hidden=state.mode!=='steps';
+  document.querySelectorAll('.tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.mode===state.mode));
+}
+function update(){
+  drawEditor();drawVelo();placeHandles();
+  $('token').textContent=token();
+  syncInputs();writeHash();
+  if(!playing)renderDemos($('scrub').value/1000);
+}
+
+// ---------- hash ----------
+const MODES=['bezier','spring','steps'];
+const JUMPS=['jump-start','jump-end','jump-both','jump-none'];
+const REFS=['none','ghost','ease','ease-in','ease-out','ease-in-out','linear'];
+function writeHash(){
+  const p=new URLSearchParams();p.set('m',state.mode);
+  if(state.mode==='bezier')p.set('b',state.b.map(round).join(','));
+  else if(state.mode==='spring'){
+    if(state.importedLinear)p.set('lin',state.importedLinear.map(round).join(','));  // persist imported curve so it round-trips
+    else{const s=state.spring;p.set('s',[s.mass,s.stiffness,s.damping].join(','));}
+  }
+  else p.set('st',state.steps.n+','+state.steps.jump);
+  p.set('d',state.dur);p.set('r',state.ref);
+  try{history.replaceState(null,'','#'+p.toString());}          // file:// can throw SecurityError in some engines
+  catch(e){try{location.hash=p.toString();}catch(_){}}
+}
+function readHash(){
+  if(!location.hash)return;
+  const p=new URLSearchParams(location.hash.slice(1));
+  const m=p.get('m');if(m&&MODES.includes(m))state.mode=m;
+  if(p.get('b')){const a=p.get('b').split(',').map(Number);
+    if(a.length===4&&a.every(Number.isFinite))state.b=[clamp(a[0],0,1),clamp(a[1],-1.5,2.5),clamp(a[2],0,1),clamp(a[3],-1.5,2.5)];}
+  if(p.get('lin')){const vals=p.get('lin').split(',').map(Number).filter(Number.isFinite);
+    if(vals.length>=2){state.mode='spring';state.importedLinear=vals;}}
+  else if(p.get('s')){const[mass,st,d]=p.get('s').split(',').map(Number);
+    if([mass,st,d].every(Number.isFinite)){state.spring={mass,stiffness:st,damping:d};state.importedLinear=null;}}
+  if(p.get('st')){const[n,j]=p.get('st').split(',');const nn=+n;
+    if(Number.isFinite(nn)&&nn>=1&&JUMPS.includes(j))state.steps={n:Math.round(nn),jump:j};}
+  if(p.get('d')){const d=+p.get('d');if(Number.isFinite(d)&&d>0)state.dur=d;}
+  const r=p.get('r');if(r&&REFS.includes(r))state.ref=r;
+}
+
+// ---------- import ----------
+function importStr(str){
+  str=(str||'').trim();let m;
+  if(m=str.match(/cubic-bezier\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)/i)){
+    state.mode='bezier';state.b=[+m[1],+m[2],+m[3],+m[4]];state.importedLinear=null;return true;}
+  if(m=str.match(/steps\(\s*(\d+)\s*(?:,\s*(jump-\w+|start|end))?\s*\)/i)){
+    const n=+m[1];if(n<1)return false;   // steps(0) is invalid CSS
+    let j=(m[2]||'jump-end').toLowerCase();if(j==='start')j='jump-start';if(j==='end')j='jump-end';
+    if(!JUMPS.includes(j))j='jump-end';
+    state.mode='steps';state.steps={n,jump:j};return true;}
+  if(m=str.match(/linear\(([^)]+)\)/i)){
+    const vals=m[1].split(',').map(s=>parseFloat(s)).filter(v=>!isNaN(v));
+    if(vals.length>=2){state.mode='spring';state.importedLinear=vals;return true;}
+  }
+  return false;
+}
+
+// ---------- exports ----------
+function download(name,text,type){const b=new Blob([text],{type});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+function exportAs(kind){
+  const tk=token(),d=state.dur;
+  if(kind==='keyframes'){
+    copy(`.camber-enter {\n  animation: camber ${d}ms ${tk} both;\n}\n@keyframes camber {\n  from { opacity: 0; transform: translateY(12px) scale(.96); }\n  to   { opacity: 1; transform: translateY(0)    scale(1);   }\n}`,'@keyframes copied');
+  }else if(kind==='waapi'){
+    copy(`el.animate(\n  [ { opacity: 0, transform: 'translateY(12px)' },\n    { opacity: 1, transform: 'translateY(0)'    } ],\n  { duration: ${d}, easing: '${tk}', fill: 'both' }\n);`,'Web Animations snippet copied');
+  }else if(kind==='framer'){
+    let obj;
+    if(state.mode==='bezier')obj=`{ duration: ${(d/1000)}, ease: [${state.b.map(round).join(', ')}] }`;
+    else if(state.mode==='spring'&&state.importedLinear)obj=`{ duration: ${(d/1000)} } /* imported curve — ship as CSS ${tk} */`;
+    else if(state.mode==='spring')obj=`{ type: 'spring', stiffness: ${state.spring.stiffness}, damping: ${state.spring.damping}, mass: ${state.spring.mass} }`;
+    else obj=`{ duration: ${(d/1000)}, ease: 'steps(${state.steps.n})' } /* ${tk} */`;
+    copy(`transition={${obj}}`,'Framer/JS transition copied');
+  }else if(kind==='svg'){
+    const fn=ease();let dpath='';for(let i=0;i<=100;i++){const t=i/100;dpath+=(i?'L':'M')+(t*100).toFixed(2)+','+(100-fn(t)*100).toFixed(2)+' ';}
+    const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="-6 -20 112 140" width="240" height="300">\n<rect x="0" y="0" width="100" height="100" fill="none" stroke="#ccc"/>\n<path d="${dpath.trim()}" fill="none" stroke="#ff7a3d" stroke-width="2"/>\n<text x="0" y="115" font-size="7" font-family="monospace">${tk}</text></svg>`;
+    download('camber-curve.svg',svg,'image/svg+xml');toast('SVG downloaded');
+  }else if(kind==='link'){copy(location.href,'Share link copied');}
+}
+
+// ---------- clipboard + toast ----------
+function toast(t){const m=$('msg');m.textContent=t;m.classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(()=>m.classList.remove('show'),1400);}
+function copy(text,label){
+  const done=()=>toast(label||'Copied');
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(text).then(done,()=>fallback(text,done));
+  else fallback(text,done);
+}
+function fallback(text,done){const ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');}catch(e){}ta.remove();done();}
+
+// ---------- wire up ----------
+function initPresets(){
+  const c=$('presets');
+  PRESETS.forEach(([name,b])=>{const btn=document.createElement('button');btn.textContent=name;
+    btn.onclick=()=>{state.ghost=state.mode==='bezier'?state.b.slice():state.ghost;state.mode='bezier';state.b=b.slice();state.importedLinear=null;update();};
+    c.appendChild(btn);});
+}
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{state.mode=b.dataset.mode;update();});
+['bx1','by1','bx2','by2'].forEach((id,i)=>$(id).addEventListener('input',()=>{const v=parseFloat($(id).value);if(!isNaN(v)){state.b[i]=(i%2===0)?clamp(v,0,1):clamp(v,-1.5,2.5);update();}}));
+$('sm').addEventListener('input',e=>{state.spring.mass=+e.target.value;state.importedLinear=null;update();});
+$('ss').addEventListener('input',e=>{state.spring.stiffness=+e.target.value;state.importedLinear=null;update();});
+$('sd').addEventListener('input',e=>{state.spring.damping=+e.target.value;state.importedLinear=null;update();});
+$('stn').addEventListener('input',e=>{state.steps.n=+e.target.value;update();});
+$('stj').addEventListener('change',e=>{state.steps.jump=e.target.value;update();});
+$('dur').addEventListener('input',e=>{state.dur=+e.target.value;if(playing)t0=performance.now();update();});
+$('ref').addEventListener('change',e=>{state.ref=e.target.value;update();});
+$('copy').onclick=()=>copy(token(),'CSS copied');
+$('importBtn').onclick=()=>{if(importStr($('importIn').value)){$('importIn').value='';update();toast('Imported — tweak away');}else toast('Could not parse that string');};
+$('importIn').addEventListener('keydown',e=>{if(e.key==='Enter')$('importBtn').click();});
+document.querySelectorAll('[data-exp]').forEach(b=>b.onclick=()=>exportAs(b.dataset.exp));
+$('scrub').addEventListener('input',()=>{if(playing)pause();renderDemos($('scrub').value/1000);});
+$('play').onclick=()=>playing?pause():play();
+
+bindHandle($('h1'),0);bindHandle($('h2'),1);
+
+function resize(){[W,H]=fit(cv);fit(velo);update();}
+window.addEventListener('resize',resize);
+
+// ---------- boot ----------
+readHash();
+[W,H]=fit(cv);fit(velo);
+initPresets();
+update();
+$('play').textContent='▶ play';
+if(!REDUCED){play();} else {$('scrub').value=1000;renderDemos(1);}
+</script>
+</body>
+</html>

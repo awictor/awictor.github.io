@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DiceOdds — Dice Roll Probability Calculator</title>
+<meta name="description" content="Compute the probability distribution, expected value, and at-least/at-most/exactly odds for rolling any number of dice. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('dice-odds-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#dc2626;
+    --bg:#f7f5f5; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e6e2e2; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#161212; --card:#211b1b; --fg:#f0eaea; --muted:#a09696; --line:#352b2b; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:800px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#991b1b);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:800px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  .controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:14px;align-items:end}
+  input,select{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  .dice-line{font-size:1.1rem;margin:16px 0 4px;text-align:center;font-weight:700}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:12px;margin-top:8px}
+  .stat{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center}
+  .stat span{display:block;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .stat b{font-size:1.15rem;font-variant-numeric:tabular-nums}
+  .prob{text-align:center;margin-top:6px}
+  .prob .big{font-size:2.6rem;font-weight:800;color:var(--c);letter-spacing:-1px}
+  .chart{display:flex;align-items:flex-end;gap:2px;height:180px;margin-top:12px;padding-top:6px}
+  .bar{flex:1;background:var(--c);border-radius:3px 3px 0 0;min-height:1px;opacity:.85;position:relative}
+  .bar:hover{opacity:1}
+  .axis{display:flex;gap:2px;margin-top:4px;color:var(--muted);font-size:.68rem}
+  .axis div{flex:1;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:800px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🎲</div>
+    <div><h1>DiceOdds</h1><div class="sub">Probability distribution &amp; odds for any dice roll</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="controls">
+      <div><label for="count">Number of dice</label><input type="number" id="count" value="2" min="1" max="20"></div>
+      <div><label for="sides">Sides each</label><input type="number" id="sides" value="6" min="2" max="100"></div>
+      <div><label for="mode">Condition</label>
+        <select id="mode">
+          <option value="atleast">Sum at least</option>
+          <option value="atmost">Sum at most</option>
+          <option value="exactly">Sum exactly</option>
+        </select>
+      </div>
+      <div><label for="target">Target sum</label><input type="number" id="target" value="9"></div>
+    </div>
+    <div class="dice-line" id="diceLine">2d6</div>
+  </div>
+
+  <div class="card">
+    <div class="prob"><div class="big" id="probBig">—</div><div id="probText" class="sub"></div></div>
+    <div class="stats" id="stats"></div>
+  </div>
+
+  <div class="card">
+    <label>Sum distribution</label>
+    <div class="chart" id="chart"></div>
+    <div class="axis" id="axis"></div>
+  </div>
+</main>
+<footer>
+  100% offline. Nothing leaves your browser. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/dice-odds">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  function singleDie(sides){
+    const m = new Map();
+    for(let f = 1; f <= sides; f++) m.set(f, 1);
+    return m;
+  }
+
+  function convolve(a, b){
+    const m = new Map();
+    for(const [s1, c1] of a) for(const [s2, c2] of b){
+      const s = s1 + s2;
+      m.set(s, (m.get(s) || 0) + c1 * c2);
+    }
+    return m;
+  }
+
+  // returns Map<sum, number-of-ways>
+  function distribution(n, sides){
+    if(!Number.isInteger(n) || !Number.isInteger(sides) || n < 1 || sides < 1)
+      throw new Error('need n >= 1 and sides >= 1');
+    let d = singleDie(sides);
+    for(let i = 1; i < n; i++) d = convolve(d, singleDie(sides));
+    return d;
+  }
+
+  function totalOutcomes(dist){
+    let t = 0;
+    for(const c of dist.values()) t += c;
+    return t;
+  }
+
+  function stats(n, sides){
+    const dist = distribution(n, sides);
+    const total = totalOutcomes(dist);
+    let mean = 0, min = Infinity, max = -Infinity, mode = null, modeCount = -1;
+    for(const [s, c] of dist){
+      mean += s * c;
+      if(s < min) min = s;
+      if(s > max) max = s;
+      if(c > modeCount){ modeCount = c; mode = s; }
+    }
+    return { min, max, mean: mean / total, mode, total };
+  }
+
+  // probability that the sum satisfies the condition vs target
+  function probability(n, sides, mode, target){
+    const dist = distribution(n, sides);
+    const total = totalOutcomes(dist);
+    let hit = 0;
+    for(const [s, c] of dist){
+      if(mode === 'atleast' && s >= target) hit += c;
+      else if(mode === 'atmost' && s <= target) hit += c;
+      else if(mode === 'exactly' && s === target) hit += c;
+    }
+    return { ways: hit, total, p: hit / total };
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('chart')){
+    const $ = id => document.getElementById(id);
+    const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(v) || lo));
+
+    function render(){
+      const n = clampN(+$('count').value, 1, 20);
+      const sides = clampN(+$('sides').value, 2, 100);
+      const mode = $('mode').value;
+      const target = Math.round(+$('target').value) || 0;
+      $('diceLine').textContent = `${n}d${sides}`;
+
+      let dist, st, pr;
+      try{
+        dist = distribution(n, sides);
+        st = stats(n, sides);
+        pr = probability(n, sides, mode, target);
+      }catch(e){ return; }
+
+      const label = { atleast: '≥', atmost: '≤', exactly: '=' }[mode];
+      $('probBig').textContent = (pr.p * 100).toFixed(2) + '%';
+      $('probText').textContent = `P(sum ${label} ${target}) = ${pr.ways.toLocaleString()} / ${pr.total.toLocaleString()} outcomes`;
+
+      $('stats').innerHTML =
+        `<div class="stat"><span>Min</span><b>${st.min}</b></div>` +
+        `<div class="stat"><span>Max</span><b>${st.max}</b></div>` +
+        `<div class="stat"><span>Mean</span><b>${st.mean.toFixed(2)}</b></div>` +
+        `<div class="stat"><span>Most likely</span><b>${st.mode}</b></div>` +
+        `<div class="stat"><span>Outcomes</span><b>${st.total.toLocaleString()}</b></div>`;
+
+      const sums = [...dist.keys()].sort((a, b) => a - b);
+      const maxCount = Math.max(...dist.values());
+      $('chart').innerHTML = sums.map(s => {
+        const h = (dist.get(s) / maxCount) * 100;
+        const hit = (mode === 'atleast' && s >= target) || (mode === 'atmost' && s <= target) || (mode === 'exactly' && s === target);
+        return `<div class="bar" title="sum ${s}: ${(dist.get(s) / st.total * 100).toFixed(2)}%" style="height:${h}%;opacity:${hit ? 1 : .35}"></div>`;
+      }).join('');
+      // sparse axis labels
+      const step = Math.ceil(sums.length / 12);
+      $('axis').innerHTML = sums.map((s, i) => `<div>${i % step === 0 ? s : ''}</div>`).join('');
+    }
+
+    ['count', 'sides', 'mode', 'target'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('dice-odds-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { distribution, totalOutcomes, stats, probability };
+</script>
+</body>
+</html>

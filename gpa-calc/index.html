@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GPACalc — weighted GPA calculator</title>
+<meta name="description" content="Free offline GPA calculator. Enter courses with credit hours and letter grades to get your weighted GPA on the 4.0 scale, with +/- grades and standing. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/gpa-calc/">
+<style>
+  :root{
+    --c:#134e4a; --bg:#f5fafa; --fg:#0d201e; --muted:#4f716d;
+    --card:#ffffff; --border:#d6e8e5; --code:#e6f2f0;
+  }
+  [data-theme="dark"]{
+    --bg:#0a1615; --fg:#e3efed; --muted:#82a4a0; --card:#102422;
+    --border:#20393600; --border:#203936; --code:#152c29;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#0d9488);display:grid;place-items:center;color:#fff;font-size:18px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:720px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  .result{text-align:center;margin-bottom:18px}
+  .gpa{font-family:ui-monospace,monospace;font-size:3rem;font-weight:700;color:var(--c)}
+  .standing{color:var(--muted);font-size:.95rem;margin-top:2px}
+  .rows{display:flex;flex-direction:column;gap:8px}
+  .rhead,.row{display:grid;grid-template-columns:1fr 90px 90px 36px;gap:8px;align-items:center}
+  .rhead{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding:0 2px}
+  input,select{width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:9px;
+    background:var(--bg);color:var(--fg);font-size:.92rem}
+  input:focus,select:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .rm{background:none;border:1px solid var(--border);color:var(--muted);border-radius:9px;height:36px;cursor:pointer;font-size:1.1rem}
+  .rm:hover{color:#dc2626;border-color:#dc2626}
+  .add{margin-top:12px;background:var(--code);border:1px dashed var(--border);color:var(--c);
+    border-radius:10px;padding:9px;cursor:pointer;font-size:.86rem;font-weight:600;width:100%}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('gpa.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">GPA</div>
+  <div>
+    <h1>GPACalc</h1>
+    <p class="sub">Weighted GPA calculator</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <div class="result">
+      <div class="gpa" id="gpa">—</div>
+      <div class="standing" id="standing"></div>
+    </div>
+    <div class="rhead"><span>Course</span><span>Credits</span><span>Grade</span><span></span></div>
+    <div class="rows" id="rows"></div>
+    <button class="add" id="add">+ Add course</button>
+    <p class="hint">GPA is credit-weighted on the 4.0 scale (A+/A = 4.0, A− = 3.7, … F = 0.0).
+      Rows with no grade or zero credits are ignored. Everything runs locally.</p>
+  </div>
+</main>
+<footer>
+  GPACalc is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/gpa-calc">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+var GRADE_POINTS = {
+  'A+': 4.0, 'A': 4.0, 'A-': 3.7,
+  'B+': 3.3, 'B': 3.0, 'B-': 2.7,
+  'C+': 2.3, 'C': 2.0, 'C-': 1.7,
+  'D+': 1.3, 'D': 1.0, 'D-': 0.7,
+  'F': 0.0
+};
+function gradePoints(letter){
+  var g = String(letter).trim().toUpperCase();
+  return Object.prototype.hasOwnProperty.call(GRADE_POINTS, g) ? GRADE_POINTS[g] : null;
+}
+function gpa(courses){
+  var totalCredits = 0, totalPoints = 0;
+  (courses || []).forEach(function(c){
+    var p = gradePoints(c.grade);
+    var cr = Number(c.credits);
+    if(p === null || !isFinite(cr) || cr <= 0) return;
+    totalCredits += cr;
+    totalPoints += p * cr;
+  });
+  if(totalCredits === 0) return null;
+  return { gpa: totalPoints / totalCredits, credits: totalCredits, points: totalPoints };
+}
+function standing(g){
+  if(g == null || !isFinite(g)) return null;
+  if(g >= 3.5) return "Dean's List";
+  if(g >= 2.0) return 'Good standing';
+  return 'Below 2.0 — at risk';
+}
+
+if(typeof module !== 'undefined') module.exports = { GRADE_POINTS, gradePoints, gpa, standing };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var rowsEl = document.getElementById('rows');
+  var gpaEl = document.getElementById('gpa');
+  var standingEl = document.getElementById('standing');
+  var GRADES = Object.keys(GRADE_POINTS);
+  var state = [];
+
+  function defaults(){
+    return [ { name: 'Calculus', credits: '4', grade: 'A' },
+             { name: 'History', credits: '3', grade: 'B+' },
+             { name: 'Chemistry', credits: '4', grade: 'A-' } ];
+  }
+  function renderRows(){
+    rowsEl.innerHTML = '';
+    state.forEach(function(c, i){
+      var d = document.createElement('div');
+      d.className = 'row';
+      var opts = '<option value="">—</option>' + GRADES.map(function(g){
+        return '<option value="' + g + '"' + (g === c.grade ? ' selected' : '') + '>' + g + '</option>'; }).join('');
+      d.innerHTML =
+        '<input type="text" data-i="' + i + '" data-k="name" value="' + (c.name || '').replace(/"/g, '&quot;') + '" placeholder="Course">' +
+        '<input type="number" data-i="' + i + '" data-k="credits" min="0" step="0.5" value="' + c.credits + '">' +
+        '<select data-i="' + i + '" data-k="grade">' + opts + '</select>' +
+        '<button class="rm" data-i="' + i + '" title="Remove">&times;</button>';
+      rowsEl.appendChild(d);
+    });
+  }
+  function render(){
+    var r = gpa(state);
+    gpaEl.textContent = r ? r.gpa.toFixed(2) : '—';
+    standingEl.textContent = r ? (standing(r.gpa) + ' · ' + r.credits + ' credits') : 'Add courses with a grade';
+    try{ localStorage.setItem('gpa.state', JSON.stringify(state)); }catch(e){}
+  }
+  rowsEl.addEventListener('input', function(e){
+    var t = e.target, i = +t.getAttribute('data-i'), k = t.getAttribute('data-k');
+    if(k) { state[i][k] = t.value; render(); }
+  });
+  rowsEl.addEventListener('change', function(e){
+    var t = e.target, i = +t.getAttribute('data-i'), k = t.getAttribute('data-k');
+    if(k === 'grade'){ state[i].grade = t.value; render(); }
+  });
+  rowsEl.addEventListener('click', function(e){
+    var b = e.target.closest ? e.target.closest('.rm') : null;
+    if(!b) return;
+    state.splice(+b.getAttribute('data-i'), 1); renderRows(); render();
+  });
+  document.getElementById('add').addEventListener('click', function(){
+    state.push({ name: '', credits: '3', grade: '' }); renderRows(); render();
+  });
+  try{ var s = JSON.parse(localStorage.getItem('gpa.state')); if(s && s.length) state = s; else state = defaults(); }
+  catch(e){ state = defaults(); }
+  renderRows();
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('gpa.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('gpa.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

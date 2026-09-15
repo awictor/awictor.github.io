@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hyperfocal Distance &amp; Depth of Field Calculator</title>
+<meta name="description" content="Compute hyperfocal distance and depth of field (near/far limits) from focal length, aperture, circle of confusion, and focus distance. For landscape and portrait photography. Offline.">
+<style>
+  :root{
+    --c:#0f766e;
+    --bg:#e8f6f4; --card:#ffffff; --fg:#052321; --muted:#3a5a56;
+    --line:#c9e9e3; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#031513; --card:#0a201d; --fg:#dbf3ef; --muted:#89b5ae;
+    --line:#123833; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:840px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto;font-weight:700}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:840px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.78rem;font-weight:600;color:var(--muted);margin:14px 0 5px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:560px){.grid{grid-template-columns:1fr}}
+  input,select{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.05rem;font-weight:600;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus,select:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .hyper{margin-top:20px;text-align:center;font-size:2.4rem;font-weight:800;color:var(--c)}
+  .tag{text-align:center;color:var(--muted);font-size:.9rem}
+  .res{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px}
+  @media(max-width:560px){.res{grid-template-columns:1fr}}
+  .box{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:16px;text-align:center}
+  .box .v{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.25rem;font-weight:800;color:var(--c)}
+  .box .k{font-size:.72rem;color:var(--muted);margin-top:5px}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .note code{background:var(--bg);padding:1px 5px;border-radius:5px}
+  .err{color:#dc2626;font-size:.86rem;margin-top:10px;text-align:center;min-height:1em}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🎯</div>
+  <div>
+    <h1>Hyperfocal Distance</h1>
+    <p>depth of field &amp; near/far limits</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div><label>Focal length (mm)</label><input id="f" value="50"></div>
+      <div><label>Aperture (f-number N)</label><input id="n" value="8"></div>
+      <div><label>Focus distance (m)</label><input id="s" value="3"></div>
+      <div><label>Circle of confusion (mm)</label>
+        <select id="coc">
+          <option value="0.029">Full frame (0.029)</option>
+          <option value="0.019">APS-C (0.019)</option>
+          <option value="0.015">Micro 4/3 (0.015)</option>
+          <option value="0.006">1″ (0.006)</option>
+        </select>
+      </div>
+    </div>
+    <div class="hyper" id="hyper">—</div>
+    <div class="tag">hyperfocal distance</div>
+    <div class="res">
+      <div class="box"><div class="v" id="near">—</div><div class="k">Near limit</div></div>
+      <div class="box"><div class="v" id="far">—</div><div class="k">Far limit</div></div>
+      <div class="box"><div class="v" id="dof">—</div><div class="k">Total depth of field</div></div>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>About hyperfocal distance</h2>
+    <p class="note">The <b>hyperfocal distance</b> <code>H = f²/(N·c) + f</code> is the focus distance that keeps everything from half that distance to infinity acceptably sharp — landscape photographers focus there to maximize depth of field. Here <code>f</code> is focal length, <code>N</code> the f-number, and <code>c</code> the <b>circle of confusion</b> (the largest blur spot still perceived as sharp, which scales with sensor size). Once you focus at some distance <code>s</code>, the near and far sharp limits are <code>D_N = s(H−f)/(H+s−2f)</code> and <code>D_F = s(H−f)/(H−s)</code>; when you focus at or beyond H, the far limit is infinity. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  // All lengths in millimetres internally.
+  function hyperfocal(f, N, c){
+    if(f <= 0 || N <= 0 || c <= 0) throw new Error('focal length, aperture, and circle of confusion must be positive');
+    return f * f / (N * c) + f;
+  }
+  function nearLimit(f, s, H){
+    if(s <= 0) throw new Error('focus distance must be positive');
+    return s * (H - f) / (H + s - 2 * f);
+  }
+  function farLimit(f, s, H){
+    if(s <= 0) throw new Error('focus distance must be positive');
+    if(s >= H) return Infinity;
+    return s * (H - f) / (H - s);
+  }
+  function depthOfField(f, s, H){
+    var df = farLimit(f, s, H);
+    if(!isFinite(df)) return Infinity;
+    return df - nearLimit(f, s, H);
+  }
+
+  if(typeof module !== 'undefined') module.exports = { hyperfocal:hyperfocal, nearLimit:nearLimit, farLimit:farLimit, depthOfField:depthOfField };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var $ = function(id){ return document.getElementById(id); };
+    function num(id){ var v = parseFloat($(id).value); if(!isFinite(v)) throw new Error('enter valid numbers'); return v; }
+    function m(mm){ // format millimetres as a friendly distance
+      if(!isFinite(mm)) return '∞';
+      var metres = mm / 1000;
+      if(metres < 1) return (Math.round(metres * 100) / 100) + ' m';
+      return (Math.round(metres * 100) / 100) + ' m';
+    }
+    function render(){
+      $('err').textContent = '';
+      try{
+        var f = num('f'), N = num('n'), c = parseFloat($('coc').value), s = num('s') * 1000; // s to mm
+        var H = hyperfocal(f, N, c);
+        $('hyper').textContent = m(H);
+        $('near').textContent = m(nearLimit(f, s, H));
+        $('far').textContent = m(farLimit(f, s, H));
+        $('dof').textContent = m(depthOfField(f, s, H));
+      }catch(e){
+        ['hyper','near','far','dof'].forEach(function(id){ $(id).textContent = '—'; });
+        $('err').textContent = e.message;
+      }
+    }
+    ['f','n','s'].forEach(function(id){ $(id).addEventListener('input', render); });
+    $('coc').addEventListener('change', render);
+    render();
+
+    var root = document.documentElement, tb = $('theme');
+    function setTheme(t){ root.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? '☀️' : '🌙'; try{ localStorage.setItem('hyperfocal-theme', t); }catch(e){} }
+    var saved; try{ saved = localStorage.getItem('hyperfocal-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); });
+  }
+</script>
+</body>
+</html>

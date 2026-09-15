@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CronNext — see the next run times of a cron expression</title>
+<meta name="description" content="Free offline cron schedule previewer. Enter a 5-field cron expression and see its next run times, so you can verify a schedule before deploying it. Supports lists, ranges and steps. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/cron-next/">
+<style>
+  :root{
+    --c:#475569; --bg:#f8f8f9; --fg:#18181b; --muted:#52525b;
+    --card:#ffffff; --border:#e4e4e7; --code:#efeff1; --bad:#dc2626; --accent:#2563eb;
+  }
+  [data-theme="dark"]{
+    --bg:#09090b; --fg:#e7e7ea; --muted:#8b8b93; --card:#151518;
+    --border:#27272a; --code:#1c1c20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#64748b);display:grid;place-items:center;color:#fff;font-size:16px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:720px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  input{width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:1.15rem;letter-spacing:.04em;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  input:focus{outline:2px solid var(--accent);border-color:var(--accent)}
+  input.bad{border-color:var(--bad)}
+  .opts{display:flex;gap:14px;align-items:end;margin-top:14px}
+  .opts .f{flex:0 0 auto}
+  .opts input[type=number]{width:80px}
+  .presets{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+  .presets button{background:var(--code);border:1px solid var(--border);color:var(--fg);border-radius:999px;
+    padding:5px 11px;cursor:pointer;font-size:.8rem;font-family:ui-monospace,monospace}
+  .presets button:hover{border-color:var(--accent);color:var(--accent)}
+  .runs{margin-top:18px;list-style:none;padding:0}
+  .runs li{padding:11px 14px;border:1px solid var(--border);border-radius:11px;margin-bottom:8px;background:var(--card);
+    display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .runs .iso{font-family:ui-monospace,monospace;font-weight:700}
+  .runs .rel{color:var(--muted);font-size:.85rem}
+  .err{color:var(--bad);font-size:.86rem;margin-top:10px;min-height:20px;font-family:ui-monospace,monospace}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  .hint code{background:var(--code);padding:1px 5px;border-radius:5px}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--accent)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('cn.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">⏱</div>
+  <div>
+    <h1>CronNext</h1>
+    <p class="sub">Preview a cron expression's next runs</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <label for="expr">Cron expression <small style="font-weight:400;color:var(--muted)">(min hour day month weekday)</small></label>
+    <input id="expr" spellcheck="false" value="*/15 * * * *">
+    <div class="presets" id="presets">
+      <button data-v="*/15 * * * *">every 15 min</button>
+      <button data-v="0 * * * *">hourly</button>
+      <button data-v="0 9 * * 1-5">weekdays 9am</button>
+      <button data-v="0 0 1 * *">monthly</button>
+      <button data-v="30 3 * * 0">Sun 3:30am</button>
+    </div>
+    <div class="opts">
+      <div class="f"><label for="count"># of runs</label><input id="count" type="number" min="1" max="50" value="8"></div>
+      <div class="f" style="color:var(--muted);font-size:.82rem;padding-bottom:12px">Times shown in UTC</div>
+    </div>
+    <div class="err" id="err"></div>
+    <ul class="runs" id="runs"></ul>
+    <p class="hint">Supports <code>*</code>, lists (<code>1,15</code>), ranges (<code>9-17</code>) and steps
+      (<code>*/5</code>). When both day-of-month and weekday are set, a run fires if <b>either</b> matches
+      (standard cron behavior). Times are computed in UTC. 100% local.</p>
+  </div>
+</main>
+<footer>
+  CronNext is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/cron-next">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function parseField(field, min, max){
+  var set = {};
+  String(field).split(',').forEach(function(part){
+    var step = 1, range = part;
+    var slash = part.split('/');
+    if(slash.length === 2){ range = slash[0]; step = parseInt(slash[1], 10); }
+    else if(slash.length > 2) throw new Error('bad field: ' + field);
+    var lo, hi;
+    if(range === '*'){ lo = min; hi = max; }
+    else if(range.indexOf('-') >= 0){ var r = range.split('-'); lo = parseInt(r[0], 10); hi = parseInt(r[1], 10); }
+    else { lo = hi = parseInt(range, 10); }
+    if(!isFinite(lo) || !isFinite(hi) || !isFinite(step) || step < 1 || lo < min || hi > max || lo > hi)
+      throw new Error('bad field: ' + field);
+    for(var v = lo; v <= hi; v += step) set[v] = true;
+  });
+  return set;
+}
+function parseCron(expr){
+  var f = String(expr).trim().split(/\s+/);
+  if(f.length !== 5) throw new Error('cron must have exactly 5 fields');
+  var dowRaw = parseField(f[4], 0, 7);
+  var dow = {};
+  Object.keys(dowRaw).forEach(function(d){ dow[d === '7' ? 0 : +d] = true; });
+  return {
+    minute: parseField(f[0], 0, 59),
+    hour: parseField(f[1], 0, 23),
+    dom: parseField(f[2], 1, 31),
+    month: parseField(f[3], 1, 12),
+    dow: dow,
+    domStar: f[2] === '*',
+    dowStar: f[4] === '*'
+  };
+}
+function matches(d, c){
+  if(!c.minute[d.getUTCMinutes()]) return false;
+  if(!c.hour[d.getUTCHours()]) return false;
+  if(!c.month[d.getUTCMonth() + 1]) return false;
+  var domOk = !!c.dom[d.getUTCDate()];
+  var dowOk = !!c.dow[d.getUTCDay()];
+  if(c.domStar && c.dowStar) return true;
+  if(c.domStar) return dowOk;
+  if(c.dowStar) return domOk;
+  return domOk || dowOk;
+}
+function nextRuns(expr, from, count, maxMinutes){
+  var c = parseCron(expr);
+  count = count || 5;
+  maxMinutes = maxMinutes || (5 * 366 * 24 * 60);
+  var t = from.getTime();
+  t = t - (t % 60000) + 60000;   // start of next minute
+  var out = [];
+  for(var i = 0; i < maxMinutes && out.length < count; i++){
+    var d = new Date(t);
+    if(matches(d, c)) out.push(d);
+    t += 60000;
+  }
+  return out;
+}
+
+if(typeof module !== 'undefined') module.exports = { parseField, parseCron, matches, nextRuns };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var exprEl = document.getElementById('expr');
+  var countEl = document.getElementById('count');
+  var runsEl = document.getElementById('runs');
+  var errEl = document.getElementById('err');
+
+  function rel(ms){
+    var s = Math.round((ms - Date.now()) / 1000);
+    if(s < 0) s = 0;
+    var d = Math.floor(s / 86400); s -= d * 86400;
+    var h = Math.floor(s / 3600); s -= h * 3600;
+    var m = Math.floor(s / 60);
+    var parts = [];
+    if(d) parts.push(d + 'd'); if(h) parts.push(h + 'h'); if(m || parts.length === 0) parts.push(m + 'm');
+    return 'in ' + parts.join(' ');
+  }
+  function render(){
+    exprEl.classList.remove('bad'); errEl.textContent = '';
+    var n = Math.max(1, Math.min(50, parseInt(countEl.value, 10) || 5));
+    try{
+      var runs = nextRuns(exprEl.value, new Date(), n);
+      if(runs.length === 0){ errEl.textContent = 'No runs found within the search window.'; runsEl.innerHTML = ''; }
+      else runsEl.innerHTML = runs.map(function(d){
+        return '<li><span class="iso">' + d.toISOString().replace('.000Z', 'Z') + '</span>' +
+          '<span class="rel">' + rel(d.getTime()) + '</span></li>';
+      }).join('');
+    }catch(e){
+      exprEl.classList.add('bad'); errEl.textContent = e.message; runsEl.innerHTML = '';
+    }
+    try{ localStorage.setItem('cn.expr', exprEl.value); localStorage.setItem('cn.count', countEl.value); }catch(e){}
+  }
+  exprEl.addEventListener('input', render);
+  countEl.addEventListener('input', render);
+  document.getElementById('presets').addEventListener('click', function(e){
+    var b = e.target.closest ? e.target.closest('button') : null;
+    if(b){ exprEl.value = b.getAttribute('data-v'); render(); }
+  });
+  try{ var s = localStorage.getItem('cn.expr'); if(s !== null) exprEl.value = s;
+       var c = localStorage.getItem('cn.count'); if(c !== null) countEl.value = c; }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('cn.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('cn.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

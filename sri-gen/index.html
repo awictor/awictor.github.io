@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SriGen — Subresource Integrity (SRI) hash generator</title>
+<meta name="description" content="Free offline Subresource Integrity generator. Paste file contents to get an integrity='sha384-…' attribute using SHA-256/384/512 via the Web Crypto API. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/sri-gen/">
+<style>
+  :root{
+    --c:#4a044e; --bg:#fdf7fd; --fg:#210d24; --muted:#6d5470;
+    --card:#ffffff; --border:#eedcef; --code:#f6eaf7;
+  }
+  [data-theme="dark"]{
+    --bg:#160a18; --fg:#f0e4f1; --muted:#ab8fae; --card:#211026;
+    --border:#37203b; --code:#2b1730;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#a21caf);display:grid;place-items:center;color:#fff;font-size:18px}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:720px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  textarea{width:100%;min-height:150px;padding:12px 14px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:.9rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    resize:vertical;line-height:1.55}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .drop{margin-top:10px;border:1px dashed var(--border);border-radius:11px;padding:12px;text-align:center;
+    color:var(--muted);font-size:.84rem;cursor:pointer}
+  .drop.over{border-color:var(--c);color:var(--c)}
+  .algos{display:flex;gap:8px;margin:16px 0}
+  .algos button{flex:1;background:var(--bg);border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:9px;cursor:pointer;font-size:.88rem;font-weight:600}
+  .algos button.on{background:var(--c);color:#fff;border-color:var(--c)}
+  .out-head{display:flex;align-items:center;margin-top:8px}
+  .copy{margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);
+    border-radius:8px;padding:5px 13px;cursor:pointer;font-size:.8rem}
+  .copy:hover{color:var(--c);border-color:var(--c)}
+  pre{background:var(--code);border-radius:12px;padding:14px 16px;margin:8px 0 0;overflow-x:auto;
+    font-family:ui-monospace,monospace;font-size:.86rem;white-space:pre-wrap;word-break:break-all;min-height:1.4em}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('sri.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">🔗</div>
+  <div>
+    <h1>SriGen</h1>
+    <p class="sub">Subresource Integrity hash generator</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <label for="in">File contents</label>
+    <textarea id="in" spellcheck="false" placeholder="Paste the exact contents of the JS/CSS file…">console.log("hello");</textarea>
+    <div class="drop" id="drop">…or drop a file here</div>
+    <div class="algos" id="algos">
+      <button data-a="sha256">SHA-256</button>
+      <button data-a="sha384" class="on">SHA-384</button>
+      <button data-a="sha512">SHA-512</button>
+    </div>
+    <div class="out-head">
+      <label style="margin:0">integrity attribute</label>
+      <button class="copy" id="copy">Copy</button>
+    </div>
+    <pre id="out"></pre>
+    <div class="out-head">
+      <label style="margin:0">Full &lt;script&gt; tag</label>
+      <button class="copy" id="copyTag">Copy</button>
+    </div>
+    <pre id="tag"></pre>
+    <p class="hint">Paste (or drop) the exact bytes of the file you'll link. SRI lets a browser verify a
+      CDN-hosted script/style hasn't been tampered with. SHA-384 is the common choice. Runs locally.</p>
+  </div>
+</main>
+<footer>
+  SriGen is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/sri-gen">Source</a>
+</footer>
+
+<script>
+// ---- pure / crypto functions ----
+function bytesToBase64(bytes){
+  var bin = '';
+  for(var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+var ALGO_MAP = { sha256: 'SHA-256', sha384: 'SHA-384', sha512: 'SHA-512' };
+async function sriHash(text, algo){
+  algo = algo || 'sha384';
+  if(!ALGO_MAP[algo]) return null;
+  var data = new TextEncoder().encode(text);
+  var buf = await crypto.subtle.digest(ALGO_MAP[algo], data);
+  return algo + '-' + bytesToBase64(new Uint8Array(buf));
+}
+function scriptTag(url, integrity){
+  return '<script src="' + (url || 'https://example.com/lib.js') + '" integrity="' + integrity +
+    '" crossorigin="anonymous"><' + '/script>';
+}
+
+if(typeof module !== 'undefined') module.exports = { bytesToBase64, sriHash, scriptTag, ALGO_MAP };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var inEl = document.getElementById('in');
+  var outEl = document.getElementById('out');
+  var tagEl = document.getElementById('tag');
+  var algosEl = document.getElementById('algos');
+  var dropEl = document.getElementById('drop');
+  var algo = 'sha384';
+
+  async function render(){
+    var sri = await sriHash(inEl.value, algo);
+    outEl.textContent = 'integrity="' + sri + '"';
+    tagEl.textContent = scriptTag('', sri);
+    try{ localStorage.setItem('sri.in', inEl.value); localStorage.setItem('sri.algo', algo); }catch(e){}
+  }
+  algosEl.addEventListener('click', function(e){
+    var b = e.target.closest ? e.target.closest('button') : null;
+    if(!b) return;
+    algo = b.getAttribute('data-a');
+    [].forEach.call(algosEl.querySelectorAll('button'), function(x){ x.className = (x === b) ? 'on' : ''; });
+    render();
+  });
+  inEl.addEventListener('input', render);
+  document.getElementById('copy').addEventListener('click', function(){
+    if(navigator.clipboard) navigator.clipboard.writeText(outEl.textContent);
+    this.textContent = 'Copied'; var b = this; setTimeout(function(){ b.textContent = 'Copy'; }, 1000);
+  });
+  document.getElementById('copyTag').addEventListener('click', function(){
+    if(navigator.clipboard) navigator.clipboard.writeText(tagEl.textContent);
+    this.textContent = 'Copied'; var b = this; setTimeout(function(){ b.textContent = 'Copy'; }, 1000);
+  });
+  dropEl.addEventListener('dragover', function(e){ e.preventDefault(); dropEl.className = 'drop over'; });
+  dropEl.addEventListener('dragleave', function(){ dropEl.className = 'drop'; });
+  dropEl.addEventListener('drop', function(e){
+    e.preventDefault(); dropEl.className = 'drop';
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if(!f) return;
+    var reader = new FileReader();
+    reader.onload = function(){ inEl.value = reader.result; render(); };
+    reader.readAsText(f);
+  });
+  try{
+    var si = localStorage.getItem('sri.in'); if(si !== null) inEl.value = si;
+    var sa = localStorage.getItem('sri.algo');
+    if(sa && ALGO_MAP[sa]){ algo = sa;
+      [].forEach.call(algosEl.querySelectorAll('button'), function(x){ x.className = (x.getAttribute('data-a') === sa) ? 'on' : ''; }); }
+  }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('sri.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('sri.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

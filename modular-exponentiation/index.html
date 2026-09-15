@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Modular Exponentiation — (base ^ exponent) mod m</title>
+<meta name="description" content="Compute (base^exponent) mod m efficiently with fast exponentiation — the core of RSA and Diffie-Hellman. Handles huge exponents. Offline, no tracking.">
+<style>
+  :root{
+    --c:#3730a3;
+    --bg:#f0f0fb; --card:#ffffff; --fg:#101033; --muted:#54547f;
+    --line:#dcdcf2; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#08081c; --card:#12122c; --fg:#e7e7f8; --muted:#9494c2;
+    --line:#222247; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:800px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:18px;color:#fff;flex:0 0 auto;font-weight:700}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:800px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+  @media(max-width:520px){.grid{grid-template-columns:1fr}}
+  label{display:block;font-size:.78rem;font-weight:600;color:var(--muted);margin-bottom:5px}
+  input{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.15rem;font-weight:600;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--fg)}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .out{margin-top:18px;text-align:center;font-family:ui-monospace,monospace;font-size:2.2rem;font-weight:800;color:var(--c);word-break:break-all;min-height:1.1em}
+  .expr{text-align:center;color:var(--muted);font-size:.9rem;font-family:ui-monospace,monospace;margin-top:4px}
+  .err{color:#dc2626;font-size:.86rem;margin-top:10px;text-align:center;min-height:1em}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">aᵇ</div>
+  <div>
+    <h1>Modular Exponentiation</h1>
+    <p>(base ^ exponent) mod m</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div><label>Base</label><input id="base" inputmode="numeric" value="4"></div>
+      <div><label>Exponent</label><input id="exp" inputmode="numeric" value="13"></div>
+      <div><label>Modulus</label><input id="mod" inputmode="numeric" value="497"></div>
+    </div>
+    <div class="err" id="err"></div>
+    <div class="out" id="out">—</div>
+    <div class="expr" id="expr"></div>
+  </div>
+
+  <div class="card">
+    <h2>Why fast exponentiation?</h2>
+    <p class="note">Computing <code>bⁿ mod m</code> by multiplying b out n times is hopeless when n is huge — and it overflows. <b>Exponentiation by squaring</b> does it in about log₂(n) steps: square the base and take the modulus at each bit of the exponent. This is the workhorse of public-key cryptography — <b>RSA</b> and <b>Diffie-Hellman</b> raise numbers to enormous exponents mod a large modulus. This tool uses big integers, so exponents in the thousands are instant and exact. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function toBig(v, name){
+    if(typeof v === 'number'){ if(!isFinite(v) || Math.floor(v) !== v) throw new Error(name + ' must be an integer'); return BigInt(v); }
+    if(typeof v === 'bigint') return v;
+    if(typeof v === 'string' && /^-?\d+$/.test(v.trim())) return BigInt(v.trim());
+    throw new Error(name + ' must be an integer');
+  }
+  // (base ^ exponent) mod m via exponentiation by squaring. Returns a BigInt.
+  function modpowBig(base, exponent, m){
+    base = toBig(base, 'base'); exponent = toBig(exponent, 'exponent'); m = toBig(m, 'modulus');
+    if(m <= 0n) throw new Error('modulus must be positive');
+    if(exponent < 0n) throw new Error('exponent must be non-negative');
+    if(m === 1n) return 0n;
+    var result = 1n; base = ((base % m) + m) % m;
+    while(exponent > 0n){
+      if(exponent & 1n) result = (result * base) % m;
+      exponent >>= 1n;
+      base = (base * base) % m;
+    }
+    return result;
+  }
+  // Convenience wrapper returning a Number (result is always < modulus).
+  function modpow(base, exponent, m){ return Number(modpowBig(base, exponent, m)); }
+
+  if(typeof module !== 'undefined') module.exports = { modpowBig:modpowBig, modpow:modpow };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    function render(){
+      var err = document.getElementById('err');
+      err.textContent = '';
+      var b = document.getElementById('base').value, e = document.getElementById('exp').value, m = document.getElementById('mod').value;
+      try{
+        var r = modpowBig(b, e, m);
+        document.getElementById('out').textContent = r.toString();
+        document.getElementById('expr').textContent = b + '^' + e + ' mod ' + m;
+      }catch(ex){ document.getElementById('out').textContent = '—'; document.getElementById('expr').textContent = ''; err.textContent = ex.message; }
+    }
+    ['base','exp','mod'].forEach(function(id){ document.getElementById(id).addEventListener('input', render); });
+    render();
+
+    var root=document.documentElement, tb=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); tb.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('modpow-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('modpow-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

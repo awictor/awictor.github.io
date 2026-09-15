@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bitrate Calculator — file size, bitrate &amp; duration</title>
+<meta name="description" content="Work out video/audio bitrate from a target file size and duration, the file size a bitrate produces, or the video bitrate to hit a size after audio. Offline, no tracking.">
+<style>
+  :root{
+    --c:#7c3aed;
+    --bg:#f2ecfd; --card:#ffffff; --fg:#1c0a3a; --muted:#5b4a7a;
+    --line:#ddd0f5; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#0c0518; --card:#160a2b; --fg:#e7ddfb; --muted:#a893cf;
+    --line:#2c1a4d; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:19px;color:#fff;flex:0 0 auto;font-weight:700;font-family:ui-monospace,monospace}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.78rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .row>div{flex:1 1 150px}
+  input,select{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.1rem;font-weight:600;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus,select:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .big{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:18px;text-align:center;margin-top:16px}
+  .big .v{font-family:ui-monospace,monospace;font-size:1.7rem;font-weight:800;color:var(--c)}
+  .big .k{font-size:.75rem;color:var(--muted);margin-top:4px}
+  .err{color:#dc2626;font-size:.86rem;margin-top:10px;text-align:center;min-height:1em}
+  h2{font-size:1rem;margin:0 0 10px}
+  .note{color:var(--muted);font-size:.86rem}
+  .note code{background:var(--bg);padding:1px 5px;border-radius:5px}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">kb/s</div>
+  <div>
+    <h1>Bitrate Calculator</h1>
+    <p>file size · bitrate · duration</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <label>Solve for</label>
+    <select id="mode">
+      <option value="bitrate">Bitrate — from file size &amp; duration</option>
+      <option value="size">File size — from bitrate &amp; duration</option>
+      <option value="dur">Duration — from bitrate &amp; file size</option>
+      <option value="video">Video bitrate — hit a target size after audio</option>
+    </select>
+    <div class="row" id="inputs" style="margin-top:14px"></div>
+    <div class="big"><div class="v" id="result">—</div><div class="k" id="rlabel"></div></div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>How it works</h2>
+    <p class="note">Bitrate is data per second. With decimal units (1&nbsp;MB = 8,000&nbsp;kb), the relationship is <code>size(MB) = bitrate(kbps) × duration(s) ÷ 8000</code>. To fit a clip into a target size, compute the total bitrate that size allows, then subtract the audio bitrate to get the video bitrate to feed your encoder. A 700&nbsp;MB, 90&nbsp;minute encode needs about 1,037&nbsp;kbps total. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function fileSizeToBitrate(sizeMB, durationSec){
+    if(durationSec <= 0) throw new Error('duration must be positive');
+    if(sizeMB < 0) throw new Error('size must be >= 0');
+    return sizeMB * 8000 / durationSec;
+  }
+  function bitrateToFileSize(kbps, durationSec){
+    if(kbps < 0 || durationSec < 0) throw new Error('values must be >= 0');
+    return kbps * durationSec / 8000;
+  }
+  function bitrateToDuration(kbps, sizeMB){
+    if(kbps <= 0) throw new Error('bitrate must be positive');
+    if(sizeMB < 0) throw new Error('size must be >= 0');
+    return sizeMB * 8000 / kbps;
+  }
+  function videoBitrateForTarget(sizeMB, durationSec, audioKbps){
+    return fileSizeToBitrate(sizeMB, durationSec) - audioKbps;
+  }
+
+  if(typeof module !== 'undefined') module.exports = { fileSizeToBitrate:fileSizeToBitrate, bitrateToFileSize:bitrateToFileSize, bitrateToDuration:bitrateToDuration, videoBitrateForTarget:videoBitrateForTarget };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var $ = function(id){ return document.getElementById(id); };
+    var FIELDS = {
+      bitrate: [['size','Target file size (MB)','700'],['dur','Duration (seconds)','5400']],
+      size:    [['kbps','Bitrate (kbps)','1037'],['dur','Duration (seconds)','5400']],
+      dur:     [['kbps','Bitrate (kbps)','1037'],['size','File size (MB)','700']],
+      video:   [['size','Target file size (MB)','700'],['dur','Duration (seconds)','5400'],['kbps','Audio bitrate (kbps)','128']]
+    };
+    var LABELS = { bitrate:'Total bitrate (kbps)', size:'File size (MB)', dur:'Duration', video:'Video bitrate (kbps)' };
+    function build(){
+      var mode = $('mode').value, host = $('inputs');
+      host.innerHTML = '';
+      FIELDS[mode].forEach(function(f){
+        var d = document.createElement('div');
+        d.innerHTML = '<label>' + f[1] + '</label><input data-k="' + f[0] + '" value="' + f[2] + '">';
+        host.appendChild(d);
+      });
+      host.querySelectorAll('input').forEach(function(el){ el.addEventListener('input', render); });
+      $('rlabel').textContent = LABELS[mode];
+      render();
+    }
+    function num(k){ return parseFloat($('inputs').querySelector('[data-k="' + k + '"]').value); }
+    function fmtDur(s){ var h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = Math.round(s%60); return (h?h+'h ':'') + (m?m+'m ':'') + sec + 's'; }
+    function r(x){ return Math.round(x * 100) / 100; }
+    function render(){
+      $('err').textContent = '';
+      var mode = $('mode').value;
+      try{
+        var out;
+        if(mode === 'bitrate') out = r(fileSizeToBitrate(num('size'), num('dur')));
+        else if(mode === 'size') out = r(bitrateToFileSize(num('kbps'), num('dur')));
+        else if(mode === 'dur') out = fmtDur(bitrateToDuration(num('kbps'), num('size')));
+        else out = r(videoBitrateForTarget(num('size'), num('dur'), num('kbps')));
+        if(typeof out === 'number' && !isFinite(out)) throw new Error('enter valid numbers');
+        $('result').textContent = out;
+      }catch(e){ $('result').textContent = '—'; $('err').textContent = e.message; }
+    }
+    $('mode').addEventListener('change', build);
+    build();
+
+    var root = document.documentElement, tb = $('theme');
+    function setTheme(t){ root.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? '☀️' : '🌙'; try{ localStorage.setItem('bitrate-theme', t); }catch(e){} }
+    var saved; try{ saved = localStorage.getItem('bitrate-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); });
+  }
+</script>
+</body>
+</html>

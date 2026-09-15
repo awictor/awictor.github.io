@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bellwether — Draw any distribution. Watch it become a bell.</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#121a24; --edge:#1e2b3a; --ink:#e8eef5;
+    --dim:#8aa0b6; --accent:#4dd0e1; --gauss:#ffb347; --a:#ff6b9d; --b:#7dff9e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,#14202e,#0b0f14);
+    color:var(--ink);font:13px/1.4 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:1080px;margin:0 auto;padding:16px}
+  h1{font-size:20px;margin:0;letter-spacing:.3px}
+  h1 b{color:var(--accent)}
+  .sub{color:var(--dim);margin:2px 0 12px;font-size:12px}
+  .panel{background:var(--panel);border:1px solid var(--edge);border-radius:10px;padding:10px;margin-bottom:12px}
+  .lab{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--dim);margin-bottom:6px}
+  canvas{display:block;width:100%;border-radius:6px;background:#0c141d;cursor:crosshair;touch-action:none}
+  .row{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+  .grow{flex:1 1 380px;min-width:280px}
+  .qqbox{flex:0 0 220px}
+  #qq{cursor:default;height:200px}
+  .bar-cv{cursor:default}
+  .ctrls{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
+  .ctrls .grp{display:flex;align-items:center;gap:6px}
+  button{background:#1b2a3a;color:var(--ink);border:1px solid var(--edge);border-radius:6px;
+    padding:5px 10px;font-size:12px;cursor:pointer;transition:.12s}
+  button:hover{background:#243849;border-color:#365065}
+  button.on{background:var(--accent);color:#04222a;border-color:var(--accent);font-weight:600}
+  input[type=range]{width:130px;accent-color:var(--accent)}
+  input[type=number]{width:82px;background:#0c141d;color:var(--ink);border:1px solid var(--edge);
+    border-radius:5px;padding:4px 6px;font-size:12px}
+  .val{font-variant-numeric:tabular-nums;color:var(--accent);min-width:26px;text-align:right}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:4px}
+  .stat{background:#0c141d;border:1px solid var(--edge);border-radius:7px;padding:7px 9px}
+  .stat .k{color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:.6px}
+  .stat .v{font-size:15px;font-variant-numeric:tabular-nums;margin-top:2px}
+  .stat .v small{color:var(--dim);font-size:11px}
+  .meter{height:14px;border-radius:7px;background:#0c141d;border:1px solid var(--edge);overflow:hidden;margin-top:6px}
+  .meter > div{height:100%;width:0;transition:width .25s,background .25s}
+  .meterlab{display:flex;justify-content:space-between;font-size:11px;color:var(--dim);margin-top:4px}
+  .foot{color:var(--dim);font-size:11px;margin-top:2px}
+  .axis{display:flex;justify-content:space-between;font-variant-numeric:tabular-nums;
+    color:var(--dim);font-size:10px;margin-top:3px;padding:0 1px}
+  .pill{font-size:11px;color:var(--dim)}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><b>Bellwether</b></h1>
+  <div class="sub">Draw any parent distribution below. Bellwether draws thousands of samples of size <i>n</i>, averages each, and grows the sampling-distribution-of-the-mean. Crank <i>n</i> and watch it collapse into a Gaussian.</div>
+
+  <div class="panel">
+    <div class="lab">Parent population — drag to paint</div>
+    <canvas id="parent" height="150"></canvas>
+    <div class="ctrls" style="margin-top:8px">
+      <span class="pill">Presets:</span>
+      <button data-preset="uniform">Uniform</button>
+      <button data-preset="bimodal">Bimodal</button>
+      <button data-preset="exponential">Exponential</button>
+      <button data-preset="dirac">Dirac spike</button>
+      <button data-preset="ushaped">U-shaped</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="ctrls">
+      <div class="grp"><label for="n">Sample size n</label><input id="n" type="range" min="1" max="64" value="2"><span class="val" id="nv">2</span></div>
+      <div class="grp"><label for="spd">Speed</label><input id="spd" type="range" min="10" max="1200" value="220"><span class="val" id="spdv">220</span><span class="pill">trials/frame</span></div>
+      <div class="grp"><label for="seed">Seed</label><input id="seed" type="number" value="12345"></div>
+      <div class="grp">
+        <button id="reset">Reset</button>
+        <button id="sweep">Sweep n 1→64</button>
+        <button id="copy">Copy shareable link</button>
+      </div>
+    </div>
+    <div class="ctrls" style="margin-top:8px">
+      <span class="pill">Compare — freeze the curve, change n, freeze again:</span>
+      <div class="grp">
+        <button id="freezeA">Freeze A</button>
+        <button id="freezeB">Freeze B</button>
+        <button id="clearF">Clear A/B</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="grow panel">
+      <div class="lab">Sampling distribution of the mean <span class="pill" id="tcount"></span></div>
+      <canvas id="samp" height="220" class="bar-cv"></canvas>
+      <div class="axis"><span>0</span><span>0.25</span><span>0.5</span><span>0.75</span><span>1</span></div>
+      <div class="foot">Bars = empirical density of sample means · <span style="color:var(--gauss)">orange curve</span> = theoretical N(&mu;, &sigma;/&radic;n) · <span style="color:var(--a)">A</span>/<span style="color:var(--b)">B</span> = frozen snapshots.</div>
+    </div>
+    <div class="qqbox panel">
+      <div class="lab">Normal QQ plot</div>
+      <canvas id="qq" width="200" height="200" class="bar-cv"></canvas>
+      <div class="foot">Standardized means vs normal quantiles. Straightens onto the diagonal as it becomes normal.</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="lab">Convergence meter — how close the means are to a bell</div>
+    <div class="meter"><div id="mfill"></div></div>
+    <div class="meterlab"><span>far from normal</span><span id="mscore">0%</span><span>perfect bell</span></div>
+    <div class="stats">
+      <div class="stat"><div class="k">Parent</div><div class="v">&mu; <span id="pmu">–</span> · &sigma; <span id="psd">–</span></div></div>
+      <div class="stat"><div class="k">Means (empirical)</div><div class="v">&mu; <span id="mmu">–</span> · &sigma; <span id="msd">–</span></div></div>
+      <div class="stat"><div class="k">Predicted &sigma;/&radic;n</div><div class="v" id="psdn">–</div></div>
+      <div class="stat"><div class="k">Skewness</div><div class="v" id="skew">–</div></div>
+      <div class="stat"><div class="k">Excess kurtosis</div><div class="v" id="kurt">–</div></div>
+    </div>
+  </div>
+  <div class="foot">Seeded &amp; reproducible. Full state (seed, n, RLE-encoded parent shape) lives in the URL hash — copy the link to share this exact experiment.</div>
+</div>
+
+<script>
+"use strict";
+var BINS=48, MBINS=110, RESCAP=1500;
+var bins=new Array(BINS).fill(0.5);
+var cum=new Float64Array(BINS+1);
+var counts=new Float64Array(MBINS);
+var res=new Float64Array(RESCAP), resIdx=0, resLen=0;
+var cnt=0, s1=0, s2=0, s3=0, s4=0;           // running trial moments (of the means)
+var n=2, seed=12345, tpf=220, rng=mulberry32(12345);
+var pMu=0, pSd=0;                             // parent moments
+var sweeping=false, sweepFrame=0;
+var snapA=null, snapB=null;
+
+// ---- seeded PRNG ----
+function mulberry32(a){a=a>>>0;return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+// ---- inverse normal CDF (Acklam) ----
+function normInv(p){
+  var a=[-39.69683028665376,220.9460984245205,-275.9285104469687,138.357751867269,-30.66479806614716,2.506628277459239];
+  var b=[-54.47609879822406,161.5858368580409,-155.6989798598866,66.80131188771972,-13.28068155288572];
+  var c=[-0.007784894002430293,-0.3223964580411365,-2.400758277161838,-2.549732539343734,4.374664141464968,2.938163982698783];
+  var d=[0.007784695709041462,0.3224671290700398,2.445134137142996,3.754408661907416];
+  var pl=0.02425,q,r;
+  if(p<pl){q=Math.sqrt(-2*Math.log(p));return(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])/((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);}
+  if(p<=1-pl){q=p-0.5;r=q*q;return(((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q/(((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);}
+  q=Math.sqrt(-2*Math.log(1-p));return-(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])/((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+}
+
+// ---- parent model: CDF + moments ----
+function rebuild(){
+  var tot=0,i;for(i=0;i<BINS;i++)tot+=bins[i];
+  if(tot<=0){for(i=0;i<BINS;i++)bins[i]=0.5;tot=BINS*0.5;}
+  cum[0]=0;for(i=0;i<BINS;i++)cum[i+1]=cum[i]+bins[i]/tot;
+  cum[BINS]=1;
+  var mu=0,v=0;for(i=0;i<BINS;i++){var x=(i+0.5)/BINS,w=bins[i]/tot;mu+=w*x;}
+  for(i=0;i<BINS;i++){var x2=(i+0.5)/BINS,w2=bins[i]/tot;v+=w2*(x2-mu)*(x2-mu);}
+  pMu=mu;pSd=Math.sqrt(v);
+}
+function sampleValue(u){
+  var lo=0,hi=BINS,mid;
+  while(hi-lo>1){mid=(lo+hi)>>1;if(cum[mid]<=u)lo=mid;else hi=mid;}
+  var span=cum[lo+1]-cum[lo];if(span<1e-12)span=1e-12;
+  return(lo+(u-cum[lo])/span)/BINS;
+}
+
+// ---- accumulate ----
+function resetAccum(){counts.fill(0);cnt=0;s1=s2=s3=s4=0;resIdx=0;resLen=0;rng=mulberry32(seed>>>0);}
+function runTrials(k){
+  for(var t=0;t<k;t++){
+    var sum=0;for(var i=0;i<n;i++)sum+=sampleValue(rng());
+    var m=sum/n;
+    var bi=Math.floor(m*MBINS);if(bi<0)bi=0;else if(bi>=MBINS)bi=MBINS-1;counts[bi]++;
+    var mm=m*m;cnt++;s1+=m;s2+=mm;s3+=mm*m;s4+=mm*mm;
+    res[resIdx]=m;resIdx=(resIdx+1)%RESCAP;if(resLen<RESCAP)resLen++;
+  }
+}
+function moments(){
+  if(cnt<2)return{mean:pMu,sd:0,skew:0,kurt:0};
+  var mean=s1/cnt,m2=s2/cnt-mean*mean;
+  var m3=s3/cnt-3*mean*(s2/cnt)+2*mean*mean*mean;
+  var m4=s4/cnt-4*mean*(s3/cnt)+6*mean*mean*(s2/cnt)-3*Math.pow(mean,4);
+  var sd=Math.sqrt(Math.max(m2,0));
+  return{mean:mean,sd:sd,skew:sd>1e-9?m3/Math.pow(m2,1.5):0,kurt:m2>1e-9?m4/(m2*m2)-3:0};
+}
+
+// ---- canvas helpers ----
+function fit(cv){var dpr=window.devicePixelRatio||1,w=cv.clientWidth||cv.width;
+  cv.width=w*dpr;cv.height=cv.clientHeight*dpr;var c=cv.getContext("2d");c.setTransform(dpr,0,0,dpr,0,0);return c;}
+var parentCv=document.getElementById("parent"),sampCv=document.getElementById("samp"),qqCv=document.getElementById("qq");
+var pctx,sctx,qctx;
+function sizeAll(){pctx=fit(parentCv);sctx=fit(sampCv);qctx=fit(qqCv);draw();}
+
+function drawParent(){
+  var W=parentCv.clientWidth,H=parentCv.clientHeight,c=pctx;c.clearRect(0,0,W,H);
+  var bw=W/BINS,mx=0,i;for(i=0;i<BINS;i++)if(bins[i]>mx)mx=bins[i];if(mx<=0)mx=1;
+  for(i=0;i<BINS;i++){var h=(bins[i]/mx)*(H-10);
+    c.fillStyle=i%2?"#2b6f7a":"#2f7d89";c.fillRect(i*bw+0.5,H-h,bw-1,h);}
+  // parent mean line
+  c.strokeStyle="#ffb347";c.lineWidth=1.5;c.setLineDash([4,3]);
+  c.beginPath();c.moveTo(pMu*W,0);c.lineTo(pMu*W,H);c.stroke();c.setLineDash([]);
+}
+function densityOf(arr,N){var d=new Float64Array(MBINS),bw=1/MBINS;if(N>0)for(var i=0;i<MBINS;i++)d[i]=arr[i]/(N*bw);return d;}
+function gaussPeak(sd){return sd>1e-9?1/(sd*Math.sqrt(2*Math.PI)):0;}
+function drawSampling(){
+  var W=sampCv.clientWidth,H=sampCv.clientHeight,c=sctx;c.clearRect(0,0,W,H);
+  var sd=pSd/Math.sqrt(n),mo=moments();
+  var d=densityOf(counts,cnt),peak=0,i;for(i=0;i<MBINS;i++)if(d[i]>peak)peak=d[i];
+  peak=Math.max(peak,gaussPeak(sd));
+  if(snapA)peak=Math.max(peak,gaussPeak(snapA.sd),arrMax(snapA.d));
+  if(snapB)peak=Math.max(peak,gaussPeak(snapB.sd),arrMax(snapB.d));
+  if(peak<=0)peak=1;
+  var sc=(H-16)/peak,bw=W/MBINS;
+  // grid baseline
+  c.strokeStyle="#1e2b3a";c.beginPath();c.moveTo(0,H-1);c.lineTo(W,H-1);c.stroke();
+  // empirical bars
+  for(i=0;i<MBINS;i++){var h=d[i]*sc;if(h>0){c.fillStyle="#3a8fd6";c.fillRect(i*bw,H-h,Math.max(bw-0.4,0.6),h);}}
+  // frozen snapshots as outlines
+  if(snapA)drawOutline(c,snapA.d,sc,W,H,snapA.col);
+  if(snapB)drawOutline(c,snapB.d,sc,W,H,snapB.col);
+  // theoretical gaussian (skip when parent collapses to a single bin => sd=0 => NaN)
+  if(sd>1e-9){
+    c.strokeStyle="#ffb347";c.lineWidth=2;c.beginPath();
+    for(i=0;i<=W;i++){var x=i/W,g=gaussPeak(sd)*Math.exp(-((x-pMu)*(x-pMu))/(2*sd*sd));
+      var y=H-g*sc;if(i===0)c.moveTo(i,y);else c.lineTo(i,y);}c.stroke();c.lineWidth=1;
+  }
+  // empirical mean marker
+  c.strokeStyle="#4dd0e1";c.setLineDash([3,3]);c.beginPath();c.moveTo(mo.mean*W,0);c.lineTo(mo.mean*W,H);c.stroke();c.setLineDash([]);
+}
+function arrMax(a){var m=0;for(var i=0;i<a.length;i++)if(a[i]>m)m=a[i];return m;}
+function drawOutline(c,d,sc,W,H,col){c.strokeStyle=col;c.lineWidth=1.5;c.beginPath();
+  for(var i=0;i<MBINS;i++){var x=(i+0.5)/MBINS*W,y=H-d[i]*sc;if(i===0)c.moveTo(x,y);else c.lineTo(x,y);}c.stroke();c.lineWidth=1;}
+function drawQQ(){
+  var S=qqCv.clientWidth,c=qctx;c.clearRect(0,0,S,S);
+  var pad=18,R=3.2;function mx(x){return pad+(x+R)/(2*R)*(S-2*pad);}function my(y){return S-pad-(y+R)/(2*R)*(S-2*pad);}
+  c.strokeStyle="#1e2b3a";c.strokeRect(pad,pad,S-2*pad,S-2*pad);
+  c.strokeStyle="#33506a";c.setLineDash([4,4]);c.beginPath();c.moveTo(mx(-R),my(-R));c.lineTo(mx(R),my(R));c.stroke();c.setLineDash([]);
+  if(resLen<8)return;
+  var arr=Array.prototype.slice.call(res.subarray(0,resLen)).sort(function(a,b){return a-b;});
+  var mo=moments();if(mo.sd<1e-9)return;
+  var k=Math.min(70,arr.length);c.fillStyle="#4dd0e1";
+  for(var i=0;i<k;i++){var p=(i+0.5)/k,idx=Math.min(arr.length-1,Math.floor(p*arr.length));
+    var z=(arr[idx]-mo.mean)/mo.sd,q=normInv(p);
+    c.beginPath();c.arc(mx(q),my(z),2,0,6.283);c.fill();}
+}
+function draw(){
+  drawParent();drawSampling();drawQQ();
+  var mo=moments(),sd=pSd/Math.sqrt(n);
+  document.getElementById("pmu").textContent=pMu.toFixed(3);
+  document.getElementById("psd").textContent=pSd.toFixed(3);
+  document.getElementById("mmu").textContent=mo.mean.toFixed(3);
+  document.getElementById("msd").textContent=mo.sd.toFixed(3);
+  document.getElementById("psdn").textContent=sd.toFixed(3);
+  document.getElementById("skew").textContent=mo.skew.toFixed(3);
+  document.getElementById("kurt").textContent=mo.kurt.toFixed(3);
+  document.getElementById("tcount").textContent=cnt.toLocaleString()+" trials";
+  var score=cnt<30?0:Math.round(100*Math.exp(-1.6*(Math.abs(mo.skew)+Math.abs(mo.kurt))));
+  if(score<0)score=0;if(score>100)score=100;
+  var fill=document.getElementById("mfill");fill.style.width=score+"%";
+  var hue=score*1.2;fill.style.background="linear-gradient(90deg,hsl("+(hue*0.4)+" 70% 45%),hsl("+hue+" 75% 50%))";
+  document.getElementById("mscore").textContent=score+"%";
+}
+
+// ---- hash encode/decode (RLE of quantized bins) ----
+function enc36(x){return x.toString(36);}
+function encodeHash(){
+  var q=bins.map(function(v){var x=Math.round(v*35);return x<0?0:x>35?35:x;});
+  var rle="",i=0;
+  while(i<BINS){var v=q[i],run=1;while(i+run<BINS&&q[i+run]===v&&run<35)run++;rle+=enc36(run)+enc36(v);i+=run;}
+  return"s="+seed+"&n="+n+"&d="+rle;
+}
+function decodeHash(h){
+  var p={};h.replace(/^#/,"").split("&").forEach(function(kv){var a=kv.split("=");p[a[0]]=a[1];});
+  if(p.s!==undefined&&!isNaN(+p.s))seed=+p.s;
+  if(p.n!==undefined&&!isNaN(+p.n))n=Math.max(1,Math.min(64,+p.n));
+  if(p.d){var s=p.d,i=0,out=[];
+    while(i+1<s.length&&out.length<BINS){var run=parseInt(s[i],36),v=parseInt(s[i+1],36);
+      for(var r=0;r<run&&out.length<BINS;r++)out.push(v/35);i+=2;}
+    if(out.length===BINS)bins=out;}
+}
+function pushHash(){try{history.replaceState(null,"","#"+encodeHash());}catch(e){try{location.hash=encodeHash();}catch(e2){}}}
+
+// ---- presets ----
+var presets={
+  uniform:function(){return bins.map(function(){return 0.6;});},
+  bimodal:function(){return bins.map(function(_,i){var x=i/(BINS-1);
+    return 0.9*Math.exp(-Math.pow((x-0.25)/0.09,2))+0.9*Math.exp(-Math.pow((x-0.75)/0.09,2))+0.03;});},
+  exponential:function(){return bins.map(function(_,i){return 0.05+0.95*Math.exp(-i/8);});},
+  dirac:function(){return bins.map(function(_,i){return (i>=23&&i<=24)?1:0.01;});},
+  ushaped:function(){return bins.map(function(_,i){var x=i/(BINS-1);return 0.06+0.94*Math.pow(2*x-1,4);});}
+};
+function applyPreset(name){bins=presets[name]();afterParentChange();}
+function afterParentChange(){rebuild();resetAccum();pushHash();draw();}
+
+// ---- painting ----
+var painting=false,lastBin=-1,lastVal=0;
+function sampleAt(e){
+  var r=parentCv.getBoundingClientRect();
+  var x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height;
+  var i=Math.floor(x*BINS);if(i<0)i=0;else if(i>=BINS)i=BINS-1;
+  var v=1-y;if(v<0.01)v=0.01;if(v>1)v=1;
+  return{i:i,v:v};
+}
+function paintAt(e){
+  var s=sampleAt(e);
+  if(lastBin<0||lastBin===s.i){bins[s.i]=s.v;}
+  else{ // linearly interpolate every bin between the previous and current pointer position
+    var a=lastBin,b=s.i,va=lastVal,vb=s.v,step=a<b?1:-1;
+    for(var i=a;i!==b+step;i+=step){var t=(i-a)/(b-a);bins[i]=va+(vb-va)*t;}
+  }
+  lastBin=s.i;lastVal=s.v;
+  rebuild();resetAccum();draw();
+}
+parentCv.addEventListener("pointerdown",function(e){painting=true;lastBin=-1;parentCv.setPointerCapture(e.pointerId);paintAt(e);});
+parentCv.addEventListener("pointermove",function(e){if(painting)paintAt(e);});
+parentCv.addEventListener("pointerup",function(){if(painting){painting=false;lastBin=-1;pushHash();}});
+parentCv.addEventListener("pointercancel",function(){painting=false;lastBin=-1;});
+
+// ---- controls ----
+var nEl=document.getElementById("n"),nv=document.getElementById("nv");
+nEl.addEventListener("input",function(){n=+nEl.value;nv.textContent=n;sweeping=false;resetAccum();pushHash();});
+var spd=document.getElementById("spd"),spdv=document.getElementById("spdv");
+spd.addEventListener("input",function(){tpf=+spd.value;spdv.textContent=tpf;});
+var seedEl=document.getElementById("seed");
+seedEl.addEventListener("change",function(){seed=+seedEl.value||0;resetAccum();pushHash();});
+document.getElementById("reset").addEventListener("click",function(){sweeping=false;resetAccum();});
+document.getElementById("sweep").addEventListener("click",function(){sweeping=!sweeping;sweepFrame=0;if(sweeping){n=1;nEl.value=1;nv.textContent=1;resetAccum();}this.classList.toggle("on",sweeping);});
+var fA=document.getElementById("freezeA"),fB=document.getElementById("freezeB");
+fA.addEventListener("click",function(){snapA=snapshot("#ff6b9d");fA.classList.add("on");fA.textContent="A: n="+snapA.n;draw();});
+fB.addEventListener("click",function(){snapB=snapshot("#7dff9e");fB.classList.add("on");fB.textContent="B: n="+snapB.n;draw();});
+document.getElementById("clearF").addEventListener("click",function(){
+  snapA=snapB=null;fA.classList.remove("on");fA.textContent="Freeze A";
+  fB.classList.remove("on");fB.textContent="Freeze B";draw();});
+document.getElementById("copy").addEventListener("click",function(){
+  pushHash();var url=location.href;var self=this;
+  var done=function(){self.textContent="Copied!";setTimeout(function(){self.textContent="Copy shareable link";},1200);};
+  function fallback(){
+    try{
+      var ta=document.createElement("textarea");ta.value=url;ta.style.position="fixed";ta.style.opacity="0";
+      document.body.appendChild(ta);ta.focus();ta.select();
+      var ok=document.execCommand("copy");document.body.removeChild(ta);
+      if(ok){done();return;}
+    }catch(e){}
+    self.textContent="Copy from address bar";setTimeout(function(){self.textContent="Copy shareable link";},1600);
+  }
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(url).then(done,fallback);
+  else fallback();
+});
+[].forEach.call(document.querySelectorAll("[data-preset]"),function(b){
+  b.addEventListener("click",function(){applyPreset(b.getAttribute("data-preset"));});});
+function snapshot(col){return{d:densityOf(counts,cnt),sd:pSd/Math.sqrt(n),n:n,col:col};}
+
+// ---- main loop ----
+function frame(){
+  if(sweeping){sweepFrame++;if(sweepFrame>=34){sweepFrame=0;if(n<64){n++;nEl.value=n;nv.textContent=n;resetAccum();}else{sweeping=false;document.getElementById("sweep").classList.remove("on");}}}
+  runTrials(tpf);
+  draw();
+  requestAnimationFrame(frame);
+}
+
+// ---- boot ----
+if(location.hash.length>1)decodeHash(location.hash);
+seedEl.value=seed;nEl.value=n;nv.textContent=n;spdv.textContent=tpf;
+rebuild();resetAccum();
+window.addEventListener("resize",sizeAll);
+sizeAll();
+pushHash();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

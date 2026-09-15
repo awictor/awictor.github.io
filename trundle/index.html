@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Trundle — ink gravity marble sandbox</title>
+<style>
+  :root{--ink:#e8e2d0;--dim:#8a8674;--accent:#ff9b3d;--panel:rgba(18,17,14,.82)}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;background:#0a0908;color:var(--ink);
+    font:13px/1.4 ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;-webkit-user-select:none;user-select:none}
+  #stage{position:fixed;inset:0}
+  canvas{display:block;width:100%;height:100%;cursor:crosshair;touch-action:none}
+  #hud{position:fixed;top:12px;left:12px;width:224px;background:var(--panel);
+    border:1px solid #2a271f;border-radius:10px;padding:12px 13px;
+    -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);z-index:5;
+    max-height:calc(100vh - 24px);overflow-y:auto;scrollbar-width:thin;scrollbar-color:#34301f transparent}
+  #hud::-webkit-scrollbar{width:7px}
+  #hud::-webkit-scrollbar-thumb{background:#34301f;border-radius:4px}
+  #hud::-webkit-scrollbar-track{background:transparent}
+  #hud h1{font-size:16px;letter-spacing:.5px;color:var(--accent);margin-bottom:2px;font-weight:700}
+  #hud .sub{color:var(--dim);font-size:11px;margin-bottom:10px}
+  .tools{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px}
+  .tools button,.acts button{flex:1 0 auto;background:#1b1913;border:1px solid #34301f;color:var(--ink);
+    padding:5px 7px;border-radius:6px;cursor:pointer;font:inherit;font-size:11px;transition:.12s}
+  .tools button:hover,.acts button:hover{border-color:var(--accent)}
+  .tools button.on{background:var(--accent);color:#191510;border-color:var(--accent);font-weight:700}
+  .row{display:flex;align-items:center;gap:8px;margin:5px 0}
+  .row label{flex:0 0 64px;color:var(--dim);font-size:11px}
+  .row input[type=range]{flex:1;accent-color:var(--accent);height:3px}
+  .row .val{flex:0 0 34px;text-align:right;font-size:11px;color:var(--ink)}
+  .acts{display:flex;gap:4px;margin-top:9px}
+  hr{border:0;border-top:1px solid #26231b;margin:9px 0}
+  .demos{display:flex;flex-wrap:wrap;gap:4px}
+  .demos button{flex:1 0 44%;font-size:11px}
+  .demos button.on{background:var(--accent);color:#191510;border-color:var(--accent);font-weight:700}
+  #compass{position:fixed;top:12px;right:12px;width:78px;height:78px;background:var(--panel);
+    border:1px solid #2a271f;border-radius:50%;z-index:5;cursor:grab;touch-action:none;
+    -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+  #stat{position:fixed;bottom:10px;left:12px;background:var(--panel);border:1px solid #2a271f;
+    border-radius:8px;padding:6px 10px;font-size:11px;color:var(--dim);z-index:5}
+  #stat b{color:var(--accent)}
+  .foot{color:var(--dim);font-size:10px;margin-top:8px;line-height:1.55}
+  kbd{background:#26231b;border-radius:3px;padding:0 3px;color:var(--ink)}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c"></canvas></div>
+<canvas id="compass" width="78" height="78" title="drag to tilt gravity"></canvas>
+<div id="hud">
+  <h1>Trundle</h1>
+  <div class="sub">draw ink · pour marbles · tilt gravity</div>
+  <div class="tools" id="tools">
+    <button data-tool="draw" class="on">✎ Draw</button>
+    <button data-tool="erase">⌫ Erase</button>
+    <button data-tool="faucet">◍ Faucet</button>
+    <button data-tool="seesaw">⤿ See-saw</button>
+    <button data-tool="bin">▣ Bin</button>
+  </div>
+  <div class="row"><label>gravity</label><input id="p_grav" type="range" min="0" max="2400" value="1000"><span class="val" id="v_grav"></span></div>
+  <div class="row"><label>restitution</label><input id="p_rest" type="range" min="0" max="95" value="42"><span class="val" id="v_rest"></span></div>
+  <div class="row"><label>friction</label><input id="p_fric" type="range" min="0" max="100" value="55"><span class="val" id="v_fric"></span></div>
+  <div class="row"><label>marble r</label><input id="p_rad" type="range" min="4" max="18" value="8"><span class="val" id="v_rad"></span></div>
+  <div class="row"><label>spawn/s</label><input id="p_rate" type="range" min="0" max="40" value="12"><span class="val" id="v_rate"></span></div>
+  <div class="row"><label>trail</label><input id="p_trail" type="range" min="0" max="24" value="8"><span class="val" id="v_trail"></span></div>
+  <div class="row"><label>cap</label><input id="p_cap" type="range" min="20" max="320" value="200"><span class="val" id="v_cap"></span></div>
+  <hr>
+  <div class="demos" id="demos">
+    <button data-demo="0">Funnel loop</button>
+    <button data-demo="1">Switchbacks</button>
+    <button data-demo="2">Sorter</button>
+    <button data-demo="3">Cascade bins</button>
+  </div>
+  <div class="acts">
+    <button id="clear">Clear</button>
+    <button id="pause">Pause</button>
+    <button id="mute">♪ On</button>
+    <button id="share">Share</button>
+  </div>
+  <div class="foot">Draw a track, marbles pour from the spout. Drag the compass to tilt gravity. <kbd>Share</kbd> copies a replay link.</div>
+</div>
+<div id="stat"></div>
+<script>
+"use strict";
+(function(){
+const cv=document.getElementById("c"),ctx=cv.getContext("2d");
+const cmp=document.getElementById("compass"),cctx=cmp.getContext("2d");
+let W=0,H=0,DPR=1;
+function resize(){DPR=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;ctx.setTransform(DPR,0,0,DPR,0,0);}
+addEventListener("resize",resize);resize();
+
+// ---- state ----
+const P={grav:1000,rest:.42,fric:.55,rad:8,rate:12,trail:8,cap:200,ang:Math.PI/2}; // ang: gravity direction (down=PI/2)
+let strokes=[];            // [{pts:[x,y,...]}]  polylines, capsule-collided
+let seesaws=[];            // {x,y,len,a,av}
+let bins=[];               // {x,y,w,h,n}
+let faucets=[];            // {x,y}
+const spout={x:0,y:0};     // default emitter
+let marbles=[];            // {x,y,px,py,vx,vy,w,r,trail:[],heat}
+let sparks=[];             // {x,y,vx,vy,life,max,c}
+let dust=[];               // chalk puffs {x,y,r,life}
+let tool="draw",paused=false,audioOn=true;
+let drawing=null,spawnAcc=0;
+const ERASE_R=18;           // eraser ghost radius (matches stroke erase reach)
+let ptr={x:0,y:0,on:false}; // last pointer position over canvas (for eraser ghost)
+
+// ---- audio (off physics hot path) ----
+let AC=null,master=null;
+function initAudio(){ if(AC){ if(AC.state==="suspended")AC.resume(); return; }
+  try{AC=new (window.AudioContext||window.webkitAudioContext)();
+  master=AC.createGain();master.gain.value=.5;master.connect(AC.destination);
+  if(AC.state==="suspended")AC.resume();}catch(e){audioOn=false;} }
+function tink(speed){ if(!audioOn||!AC)return; const t=AC.currentTime;
+  const f=180+Math.min(speed,1400)*.9; const o=AC.createOscillator(),g=AC.createGain();
+  o.type="triangle";o.frequency.value=f; g.gain.setValueAtTime(0,t);
+  g.gain.linearRampToValueAtTime(Math.min(.22,speed/2600),t+.004);
+  g.gain.exponentialRampToValueAtTime(.0001,t+.11);
+  o.connect(g);g.connect(master);o.start(t);o.stop(t+.12); }
+let rumbleT=0;
+function rumble(){ if(!audioOn||!AC)return; const t=AC.currentTime; if(t<rumbleT)return; rumbleT=t+.13;
+  const o=AC.createOscillator(),g=AC.createGain();o.type="sine";o.frequency.value=54+Math.random()*10;
+  g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(.05,t+.02);
+  g.gain.exponentialRampToValueAtTime(.0001,t+.22);o.connect(g);g.connect(master);o.start(t);o.stop(t+.24); }
+
+// ---- geometry helpers ----
+function closestOnSeg(px,py,ax,ay,bx,by){
+  const dx=bx-ax,dy=by-ay,l2=dx*dx+dy*dy||1e-9;
+  let t=((px-ax)*dx+(py-ay)*dy)/l2; t=t<0?0:t>1?1:t;
+  return [ax+t*dx,ay+t*dy,t];
+}
+const STROKE_HALF=3.2;     // capsule thickness of ink
+// resolve marble vs a static segment (capsule). returns impact speed if hit else 0.
+function hitSegment(m,ax,ay,bx,by){
+  const [cx,cy]=closestOnSeg(m.x,m.y,ax,ay,bx,by);
+  let nx=m.x-cx,ny=m.y-cy,d=Math.hypot(nx,ny),reach=m.r+STROKE_HALF;
+  if(d>=reach)return 0;
+  if(d<1e-6){nx=0;ny=-1;d=1;} else {nx/=d;ny/=d;}
+  m.x=cx+nx*reach; m.y=cy+ny*reach;
+  const tx=-ny,ty=nx;
+  let vn=m.vx*nx+m.vy*ny, vt=m.vx*tx+m.vy*ty;
+  const impact=vn<0?-vn:0;
+  if(vn<0) vn=-vn*P.rest;
+  // friction + induced spin (disk I=.5 m r^2, contact tang vel = vt - w*r)
+  const slip=vt-m.w*m.r, J=-slip*P.fric/3;
+  vt+=J; m.w+=-2*J/m.r;
+  m.vx=vn*nx+vt*tx; m.vy=vn*ny+vt*ty;
+  return impact;
+}
+
+// ---- input ----
+function pos(e){const t=e.touches?e.touches[0]:e;return[t.clientX,t.clientY];}
+cv.addEventListener("pointerdown",e=>{
+  initAudio(); const[x,y]=pos(e); setActiveDemo(-1);
+  if(tool==="draw"){drawing={pts:[x,y]};puff(x,y);}
+  else if(tool==="erase"){eraseAt(x,y);drawing="erasing";}
+  else if(tool==="faucet"){faucets.push({x,y});puff(x,y);}
+  else if(tool==="seesaw"){seesaws.push({x,y,len:70,a:0,av:0});puff(x,y);}
+  else if(tool==="bin"){bins.push({x:x-45,y:y-8,w:90,h:56,n:0});}
+  cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener("pointermove",e=>{
+  const[x,y]=pos(e); ptr.x=x;ptr.y=y;ptr.on=true;
+  if(drawing&&drawing!=="erasing"){
+    const p=drawing.pts,lx=p[p.length-2],ly=p[p.length-1];
+    if(Math.hypot(x-lx,y-ly)>7){p.push(x,y);}
+  } else if(drawing==="erasing"){eraseAt(x,y);}
+});
+cv.addEventListener("pointerleave",()=>{ptr.on=false;});
+function endDraw(){
+  if(drawing&&drawing!=="erasing"&&drawing.pts.length>=4){strokes.push(simplify(drawing.pts));}
+  drawing=null;
+}
+cv.addEventListener("pointerup",endDraw); cv.addEventListener("pointercancel",endDraw);
+function eraseAt(x,y){ strokes=strokes.filter(s=>{
+    for(let i=0;i<s.pts.length-2;i+=2){const[cx,cy]=closestOnSeg(x,y,s.pts[i],s.pts[i+1],s.pts[i+2],s.pts[i+3]);
+      if(Math.hypot(x-cx,y-cy)<ERASE_R)return false;}return true;});
+  seesaws=seesaws.filter(s=>Math.hypot(x-s.x,y-s.y)>26);
+  bins=bins.filter(b=>!(x>b.x-6&&x<b.x+b.w+6&&y>b.y-6&&y<b.y+b.h+6));
+  faucets=faucets.filter(f=>Math.hypot(x-f.x,y-f.y)>16);
+}
+// Ramer-Douglas-Peucker-lite: drop near-collinear/near points
+function simplify(pts){
+  const out=[pts[0],pts[1]];
+  for(let i=2;i<pts.length-2;i+=2){
+    const ax=out[out.length-2],ay=out[out.length-1];
+    const[cx,cy]=closestOnSeg(pts[i],pts[i+1],ax,ay,pts[i+2],pts[i+3]);
+    if(Math.hypot(pts[i]-cx,pts[i+1]-cy)>2.4){out.push(pts[i],pts[i+1]);}
+  }
+  out.push(pts[pts.length-2],pts[pts.length-1]);
+  return{pts:out};
+}
+function puff(x,y){for(let i=0;i<7;i++)dust.push({x:x+(Math.random()-.5)*10,y:y+(Math.random()-.5)*10,r:2+Math.random()*3,life:1});}
+
+// ---- compass ----
+let cDrag=false;
+function compassXY(e){const r=cmp.getBoundingClientRect();return[(e.touches?e.touches[0]:e).clientX-r.left-39,(e.touches?e.touches[0]:e).clientY-r.top-39];}
+cmp.addEventListener("pointerdown",e=>{cDrag=true;cmp.setPointerCapture(e.pointerId);const[x,y]=compassXY(e);P.ang=Math.atan2(y,x);});
+cmp.addEventListener("pointermove",e=>{if(!cDrag)return;const[x,y]=compassXY(e);P.ang=Math.atan2(y,x);});
+cmp.addEventListener("pointerup",()=>cDrag=false);
+cmp.addEventListener("dblclick",()=>{P.ang=Math.PI/2;flash("gravity reset");}); // snap to straight-down
+function drawCompass(){
+  cctx.clearRect(0,0,78,78);cctx.translate(39,39);
+  cctx.strokeStyle="#34301f";cctx.lineWidth=1;cctx.beginPath();cctx.arc(0,0,30,0,7);cctx.stroke();
+  const ax=Math.cos(P.ang),ay=Math.sin(P.ang);
+  cctx.strokeStyle="#ff9b3d";cctx.lineWidth=3;cctx.beginPath();cctx.moveTo(-ax*10,-ay*10);cctx.lineTo(ax*26,ay*26);cctx.stroke();
+  cctx.fillStyle="#ff9b3d";cctx.beginPath();cctx.arc(ax*26,ay*26,4.5,0,7);cctx.fill();
+  cctx.fillStyle="#8a8674";cctx.font="9px monospace";cctx.textAlign="center";cctx.fillText("g",-ax*10-ax*6,-ay*10-ay*6+3);
+  cctx.setTransform(1,0,0,1,0,0);
+}
+
+// ---- HUD wiring ----
+const map=[["grav","p_grav","v_grav",v=>+v,v=>v],["rest","p_rest","v_rest",v=>v/100,v=>(v/100).toFixed(2)],
+  ["fric","p_fric","v_fric",v=>v/100,v=>(v/100).toFixed(2)],["rad","p_rad","v_rad",v=>+v,v=>v],
+  ["rate","p_rate","v_rate",v=>+v,v=>v],["trail","p_trail","v_trail",v=>+v,v=>v],["cap","p_cap","v_cap",v=>+v,v=>v]];
+map.forEach(([k,id,vid,f,fmt])=>{const el=document.getElementById(id),vl=document.getElementById(vid);
+  const upd=()=>{P[k]=f(el.value);vl.textContent=fmt(el.value);};el.addEventListener("input",upd);el.__upd=upd;upd();});
+function syncHUD(){map.forEach(([k,id])=>{const el=document.getElementById(id);
+  el.value=(k==="rest"||k==="fric")?Math.round(P[k]*100):P[k];el.__upd();});}
+document.querySelectorAll("#tools button").forEach(b=>b.addEventListener("click",()=>{
+  tool=b.dataset.tool;document.querySelectorAll("#tools button").forEach(x=>x.classList.toggle("on",x===b));}));
+document.getElementById("clear").onclick=()=>{strokes=[];seesaws=[];bins=[];faucets=[];marbles=[];sparks=[];setActiveDemo(-1);};
+document.getElementById("pause").onclick=e=>{paused=!paused;e.target.textContent=paused?"Play":"Pause";};
+document.getElementById("mute").onclick=e=>{audioOn=!audioOn;initAudio();e.target.textContent=audioOn?"♪ On":"♪ Off";};
+document.getElementById("share").onclick=()=>{location.hash=encode();
+  if(navigator.clipboard)navigator.clipboard.writeText(location.href).then(()=>flash("link copied!")).catch(()=>flash("link in URL"));
+  else flash("link in URL");};
+const demoBtns=document.querySelectorAll("#demos button");
+function setActiveDemo(n){demoBtns.forEach(b=>b.classList.toggle("on",+b.dataset.demo===n));}
+demoBtns.forEach(b=>b.addEventListener("click",()=>loadDemo(+b.dataset.demo)));
+let flashMsg="",flashT=0;function flash(m){flashMsg=m;flashT=performance.now()+1600;}
+
+// ---- serialize (quantized) ----
+function encode(){
+  const q=n=>Math.round(n);
+  const o={p:[q(P.grav),Math.round(P.rest*100),Math.round(P.fric*100),P.rad,P.rate,P.trail,P.cap,Math.round(P.ang*100)],
+    s:strokes.map(s=>s.pts.map(q)),w:seesaws.map(s=>[q(s.x),q(s.y),q(s.len)]),
+    b:bins.map(b=>[q(b.x),q(b.y),q(b.w),q(b.h)]),f:faucets.map(f=>[q(f.x),q(f.y)])};
+  return "m"+btoa(JSON.stringify(o)).replace(/=+$/,"").replace(/\+/g,"-").replace(/\//g,"_");
+}
+function decode(h){
+  try{ if(h[0]!=="m")return false;
+    let b=h.slice(1).replace(/-/g,"+").replace(/_/g,"/");
+    while(b.length%4)b+="=";
+    const o=JSON.parse(atob(b));
+    const p=o.p;P.grav=p[0];P.rest=p[1]/100;P.fric=p[2]/100;P.rad=p[3];P.rate=p[4];P.trail=p[5];P.cap=p[6];P.ang=p[7]/100;
+    strokes=(o.s||[]).map(a=>({pts:a}));
+    seesaws=(o.w||[]).map(a=>({x:a[0],y:a[1],len:a[2],a:0,av:0}));
+    bins=(o.b||[]).map(a=>({x:a[0],y:a[1],w:a[2],h:a[3],n:0}));
+    faucets=(o.f||[]).map(a=>({x:a[0],y:a[1]}));
+    syncHUD();return true;
+  }catch(e){return false;}
+}
+
+// ---- demos (fractional coords -> pixels) ----
+function line(fx1,fy1,fx2,fy2,seg){seg=seg||1;const p=[];for(let i=0;i<=seg;i++){const t=i/seg;
+  p.push((fx1+(fx2-fx1)*t)*W,(fy1+(fy2-fy1)*t)*H);}return{pts:p};}
+function loadDemo(n){
+  strokes=[];seesaws=[];bins=[];faucets=[];marbles=[];sparks=[];
+  P.ang=Math.PI/2;
+  if(n===0){ // funnel to loop
+    strokes.push(line(.30,.20,.47,.42,6),line(.70,.20,.53,.42,6),line(.53,.42,.50,.58,4));
+    const seg=26,p=[];for(let i=0;i<=seg;i++){const a=-Math.PI/2+ (Math.PI*2)*i/seg;
+      p.push((.50+Math.cos(a)*.10)*W,(.66+Math.sin(a)*.10*(W/H)*.62)*H);}
+    strokes.push({pts:p});
+    strokes.push(line(.20,.92,.80,.86,8));bins.push({x:W*.34,y:H*.80,w:W*.30,h:H*.13,n:0});
+  } else if(n===1){ // switchback cascade
+    strokes.push(line(.18,.24,.78,.34,10),line(.78,.44,.20,.54,10),line(.18,.64,.80,.74,10));
+    bins.push({x:W*.62,y:H*.80,w:W*.26,h:H*.14,n:0});
+  } else if(n===2){ // sorter (center wedge + two bins)
+    strokes.push(line(.30,.22,.50,.40,6),line(.70,.22,.50,.40,6));
+    strokes.push(line(.16,.55,.42,.72,6),line(.84,.55,.58,.72,6));
+    strokes.push(line(.05,.55,.16,.55,1),line(.84,.55,.95,.55,1));
+    bins.push({x:W*.10,y:H*.74,w:W*.26,h:H*.16,n:0});bins.push({x:W*.64,y:H*.74,w:W*.26,h:H*.16,n:0});
+    faucets.push({x:W*.5,y:H*.12});
+  } else { // cascade of see-saws into bins
+    seesaws.push({x:W*.34,y:H*.34,len:80,a:0,av:0});
+    seesaws.push({x:W*.62,y:H*.52,len:80,a:0,av:0});
+    strokes.push(line(.10,.70,.90,.78,10));
+    bins.push({x:W*.55,y:H*.80,w:W*.30,h:H*.14,n:0});
+  }
+  location.hash="";setActiveDemo(n);
+}
+
+// ---- spawning ----
+function emitAt(x,y){
+  if(marbles.length>=P.cap)return;
+  marbles.push({x:x+(Math.random()-.5)*6,y,px:x,py:y,vx:(Math.random()-.5)*20,vy:20,w:0,r:P.rad,trail:[],heat:0});
+}
+
+// ---- physics ----
+const SUB=4, CL=2600;
+function step(dt){
+  spout.x=W*.5;spout.y=44;
+  spawnAcc+=P.rate*dt;
+  while(spawnAcc>=1){spawnAcc--;emitAt(spout.x,spout.y);faucets.forEach(f=>emitAt(f.x,f.y));}
+  const gx=Math.cos(P.ang)*P.grav, gy=Math.sin(P.ang)*P.grav;
+  // adaptive substeps: subdivide time so the fastest marble can't skip a thin capsule in one substep (anti-tunnel)
+  let maxSp=0,minR=P.rad;
+  for(let i=0;i<marbles.length;i++){const m=marbles[i];const s=Math.abs(m.vx)+Math.abs(m.vy);
+    if(s>maxSp)maxSp=s; if(m.r<minR)minR=m.r;}
+  maxSp+=P.grav*dt; // account for acceleration gained within this frame
+  const reach=minR+STROKE_HALF;
+  let sub=SUB; const need=Math.ceil(maxSp*dt/(reach*.8)); if(need>sub)sub=Math.min(need,16);
+  const h=dt/sub;
+  // seesaw restoring dynamics accumulate torque across substeps
+  seesaws.forEach(s=>{s.torque=0;});
+  for(let si=0;si<sub;si++){
+    for(let i=marbles.length-1;i>=0;i--){
+      const m=marbles[i];
+      m.vx+=gx*h; m.vy+=gy*h;
+      m.x+=m.vx*h; m.y+=m.vy*h;
+      // walls
+      if(m.x<m.r){m.x=m.r;m.vx=-m.vx*P.rest;} if(m.x>W-m.r){m.x=W-m.r;m.vx=-m.vx*P.rest;}
+      if(m.y>H+40){marbles.splice(i,1);continue;}
+      if(m.y<m.r&&m.vy<0){m.y=m.r;m.vy=-m.vy*P.rest;}
+      // strokes
+      for(let k=0;k<strokes.length;k++){const p=strokes[k].pts;
+        for(let j=0;j<p.length-2;j+=2){const imp=hitSegment(m,p[j],p[j+1],p[j+2],p[j+3]);
+          if(imp>60){onImpact(m,imp);}}}
+      // seesaws (as rotating segment; feed torque)
+      for(let k=0;k<seesaws.length;k++){const s=seesaws[k];
+        const c=Math.cos(s.a),sn=Math.sin(s.a),hl=s.len/2;
+        const ax=s.x-c*hl,ay=s.y-sn*hl,bx=s.x+c*hl,by=s.y+sn*hl;
+        const imp=hitSegment(m,ax,ay,bx,by);
+        // only load the plank on genuine contact or a marble truly resting on it
+        const q=closestOnSeg(m.x,m.y,ax,ay,bx,by);
+        const touching=imp>0||Math.hypot(m.x-q[0],m.y-q[1])<m.r+STROKE_HALF+3;
+        if(touching){ const off=((m.x-s.x)*c+(m.y-s.y)*sn);
+          s.torque+=off*Math.max(imp,20)*.0006; if(imp>60)onImpact(m,imp);}
+      }
+    }
+  }
+  // integrate seesaws (spring toward level + damping + load torque)
+  seesaws.forEach(s=>{ const acc=s.torque - s.a*3.2 - s.av*1.6;
+    s.av+=acc*dt; s.a+=s.av*dt; if(s.a>.7)s.a=.7,s.av*=-.3; if(s.a<-.7)s.a=-.7,s.av*=-.3; });
+  // marble-marble (O(n^2) capped)
+  const n=marbles.length;
+  for(let i=0;i<n;i++){const a=marbles[i];
+    for(let j=i+1;j<n;j++){const b=marbles[j];
+      let dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy),min=a.r+b.r;
+      if(d<min&&d>1e-6){const nx=dx/d,ny=dy/d,ov=(min-d)/2;
+        a.x-=nx*ov;a.y-=ny*ov;b.x+=nx*ov;b.y+=ny*ov;
+        const rvn=(b.vx-a.vx)*nx+(b.vy-a.vy)*ny;
+        if(rvn<0){const jimp=-(1+P.rest*.7)*rvn/2;
+          a.vx-=jimp*nx;a.vy-=jimp*ny;b.vx+=jimp*nx;b.vy+=jimp*ny;
+          if(-rvn>120)rumble();}
+      }
+    }}
+  // bins collect
+  for(let i=marbles.length-1;i>=0;i--){const m=marbles[i];
+    for(let k=0;k<bins.length;k++){const bx=bins[k];
+      if(m.x>bx.x&&m.x<bx.x+bx.w&&m.y>bx.y&&m.y<bx.y+bx.h){bx.n++;marbles.splice(i,1);break;}}}
+  // heat / trails / velocity clamp
+  marbles.forEach(m=>{const sp=Math.hypot(m.vx,m.vy);
+    if(sp>CL){m.vx*=CL/sp;m.vy*=CL/sp;}
+    m.heat+=((Math.min(sp/900,1))-m.heat)*.15;
+    if(P.trail>0){m.trail.push(m.x,m.y);while(m.trail.length>P.trail*2)m.trail.splice(0,2);}else m.trail.length=0;});
+  // particles
+  for(let i=sparks.length-1;i>=0;i--){const s=sparks[i];s.vy+=gy*dt*.4;s.x+=s.vx*dt;s.y+=s.vy*dt;s.life-=dt*2.2;if(s.life<=0)sparks.splice(i,1);}
+  for(let i=dust.length-1;i>=0;i--){const d=dust[i];d.r+=dt*10;d.life-=dt*1.8;if(d.life<=0)dust.splice(i,1);}
+}
+let lastTink=0;
+function onImpact(m,imp){
+  if(imp>140){for(let i=0;i<Math.min(6,imp/120|0);i++)sparks.push({x:m.x,y:m.y,
+    vx:(Math.random()-.5)*140,vy:(Math.random()-.5)*140-40,life:1,c:220+Math.random()*35|0});}
+  const now=performance.now();
+  if(now-lastTink>16){tink(imp);lastTink=now;}
+}
+
+// ---- render ----
+function heatColor(h){ // ink -> warm -> hot
+  const r=Math.round(200+55*h),g=Math.round(190-70*h),b=Math.round(150-120*h);
+  return "rgb("+r+","+Math.max(g,60)+","+Math.max(b,30)+")";
+}
+function render(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#0a0908";ctx.fillRect(0,0,W,H);
+  // subtle slate grain
+  ctx.strokeStyle="rgba(255,255,255,.02)";ctx.lineWidth=1;
+  for(let y=0;y<H;y+=48){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+  // chalk dust
+  dust.forEach(d=>{ctx.fillStyle="rgba(232,226,208,"+(.25*d.life)+")";ctx.beginPath();ctx.arc(d.x,d.y,d.r,0,7);ctx.fill();});
+  // strokes
+  ctx.lineCap="round";ctx.lineJoin="round";ctx.strokeStyle="#e8e2d0";ctx.lineWidth=STROKE_HALF*2;
+  strokes.forEach(s=>{const p=s.pts;ctx.beginPath();ctx.moveTo(p[0],p[1]);
+    for(let i=2;i<p.length;i+=2)ctx.lineTo(p[i],p[i+1]);ctx.stroke();});
+  if(drawing&&drawing!=="erasing"){const p=drawing.pts;ctx.beginPath();ctx.moveTo(p[0],p[1]);
+    for(let i=2;i<p.length;i+=2)ctx.lineTo(p[i],p[i+1]);ctx.stroke();}
+  // seesaws
+  seesaws.forEach(s=>{const c=Math.cos(s.a),sn=Math.sin(s.a),hl=s.len/2;
+    ctx.strokeStyle="#c9a24b";ctx.lineWidth=6;ctx.beginPath();
+    ctx.moveTo(s.x-c*hl,s.y-sn*hl);ctx.lineTo(s.x+c*hl,s.y+sn*hl);ctx.stroke();
+    ctx.fillStyle="#8a8674";ctx.beginPath();ctx.arc(s.x,s.y,4,0,7);ctx.fill();});
+  // bins
+  bins.forEach(b=>{ctx.strokeStyle="#c98f7a";ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(b.x,b.y);ctx.lineTo(b.x,b.y+b.h);ctx.lineTo(b.x+b.w,b.y+b.h);ctx.lineTo(b.x+b.w,b.y);ctx.stroke();
+    ctx.fillStyle="#c98f7a";ctx.font="bold 15px monospace";ctx.textAlign="center";ctx.fillText(b.n,b.x+b.w/2,b.y+b.h/2+5);});
+  // spout + faucets
+  drawSpout(spout.x,spout.y,"#ff9b3d"); faucets.forEach(f=>drawSpout(f.x,f.y,"#5ac98f"));
+  // trails
+  marbles.forEach(m=>{if(m.trail.length>3){ctx.strokeStyle="rgba(255,155,61,.18)";ctx.lineWidth=m.r*.7;
+    ctx.beginPath();ctx.moveTo(m.trail[0],m.trail[1]);for(let i=2;i<m.trail.length;i+=2)ctx.lineTo(m.trail[i],m.trail[i+1]);ctx.stroke();}});
+  // marbles + spin spoke
+  marbles.forEach(m=>{const col=heatColor(m.heat);
+    ctx.fillStyle=col;ctx.beginPath();ctx.arc(m.x,m.y,m.r,0,7);ctx.fill();
+    ctx.strokeStyle="rgba(10,9,8,.55)";ctx.lineWidth=Math.max(1.4,m.r*.22);
+    ctx.beginPath();ctx.moveTo(m.x,m.y);ctx.lineTo(m.x+Math.cos(m.spin||0)*m.r,m.y+Math.sin(m.spin||0)*m.r);ctx.stroke();
+    ctx.fillStyle="rgba(255,255,255,.35)";ctx.beginPath();ctx.arc(m.x-m.r*.3,m.y-m.r*.3,m.r*.28,0,7);ctx.fill();});
+  // sparks
+  sparks.forEach(s=>{ctx.fillStyle="rgba(255,"+s.c+",120,"+s.life+")";ctx.fillRect(s.x-1,s.y-1,2.5,2.5);});
+  // eraser ghost
+  if(tool==="erase"&&ptr.on){
+    ctx.strokeStyle="rgba(255,155,61,.7)";ctx.lineWidth=1.5;ctx.setLineDash([4,4]);
+    ctx.beginPath();ctx.arc(ptr.x,ptr.y,ERASE_R,0,7);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle="rgba(255,155,61,.08)";ctx.beginPath();ctx.arc(ptr.x,ptr.y,ERASE_R,0,7);ctx.fill();
+  }
+  drawCompass();
+  // stat
+  const total=bins.reduce((a,b)=>a+b.n,0);
+  let msg="<b>"+marbles.length+"</b> marbles · <b>"+strokes.length+"</b> strokes · collected <b>"+total+"</b>";
+  if(flashMsg&&performance.now()<flashT)msg+=" · <b>"+flashMsg+"</b>";
+  document.getElementById("stat").innerHTML=msg;
+}
+function drawSpout(x,y,c){ctx.fillStyle=c;ctx.beginPath();ctx.moveTo(x-13,y-16);ctx.lineTo(x+13,y-16);
+  ctx.lineTo(x+6,y);ctx.lineTo(x-6,y);ctx.closePath();ctx.fill();}
+
+// spin visual accumulates from angular velocity
+function spinUpdate(dt){marbles.forEach(m=>{m.spin=(m.spin||0)+m.w*dt;});}
+
+// ---- loop ----
+let last=performance.now();
+function frame(now){
+  let dt=(now-last)/1000;last=now;if(dt>.05)dt=.05;
+  if(!paused){step(dt);spinUpdate(dt);}
+  render();
+  requestAnimationFrame(frame);
+}
+// ---- boot ----
+if(!decode(location.hash.slice(1))) loadDemo(0);
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

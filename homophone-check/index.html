@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Homophone Checker — catch their/there, your/you're & more</title>
+<meta name="description" content="Scan your writing for commonly confused homophones — their/there, your/you're, to/too/two, affect/effect — so you can double-check each one. Offline, no tracking.">
+<style>
+  :root{
+    --c:#c026d3;
+    --bg:#fdf1fc; --card:#ffffff; --fg:#220a22; --muted:#71517a;
+    --line:#f3d7f2; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#150715; --card:#210e21; --fg:#f7e6f6; --muted:#c092c0;
+    --line:#3a1c3a; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  textarea{width:100%;min-height:140px;font:inherit;padding:14px;border:1px solid var(--line);border-radius:10px;
+    background:var(--bg);color:var(--fg);resize:vertical;line-height:1.6}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  h2{font-size:.82rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:0 0 8px}
+  .flag{padding:10px 12px;border:1px solid var(--line);border-radius:9px;margin-bottom:8px;font-size:.95rem}
+  .flag b{color:var(--c)}
+  .flag .alt{color:var(--muted);font-size:.88rem}
+  .empty{color:var(--muted);font-size:.9rem}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🗣️</div>
+  <div>
+    <h1>Homophone Checker</h1>
+    <p>Catch their/there, your/you're &amp; friends</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <textarea id="in" placeholder="Paste your writing…">Your going to love this: they're bringing there dog too the park, and its affect on you're mood is weather-dependent.</textarea>
+  </div>
+  <div class="card">
+    <h2 id="count">Words to double-check</h2>
+    <div id="out"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="text-transform:none;letter-spacing:0;font-size:1rem;color:var(--fg)">How it works</h2>
+    <p class="note">This flags words that have common <b>homophones</b> or are frequently confused — <i>their/there/they're</i>, <i>your/you're</i>, <i>to/too/two</i>, <i>affect/effect</i>, <i>lose/loose</i>, and dozens more — so you can pause and confirm you picked the right one. It doesn't judge whether you're correct (that needs the meaning); it just highlights the risky words and shows the alternatives. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var GROUPS = [
+    ['their', 'there', 'theyre'], ['your', 'youre'], ['to', 'too', 'two'], ['whose', 'whos'],
+    ['then', 'than'], ['affect', 'effect'], ['accept', 'except'], ['lose', 'loose'],
+    ['weather', 'whether'], ['principal', 'principle'], ['stationary', 'stationery'],
+    ['complement', 'compliment'], ['bear', 'bare'], ['break', 'brake'], ['flour', 'flower'],
+    ['hear', 'here'], ['hole', 'whole'], ['knight', 'night'], ['mail', 'male'],
+    ['pair', 'pear', 'pare'], ['peace', 'piece'], ['plain', 'plane'], ['right', 'write', 'rite'],
+    ['sight', 'site', 'cite'], ['son', 'sun'], ['tail', 'tale'], ['waist', 'waste'],
+    ['week', 'weak'], ['wood', 'would'], ['aloud', 'allowed'], ['aisle', 'isle'],
+    ['brake', 'break'], ['cell', 'sell'], ['dear', 'deer'], ['fair', 'fare'],
+    ['heal', 'heel'], ['made', 'maid'], ['road', 'rode'], ['role', 'roll'],
+    ['scene', 'seen'], ['threw', 'through'], ['wear', 'where'], ['which', 'witch']
+  ];
+  var MAP = {};
+  GROUPS.forEach(function(g){ g.forEach(function(w){ MAP[w] = g; }); });
+
+  function normalizeWord(w){ return String(w).toLowerCase().replace(/['’]/g, '').replace(/[^a-z]/g, ''); }
+  // Alternatives for a word (empty if it has none).
+  function homophonesOf(word){
+    var w = normalizeWord(word), g = MAP[w];
+    return g ? g.filter(function(x){ return x !== w; }) : [];
+  }
+  // Find every homophone-group word in the text.
+  function findHomophones(text){
+    if(typeof text !== 'string') throw new Error('text must be a string');
+    var re = /[A-Za-z]+(?:['’][A-Za-z]+)?/g, m, out = [];
+    while((m = re.exec(text))){
+      var w = normalizeWord(m[0]);
+      if(MAP[w]) out.push({ word: m[0], normalized: w, alternatives: MAP[w].filter(function(x){ return x !== w; }), index: m.index });
+    }
+    return out;
+  }
+
+  if(typeof module !== 'undefined') module.exports = { GROUPS:GROUPS, normalizeWord:normalizeWord, homophonesOf:homophonesOf, findHomophones:findHomophones };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var inEl = document.getElementById('in');
+    function render(){
+      var flags;
+      try{ flags = findHomophones(inEl.value); }catch(e){ flags = []; }
+      document.getElementById('count').textContent = flags.length ? (flags.length + ' word' + (flags.length === 1 ? '' : 's') + ' to double-check') : 'Words to double-check';
+      var out = document.getElementById('out');
+      if(!flags.length){ out.innerHTML = '<div class="empty">No commonly-confused words found.</div>'; return; }
+      out.innerHTML = flags.map(function(f){
+        return '<div class="flag"><b>' + f.word + '</b> <span class="alt">— or: ' + f.alternatives.join(', ') + '</span></div>';
+      }).join('');
+    }
+    inEl.addEventListener('input', render);
+    render();
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('homophone-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('homophone-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

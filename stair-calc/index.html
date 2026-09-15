@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stair Calculator — risers, treads & code check</title>
+<meta name="description" content="Calculate stair risers, riser height, tread depth and total run from a floor-to-floor height, with building-code and comfort-rule checks. Offline, no tracking.">
+<style>
+  :root{
+    --c:#b45309;
+    --bg:#fbf5ec; --card:#ffffff; --fg:#231809; --muted:#6f5b3f;
+    --line:#eee0cb; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px; --ok:#16a34a; --bad:#dc2626;
+  }
+  [data-theme="dark"]{
+    --bg:#140f06; --card:#1f170b; --fg:#f5ead7; --muted:#b69a71;
+    --line:#33270f; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:800px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:800px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .unit-tog{display:flex;gap:8px;margin-bottom:16px}
+  .unit-tog button{flex:1;padding:9px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:10px;cursor:pointer;font-weight:600;font-size:.9rem}
+  .unit-tog button.on{background:var(--c);color:#fff;border-color:var(--c)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:560px){.grid{grid-template-columns:1fr}}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  input[type=number]{width:100%;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .result{text-align:center;margin:22px 0 4px}
+  .result .n{font-size:3rem;font-weight:800;color:var(--c);font-variant-numeric:tabular-nums;line-height:1}
+  .result .k{color:var(--muted);font-size:.9rem;margin-top:4px}
+  .breakdown{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:16px}
+  @media(max-width:520px){.breakdown{grid-template-columns:1fr}}
+  .bd{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+  .bd b{display:block;font-size:1.2rem;font-variant-numeric:tabular-nums}
+  .bd span{font-size:.76rem;color:var(--muted)}
+  .checks{margin-top:16px}
+  .chk{display:flex;justify-content:space-between;padding:8px 12px;border:1px solid var(--line);border-radius:9px;margin-bottom:8px;font-size:.9rem}
+  .chk .pass{color:var(--ok);font-weight:700} .chk .fail{color:var(--bad);font-weight:700}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+  .err{color:var(--bad);font-size:.85rem;margin-top:8px;min-height:1em;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🪜</div>
+  <div>
+    <h1>Stair Calculator</h1>
+    <p>Risers, treads &amp; a code check</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="unit-tog">
+      <button id="uIn" class="on">inches</button>
+      <button id="uCm">cm</button>
+    </div>
+    <div class="grid">
+      <div><label>Total rise (floor to floor)</label><input type="number" id="rise" value="108" min="0" step="any"></div>
+      <div><label>Target riser height</label><input type="number" id="target" value="7" min="0.1" step="any"></div>
+      <div><label>Tread depth (run per step)</label><input type="number" id="tread" value="11" min="0.1" step="any"></div>
+    </div>
+    <div class="result">
+      <div class="n" id="risers">—</div>
+      <div class="k">risers (steps up)</div>
+    </div>
+    <div class="breakdown">
+      <div class="bd"><b id="riserH">—</b><span>actual riser height</span></div>
+      <div class="bd"><b id="treads">—</b><span>treads</span></div>
+      <div class="bd"><b id="run">—</b><span>total run</span></div>
+    </div>
+    <div class="checks" id="checks"></div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>The rules of a comfortable stair</h2>
+    <p class="note">You can't have a fractional step, so the tool rounds the number of risers and back-solves the exact riser height. Common US residential code (IRC): <b>riser ≤ 7¾″</b>, <b>tread ≥ 10″</b>. The classic comfort formula is <b>2 × riser + tread = 24–25″</b> (about 63 cm). There's always one fewer tread than riser (the top floor is the last "step"). Check your local code before building. Everything runs locally.</p>
+  </div>
+
+  <p class="foot">100% offline · verify local code before building · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function toNum(x){ var n = Number(x); if(!isFinite(n)) throw new Error('inputs must be numbers'); return n; }
+  // Number of risers: round total rise / target riser height (at least 1).
+  function numRisers(totalRise, targetRiser){
+    totalRise = toNum(totalRise); targetRiser = toNum(targetRiser);
+    if(totalRise <= 0) throw new Error('total rise must be positive');
+    if(targetRiser <= 0) throw new Error('target riser must be positive');
+    return Math.max(1, Math.round(totalRise / targetRiser));
+  }
+  // Actual riser height once the count is fixed.
+  function riserHeight(totalRise, risers){
+    totalRise = toNum(totalRise); risers = toNum(risers);
+    if(risers < 1) throw new Error('need at least one riser');
+    return totalRise / risers;
+  }
+  // Treads = risers - 1 (the top floor is the final level).
+  function treadCount(risers){
+    risers = toNum(risers);
+    if(risers < 1) throw new Error('need at least one riser');
+    return risers - 1;
+  }
+  // Total horizontal run.
+  function totalRun(treads, treadDepth){
+    treads = toNum(treads); treadDepth = toNum(treadDepth);
+    if(treads < 0) throw new Error('treads must be non-negative');
+    if(treadDepth <= 0) throw new Error('tread depth must be positive');
+    return treads * treadDepth;
+  }
+  // The 2R + T comfort value (same unit in, same unit out).
+  function comfort(riserH, treadDepth){
+    return 2 * toNum(riserH) + toNum(treadDepth);
+  }
+
+  if(typeof module !== 'undefined') module.exports = { numRisers:numRisers, riserHeight:riserHeight, treadCount:treadCount, totalRun:totalRun, comfort:comfort };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var unit = 'in';
+    var uIn = document.getElementById('uIn'), uCm = document.getElementById('uCm');
+    function val(id){ return Number(document.getElementById(id).value); }
+    function fmt(n){ return (Math.round(n * 100) / 100) + (unit === 'in' ? '″' : ' cm'); }
+    function chkRow(label, ok, detail){
+      return '<div class="chk"><span>' + label + ' <span style="color:var(--muted)">' + detail + '</span></span><span class="' + (ok ? 'pass' : 'fail') + '">' + (ok ? '✓' : '✗') + '</span></div>';
+    }
+    function render(){
+      document.getElementById('err').textContent = '';
+      try{
+        var rise = val('rise'), target = val('target'), tread = val('tread');
+        var risers = numRisers(rise, target);
+        var rh = riserHeight(rise, risers);
+        var treads = treadCount(risers);
+        var run = totalRun(treads, tread);
+        var cmf = comfort(rh, tread);
+        document.getElementById('risers').textContent = risers;
+        document.getElementById('riserH').textContent = fmt(rh);
+        document.getElementById('treads').textContent = treads;
+        document.getElementById('run').textContent = fmt(run);
+        // code checks (convert limits to unit)
+        var maxRiser = unit === 'in' ? 7.75 : 19.7;
+        var minTread = unit === 'in' ? 10 : 25.4;
+        var cmfLo = unit === 'in' ? 24 : 61, cmfHi = unit === 'in' ? 25 : 63.5;
+        var html = '';
+        html += chkRow('Riser ≤ ' + maxRiser + (unit === 'in' ? '″' : ' cm'), rh <= maxRiser + 1e-9, '(' + fmt(rh) + ')');
+        html += chkRow('Tread ≥ ' + minTread + (unit === 'in' ? '″' : ' cm'), tread >= minTread - 1e-9, '(' + fmt(tread) + ')');
+        html += chkRow('2×riser + tread = ' + cmfLo + '–' + cmfHi, cmf >= cmfLo - 1e-9 && cmf <= cmfHi + 1e-9, '(' + fmt(cmf) + ')');
+        document.getElementById('checks').innerHTML = html;
+      }catch(e){
+        document.getElementById('risers').textContent = '—';
+        document.getElementById('riserH').textContent = '—';
+        document.getElementById('treads').textContent = '—';
+        document.getElementById('run').textContent = '—';
+        document.getElementById('checks').innerHTML = '';
+        document.getElementById('err').textContent = e.message;
+      }
+    }
+    function setUnit(u){
+      unit = u; uIn.classList.toggle('on', u === 'in'); uCm.classList.toggle('on', u === 'cm');
+      if(u === 'cm'){ document.getElementById('rise').value = 274; document.getElementById('target').value = 18; document.getElementById('tread').value = 28; }
+      else { document.getElementById('rise').value = 108; document.getElementById('target').value = 7; document.getElementById('tread').value = 11; }
+      render();
+    }
+    uIn.addEventListener('click', function(){ setUnit('in'); });
+    uCm.addEventListener('click', function(){ setUnit('cm'); });
+    ['rise','target','tread'].forEach(function(id){ document.getElementById(id).addEventListener('input', render); });
+    render();
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('stair-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('stair-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

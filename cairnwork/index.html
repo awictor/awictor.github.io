@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cairnwork — Logic-Guaranteed Picross</title>
+<style>
+  :root{ --bg:#12161f; --panel:#1c2230; --line:#2c3547; --ink:#e6eaf2; --dim:#7f8aa3;
+         --accent:#ff8a3d; --accent2:#ffb877; --fill:#c3cce0; --good:#4ade80; --bad:#f26d6d; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family:"Segoe UI",system-ui,Arial,sans-serif; -webkit-font-smoothing:antialiased; }
+  #app{ max-width:900px; margin:0 auto; padding:18px 16px 40px; }
+  header{ display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+  h1{ font-size:24px; margin:0; letter-spacing:.5px; }
+  h1 b{ color:var(--accent); }
+  .tag{ color:var(--dim); font-size:13px; }
+  .bar{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:10px 0; }
+  button,select{ background:var(--panel); color:var(--ink); border:1px solid var(--line);
+    border-radius:8px; padding:7px 12px; font-size:13px; cursor:pointer; transition:.12s; }
+  button:hover,select:hover{ border-color:var(--accent); }
+  button:active{ transform:translateY(1px); }
+  button.primary{ background:var(--accent); color:#1a1206; border-color:var(--accent); font-weight:600; }
+  button:disabled{ opacity:.45; cursor:default; }
+  .seg{ display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .seg button{ border:0; border-radius:0; border-right:1px solid var(--line); }
+  .seg button:last-child{ border-right:0; }
+  .seg button.on{ background:var(--accent); color:#1a1206; font-weight:600; }
+  .stats{ display:flex; gap:16px; flex-wrap:wrap; align-items:center; margin:6px 0 12px;
+    font-size:13px; color:var(--dim); }
+  .stats b{ color:var(--ink); font-variant-numeric:tabular-nums; }
+  .badge{ color:var(--accent2); letter-spacing:2px; }
+  #wrap{ display:inline-block; padding:14px; background:var(--panel); border:1px solid var(--line);
+    border-radius:14px; box-shadow:0 12px 40px rgba(0,0,0,.35); }
+  #wrap.shake{ animation:sh .32s; }
+  @keyframes sh{ 0%,100%{transform:translateX(0)} 20%{transform:translateX(-7px)}
+    40%{transform:translateX(6px)} 60%{transform:translateX(-4px)} 80%{transform:translateX(3px)} }
+  canvas{ display:block; cursor:crosshair; touch-action:none; }
+  #msg{ min-height:22px; margin-top:10px; font-size:14px; color:var(--good); font-weight:600; }
+  .hint{ color:var(--dim); font-size:12px; margin-top:8px; line-height:1.6; }
+  a.share{ color:var(--accent2); }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Cairn<b>work</b></h1>
+    <span class="tag">Logic-guaranteed picross — every board is solvable by pure reasoning, no guessing.</span>
+  </header>
+
+  <div class="bar">
+    <div class="seg" id="tiers"></div>
+    <button class="primary" id="newBtn">New Puzzle</button>
+    <button id="dailyBtn">Daily</button>
+    <button id="modeBtn" title="Toggle what drag/tap places — Fill or X. Right-click always marks X on desktop.">Mode: Fill</button>
+    <button id="undoBtn">Undo</button>
+    <button id="hintBtn">Hint</button>
+    <button id="solveBtn">Auto-Solve</button>
+    <button id="shareBtn">Share</button>
+    <button id="pngBtn" disabled title="Solve the puzzle to export the hidden picture as a PNG.">Export PNG</button>
+  </div>
+
+  <div class="stats">
+    <span>Mistakes <b id="mist">0</b></span>
+    <span>Time <b id="time">0:00</b></span>
+    <span>Logic depth <b id="depth">–</b> <span class="badge" id="badge"></span></span>
+    <span>Daily streak <b id="streak">0</b></span>
+    <span>Best <b id="best">–</b></span>
+  </div>
+
+  <div id="wrap"><canvas id="cv"></canvas></div>
+  <div id="msg"></div>
+  <div class="hint">Desktop: left-click / drag to <b>fill</b>, right-click / drag to <b>mark X</b>.
+    Touch or one-button: use the <b>Mode</b> button to switch between fill and X. Drag locks to one axis.
+    Clues turn <span style="color:var(--good)">green</span> when a line is satisfied and its blanks auto-cross.
+    Everything is verified unique &amp; guess-free before you play.</div>
+</div>
+
+<script>
+"use strict";
+// ---------- seeded RNG ----------
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+// ---------- curated art (recognizable, symmetric) ----------
+const ART = {
+  5:[
+    ["..#..",".###.","#####",".###.","..#.."],            // diamond
+    [".#.#.","#####","#####",".###.","..#.."],            // heart
+    ["..#..","..#..","#####","..#..","..#.."],            // plus
+    ["..#..",".###.","#####","..#..","..#.."]             // arrow up
+  ],
+  10:[
+    [".##....##.","####..####","##########","##########",
+     "##########",".########.","..######..","...####...","....##....",".........."], // heart
+    ["..#....#..","...#..#...","..######..",".##.##.##.","##########",
+     "#.######.#","#.#....#.#","...#..#...","..#....#..",".........."]  // invader
+  ]
+};
+
+// ---------- clue derivation ----------
+function runsOf(arr){ const r=[]; let c=0; for(const v of arr){ if(v){c++;} else if(c){r.push(c);c=0;} }
+  if(c)r.push(c); return r.length?r:[0]; }
+function deriveClues(sol,W,H){
+  const rows=[],cols=[];
+  for(let y=0;y<H;y++){ const a=[]; for(let x=0;x<W;x++)a.push(sol[y*W+x]); rows.push(runsOf(a)); }
+  for(let x=0;x<W;x++){ const a=[]; for(let y=0;y<H;y++)a.push(sol[y*W+x]); cols.push(runsOf(a)); }
+  return {rows,cols};
+}
+
+// ---------- line solver (enumerate consistent arrangements, intersect) ----------
+function lineForced(clue,line){
+  const n=line.length, cf=new Array(n).fill(false), cb=new Array(n).fill(false);
+  const empty=(clue.length===1&&clue[0]===0);
+  const arr=new Array(n).fill(0); let count=0;
+  function commit(){ count++; for(let i=0;i<n;i++){ if(arr[i])cf[i]=true; else cb[i]=true; } }
+  function rec(ci,start){
+    if(empty||ci===clue.length){ for(let i=start;i<n;i++){ if(line[i]===1)return; arr[i]=0; } commit(); return; }
+    const len=clue[ci];
+    let rem=0; for(let k=ci;k<clue.length;k++)rem+=clue[k]; rem+=clue.length-1-ci;
+    const maxStart=n-rem;
+    for(let s=start;s<=maxStart;s++){
+      if(s>start&&line[s-1]===1)break;          // a known fill can't be left blank before the run
+      let ok=true;
+      for(let i=s;i<s+len;i++){ if(line[i]===0){ok=false;break;} } // run cell can't be a known blank
+      if(!ok)continue;
+      const gap=s+len;
+      if(ci<clue.length-1&&gap<n&&line[gap]===1)continue; // separator can't be a known fill
+      for(let i=start;i<s;i++)arr[i]=0;
+      for(let i=s;i<s+len;i++)arr[i]=1;
+      if(ci<clue.length-1){ arr[gap]=0; rec(ci+1,gap+1); } else rec(ci+1,gap);
+    }
+  }
+  rec(0,0);
+  if(count===0)return null;                     // contradiction
+  const out=line.slice();
+  for(let i=0;i<n;i++){ if(cf[i]&&!cb[i])out[i]=1; else if(cb[i]&&!cf[i])out[i]=0; }
+  return out;
+}
+
+// solve purely by line propagation; returns solvability, pass count, resolution order
+function certify(rows,cols,W,H){
+  const g=new Array(W*H).fill(-1), order=[];
+  let changed=true, passes=0;
+  while(changed){
+    changed=false; passes++;
+    for(let y=0;y<H;y++){
+      const line=[]; for(let x=0;x<W;x++)line.push(g[y*W+x]);
+      const res=lineForced(rows[y],line); if(!res)return{solved:false};
+      for(let x=0;x<W;x++){ const i=y*W+x; if(res[x]!==g[i]){ g[i]=res[x]; order.push(i); changed=true; } }
+    }
+    for(let x=0;x<W;x++){
+      const line=[]; for(let y=0;y<H;y++)line.push(g[y*W+x]);
+      const res=lineForced(cols[x],line); if(!res)return{solved:false};
+      for(let y=0;y<H;y++){ const i=y*W+x; if(res[y]!==g[i]){ g[i]=res[y]; order.push(i); changed=true; } }
+    }
+    if(passes>60)break;
+  }
+  return { solved:g.every(v=>v!==-1), grid:g, passes:passes-1, order };
+}
+
+// ---------- picture generation ----------
+function procedural(rng,W,H,density){
+  const g=new Uint8Array(W*H), hw=Math.ceil(W/2);
+  for(let y=0;y<H;y++)for(let x=0;x<hw;x++){
+    if(rng()<density){ g[y*W+x]=1; g[y*W+(W-1-x)]=1; }
+  }
+  let n=0; for(const v of g)n+=v;
+  return (n<W*H*0.18||n>W*H*0.82)?null:g;
+}
+function fromArt(pat,rng){
+  const H=pat.length,W=pat[0].length,g=new Uint8Array(W*H),flip=rng()<0.5;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const ch=pat[y][flip?W-1-x:x]; g[y*W+x]=(ch==='#')?1:0; }
+  return {g,W,H};
+}
+// generate a certified board matching the tier; deterministic given seed
+function generate(tier,seed){
+  const rng=mulberry32(seed>>>0), pool=ART[tier.W]||null;
+  let best=null;
+  for(let t=0;t<220;t++){
+    let sol,W=tier.W,H=tier.H;
+    if(pool&&rng()<0.55){ const a=fromArt(pool[Math.floor(rng()*pool.length)],rng); sol=a.g; W=a.W; H=a.H; }
+    else { sol=procedural(rng,W,H,tier.dens); if(!sol)continue; }
+    const {rows,cols}=deriveClues(sol,W,H);
+    const r=certify(rows,cols,W,H);
+    if(!r.solved)continue;
+    const cand={sol,W,H,rows,cols,order:r.order,passes:r.passes,hue:Math.floor(rng()*360)};
+    if(r.passes>=tier.minP)return cand;          // exact tier match
+    if(!best||r.passes>best.passes)best=cand;    // keep hardest fallback
+  }
+  return best;
+}
+
+// ---------- share hash ----------
+const B64="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+function encodeBoard(p){
+  const bits=[]; for(let i=0;i<p.W*p.H;i++)bits.push(p.sol[i]);
+  let s=""; for(let i=0;i<bits.length;i+=6){ let v=0; for(let j=0;j<6;j++)v=(v<<1)|(bits[i+j]||0); s+=B64[v]; }
+  return "#"+p.W+"."+p.H+"."+s;
+}
+function decodeBoard(hash){
+  try{
+    const m=hash.replace(/^#/,"").split("."); const W=+m[0],H=+m[1],s=m[2];
+    const sol=new Uint8Array(W*H); let bi=0;
+    for(const ch of s){ let v=B64.indexOf(ch); for(let j=5;j>=0;j--){ if(bi<W*H)sol[bi++]=(v>>j)&1; } }
+    const {rows,cols}=deriveClues(sol,W,H); const r=certify(rows,cols,W,H);
+    return {sol,W,H,rows,cols,order:r.order||[],passes:r.passes||0,hue:(W*7+H*13)%360};
+  }catch(e){ return null; }
+}
+
+// ---------- game state ----------
+const TIERS=[
+  {name:"Mini 5×5",W:5,H:5,dens:.56,minP:1},
+  {name:"Small 10×10",W:10,H:10,dens:.5,minP:2},
+  {name:"Medium 15×15",W:15,H:15,dens:.48,minP:3},
+  {name:"Large 20×20",W:20,H:20,dens:.46,minP:4},
+];
+const cv=document.getElementById("cv"), ctx=cv.getContext("2d");
+const $=id=>document.getElementById(id);
+let G=null, tierIdx=0, geom=null, drag=null, reveal=null, autoTimer=null, tickTimer=null, paintMode=1;
+
+function LS(k,v){ try{ if(v===undefined)return localStorage.getItem("cw_"+k); localStorage.setItem("cw_"+k,v); }catch(e){} }
+function fmt(ms){ const s=Math.floor(ms/1000); return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); }
+function stars(p){ const n=Math.max(1,Math.min(5,Math.ceil(p/1.6))); return "★".repeat(n)+"☆".repeat(5-n); }
+
+function newGame(puzzle,isDaily,dailyKey){
+  clearInterval(autoTimer); autoTimer=null;
+  clearInterval(tickTimer); tickTimer=null; reveal=null;
+  const P=puzzle;
+  G={ P, W:P.W, H:P.H, sol:P.sol, rows:P.rows, cols:P.cols,
+      cell:new Uint8Array(P.W*P.H), // 0 empty,1 fill,2 cross
+      undo:[], mistakes:0, started:0, elapsed:0, won:false, isDaily:!!isDaily, dailyKey:dailyKey||"",
+      solCount:0, hintCell:-1, assisted:false };
+  for(const v of P.sol)G.solCount+=v;
+  layout(); refresh(); $("msg").textContent=""; $("pngBtn").disabled=true;
+  $("depth").textContent=P.passes+" passes"; $("badge").textContent=stars(P.passes);
+  $("best").textContent=LS("best_"+G.W)?fmt(+LS("best_"+G.W)):"–";
+  updateStreak(); draw();
+}
+function updateStreak(){ $("streak").textContent=LS("dstreak")||0;
+  const done=LS("dlast")===String(dateKey(new Date()));
+  $("dailyBtn").textContent=done?"Daily ✓":"Daily";
+  $("dailyBtn").title=done?"Today's daily is already solved — click to replay it.":"Play today's shared daily puzzle."; }
+
+function layout(){
+  const {W,H,rows,cols}=G;
+  let maxR=1,maxC=1;
+  for(const r of rows)maxR=Math.max(maxR,r.length);
+  for(const c of cols)maxC=Math.max(maxC,c.length);
+  const base=Math.min(560, Math.max(220, (window.innerWidth||560)-48));
+  const cell=Math.max(14,Math.min(46,Math.floor(base/Math.max(W,H))));
+  const gx=cell*maxR+8, gy=cell*maxC+8;
+  const cw=gx+cell*W, ch=gy+cell*H, dpr=window.devicePixelRatio||1;
+  geom={cell,gx,gy,maxR,maxC,cw,ch};
+  cv.width=Math.round(cw*dpr); cv.height=Math.round(ch*dpr);
+  cv.style.width=cw+"px"; cv.style.height=ch+"px";
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+function cellAt(mx,my){ const{cell,gx,gy}=geom; const x=Math.floor((mx-gx)/cell), y=Math.floor((my-gy)/cell);
+  return (x>=0&&x<G.W&&y>=0&&y<G.H)?{x,y,i:y*G.W+x}:null; }
+
+// per-line satisfaction: correct fills == solution fills in that line
+function lineSat(idxs){ let need=0,have=0; for(const i of idxs){ if(G.sol[i])need++; if(G.cell[i]===1&&G.sol[i])have++; } return need===have; }
+function rowIdx(y){ const a=[]; for(let x=0;x<G.W;x++)a.push(y*G.W+x); return a; }
+function colIdx(x){ const a=[]; for(let y=0;y<G.H;y++)a.push(y*G.W+x); return a; }
+
+function refresh(){ // auto-cross satisfied lines, update mistake display, win check
+  for(let y=0;y<G.H;y++){ const ix=rowIdx(y); if(lineSat(ix))for(const i of ix)if(G.cell[i]===0)G.cell[i]=2; }
+  for(let x=0;x<G.W;x++){ const ix=colIdx(x); if(lineSat(ix))for(const i of ix)if(G.cell[i]===0)G.cell[i]=2; }
+  $("mist").textContent=G.mistakes;
+  $("time").textContent=fmt(G.started?(G.elapsed+(Date.now()-G.started)):G.elapsed);
+  if(!G.won){ let all=true; for(let i=0;i<G.sol.length;i++)if(G.sol[i]&&G.cell[i]!==1){all=false;break;} if(all)win(); }
+}
+function startTimer(){ if(!G.started&&!G.won){ G.started=Date.now();
+  clearInterval(tickTimer);
+  tickTimer=setInterval(()=>{ if(!G||!G.started){ clearInterval(tickTimer); tickTimer=null; return; }
+    $("time").textContent=fmt(G.elapsed+(Date.now()-G.started)); },500); } }
+
+function snapshot(){ G.undo.push({c:G.cell.slice(),m:G.mistakes}); if(G.undo.length>200)G.undo.shift(); }
+function setCell(i,val,fromHint){
+  if(val===1&&G.sol[i]===0){ if(!fromHint){ G.mistakes++; shake(); } return false; } // wrong fill
+  G.cell[i]=val; return true;
+}
+function shake(){ const w=$("wrap"); w.classList.remove("shake"); void w.offsetWidth; w.classList.add("shake"); }
+
+function win(){
+  G.won=true; if(G.started){ G.elapsed+=Date.now()-G.started; G.started=0; }
+  clearInterval(tickTimer); tickTimer=null;
+  const t=G.elapsed, prev=+LS("best_"+G.W)||0;
+  if(!G.assisted){
+    if(!prev||t<prev){ LS("best_"+G.W,t); $("best").textContent=fmt(t); }
+    if(G.isDaily){
+      const today=G.dailyKey, last=LS("dlast");
+      if(last!==today){
+        const y=new Date(); y.setDate(y.getDate()-1); const yk=dateKey(y);
+        LS("dstreak", (last===yk?(+LS("dstreak")||0)+1:1)); LS("dlast",today); updateStreak();
+      }
+    }
+  }
+  $("msg").innerHTML= G.assisted
+    ? "Assisted solve (hint / auto-solve used) — not recorded. The hidden picture:"
+    : "Solved in "+fmt(t)+" · "+G.mistakes+" mistakes · logic depth "+G.P.passes+" — the hidden picture:";
+  $("pngBtn").disabled=false;
+  reveal={start:performance.now()}; requestAnimationFrame(animate);
+}
+function animate(now){
+  draw(); if(reveal){ const done=(now-reveal.start)>(G.W+G.H)*45+700; if(!done)requestAnimationFrame(animate); }
+}
+
+// ---------- rendering ----------
+function cellColor(x,y){ const h=(G.P.hue+(x*6+y*10))%360, l=46+14*Math.sin((x+y)/3.2); return `hsl(${h},68%,${l}%)`; }
+function draw(){
+  const {cell,gx,gy,cw,ch}=geom, W=G.W,H=G.H, cs=getComputedStyle(document.documentElement);
+  ctx.clearRect(0,0,cw,ch);
+  ctx.fillStyle=cs.getPropertyValue("--panel"); ctx.fillRect(0,0,cw,ch);
+  // cells
+  const now=performance.now();
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const i=y*W+x, px=gx+x*cell, py=gy+y*cell, v=G.cell[i];
+    if(reveal&&G.sol[i]){
+      const delay=(x+y)*45, p=Math.max(0,Math.min(1,(now-reveal.start-delay)/380));
+      if(p>0){ ctx.globalAlpha=p; ctx.fillStyle=cellColor(x,y);
+        const m=(1-p)*cell*0.5; ctx.fillRect(px+m,py+m,cell-2*m,cell-2*m); ctx.globalAlpha=1; }
+      else { ctx.fillStyle=cs.getPropertyValue("--fill"); ctx.fillRect(px+1,py+1,cell-2,cell-2); }
+      continue;
+    }
+    if(v===1){ ctx.fillStyle=(i===G.hintCell)?cs.getPropertyValue("--accent"):cs.getPropertyValue("--fill");
+      ctx.fillRect(px+1,py+1,cell-2,cell-2); }
+    else if(v===2){ ctx.strokeStyle=cs.getPropertyValue("--dim"); ctx.lineWidth=1.6; const p=cell*0.3;
+      ctx.beginPath(); ctx.moveTo(px+p,py+p); ctx.lineTo(px+cell-p,py+cell-p);
+      ctx.moveTo(px+cell-p,py+p); ctx.lineTo(px+p,py+cell-p); ctx.stroke(); }
+    if(i===G.hintCell&&v!==1){ ctx.strokeStyle=cs.getPropertyValue("--accent"); ctx.lineWidth=2;
+      ctx.strokeRect(px+2,py+2,cell-4,cell-4); }
+  }
+  // grid lines
+  ctx.lineWidth=1;
+  for(let x=0;x<=W;x++){ ctx.strokeStyle=(x%5===0)?cs.getPropertyValue("--dim"):cs.getPropertyValue("--line");
+    ctx.beginPath(); ctx.moveTo(gx+x*cell+.5,gy); ctx.lineTo(gx+x*cell+.5,gy+H*cell); ctx.stroke(); }
+  for(let y=0;y<=H;y++){ ctx.strokeStyle=(y%5===0)?cs.getPropertyValue("--dim"):cs.getPropertyValue("--line");
+    ctx.beginPath(); ctx.moveTo(gx,gy+y*cell+.5); ctx.lineTo(gx+W*cell,gy+y*cell+.5); ctx.stroke(); }
+  // clues
+  ctx.font=Math.floor(cell*0.5)+"px 'Segoe UI',sans-serif"; ctx.textBaseline="middle";
+  for(let y=0;y<H;y++){ const sat=lineSat(rowIdx(y)); const clue=G.rows[y]; ctx.textAlign="right";
+    ctx.fillStyle= sat?cs.getPropertyValue("--good"):cs.getPropertyValue("--ink");
+    for(let k=0;k<clue.length;k++){ const cx=gx-6-(clue.length-1-k)*cell*0.85, cy=gy+y*cell+cell/2;
+      ctx.fillText(clue[k], cx, cy); } }
+  for(let x=0;x<W;x++){ const sat=lineSat(colIdx(x)); const clue=G.cols[x]; ctx.textAlign="center";
+    ctx.fillStyle= sat?cs.getPropertyValue("--good"):cs.getPropertyValue("--ink");
+    for(let k=0;k<clue.length;k++){ const cx=gx+x*cell+cell/2, cy=gy-6-(clue.length-1-k)*cell*0.8;
+      ctx.fillText(clue[k], cx, cy); } }
+}
+
+// ---------- input ----------
+function evtCell(e){ const r=cv.getBoundingClientRect();
+  return cellAt((e.clientX-r.left)*geom.cw/r.width,(e.clientY-r.top)*geom.ch/r.height); }
+cv.addEventListener("contextmenu",e=>e.preventDefault());
+cv.addEventListener("pointerdown",e=>{
+  if(G.won)return; const c=evtCell(e); if(!c)return; e.preventDefault(); cv.setPointerCapture(e.pointerId);
+  startTimer(); snapshot(); G.hintCell=-1;
+  let mode;
+  if(e.button===2){ mode=(G.cell[c.i]===2)?0:2; }        // right: toggle cross
+  else { mode=(G.cell[c.i]===paintMode)?0:paintMode; }   // left/tap: toggle current paint mode
+  drag={mode,axis:null,sr:c.y,sc:c.x};
+  setCell(c.i,mode); refresh(); draw();
+});
+cv.addEventListener("pointermove",e=>{
+  if(!drag||G.won)return; const c=evtCell(e); if(!c)return;
+  if(drag.axis===null){ if(c.x!==drag.sc||c.y!==drag.sr)
+    drag.axis=(Math.abs(c.x-drag.sc)>=Math.abs(c.y-drag.sr))?"h":"v"; }
+  if(drag.axis==="h"&&c.y!==drag.sr)return;
+  if(drag.axis==="v"&&c.x!==drag.sc)return;
+  if(G.cell[c.i]===drag.mode)return;
+  setCell(c.i,drag.mode); refresh(); draw();
+});
+const endDrag=()=>{ drag=null; };
+cv.addEventListener("pointerup",endDrag); cv.addEventListener("pointercancel",endDrag);
+
+// ---------- actions ----------
+function doUndo(){ if(G.won||!G.undo.length)return; const s=G.undo.pop(); G.cell=s.c; G.mistakes=s.m; G.hintCell=-1; refresh(); draw(); }
+function doHint(){
+  if(G.won)return; startTimer(); G.assisted=true;
+  for(const i of G.P.order){ const want=G.sol[i]?1:2; if(G.cell[i]!==want){ snapshot(); setCell(i,want,true); G.hintCell=i; refresh(); draw(); return; } }
+  // fallback: any unfilled solution cell
+  for(let i=0;i<G.sol.length;i++)if(G.sol[i]&&G.cell[i]!==1){ snapshot(); setCell(i,1,true); G.hintCell=i; refresh(); draw(); return; }
+}
+function doAutoSolve(){
+  if(G.won||autoTimer)return; snapshot(); startTimer(); G.hintCell=-1; G.assisted=true;
+  const order=G.P.order.slice(); let k=0;
+  if(!order.length){ for(let i=0;i<G.sol.length;i++)G.cell[i]=G.sol[i]?1:2; refresh(); draw(); return; }
+  autoTimer=setInterval(()=>{
+    if(k>=order.length){ clearInterval(autoTimer); autoTimer=null;
+      for(let i=0;i<G.sol.length;i++)G.cell[i]=G.sol[i]?1:2; refresh(); draw(); return; }
+    const i=order[k++]; G.cell[i]=G.sol[i]?1:2; refresh(); draw();
+  }, Math.max(12, 900/Math.max(1,order.length)));
+}
+function doShare(){
+  const h=encodeBoard(G.P); location.hash=h;
+  const url=location.href;
+  const inUrl=' — <a class="share" href="'+h+'">this exact board</a> is now in the address bar.';
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).then(()=>{
+      $("msg").innerHTML='Link copied'+inUrl;
+    }).catch(()=>{
+      $("msg").innerHTML='Copy the URL to share'+inUrl;
+    });
+  } else {
+    $("msg").innerHTML='Copy the URL to share'+inUrl;
+  }
+}
+function doPNG(){
+  const s=48,pad=8,W=G.W,H=G.H, oc=document.createElement("canvas");
+  oc.width=W*s+pad*2; oc.height=H*s+pad*2; const o=oc.getContext("2d");
+  o.fillStyle="#12161f"; o.fillRect(0,0,oc.width,oc.height);
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(G.sol[y*W+x]){ o.fillStyle=cellColor(x,y);
+    o.fillRect(pad+x*s+1,pad+y*s+1,s-2,s-2); }
+  const a=document.createElement("a"); a.download="cairnwork.png"; a.href=oc.toDataURL("image/png"); a.click();
+}
+
+function dateKey(d){ return d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate(); }
+function loadTier(idx,daily){
+  clearInterval(tickTimer); tickTimer=null; clearInterval(autoTimer); autoTimer=null;
+  tierIdx=idx; [...$("tiers").children].forEach((b,k)=>b.classList.toggle("on",k===idx));
+  const t=TIERS[idx];
+  const fail=()=>{ $("msg").style.color="var(--bad)";
+    $("msg").textContent="Couldn't generate a puzzle for this tier — click again to retry."; };
+  if(daily){ const k=dateKey(new Date()); const p=generate(t, (k%100000)*10+idx); location.hash="";
+    if(p){ $("msg").style.color=""; newGame(p,true,String(k)); } else fail(); }
+  else { const p=generate(t,(Math.random()*1e9)>>>0); location.hash="";
+    if(p){ $("msg").style.color=""; newGame(p,false); } else fail(); }
+}
+
+// ---------- boot ----------
+TIERS.forEach((t,k)=>{ const b=document.createElement("button"); b.textContent=t.name.split(" ")[0];
+  b.title=t.name; b.onclick=()=>loadTier(k,false); $("tiers").appendChild(b); });
+$("newBtn").onclick=()=>loadTier(tierIdx,false);
+$("dailyBtn").onclick=()=>loadTier(tierIdx,true);
+$("undoBtn").onclick=doUndo; $("hintBtn").onclick=doHint; $("solveBtn").onclick=doAutoSolve;
+$("shareBtn").onclick=doShare; $("pngBtn").onclick=doPNG;
+$("modeBtn").onclick=()=>{ paintMode=(paintMode===1)?2:1;
+  const b=$("modeBtn"); b.textContent="Mode: "+(paintMode===1?"Fill":"X"); b.classList.toggle("on",paintMode===2); };
+
+let resizeT=null;
+window.addEventListener("resize",()=>{ if(!G)return; clearTimeout(resizeT);
+  resizeT=setTimeout(()=>{ layout(); draw(); },150); });
+
+(function init(){
+  if(location.hash.length>3){
+    const p=decodeBoard(location.hash);
+    if(p&&p.W>0&&p.H>0){ const ti=TIERS.findIndex(t=>t.W===p.W); tierIdx=ti<0?1:ti;
+      [...$("tiers").children].forEach((b,k)=>b.classList.toggle("on",k===tierIdx));
+      newGame(p,false); return; }
+  }
+  loadTier(0,false);
+})();
+</script>
+</body>
+</html>

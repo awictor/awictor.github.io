@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoasCalc — ROAS, ACOS & Break-Even Ad Calculator</title>
+<meta name="description" content="Calculate ROAS, ACOS, break-even ACOS/ROAS from your product margin, and net profit after ads. For advertisers and marketplace sellers. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('roas-calc-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#ff6100;
+    --bg:#f7f5f2; --card:#ffffff; --fg:#232f3e; --muted:#666; --line:#e8e2da; --shadow:0 1px 3px rgba(0,0,0,.08); --ok:#16a34a; --bad:#dc2626;
+  }
+  [data-theme="dark"]{
+    --bg:#14120f; --card:#1e1a15; --fg:#f2ede6; --muted:#a39a8c; --line:#332c22; --shadow:0 1px 3px rgba(0,0,0,.5); --ok:#4ade80; --bad:#f87171;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#c2410c);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:720px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  h2{font-size:1rem;margin:0 0 12px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:14px}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:8px}
+  @media(max-width:560px){.stats{grid-template-columns:1fr 1fr}}
+  .stat{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+  .stat span{display:block;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .stat b{font-size:1.3rem;font-variant-numeric:tabular-nums}
+  .verdict{text-align:center;margin-top:14px;font-weight:700;font-size:1.05rem}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🎯</div>
+    <div><h1>RoasCalc</h1><div class="sub">ROAS · ACOS · break-even · profit after ads</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <h2>Campaign</h2>
+    <div class="grid">
+      <div><label for="spend">Ad spend</label><input type="number" id="spend" value="250" step="any"></div>
+      <div><label for="revenue">Ad revenue / sales</label><input type="number" id="revenue" value="1000" step="any"></div>
+      <div><label for="margin">Product margin (%)</label><input type="number" id="margin" value="30" step="any"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="stats">
+      <div class="stat"><span>ROAS</span><b id="roas">—</b></div>
+      <div class="stat"><span>ACOS</span><b id="acos">—</b></div>
+      <div class="stat"><span>Break-even ACOS</span><b id="beAcos">—</b></div>
+      <div class="stat"><span>Net profit</span><b id="net">—</b></div>
+    </div>
+    <div class="verdict" id="verdict"></div>
+  </div>
+</main>
+<footer>
+  ACOS = ad spend ÷ sales · ROAS = sales ÷ ad spend. Estimates only. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/roas-calc">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  function roas(revenue, adSpend){
+    if(!(adSpend > 0)) throw new Error('ad spend must be positive');
+    return revenue / adSpend;
+  }
+
+  function acos(adSpend, revenue){
+    if(!(revenue > 0)) throw new Error('revenue must be positive');
+    return adSpend / revenue; // fraction
+  }
+
+  // margin as a fraction (0.30). Break-even is where ad spend eats the whole margin.
+  function breakEvenAcos(margin){
+    if(!(margin > 0)) throw new Error('margin must be positive');
+    return margin;
+  }
+  function breakEvenRoas(margin){
+    if(!(margin > 0)) throw new Error('margin must be positive');
+    return 1 / margin;
+  }
+
+  function netProfit(revenue, adSpend, margin){
+    return revenue * margin - adSpend;
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('roas')){
+    const $ = id => document.getElementById(id);
+    const money = n => n.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+    const pct = f => (f * 100).toFixed(1) + '%';
+
+    function render(){
+      const spend = +$('spend').value, revenue = +$('revenue').value, margin = +$('margin').value / 100;
+      try{
+        const r = roas(revenue, spend);
+        const a = acos(spend, revenue);
+        $('roas').textContent = r.toFixed(2) + '×';
+        $('acos').textContent = pct(a);
+        $('beAcos').textContent = margin > 0 ? pct(breakEvenAcos(margin)) : '—';
+        const net = netProfit(revenue, spend, margin);
+        $('net').textContent = money(net);
+        $('net').style.color = net >= 0 ? 'var(--ok)' : 'var(--bad)';
+        if(margin > 0){
+          const profitable = a < breakEvenAcos(margin);
+          $('verdict').textContent = profitable
+            ? `✓ Profitable — ACOS ${pct(a)} is below your ${pct(margin)} break-even (ROAS target ${breakEvenRoas(margin).toFixed(2)}×).`
+            : `✗ Losing money — ACOS ${pct(a)} exceeds your ${pct(margin)} break-even.`;
+          $('verdict').style.color = profitable ? 'var(--ok)' : 'var(--bad)';
+        } else $('verdict').textContent = '';
+      }catch(e){ ['roas','acos','beAcos','net'].forEach(id => $(id).textContent = '—'); $('verdict').textContent = e.message; }
+    }
+
+    ['spend', 'revenue', 'margin'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('roas-calc-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { roas, acos, breakEvenAcos, breakEvenRoas, netProfit };
+</script>
+</body>
+</html>

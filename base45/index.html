@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Base45 Encoder / Decoder — RFC 9285</title>
+<meta name="description" content="Encode and decode Base45 (RFC 9285), the compact QR-friendly encoding used in EU Digital COVID certificates. Offline, no tracking.">
+<style>
+  :root{
+    --c:#4338ca;
+    --bg:#f1f1fb; --card:#ffffff; --fg:#141428; --muted:#585a7d;
+    --line:#dedef2; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#09091a; --card:#141428; --fg:#e8e8f7; --muted:#9494bb;
+    --line:#242444; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:800px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:800px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .mode{display:flex;gap:8px;margin-bottom:16px}
+  .mode button{flex:1;padding:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:10px;cursor:pointer;font-weight:600}
+  .mode button.on{background:var(--c);color:#fff;border-color:var(--c)}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  textarea{width:100%;min-height:100px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.95rem;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);resize:vertical}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .out{margin-top:14px}
+  .out textarea{background:var(--bg)}
+  .btn{background:var(--c);color:#fff;border:0;border-radius:9px;padding:9px 14px;font-weight:600;cursor:pointer;font-size:.88rem;margin-top:12px}
+  .err{color:#dc2626;font-size:.85rem;margin-top:8px;min-height:1em}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🔤</div>
+  <div>
+    <h1>Base45</h1>
+    <p>RFC 9285 — the QR-friendly encoding</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="mode">
+      <button id="mEnc" class="on">Encode</button>
+      <button id="mDec">Decode</button>
+    </div>
+    <label id="inLbl">Text to encode</label>
+    <textarea id="in" spellcheck="false">Hello!!</textarea>
+    <div class="out">
+      <label id="outLbl">Base45</label>
+      <textarea id="out" readonly spellcheck="false"></textarea>
+    </div>
+    <button class="btn" id="copy">Copy result</button>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>About Base45</h2>
+    <p class="note">Base45 (<b>RFC 9285</b>) packs binary data into a 45-character alphabet chosen from the QR-code "alphanumeric" mode, so it stores more per QR module than Base64 — which is why it encodes <b>EU Digital COVID Certificates</b>. Bytes are taken in pairs: each pair (a 16-bit number) becomes three Base45 characters; a lone trailing byte becomes two. Text is treated as UTF-8. Known vector: <code>"AB"</code> → <code>BB8</code>. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var CHARSET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:';
+  // Encode an array of byte values (0-255) to a Base45 string.
+  function encodeBytes(bytes){
+    if(!Array.isArray(bytes) && !(bytes && bytes.length !== undefined)) throw new Error('expected a byte array');
+    var out = '';
+    for(var i = 0; i < bytes.length; i += 2){
+      if(i + 1 < bytes.length){
+        var x = bytes[i] * 256 + bytes[i + 1];
+        out += CHARSET[x % 45]; x = Math.floor(x / 45);
+        out += CHARSET[x % 45]; x = Math.floor(x / 45);
+        out += CHARSET[x % 45];
+      } else {
+        var y = bytes[i];
+        out += CHARSET[y % 45] + CHARSET[Math.floor(y / 45)];
+      }
+    }
+    return out;
+  }
+  // Decode a Base45 string to an array of byte values.
+  function decodeBytes(str){
+    str = String(str == null ? '' : str);
+    var vals = [];
+    for(var i = 0; i < str.length; i++){
+      var v = CHARSET.indexOf(str[i]);
+      if(v < 0) throw new Error('invalid Base45 character: ' + str[i]);
+      vals.push(v);
+    }
+    var bytes = [];
+    for(var j = 0; j < vals.length; j += 3){
+      if(j + 2 < vals.length){
+        var x = vals[j] + vals[j + 1] * 45 + vals[j + 2] * 45 * 45;
+        if(x > 0xFFFF) throw new Error('invalid Base45 group (overflow)');
+        bytes.push(Math.floor(x / 256), x % 256);
+      } else if(j + 1 < vals.length){
+        var y = vals[j] + vals[j + 1] * 45;
+        if(y > 0xFF) throw new Error('invalid Base45 group (overflow)');
+        bytes.push(y);
+      } else {
+        throw new Error('invalid Base45 length');
+      }
+    }
+    return bytes;
+  }
+  function encode(text){ return encodeBytes(Array.from(new TextEncoder().encode(String(text == null ? '' : text)))); }
+  function decode(b45){ return new TextDecoder().decode(new Uint8Array(decodeBytes(b45))); }
+
+  if(typeof module !== 'undefined') module.exports = { CHARSET:CHARSET, encodeBytes:encodeBytes, decodeBytes:decodeBytes, encode:encode, decode:decode };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var mode = 'enc';
+    var mEnc = document.getElementById('mEnc'), mDec = document.getElementById('mDec');
+    function render(){
+      document.getElementById('err').textContent = '';
+      var text = document.getElementById('in').value;
+      try{ document.getElementById('out').value = mode === 'enc' ? encode(text) : decode(text.trim()); }
+      catch(e){ document.getElementById('out').value = ''; if(text) document.getElementById('err').textContent = e.message; }
+    }
+    mEnc.addEventListener('click', function(){ mode='enc'; mEnc.classList.add('on'); mDec.classList.remove('on'); document.getElementById('inLbl').textContent='Text to encode'; document.getElementById('outLbl').textContent='Base45'; render(); });
+    mDec.addEventListener('click', function(){ mode='dec'; mDec.classList.add('on'); mEnc.classList.remove('on'); document.getElementById('inLbl').textContent='Base45 to decode'; document.getElementById('outLbl').textContent='Text'; render(); });
+    document.getElementById('in').addEventListener('input', render);
+    document.getElementById('copy').addEventListener('click', function(){
+      var t = document.getElementById('out').value;
+      if(navigator.clipboard) navigator.clipboard.writeText(t);
+      this.textContent = 'Copied!'; var b = this; setTimeout(function(){ b.textContent = 'Copy result'; }, 1200);
+    });
+    render();
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('base45-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('base45-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

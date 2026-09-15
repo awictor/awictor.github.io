@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glyphcast — pour your words into a mold</title>
+<style>
+  :root{
+    --bg:#14161c; --panel:#1c1f28; --panel2:#232735; --line:#333849;
+    --ink:#e7e9ef; --dim:#9aa2b5; --accent:#ff7a45; --accent2:#ffb08a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:var(--bg); color:var(--ink); display:flex; height:100vh; overflow:hidden;
+  }
+  #panel{
+    width:320px; min-width:320px; height:100%; overflow-y:auto; background:var(--panel);
+    border-right:1px solid var(--line); padding:16px 16px 40px; display:flex; flex-direction:column; gap:14px;
+  }
+  #panel::-webkit-scrollbar{width:9px} #panel::-webkit-scrollbar-thumb{background:var(--line);border-radius:9px}
+  .brand{display:flex;align-items:baseline;gap:8px}
+  .brand h1{font-size:20px;margin:0;letter-spacing:.5px;
+    background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .brand span{font-size:11px;color:var(--dim)}
+  label{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--dim);display:block;margin-bottom:5px}
+  textarea,select,input[type=text]{width:100%;background:var(--panel2);color:var(--ink);border:1px solid var(--line);
+    border-radius:8px;padding:8px 9px;font:inherit;resize:vertical}
+  textarea{min-height:74px;line-height:1.45}
+  .row{display:flex;gap:10px} .row>*{flex:1}
+  .field{margin:0}
+  input[type=range]{width:100%;accent-color:var(--accent);margin:2px 0}
+  input[type=color]{width:100%;height:34px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:2px;cursor:pointer}
+  .val{float:right;color:var(--accent2);font-variant-numeric:tabular-nums;text-transform:none;letter-spacing:0}
+  .check{display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:13px;color:var(--ink);margin:0}
+  .check input{accent-color:var(--accent);width:16px;height:16px}
+  .checks{display:flex;flex-direction:column;gap:9px}
+  hr{border:none;border-top:1px solid var(--line);margin:2px 0}
+  .btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  button{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px;
+    font:inherit;cursor:pointer;transition:.12s}
+  button:hover{border-color:var(--accent);color:var(--accent2)}
+  button.primary{background:linear-gradient(90deg,var(--accent),#ff9466);border:none;color:#1b1206;font-weight:600}
+  button.primary:hover{filter:brightness(1.08);color:#1b1206}
+  #indicator{font-size:11.5px;color:var(--dim);line-height:1.5;background:var(--panel2);border:1px solid var(--line);
+    border-radius:8px;padding:8px 10px;min-height:20px}
+  #indicator b{color:var(--accent2);font-weight:600}
+  #stage{flex:1;position:relative;display:flex;align-items:center;justify-content:center;padding:22px;overflow:hidden}
+  #canvas{max-width:100%;max-height:100%;border-radius:6px;box-shadow:0 12px 48px rgba(0,0,0,.45)}
+  #toast{position:absolute;bottom:18px;left:50%;transform:translateX(-50%) translateY(20px);opacity:0;
+    background:#000c;color:#fff;padding:8px 16px;border-radius:20px;font-size:12px;pointer-events:none;transition:.25s}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  @media(max-width:760px){body{flex-direction:column}#panel{width:100%;min-width:0;height:auto;max-height:52vh}#stage{flex:1}}
+</style>
+</head>
+<body>
+<div id="panel">
+  <div class="brand"><h1>Glyphcast</h1><span>micrography studio</span></div>
+
+  <div class="field"><label>Your words</label>
+    <textarea id="text" spellcheck="false" placeholder="Type the words to pour into your mold…"></textarea></div>
+
+  <div class="row">
+    <div class="field"><label>Mold</label>
+      <select id="mold">
+        <option value="heart">♥ Heart</option>
+        <option value="star">★ Star</option>
+        <option value="spiral">🌀 Spiral</option>
+        <option value="cat">🐱 Cat</option>
+        <option value="wave">🌊 Wave</option>
+        <option value="leaf">🍃 Leaf</option>
+        <option value="skull">💀 Skull</option>
+        <option value="bubble">💬 Bubble</option>
+        <option value="custom">✎ Type your own</option>
+      </select></div>
+    <div class="field" id="customWrap" style="display:none"><label>Glyph / word</label>
+      <input type="text" id="custom" maxlength="12" spellcheck="false" placeholder="A"></div>
+  </div>
+
+  <div class="field"><label>Font size <span class="val" id="fontSizeV"></span></label>
+    <input type="range" id="fontSize" min="6" max="48" step="1"></div>
+  <div class="row">
+    <div class="field"><label>Line <span class="val" id="lineSpacingV"></span></label>
+      <input type="range" id="lineSpacing" min="0.8" max="2" step="0.05"></div>
+    <div class="field"><label>Letter <span class="val" id="letterSpacingV"></span></label>
+      <input type="range" id="letterSpacing" min="-2" max="8" step="0.5"></div>
+  </div>
+
+  <div class="row">
+    <div class="field"><label id="inkLabel">Ink</label><input type="color" id="ink"></div>
+    <div class="field"><label>Background</label><input type="color" id="bg"></div>
+  </div>
+  <div class="row">
+    <div class="field"><label>Gradient</label>
+      <select id="gradType"><option value="off">Solid ink</option><option value="x">Gradient →</option>
+        <option value="y">Gradient ↓</option><option value="radial">Gradient ◎</option></select></div>
+    <div class="field"><label>Fill</label>
+      <select id="fill"><option value="repeat">Repeat to fill</option><option value="once">Fit once</option></select></div>
+  </div>
+
+  <hr>
+  <div class="checks">
+    <label class="check"><input type="checkbox" id="autofit"> Auto-fit text to mold</label>
+    <label class="check"><input type="checkbox" id="density"> Density ink (crisp edges)</label>
+    <label class="check"><input type="checkbox" id="typewriter"> Typewriter pour reveal</label>
+  </div>
+  <div id="indicator"></div>
+  <hr>
+  <div class="btns">
+    <button class="primary" id="btnPng">Export PNG</button>
+    <button class="primary" id="btnCard">Share card</button>
+    <button id="btnLink">Copy link</button>
+    <button id="btnRec">Record pour</button>
+  </div>
+</div>
+<div id="stage"><canvas id="canvas"></canvas><div id="toast"></div></div>
+
+<script>
+"use strict";
+(function(){
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const stage = document.getElementById('stage');
+  const el = id => document.getElementById(id);
+  const meas = document.createElement('canvas').getContext('2d'); // measuring only
+
+  const DEF = {
+    text:"You are the small bright thing I keep casting into shape, over and over, until the letters themselves remember your name and hold it warm. ",
+    mold:"heart", custom:"A", fontSize:15, lineSpacing:1.05, letterSpacing:0,
+    ink:"#c0392b", gradType:"radial", bg:"#fff7f0",
+    fill:"repeat", autofit:true, density:true, typewriter:false
+  };
+  let S = Object.assign({}, DEF);
+
+  /* ---------- mold silhouettes (drawn onto a mask canvas, sampled by alpha) ---------- */
+  const MOLDS = {
+    heart(g,w,h){ const cx=w/2,cy=h*0.52,s=Math.min(w,h)*0.031; g.beginPath();
+      for(let t=0;t<=6.30;t+=0.02){ const x=16*Math.pow(Math.sin(t),3),
+        y=13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t);
+        const px=cx+x*s,py=cy-y*s; t?g.lineTo(px,py):g.moveTo(px,py);} g.closePath(); g.fill(); },
+    star(g,w,h){ const cx=w/2,cy=h/2,R=Math.min(w,h)*0.47,r=R*0.4; g.beginPath();
+      for(let i=0;i<10;i++){ const a=-Math.PI/2+i*Math.PI/5,rad=i%2?r:R;
+        const x=cx+Math.cos(a)*rad,y=cy+Math.sin(a)*rad; i?g.lineTo(x,y):g.moveTo(x,y);} g.closePath(); g.fill(); },
+    spiral(g,w,h){ const cx=w/2,cy=h/2,mx=Math.min(w,h)*0.46; g.beginPath();
+      for(let t=0.1;t<25.1;t+=0.05){ const r=mx*t/25; g.lineTo(cx+Math.cos(t)*r,cy+Math.sin(t)*r);}
+      g.lineWidth=Math.min(w,h)*0.085; g.lineCap="round"; g.lineJoin="round"; g.stroke(); },
+    cat(g,w,h){ const cx=w/2,cy=h*0.56,R=Math.min(w,h)*0.32;
+      g.beginPath(); g.moveTo(cx-R*0.95,cy-R*0.5); g.lineTo(cx-R*0.55,cy-R*1.7); g.lineTo(cx-R*0.02,cy-R*0.8); g.closePath(); g.fill();
+      g.beginPath(); g.moveTo(cx+R*0.95,cy-R*0.5); g.lineTo(cx+R*0.55,cy-R*1.7); g.lineTo(cx+R*0.02,cy-R*0.8); g.closePath(); g.fill();
+      g.beginPath(); g.arc(cx,cy,R,0,7); g.fill(); },
+    wave(g,w,h){ const amp=h*0.17,mid=h*0.5,band=h*0.3; g.beginPath();
+      for(let x=0;x<=w;x+=3){ const y=mid+Math.sin(x/w*Math.PI*3)*amp; x?g.lineTo(x,y-band/2):g.moveTo(x,y-band/2);}
+      for(let x=w;x>=0;x-=3){ const y=mid+Math.sin(x/w*Math.PI*3)*amp; g.lineTo(x,y+band/2);} g.closePath(); g.fill(); },
+    leaf(g,w,h){ const cx=w/2,cy=h/2,s=Math.min(w,h)*0.4; g.beginPath(); g.moveTo(cx,cy-s);
+      g.quadraticCurveTo(cx+s,cy-s*0.15,cx,cy+s); g.quadraticCurveTo(cx-s,cy-s*0.15,cx,cy-s); g.closePath(); g.fill(); },
+    skull(g,w,h){ const cx=w/2,cy=h*0.43,R=Math.min(w,h)*0.29;
+      g.beginPath(); g.arc(cx,cy,R,0,7); g.fill();
+      g.beginPath(); g.moveTo(cx-R*0.55,cy+R*0.5); g.lineTo(cx-R*0.4,cy+R*1.4); g.lineTo(cx+R*0.4,cy+R*1.4); g.lineTo(cx+R*0.55,cy+R*0.5); g.closePath(); g.fill();
+      const o=g.globalCompositeOperation; g.globalCompositeOperation="destination-out";
+      g.beginPath(); g.arc(cx-R*0.42,cy-R*0.02,R*0.24,0,7); g.arc(cx+R*0.42,cy-R*0.02,R*0.24,0,7); g.fill();
+      g.beginPath(); g.moveTo(cx,cy+R*0.2); g.lineTo(cx-R*0.14,cy+R*0.55); g.lineTo(cx+R*0.14,cy+R*0.55); g.closePath(); g.fill();
+      g.globalCompositeOperation=o; },
+    bubble(g,w,h){ const x=w*0.11,y=h*0.14,bw=w*0.78,bh=h*0.52,r=Math.min(bw,bh)*0.2;
+      g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+bw,y,x+bw,y+bh,r); g.arcTo(x+bw,y+bh,x,y+bh,r);
+      g.arcTo(x,y+bh,x,y,r); g.arcTo(x,y,x+bw,y,r); g.closePath(); g.fill();
+      g.beginPath(); g.moveTo(x+bw*0.28,y+bh); g.lineTo(x+bw*0.32,y+bh+h*0.22); g.lineTo(x+bw*0.52,y+bh); g.closePath(); g.fill(); },
+    custom(g,w,h){ const t=S.custom||"A"; g.textAlign="center"; g.textBaseline="middle";
+      let fs=h*0.92; g.font="900 "+fs+"px sans-serif"; const mw=g.measureText(t).width;
+      if(mw>w*0.9){ fs*=w*0.9/mw; g.font="900 "+fs+"px sans-serif"; } g.fillText(t,w/2,h*0.5); }
+  };
+
+  /* ---------- mask cache ---------- */
+  let W=600,H=600,mask=null,maskKey="";
+  function getMask(){
+    const key=[S.mold,S.custom,W,H].join("|");
+    if(key===maskKey && mask) return mask;
+    const c=document.createElement('canvas'); c.width=W; c.height=H;
+    const g=c.getContext('2d'); g.fillStyle="#000"; g.strokeStyle="#000";
+    (MOLDS[S.mold]||MOLDS.heart)(g,W,H);
+    mask={ data:g.getImageData(0,0,W,H).data, W, H }; maskKey=key; return mask;
+  }
+  const inside=(m,x,y)=>{ x|=0; y|=0; if(x<0||y<0||x>=m.W||y>=m.H) return false; return m.data[(y*m.W+x)*4+3]>100; };
+
+  /* ---------- layout ---------- */
+  function grid(fs){ meas.font=fs+"px monospace";
+    return { cw:Math.max(2,meas.measureText("M").width+S.letterSpacing), ch:Math.max(3,fs*S.lineSpacing) }; }
+
+  function countSlots(m,fs){ const {cw,ch}=grid(fs); let n=0;
+    for(let cy=ch/2;cy<m.H;cy+=ch) for(let cx=cw/2;cx<m.W;cx+=cw) if(inside(m,cx,cy)) n++;
+    return n; }
+
+  function autoFit(m){ const N=Math.max(1,(S.text||" ").length); let best=S.fontSize,bd=1e9;
+    for(let fs=6;fs<=48;fs++){ const d=Math.abs(countSlots(m,fs)-N); if(d<bd){bd=d;best=fs;} }
+    S.fontSize=best; }
+
+  function hexToHsl(hex){
+    let x=String(hex||"").replace("#","");
+    if(x.length===3) x=x.split("").map(c=>c+c).join("");
+    if(x.length<6) x="c0392b";
+    const r=parseInt(x.slice(0,2),16)/255, gg=parseInt(x.slice(2,4),16)/255, b=parseInt(x.slice(4,6),16)/255;
+    const mx=Math.max(r,gg,b), mn=Math.min(r,gg,b); let h=0,s=0; const l=(mx+mn)/2;
+    if(mx!==mn){ const d=mx-mn; s=l>0.5?d/(2-mx-mn):d/(mx+mn);
+      h= mx===r ? (gg-b)/d+(gg<b?6:0) : mx===gg ? (b-r)/d+2 : (r-gg)/d+4; h/=6; }
+    return { h:h*360, s:s*100, l:l*100 };
+  }
+  let _inkHex=null,_inkHsl=null;
+  function inkHsl(){ if(S.ink!==_inkHex){ _inkHex=S.ink; _inkHsl=hexToHsl(S.ink); } return _inkHsl; }
+
+  function colorFor(cx,cy,edge){
+    if(S.gradType==="off") return S.ink;
+    let t; if(S.gradType==="x") t=cx/W; else if(S.gradType==="y") t=cy/H;
+    else t=Math.min(1,Math.hypot(cx-W/2,cy-H/2)/(Math.min(W,H)/2));
+    const base=inkHsl();
+    const hue=((base.h + t*140)%360+360)%360;      // sweep around the chosen ink hue
+    const sat=Math.max(45,Math.min(95,base.s));
+    const light=(S.density&&edge)?Math.max(24,base.l-16):base.l;
+    return "hsl("+hue.toFixed(0)+","+sat.toFixed(0)+"%,"+light.toFixed(0)+"%)";
+  }
+
+  function build(m){
+    const {cw,ch}=grid(S.fontSize);
+    const src=(S.text&&S.text.replace(/\s+/g," ").trim())||" ";
+    const N=src.length; const out=[]; let ptr=0, slots=0;
+    for(let cy=ch/2;cy<m.H;cy+=ch) for(let cx=cw/2;cx<m.W;cx+=cw){
+      if(!inside(m,cx,cy)) continue; slots++;
+      let ch2; if(S.fill==="once"){ if(ptr>=N) continue; ch2=src[ptr]; } else ch2=src[ptr%N];
+      if(ch2===" "){ ptr++; continue; }
+      const edge = S.density && !(inside(m,cx-cw,cy)&&inside(m,cx+cw,cy)&&inside(m,cx,cy-ch)&&inside(m,cx,cy+ch));
+      out.push({ ch:ch2, x:cx, y:cy, edge, c:colorFor(cx,cy,edge) }); ptr++;
+    }
+    return { list:out, slots, used:ptr, N };
+  }
+
+  /* ---------- painting ---------- */
+  let placements=[], revealCount=0, animId=null;
+  const reduceMotion=()=>!!(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  function paintChars(g,list,k,sc,ox,oy){
+    g.textAlign="center"; g.textBaseline="middle"; const fs=S.fontSize*sc; let bold=null;
+    for(let i=0;i<k;i++){ const p=list[i];
+      if(p.edge!==bold){ g.font=(p.edge?"bold ":"")+fs+"px monospace"; bold=p.edge; }
+      g.fillStyle=p.c; g.fillText(p.ch, ox+p.x*sc, oy+p.y*sc); }
+  }
+  function drawNow(){ ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H);
+    ctx.fillStyle=S.bg; ctx.fillRect(0,0,W,H); paintChars(ctx,placements,revealCount,1,0,0); }
+  function drawHint(msg){ ctx.save(); ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.fillStyle="rgba(120,128,148,0.85)"; ctx.font="italic 15px -apple-system,Segoe UI,sans-serif";
+    ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.fillText(msg,W/2,H/2); ctx.restore(); }
+  function stopAnim(){ if(animId) cancelAnimationFrame(animId); animId=null; }
+  function animate(done){ stopAnim(); revealCount=0; const total=placements.length;
+    const step=Math.max(1,Math.round(total/90));
+    (function frame(){ revealCount=Math.min(total,revealCount+step); drawNow();
+      if(revealCount<total) animId=requestAnimationFrame(frame);
+      else { animId=null; if(done) done(); } })(); }
+
+  let dpr=1;
+  function sizeCanvas(){ const r=stage.getBoundingClientRect();
+    const box=Math.max(80,Math.min(r.width-44,r.height-44)); W=H=Math.floor(box);
+    dpr=Math.min(2,window.devicePixelRatio||1);
+    canvas.width=W*dpr; canvas.height=H*dpr; canvas.style.width=W+"px"; canvas.style.height=H+"px"; }
+
+  function render(){ sizeCanvas(); const m=getMask();
+    if(S.autofit){ autoFit(m); el('fontSize').value=S.fontSize; el('fontSizeV').textContent=S.fontSize+"px"; }
+    const info=build(m); placements=info.list; updateIndicator(info);
+    if(S.typewriter && placements.length && !reduceMotion()){ animate(); }
+    else { stopAnim(); revealCount=placements.length; drawNow(); }
+    const emptyText=!(S.text&&S.text.trim());
+    if(emptyText) drawHint("Add some words to fill the mold");
+    else if(info.slots===0) drawHint("That glyph produced no shape — try a letter, word, or emoji"); }
+
+  function updateIndicator(info){
+    const box=el('indicator');
+    if(info.slots===0){
+      box.innerHTML="<b>0</b> slots — that glyph produced no shape. Try a letter, word, or emoji.";
+      return;
+    }
+    if(S.fill==="once"){
+      const pct=Math.round(info.used/info.N*100);
+      box.innerHTML="<b>"+info.used+"</b> / "+info.N+" chars placed &middot; <b>"+pct+"%</b> of your text used &middot; "+info.slots+" slots in mold";
+    } else {
+      const passes=(info.slots/info.N)||0;
+      box.innerHTML="<b>"+info.slots+"</b> character slots &middot; your text repeats <b>"+passes.toFixed(1)+"&times;</b> to fill the mold";
+    }
+  }
+
+  /* ---------- exports ---------- */
+  function dl(blob,name){ const u=URL.createObjectURL(blob); const a=document.createElement('a');
+    a.href=u; a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(u),4000); }
+
+  function exportPNG(){ const sc=2; const c=document.createElement('canvas'); c.width=W*sc; c.height=H*sc;
+    const g=c.getContext('2d'); g.fillStyle=S.bg; g.fillRect(0,0,c.width,c.height);
+    paintChars(g,placements,placements.length,sc,0,0);
+    c.toBlob(b=>{ if(!b){ toast("Export failed"); return; } dl(b,"glyphcast.png"); toast("PNG exported"); }); }
+
+  function shareCard(){ const sc=2, castW=W*sc, castH=H*sc, pad=40*sc, top=104*sc, bot=68*sc;
+    const cw=castW+pad*2, chh=castH+top+bot;
+    const c=document.createElement('canvas'); c.width=cw; c.height=chh; const g=c.getContext('2d');
+    g.fillStyle="#14161c"; g.fillRect(0,0,cw,chh);
+    g.fillStyle="#ff7a45"; g.textBaseline="alphabetic"; g.textAlign="left";
+    g.font="700 "+(34*sc)+"px -apple-system,Segoe UI,sans-serif"; g.fillText("Glyphcast", pad, 54*sc);
+    g.fillStyle="#9aa2b5"; g.font=(15*sc)+"px -apple-system,Segoe UI,sans-serif";
+    const moldName=(el('mold').selectedOptions[0].text||"").replace(/^\S+\s/,"");
+    g.fillText("words cast into a "+moldName.toLowerCase(), pad, 80*sc);
+    // cast panel
+    g.fillStyle=S.bg; roundRect(g,pad,top,castW,castH,10*sc); g.fill();
+    paintChars(g,placements,placements.length,sc,pad,top);
+    // caption
+    const cap=(S.text||"").replace(/\s+/g," ").trim(); const snip=cap.length>92?cap.slice(0,90)+"…":cap;
+    g.fillStyle="#6f7788"; g.font="italic "+(13*sc)+"px Georgia,serif"; g.textAlign="center";
+    g.fillText('“'+snip+'”', cw/2, chh-26*sc);
+    c.toBlob(b=>{ if(!b){ toast("Export failed"); return; } dl(b,"glyphcast-card.png"); toast("Share card exported"); }); }
+
+  function roundRect(g,x,y,w,h,r){ g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r);
+    g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); }
+
+  let recording=false;
+  function recordPour(){
+    if(recording) return;
+    if(!canvas.captureStream || !window.MediaRecorder){ toast("Recording not supported here"); return; }
+    if(!placements.length){ toast("Nothing to record yet"); return; }
+    let type="video/webm"; if(!MediaRecorder.isTypeSupported(type)) type="";
+    const stream=canvas.captureStream(30);
+    const rec=new MediaRecorder(stream, type?{mimeType:type}:undefined); const chunks=[];
+    const btn=el('btnRec'), prevLabel=btn.textContent;
+    recording=true; btn.disabled=true; btn.textContent="Recording…"; btn.style.color="var(--accent)";
+    const restore=()=>{ recording=false; btn.disabled=false; btn.textContent=prevLabel; btn.style.color=""; };
+    rec.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data); };
+    rec.onstop=()=>{ dl(new Blob(chunks,{type:"video/webm"}),"glyphcast-pour.webm"); toast("Pour recorded (WebM)"); restore(); };
+    try{ rec.start(); }catch(e){ toast("Recording failed"); restore(); return; }
+    toast("Recording pour…"); animate(()=>setTimeout(()=>rec.stop(),500));
+  }
+
+  let tId=null;
+  function toast(msg){ const t=el('toast'); t.textContent=msg; t.classList.add('show');
+    clearTimeout(tId); tId=setTimeout(()=>t.classList.remove('show'),1800); }
+
+  /* ---------- state <-> URL hash ---------- */
+  function encode(){ return btoa(unescape(encodeURIComponent(JSON.stringify(S)))); }
+  function decode(s){ return JSON.parse(decodeURIComponent(escape(atob(s)))); }
+  function clampNum(v,lo,hi,d){ v=+v; return isFinite(v)?Math.min(hi,Math.max(lo,v)):d; }
+  const HEX=/^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/;
+  function sanitize(){ // guard against hand-edited / tampered share links
+    S.fontSize=Math.round(clampNum(S.fontSize,6,48,DEF.fontSize));
+    S.lineSpacing=clampNum(S.lineSpacing,0.8,2,DEF.lineSpacing);
+    S.letterSpacing=clampNum(S.letterSpacing,-2,8,DEF.letterSpacing);
+    if(!MOLDS[S.mold]) S.mold=DEF.mold;
+    if(["off","x","y","radial"].indexOf(S.gradType)<0) S.gradType=DEF.gradType;
+    if(["repeat","once"].indexOf(S.fill)<0) S.fill=DEF.fill;
+    if(typeof S.text!=="string") S.text=DEF.text;
+    if(typeof S.custom!=="string") S.custom=DEF.custom;
+    if(!HEX.test(S.ink)) S.ink=DEF.ink;
+    if(!HEX.test(S.bg)) S.bg=DEF.bg;
+    S.autofit=!!S.autofit; S.density=!!S.density; S.typewriter=!!S.typewriter;
+  }
+  let hId=null;
+  function writeHash(){ clearTimeout(hId); hId=setTimeout(()=>{
+    try{ history.replaceState(null,"","#"+encode()); }catch(e){} },250); }
+  function copyLink(){ const url=location.href.split("#")[0]+"#"+encode();
+    (navigator.clipboard?navigator.clipboard.writeText(url):Promise.reject())
+      .then(()=>toast("Share link copied")).catch(()=>{ prompt("Copy this link:",url); }); }
+
+  /* ---------- ui wiring ---------- */
+  let rId=null;
+  function schedule(){ clearTimeout(rId); rId=setTimeout(()=>{ render(); writeHash(); },110); }
+
+  function syncUI(){
+    el('text').value=S.text; el('mold').value=S.mold; el('custom').value=S.custom;
+    el('fontSize').value=S.fontSize; el('fontSizeV').textContent=S.fontSize+"px";
+    el('lineSpacing').value=S.lineSpacing; el('lineSpacingV').textContent=(+S.lineSpacing).toFixed(2);
+    el('letterSpacing').value=S.letterSpacing; el('letterSpacingV').textContent=(+S.letterSpacing).toFixed(1)+"px";
+    el('ink').value=S.ink; el('bg').value=S.bg; el('gradType').value=S.gradType; el('fill').value=S.fill;
+    el('autofit').checked=S.autofit; el('density').checked=S.density; el('typewriter').checked=S.typewriter;
+    el('customWrap').style.display=(S.mold==="custom")?"":"none";
+    el('fontSize').disabled=S.autofit;
+    updateInkLabel();
+  }
+  function updateInkLabel(){ el('inkLabel').textContent=(S.gradType==="off")?"Ink":"Ink (gradient base)"; }
+
+  el('text').addEventListener('input',e=>{ S.text=e.target.value; schedule(); });
+  el('mold').addEventListener('change',e=>{ S.mold=e.target.value; el('customWrap').style.display=(S.mold==="custom")?"":"none"; schedule(); });
+  el('custom').addEventListener('input',e=>{ S.custom=e.target.value; schedule(); });
+  el('fontSize').addEventListener('input',e=>{ S.fontSize=+e.target.value; el('fontSizeV').textContent=S.fontSize+"px"; schedule(); });
+  el('lineSpacing').addEventListener('input',e=>{ S.lineSpacing=+e.target.value; el('lineSpacingV').textContent=(+S.lineSpacing).toFixed(2); schedule(); });
+  el('letterSpacing').addEventListener('input',e=>{ S.letterSpacing=+e.target.value; el('letterSpacingV').textContent=(+S.letterSpacing).toFixed(1)+"px"; schedule(); });
+  el('ink').addEventListener('input',e=>{ S.ink=e.target.value; schedule(); });
+  el('bg').addEventListener('input',e=>{ S.bg=e.target.value; schedule(); });
+  el('gradType').addEventListener('change',e=>{ S.gradType=e.target.value; updateInkLabel(); schedule(); });
+  el('fill').addEventListener('change',e=>{ S.fill=e.target.value; schedule(); });
+  el('autofit').addEventListener('change',e=>{ S.autofit=e.target.checked; el('fontSize').disabled=S.autofit; schedule(); });
+  el('density').addEventListener('change',e=>{ S.density=e.target.checked; schedule(); });
+  el('typewriter').addEventListener('change',e=>{ S.typewriter=e.target.checked; schedule(); });
+  el('btnPng').addEventListener('click',exportPNG);
+  el('btnCard').addEventListener('click',shareCard);
+  el('btnLink').addEventListener('click',copyLink);
+  el('btnRec').addEventListener('click',recordPour);
+
+  let wz=null; window.addEventListener('resize',()=>{ clearTimeout(wz); wz=setTimeout(render,150); });
+
+  // boot
+  if(location.hash.length>1){ try{ S=Object.assign({}, DEF, decode(location.hash.slice(1))); }catch(e){} }
+  sanitize();
+  syncUI(); render();
+})();
+</script>
+</body>
+</html>

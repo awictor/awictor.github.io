@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Selvage — the self-mending edge of Hamming(7,4)</title>
+<style>
+  :root{
+    --bg:#0e1117; --panel:#161b24; --edge:#242c3a; --ink:#e8ecf3; --dim:#8b95a7;
+    --a:#4aa3ff; --b:#ff5d8f; --c:#3fd6a5; --warn:#ffb454; --bad:#ff5b5b; --good:#3fd6a5;
+    --mono:"SFMono-Regular",ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 70% -10%,#1a2233,#0e1117);
+    color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:22px}
+  h1{font-size:22px;margin:0 0 2px;letter-spacing:.2px}
+  h1 b{color:var(--warn)}
+  .sub{color:var(--dim);margin:0 0 18px;font-size:13.5px}
+  .wrap{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-start;max-width:1000px}
+  .venn{position:relative;width:360px;height:380px;flex:0 0 auto}
+  .venn svg{position:absolute;inset:0}
+  .chip{position:absolute;transform:translate(-50%,-50%);width:42px;height:42px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;font:700 18px/1 var(--mono);
+    background:#0c0f15;border:2px solid var(--edge);color:var(--ink);cursor:pointer;
+    transition:transform .12s,box-shadow .18s,border-color .18s,background .18s;user-select:none;z-index:3}
+  .chip small{position:absolute;bottom:-15px;font:600 9.5px/1 var(--mono);color:var(--dim);white-space:nowrap}
+  .chip.data{border-color:#3b4658}
+  .chip.parity{background:#12161f;border-style:dashed}
+  .chip.on{background:#1d2740;border-color:#5b6b88;color:#fff}
+  .chip.err{border-color:var(--bad)!important;box-shadow:0 0 0 3px rgba(255,91,91,.25),0 0 16px rgba(255,91,91,.5)}
+  .chip.hl{box-shadow:0 0 0 3px rgba(255,255,255,.14)}
+  .chip:hover{transform:translate(-50%,-50%) scale(1.09)}
+  .chip:focus-visible{outline:2px solid var(--a);outline-offset:3px}
+  .chip.heal{animation:heal .7s ease}
+  @keyframes heal{0%{box-shadow:0 0 0 3px rgba(255,91,91,.3)}
+    40%{transform:translate(-50%,-50%) scale(1.35);box-shadow:0 0 0 8px rgba(63,214,165,.45)}
+    100%{transform:translate(-50%,-50%) scale(1)}}
+  .clab{position:absolute;transform:translate(-50%,-50%);font:700 12px/1.25 var(--mono);
+    text-align:center;padding:3px 7px;border-radius:7px;background:#0c0f15cc;border:1px solid var(--edge);z-index:4;white-space:nowrap}
+  .clab .st{display:block;font-size:10px;font-weight:600;margin-top:1px}
+  .odd{color:var(--bad)} .even{color:var(--good)}
+  circle.ring{fill-opacity:.10;stroke-width:2;transition:fill-opacity .18s,stroke-width .18s}
+  circle.ring.act{fill-opacity:.26;stroke-width:3.5}
+  .side{flex:1;min-width:320px;max-width:440px}
+  .card{background:var(--panel);border:1px solid var(--edge);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+  .card h2{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin:0 0 10px}
+  .eq{font:600 14px/1 var(--mono);padding:7px 9px;border-radius:8px;margin:5px 0;cursor:default;
+    display:flex;justify-content:space-between;align-items:center;border:1px solid transparent;transition:background .15s,border-color .15s}
+  .eq:hover,.eq.act{background:#0f1420;border-color:var(--edge)}
+  .eq .lhs b{font-weight:800}
+  .eq .rv{font-size:13px;color:var(--dim)}
+  .synbox{display:flex;gap:8px;align-items:center;margin:6px 0 4px;flex-wrap:wrap}
+  .sbit{width:44px;height:52px;border-radius:9px;border:1px solid var(--edge);background:#0f1420;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;font:800 20px/1 var(--mono);transition:.15s}
+  .sbit .t{font:600 9px/1 var(--mono);color:var(--dim);margin-bottom:4px}
+  .sbit.one{color:var(--bad);border-color:var(--bad);box-shadow:0 0 12px rgba(255,91,91,.3)}
+  .sbit.hl{outline:2px solid #ffffff44;outline-offset:1px}
+  .arrow{font-size:20px;color:var(--dim)}
+  .addr{font:800 22px/1 var(--mono)}
+  .status{font-size:14px;padding:10px 12px;border-radius:9px;border:1px solid var(--edge);background:#0f1420;min-height:22px}
+  .status.ok{color:var(--good);border-color:#245}
+  .status.corr{color:var(--warn);border-color:#553}
+  .status.dbl{color:var(--bad);border-color:#533}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin:4px 0}
+  button{font:600 13px/1 inherit;color:var(--ink);background:#1b2333;border:1px solid var(--edge);
+    padding:9px 13px;border-radius:9px;cursor:pointer;transition:.14s}
+  button:hover{background:#243049;border-color:#3a475e}
+  button.pri{background:var(--warn);color:#151a10;border-color:var(--warn)}
+  button.pri:hover{filter:brightness(1.08)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  .toggle{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--dim);cursor:pointer;padding:5px 0}
+  .toggle input{accent-color:var(--warn);width:16px;height:16px}
+  .dbits{display:flex;gap:10px;flex-wrap:wrap}
+  .dbit{display:flex;flex-direction:column;align-items:center;gap:4px;font:600 11px/1 var(--mono);color:var(--dim)}
+  .dbit button{width:44px;height:40px;font:800 17px/1 var(--mono);padding:0}
+  .dbit button.set{background:#1d2740;color:#fff;border-color:#5b6b88}
+  .note{color:var(--dim);font-size:12.5px;margin:8px 0 0;line-height:1.5}
+  .nocode{font:700 20px/1 var(--mono);display:flex;gap:10px;flex-wrap:wrap;margin:8px 0}
+  .nocode .b{width:46px;height:46px;border-radius:9px;border:2px solid var(--edge);background:#0f1420;
+    display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .nocode .b.err{border-color:var(--bad);color:var(--bad);box-shadow:0 0 12px rgba(255,91,91,.35)}
+  kbd{font:600 11px var(--mono);background:#0f1420;border:1px solid var(--edge);border-radius:5px;padding:1px 5px;color:var(--dim)}
+  a{color:var(--a)}
+</style>
+</head>
+<body>
+  <h1><b>Selvage</b> — the self-mending edge of Hamming(7,4)</h1>
+  <p class="sub">Set 4 data bits, Selvage adds 3 parity bits so every circle holds an <b>even</b> number of ones. Click any transmitted bit to corrupt it, then read the syndrome that points straight at the break.</p>
+
+  <div class="wrap">
+    <div class="venn" id="venn">
+      <svg viewBox="0 0 360 380">
+        <circle class="ring" id="ringA" cx="124" cy="150" r="112" fill="var(--a)" stroke="var(--a)"/>
+        <circle class="ring" id="ringB" cx="236" cy="150" r="112" fill="var(--b)" stroke="var(--b)"/>
+        <circle class="ring" id="ringC" cx="180" cy="248" r="112" fill="var(--c)" stroke="var(--c)"/>
+      </svg>
+      <!-- chips + labels injected -->
+    </div>
+
+    <div class="side">
+      <div class="card" id="nocodeCard" style="display:none">
+        <div class="row" style="justify-content:space-between;align-items:center;margin-top:0">
+          <h2 style="margin:0">No-code baseline</h2>
+          <button id="btnBackEncoder">← Back to encoder</button>
+        </div>
+        <p class="note" style="margin-top:0">Send just the raw 4 data bits — no parity. Click one to flip it in transit:</p>
+        <div class="nocode" id="ncStrip"></div>
+        <div class="status" id="ncStatus"></div>
+      </div>
+
+      <div id="mainPanels">
+        <div class="card">
+          <h2>Data bits (the message)</h2>
+          <div class="dbits" id="dbits"></div>
+        </div>
+
+        <div class="card">
+          <h2>Parity equations · each circle must stay even</h2>
+          <div class="eq" data-check="A"><span class="lhs">p₁ = d₃ ⊕ d₅ ⊕ d₇</span><span class="rv" id="eqA"></span></div>
+          <div class="eq" data-check="B"><span class="lhs">p₂ = d₃ ⊕ d₆ ⊕ d₇</span><span class="rv" id="eqB"></span></div>
+          <div class="eq" data-check="C"><span class="lhs">p₄ = d₅ ⊕ d₆ ⊕ d₇</span><span class="rv" id="eqC"></span></div>
+          <p class="note">Hover an equation to see its circle, its bits, and its syndrome digit light up together.</p>
+        </div>
+
+        <div class="card">
+          <h2>Syndrome · failed checks spell the address</h2>
+          <div class="synbox">
+            <div class="sbit" id="sbC" data-check="C"><span class="t">s₄</span><span class="v">0</span></div>
+            <div class="sbit" id="sbB" data-check="B"><span class="t">s₂</span><span class="v">0</span></div>
+            <div class="sbit" id="sbA" data-check="A"><span class="t">s₁</span><span class="v">0</span></div>
+            <span class="arrow">→</span>
+            <span class="addr" id="addr">position 0</span>
+          </div>
+          <div class="synbox" id="overallRow" style="display:none">
+            <div class="sbit" id="sbP"><span class="t">p₈</span><span class="v">0</span></div>
+            <span class="rv" style="color:var(--dim);font:600 12px var(--mono)">overall parity check</span>
+          </div>
+          <div class="status" id="status"></div>
+          <div class="row">
+            <button class="pri" id="btnHeal">Decode &amp; correct →</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Controls</h2>
+          <div class="row">
+            <button id="btnCorrupt">⚡ Corrupt me</button>
+            <button id="btnReset">↺ Reset</button>
+            <button id="btnPuzzle">🎯 New puzzle</button>
+            <button id="btnShare">🔗 Copy link</button>
+          </div>
+          <label class="toggle"><input type="checkbox" id="tgSecded"> SECDED mode — add 8th overall-parity bit (detect double errors)</label>
+          <label class="toggle"><input type="checkbox" id="tgNocode"> No-code baseline — show why parity is needed</label>
+          <div class="status" id="puzzleStatus" style="display:none;margin-top:8px"></div>
+          <p class="note">Click any bit in the diagram to inject a transmission error — or focus one with <kbd>Tab</kbd> and press <kbd>Enter</kbd> / <kbd>Space</kbd> to flip it. In SECDED you may break <b>two</b> bits to trigger uncorrectable detection.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+"use strict";
+// ---- layout: position -> role, chip coords in the 360x380 box ----
+const CHIPS = {
+  1:{x:98, y:116, role:'parity', lbl:'p₁'},
+  2:{x:262,y:116, role:'parity', lbl:'p₂'},
+  3:{x:180,y:100, role:'data',   lbl:'d₃'},
+  4:{x:180,y:305, role:'parity', lbl:'p₄'},
+  5:{x:116,y:214, role:'data',   lbl:'d₅'},
+  6:{x:244,y:214, role:'data',   lbl:'d₆'},
+  7:{x:180,y:186, role:'data',   lbl:'d₇'},
+  8:{x:46, y:322, role:'parity', lbl:'p₈'}
+};
+const DATA_POS = [3,5,6,7];
+const SUB = {1:'₁',2:'₂',3:'₃',4:'₄',5:'₅',6:'₆',7:'₇',8:'₈'}; // ascii index -> unicode subscript
+const CHECKS = {A:[1,3,5,7], B:[2,3,6,7], C:[4,5,6,7]};      // circle -> covered positions
+const CHECK_ORDER = {A:1, B:2, C:4};                          // syndrome weight
+const CIRCLE_LABELS = {A:{x:56,y:74,lbl:'p₁'}, B:{x:304,y:74,lbl:'p₂'}, C:{x:180,y:360,lbl:'p₄'}};
+
+const state = {
+  data:{3:1,5:0,6:1,7:0},
+  errors:new Set(),          // positions flipped in transit
+  secded:false,
+  nocode:false,
+  ncFlip:-1,                 // flipped index in no-code strip (0..3)
+  mode:'explore',            // explore | puzzle
+  puzzle:null                // {answer, guess, done}
+};
+
+const $ = id => document.getElementById(id);
+const xor = arr => arr.reduce((a,b)=>a^b,0);
+
+// ---- coding ----
+function codeword(){                // clean transmitted bits by position
+  const d=state.data;
+  const bit={};
+  bit[1]=xor([d[3],d[5],d[7]]);     // p1
+  bit[2]=xor([d[3],d[6],d[7]]);     // p2
+  bit[3]=d[3];
+  bit[4]=xor([d[5],d[6],d[7]]);     // p4
+  bit[5]=d[5]; bit[6]=d[6]; bit[7]=d[7];
+  if(state.secded) bit[8]=xor([bit[1],bit[2],bit[3],bit[4],bit[5],bit[6],bit[7]]); // even overall
+  return bit;
+}
+function received(){                // apply transmission errors
+  const bit=codeword();
+  state.errors.forEach(p=>{ if(bit[p]!==undefined) bit[p]^=1; });
+  return bit;
+}
+function decode(r){
+  const s1=xor(CHECKS.A.map(p=>r[p]));
+  const s2=xor(CHECKS.B.map(p=>r[p]));
+  const s4=xor(CHECKS.C.map(p=>r[p]));
+  const syn=s4*4+s2*2+s1;
+  const res={s1,s2,s4,syn,checks:{A:s1,B:s2,C:s4}};
+  if(state.secded){
+    const overall=xor([r[1],r[2],r[3],r[4],r[5],r[6],r[7],r[8]]);
+    res.overall=overall;
+    if(syn===0 && overall===0) res.kind='clean';
+    else if(overall===1) res.kind='single', res.at=(syn===0?8:syn);   // syn0+overall1 => p8 itself
+    else res.kind='double';                                            // syn!=0, overall even => 2 errors
+  } else {
+    res.kind = syn===0 ? 'clean' : 'single';
+    res.at = syn;
+  }
+  return res;
+}
+
+// ---- build DOM ----
+const venn=$('venn');
+const maxPos = ()=> state.secded?8:7;
+function buildChips(){
+  venn.querySelectorAll('.chip,.clab').forEach(e=>e.remove());
+  for(let p=1;p<=maxPos();p++){
+    const c=CHIPS[p];
+    const el=document.createElement('div');
+    el.className='chip '+c.role;
+    el.id='chip'+p; el.dataset.pos=p;
+    el.style.left=c.x+'px'; el.style.top=c.y+'px';
+    el.setAttribute('tabindex','0');
+    el.setAttribute('role','button');
+    el.setAttribute('aria-label',c.lbl+', position '+p);
+    el.innerHTML='<span class="bv">0</span><small>'+c.lbl+' · pos '+p+'</small>';
+    el.addEventListener('click',()=>onChipClick(p));
+    el.addEventListener('keydown',ev=>{ if(ev.key==='Enter'||ev.key===' '){ ev.preventDefault(); onChipClick(p); } });
+    venn.appendChild(el);
+  }
+  for(const k in CIRCLE_LABELS){
+    const c=CIRCLE_LABELS[k];
+    const el=document.createElement('div');
+    el.className='clab'; el.id='clab'+k;
+    el.style.left=c.x+'px'; el.style.top=c.y+'px';
+    el.innerHTML=c.lbl+'<span class="st"></span>';
+    venn.appendChild(el);
+  }
+}
+function buildDataBits(){
+  const wrap=$('dbits'); wrap.innerHTML='';
+  DATA_POS.forEach(p=>{
+    const box=document.createElement('div'); box.className='dbit';
+    const b=document.createElement('button'); b.textContent=state.data[p];
+    b.className=state.data[p]?'set':'';
+    b.addEventListener('click',()=>{ state.data[p]^=1; render(); syncHash(); });
+    box.appendChild(b);
+    const lab=document.createElement('div'); lab.textContent='d'+SUB[p];
+    box.appendChild(lab); wrap.appendChild(box);
+  });
+}
+function buildNoCode(){
+  const s=$('ncStrip'); s.innerHTML='';
+  DATA_POS.forEach((p,i)=>{
+    const b=document.createElement('div'); b.className='b'+(state.ncFlip===i?' err':'');
+    b.textContent=state.data[p]^(state.ncFlip===i?1:0);
+    b.title='d'+p;
+    b.addEventListener('click',()=>{ state.ncFlip = state.ncFlip===i?-1:i; render(); });
+    s.appendChild(b);
+  });
+}
+
+// ---- interactions ----
+function onChipClick(p){
+  if(state.mode==='puzzle' && !state.puzzle.done){
+    state.puzzle.guess=p; scorePuzzle(); return;
+  }
+  if(state.errors.has(p)) state.errors.delete(p); else state.errors.add(p);
+  render(); syncHash();
+}
+function scorePuzzle(){
+  const pz=state.puzzle; pz.done=true;
+  const r=received(); const d=decode(r);
+  const correct = d.at===pz.answer;
+  const hit = pz.guess===pz.answer;
+  $('puzzleStatus').style.display='block';
+  $('puzzleStatus').className='status '+(hit?'ok':'dbl');
+  $('puzzleStatus').innerHTML = (hit?'✔ Nailed it! ':'✗ Not quite. ')+
+    'You guessed <b>position '+pz.guess+'</b>. The syndrome decodes to <b>position '+pz.answer+
+    '</b> ('+CHIPS[pz.answer].lbl+'). Hit “Decode &amp; correct” to heal it.';
+  render();
+}
+function newPuzzle(){
+  state.secded=false; $('tgSecded').checked=false;
+  DATA_POS.forEach(p=> state.data[p]=Math.random()<0.5?1:0);
+  const at=1+Math.floor(Math.random()*7);
+  state.errors=new Set([at]);
+  state.mode='puzzle';
+  state.puzzle={answer:at, guess:null, done:false};
+  $('puzzleStatus').style.display='block';
+  $('puzzleStatus').className='status corr';
+  $('puzzleStatus').innerHTML='🎯 One bit is broken. <b>Click the bit you think is the culprit</b> — the syndrome is hidden until you guess.';
+  buildChips(); render(); syncHash();
+}
+function corruptMe(){
+  exitPuzzle();
+  const at=1+Math.floor(Math.random()*maxPos());
+  state.errors=new Set([at]); render(); syncHash();
+}
+function reset(){ exitPuzzle(); state.errors.clear(); state.ncFlip=-1; render(); syncHash(); }
+function exitPuzzle(){ state.mode='explore'; state.puzzle=null; $('puzzleStatus').style.display='none'; }
+
+function heal(){
+  const r=received(); const d=decode(r);
+  if(state.mode==='puzzle' && state.puzzle && !state.puzzle.done) return;
+  if(d.kind==='double'){ flash($('status')); return; }
+  const pos=d.at||d.syn;
+  if(pos>0){
+    const chip=$('chip'+pos);
+    if(chip){ chip.classList.add('heal'); setTimeout(()=>chip.classList.remove('heal'),700); }
+    state.errors.delete(pos);
+    setTimeout(()=>{ exitPuzzle(); render(); syncHash(); },260);
+  }
+}
+function flash(el){ el.animate([{transform:'translateX(-4px)'},{transform:'translateX(4px)'},{transform:'translateX(0)'}],{duration:220,iterations:2}); }
+
+// ---- render ----
+function render(){
+  const puzzleHide = state.mode==='puzzle' && state.puzzle && !state.puzzle.done;
+  $('nocodeCard').style.display = state.nocode?'block':'none';
+  $('mainPanels').style.display = state.nocode?'none':'block';
+  $('overallRow').style.display = state.secded?'flex':'none';
+
+  if(state.nocode){ buildNoCode(); renderNoCode(); return; }
+
+  buildDataBits(); // keep the data-bit toggles in sync with state.data
+  const clean=codeword(), r=received(), d=decode(r);
+
+  // chips
+  for(let p=1;p<=maxPos();p++){
+    const chip=$('chip'+p); if(!chip) continue;
+    chip.querySelector('.bv').textContent=r[p];
+    chip.classList.toggle('on', r[p]===1);
+    const err=state.errors.has(p) && !puzzleHide;
+    chip.classList.toggle('err', err);
+    chip.setAttribute('aria-pressed', err?'true':'false');
+  }
+  // circles + labels
+  for(const k in CHECKS){
+    const odd=d.checks[k]===1 && !puzzleHide;
+    $('ring'+k).classList.toggle('act', odd);
+    const lab=$('clab'+k).querySelector('.st');
+    lab.textContent = puzzleHide?'· ?' : (odd?'✗ odd':'✓ even');
+    lab.className='st '+(puzzleHide?'':(odd?'odd':'even'));
+  }
+  // equations
+  ['A','B','C'].forEach(k=>{
+    const pos = k==='A'?1 : k==='B'?2 : 4;
+    $('eq'+k).textContent = '→ p'+SUB[CHECK_ORDER[k]]+' = '+clean[pos];
+  });
+  // syndrome
+  const map={A:'sbA',B:'sbB',C:'sbC'};
+  for(const k in map){
+    const el=$(map[k]); const v=puzzleHide?'?':d.checks[k];
+    el.querySelector('.v').textContent=v;
+    el.classList.toggle('one', d.checks[k]===1 && !puzzleHide);
+  }
+  if(state.secded){ const el=$('sbP'); el.querySelector('.v').textContent=puzzleHide?'?':(d.overall||0);
+    el.classList.toggle('one', d.overall===1 && !puzzleHide); }
+  $('addr').textContent = puzzleHide ? 'position ?'
+    : (d.kind==='clean' ? 'no error' : 'position '+(d.at ?? d.syn));
+
+  // status
+  const st=$('status');
+  if(puzzleHide){ st.className='status corr'; st.innerHTML='Syndrome hidden — make your guess in the diagram.'; }
+  else if(d.kind==='clean'){ st.className='status ok'; st.innerHTML='✓ All circles even. No error detected — message intact.'; }
+  else if(d.kind==='double'){ st.className='status dbl'; st.innerHTML='‼ Two circles disagree with the overall bit: <b>double error DETECTED but not correctable.</b> SECDED knows something is wrong yet can’t locate it.'; }
+  else { st.className='status corr';
+    const pos=d.at; const covered=Object.keys(CHECKS).filter(k=>CHECKS[k].includes(pos)).map(k=>'p'+CHECK_ORDER[k]).join(' & ');
+    st.innerHTML='⚠ Odd circle'+(Object.values(d.checks).filter(v=>v===1).length>1?'s':'')+' → syndrome <b>'+d.s4+''+d.s2+''+d.s1+'</b> = <b>position '+pos+'</b> ('+CHIPS[pos].lbl+'). '+
+      (pos===8?'The overall bit itself flipped.':'Only bit '+pos+' sits in exactly checks '+covered+'.')+' Flip it back and every circle is even again.';
+  }
+  $('btnHeal').disabled = puzzleHide || d.kind==='clean' || d.kind==='double';
+}
+function renderNoCode(){
+  const flipped=state.ncFlip>=0;
+  const st=$('ncStatus');
+  if(!flipped){ st.className='status ok'; st.innerHTML='4 data bits sent, 4 received. Everything looks fine — but there is no way to be sure. Click a bit to corrupt it.'; }
+  else { st.className='status dbl'; st.innerHTML='A bit flipped in transit — and the receiver has <b>no possible way to know</b>. No parity, no even/odd check, no syndrome. The message is silently wrong. <br><span style="color:var(--dim)">↑ This is exactly why Hamming adds 3 redundant parity bits.</span>'; }
+}
+
+// ---- cross-highlight ----
+document.querySelectorAll('.eq').forEach(eq=>{
+  const k=eq.dataset.check;
+  eq.addEventListener('mouseenter',()=>highlight(k));
+  eq.addEventListener('mouseleave',clearHl);
+});
+document.querySelectorAll('.sbit[data-check]').forEach(sb=>{
+  const k=sb.dataset.check;
+  sb.addEventListener('mouseenter',()=>highlight(k));
+  sb.addEventListener('mouseleave',clearHl);
+});
+function highlight(k){
+  $('ring'+k).classList.add('act');
+  $('eq'+k) && $('eq'+k).parentElement.classList.add('act');
+  ({A:'sbA',B:'sbB',C:'sbC'})[k] && $(({A:'sbA',B:'sbB',C:'sbC'})[k]).classList.add('hl');
+  CHECKS[k].forEach(p=>{ const c=$('chip'+p); if(c) c.classList.add('hl'); });
+}
+function clearHl(){
+  document.querySelectorAll('.chip.hl').forEach(c=>c.classList.remove('hl'));
+  document.querySelectorAll('.sbit.hl').forEach(c=>c.classList.remove('hl'));
+  document.querySelectorAll('.eq.act').forEach(c=>c.classList.remove('act'));
+  render(); // restores true circle state
+}
+
+// ---- URL hash ----
+function syncHash(){
+  const d=DATA_POS.map(p=>state.data[p]).join('');
+  const e=[...state.errors].sort((a,b)=>a-b).join(',');
+  const parts=['d='+d];
+  if(e) parts.push('e='+e);
+  if(state.secded) parts.push('s=1');
+  if(state.mode==='puzzle' && state.puzzle) parts.push('pz='+state.puzzle.answer);
+  location.hash=parts.join('&');
+}
+function loadHash(){
+  const h=location.hash.replace(/^#/,''); if(!h) return;
+  const q={}; h.split('&').forEach(kv=>{const[a,b]=kv.split('=');q[a]=b;});
+  if(q.d && /^[01]{4}$/.test(q.d)) DATA_POS.forEach((p,i)=> state.data[p]=+q.d[i]);
+  if(q.s==='1'){ state.secded=true; $('tgSecded').checked=true; }
+  if(q.pz){ state.mode='puzzle'; state.puzzle={answer:+q.pz,guess:null,done:false}; }
+  if(q.e) state.errors=new Set(q.e.split(',').map(Number).filter(n=>n>=1&&n<=8));
+}
+
+// ---- wire up ----
+$('btnCorrupt').onclick=corruptMe;
+$('btnReset').onclick=reset;
+$('btnPuzzle').onclick=newPuzzle;
+$('btnHeal').onclick=heal;
+$('btnShare').onclick=()=>{ syncHash();
+  const b=$('btnShare'); const t='🔗 Copy link';
+  const flash=msg=>{ b.textContent=msg; setTimeout(()=>b.textContent=t,1600); };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(location.href)
+      .then(()=>flash('✓ Copied!'))
+      .catch(()=>{ window.prompt('Copy this link',location.href); flash('🔗 Copy link'); });
+  } else {
+    window.prompt('Copy this link',location.href);
+  }
+};
+$('btnBackEncoder').onclick=()=>{ state.nocode=false; $('tgNocode').checked=false; render(); };
+$('tgSecded').onchange=e=>{
+  state.secded=e.target.checked; exitPuzzle();
+  [...state.errors].forEach(p=>{ if(p>maxPos()) state.errors.delete(p); });
+  buildChips(); render(); syncHash();
+};
+$('tgNocode').onchange=e=>{ state.nocode=e.target.checked; render(); };
+
+// init
+loadHash();
+buildChips(); buildDataBits(); render();
+if(state.mode==='puzzle'){ $('puzzleStatus').style.display='block'; $('puzzleStatus').className='status corr';
+  $('puzzleStatus').innerHTML='🎯 Someone shared a broken bit. <b>Click the culprit</b> — syndrome hidden until you guess.'; }
+</script>
+</body>
+</html>

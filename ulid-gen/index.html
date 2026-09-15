@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UlidGen — ULID generator &amp; decoder</title>
+<meta name="description" content="Free offline ULID generator and decoder. Create lexicographically sortable, timestamp-embedded unique IDs (Crockford base32), and decode the timestamp back. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/ulid-gen/">
+<style>
+  :root{
+    --c:#172554; --bg:#f6f8fc; --fg:#0f1626; --muted:#566178;
+    --card:#ffffff; --border:#dde5f0; --code:#eef2f9;
+  }
+  [data-theme="dark"]{
+    --bg:#0b0f19; --fg:#e5eaf3; --muted:#8894aa; --card:#131a29;
+    --border:#242e42; --code:#182234;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#3b82f6);display:grid;place-items:center;color:#fff;font-size:18px}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:720px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  .ulid{background:var(--code);border-radius:12px;padding:16px 18px;font-family:ui-monospace,monospace;
+    font-size:1.25rem;letter-spacing:.04em;word-break:break-all;user-select:all}
+  .ulid .t{color:var(--c);font-weight:700}
+  .actions{display:flex;gap:10px;margin-top:12px}
+  .btn{border:1px solid var(--border);background:var(--bg);color:var(--fg);border-radius:10px;padding:9px 16px;
+    cursor:pointer;font-size:.9rem;font-weight:600}
+  .btn.primary{background:var(--c);color:#fff;border-color:var(--c)}
+  .btn:hover{border-color:var(--c)}
+  .meta{color:var(--muted);font-size:.86rem;margin-top:10px}
+  .decode{margin-top:22px;padding-top:18px;border-top:1px solid var(--border)}
+  input{width:100%;padding:11px 13px;border:1px solid var(--border);border-radius:10px;
+    background:var(--bg);color:var(--fg);font-family:ui-monospace,monospace;font-size:.95rem}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .decoded{margin-top:10px;font-size:.9rem}
+  .decoded.bad{color:#dc2626}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('ulid.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">▲</div>
+  <div>
+    <h1>UlidGen</h1>
+    <p class="sub">ULID generator &amp; decoder</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <label>Generated ULID</label>
+    <div class="ulid" id="out"></div>
+    <div class="actions">
+      <button class="btn primary" id="gen">↻ Generate</button>
+      <button class="btn" id="copy">Copy</button>
+    </div>
+    <div class="meta" id="meta"></div>
+    <div class="decode">
+      <label for="dec">Decode a ULID's timestamp</label>
+      <input id="dec" spellcheck="false" placeholder="Paste a ULID…">
+      <div class="decoded" id="decoded"></div>
+    </div>
+    <p class="hint">ULIDs are 26-character, lexicographically sortable IDs: the first 10 chars encode a
+      millisecond timestamp, the last 16 are random. Great as sortable database keys. Runs locally.</p>
+  </div>
+</main>
+<footer>
+  UlidGen is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/ulid-gen">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+var ENC = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'; // Crockford base32 (no I L O U)
+function encodeTime(now, len){
+  len = len || 10;
+  var str = '';
+  for(var i = 0; i < len; i++){
+    var mod = now % 32;
+    str = ENC.charAt(mod) + str;
+    now = (now - mod) / 32;
+  }
+  return str;
+}
+function encodeRandom(len, rng){
+  len = len || 16;
+  rng = rng || defaultRng;
+  var str = '';
+  for(var i = 0; i < len; i++) str += ENC.charAt(Math.floor(rng() * 32));
+  return str;
+}
+function ulid(now, rng){
+  if(now === undefined || now === null) now = Date.now();
+  return encodeTime(now, 10) + encodeRandom(16, rng);
+}
+function decodeTime(id){
+  if(typeof id !== 'string' || id.length < 10) return null;
+  var t = id.substr(0, 10).toUpperCase();
+  var time = 0;
+  for(var i = 0; i < 10; i++){
+    var v = ENC.indexOf(t.charAt(i));
+    if(v < 0) return null;
+    time = time * 32 + v;
+  }
+  return time;
+}
+function isValid(id){
+  return typeof id === 'string' && /^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$/i.test(id);
+}
+function defaultRng(){
+  if(typeof crypto !== 'undefined' && crypto.getRandomValues){
+    var a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] / 4294967296;
+  }
+  return Math.random();
+}
+
+if(typeof module !== 'undefined') module.exports = {
+  ENC, encodeTime, encodeRandom, ulid, decodeTime, isValid
+};
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var outEl = document.getElementById('out');
+  var metaEl = document.getElementById('meta');
+  var decEl = document.getElementById('dec');
+  var decodedEl = document.getElementById('decoded');
+  var current = '';
+
+  function gen(){
+    current = ulid();
+    outEl.innerHTML = '<span class="t">' + current.slice(0, 10) + '</span>' + current.slice(10);
+    metaEl.textContent = 'timestamp: ' + new Date(decodeTime(current)).toISOString();
+  }
+  function decode(){
+    var id = decEl.value.trim();
+    if(id === ''){ decodedEl.textContent = ''; return; }
+    if(!isValid(id)){ decodedEl.className = 'decoded bad'; decodedEl.textContent = 'Not a valid ULID (26 Crockford base32 chars).'; return; }
+    var ms = decodeTime(id);
+    decodedEl.className = 'decoded';
+    decodedEl.textContent = new Date(ms).toISOString() + '  (' + ms + ' ms)';
+  }
+  document.getElementById('gen').addEventListener('click', gen);
+  document.getElementById('copy').addEventListener('click', function(){
+    if(navigator.clipboard) navigator.clipboard.writeText(current);
+    this.textContent = 'Copied'; var b = this; setTimeout(function(){ b.textContent = 'Copy'; }, 1000);
+  });
+  decEl.addEventListener('input', decode);
+  gen();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('ulid.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('ulid.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

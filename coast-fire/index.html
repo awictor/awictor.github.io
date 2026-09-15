@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coast FIRE Calculator — can you stop saving and still retire?</title>
+<meta name="description" content="Find your Coast FIRE number — the amount invested today that grows to your retirement target with zero further contributions. Offline, no tracking.">
+<style>
+  :root{
+    --c:#10b981;
+    --bg:#eefaf5; --card:#ffffff; --fg:#0c1e17; --muted:#4f6a60;
+    --line:#d3ede2; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#061511; --card:#0e1f19; --fg:#e5f5ee; --muted:#86a99b;
+    --line:#1c332b; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:560px){.grid{grid-template-columns:1fr}}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  .unit{font-weight:400;text-transform:none}
+  input[type=number]{width:100%;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .result{text-align:center;margin:22px 0 4px}
+  .result .n{font-size:2.6rem;font-weight:800;color:var(--c);font-variant-numeric:tabular-nums;line-height:1}
+  .result .k{color:var(--muted);font-size:.9rem;margin-top:4px}
+  .verdict{display:inline-block;padding:8px 18px;border-radius:999px;font-weight:700;margin-top:14px}
+  .breakdown{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+  .bd{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+  .bd b{display:block;font-size:1.15rem;font-variant-numeric:tabular-nums}
+  .bd span{font-size:.76rem;color:var(--muted)}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+  .err{color:#dc2626;font-size:.85rem;margin-top:8px;min-height:1em;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🏖️</div>
+  <div>
+    <h1>Coast FIRE</h1>
+    <p>Can you stop saving and still retire on time?</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div><label>Current age</label><input type="number" id="age" value="30" min="0" step="1"></div>
+      <div><label>Retirement age</label><input type="number" id="retire" value="65" min="1" step="1"></div>
+      <div><label>Annual spending in retirement <span class="unit">($)</span></label><input type="number" id="spend" value="40000" min="0" step="any"></div>
+      <div><label>Withdrawal rate <span class="unit">(%)</span></label><input type="number" id="wr" value="4" min="0.1" step="any"></div>
+      <div><label>Real return rate <span class="unit">(% after inflation)</span></label><input type="number" id="rate" value="7" step="any"></div>
+      <div><label>Currently invested <span class="unit">($)</span></label><input type="number" id="have" value="90000" min="0" step="any"></div>
+    </div>
+    <div class="result">
+      <div class="n" id="coast">—</div>
+      <div class="k">Coast FIRE number (invest this much today, add nothing more)</div>
+      <div><span class="verdict" id="verdict">—</span></div>
+    </div>
+    <div class="breakdown">
+      <div class="bd"><b id="fire">—</b><span>retirement target (FIRE number)</span></div>
+      <div class="bd"><b id="proj">—</b><span>your savings projected to retirement</span></div>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>What is Coast FIRE?</h2>
+    <p class="note">You've hit <b>Coast FIRE</b> when the money you've already invested will grow — <b>with no further contributions</b> — into your full retirement target by the time you retire. After that, you only need to earn enough to cover today's expenses; compounding does the rest. Target = annual spending ÷ withdrawal rate (the 4% rule gives 25×). The coast number discounts that target back to today at your real return: <code>coast = target ÷ (1 + r)<sup>years</sup></code>. Estimates only, not financial advice. Everything runs locally.</p>
+  </div>
+
+  <p class="foot">100% offline · not financial advice · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function toNum(x){ var n = Number(x); if(!isFinite(n)) throw new Error('inputs must be numbers'); return n; }
+  // Future value of a lump sum with no further contributions.
+  function futureValue(pv, rate, years){
+    pv = toNum(pv); rate = toNum(rate); years = toNum(years);
+    if(years < 0) throw new Error('years must be non-negative');
+    if(rate <= -1) throw new Error('rate must be greater than -100%');
+    return pv * Math.pow(1 + rate, years);
+  }
+  // Retirement target from the 4% (or chosen) rule: spending / withdrawalRate.
+  function fireNumber(annualSpending, withdrawalRate){
+    annualSpending = toNum(annualSpending); withdrawalRate = toNum(withdrawalRate);
+    if(annualSpending < 0) throw new Error('spending must be non-negative');
+    if(withdrawalRate <= 0) throw new Error('withdrawal rate must be positive');
+    return annualSpending / withdrawalRate;
+  }
+  // Amount needed invested today to coast to the target.
+  function coastNumber(target, rate, years){
+    target = toNum(target); rate = toNum(rate); years = toNum(years);
+    if(target < 0) throw new Error('target must be non-negative');
+    if(years < 0) throw new Error('years must be non-negative');
+    if(rate <= -1) throw new Error('rate must be greater than -100%');
+    return target / Math.pow(1 + rate, years);
+  }
+  // Years for a lump sum to grow into the target with no contributions.
+  function yearsToTarget(pv, target, rate){
+    pv = toNum(pv); target = toNum(target); rate = toNum(rate);
+    if(pv <= 0) throw new Error('current amount must be positive');
+    if(target <= 0) throw new Error('target must be positive');
+    if(rate <= -1) throw new Error('rate must be greater than -100%');
+    if(target <= pv) return 0;
+    if(rate <= 0) return Infinity;
+    return Math.log(target / pv) / Math.log(1 + rate);
+  }
+  function isCoastFire(pv, target, rate, years){
+    return futureValue(pv, rate, years) >= toNum(target);
+  }
+
+  if(typeof module !== 'undefined') module.exports = { futureValue:futureValue, fireNumber:fireNumber, coastNumber:coastNumber, yearsToTarget:yearsToTarget, isCoastFire:isCoastFire };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    function money(n){ return '$' + Math.round(n).toLocaleString(); }
+    function val(id){ return document.getElementById(id).value; }
+    function render(){
+      document.getElementById('err').textContent = '';
+      try{
+        var age = Number(val('age')), retire = Number(val('retire')),
+            spend = Number(val('spend')), wr = Number(val('wr')) / 100,
+            rate = Number(val('rate')) / 100, have = Number(val('have'));
+        var years = retire - age;
+        if(years < 0) throw new Error('retirement age must be after current age');
+        var target = fireNumber(spend, wr);
+        var coast = coastNumber(target, rate, years);
+        var proj = futureValue(have, rate, years);
+        document.getElementById('coast').textContent = money(coast);
+        document.getElementById('fire').textContent = money(target);
+        document.getElementById('proj').textContent = money(proj);
+        var vd = document.getElementById('verdict');
+        if(isCoastFire(have, target, rate, years)){
+          vd.textContent = '✅ You’ve reached Coast FIRE';
+          vd.style.background = '#10b981'; vd.style.color = '#fff';
+        }else{
+          var pct = Math.round(have / coast * 100);
+          vd.textContent = '⏳ ' + pct + '% of the way to coasting';
+          vd.style.background = 'var(--bg)'; vd.style.color = 'var(--fg)'; vd.style.border = '1px solid var(--line)';
+        }
+      }catch(e){
+        document.getElementById('coast').textContent = '—';
+        document.getElementById('fire').textContent = '—';
+        document.getElementById('proj').textContent = '—';
+        document.getElementById('err').textContent = e.message;
+      }
+    }
+    ['age','retire','spend','wr','rate','have'].forEach(function(id){ document.getElementById(id).addEventListener('input', render); });
+    render();
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('coastfire-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('coastfire-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

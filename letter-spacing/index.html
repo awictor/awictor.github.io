@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LetterSpacing — Tracking ⇄ em ⇄ px Converter</title>
+<meta name="description" content="Convert design-tool tracking (1/1000 em, like Figma/Photoshop) to CSS letter-spacing in em and px, with a live preview. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('tracking-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#be185d;
+    --bg:#fbf4f7; --card:#ffffff; --fg:#201620; --muted:#6b556a; --line:#f0e2ea; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#150b11; --card:#1f131a; --fg:#f5ecf1; --muted:#a88d9b; --line:#2d1e27; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:660px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#9d174d);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:660px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.78rem;color:var(--muted);margin-bottom:5px;font-weight:600}
+  .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+  input{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem}
+  .fs{margin-top:14px}
+  .css{margin-top:14px;background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--c);border-radius:8px;padding:12px;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  .preview{margin-top:6px;padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--bg);text-align:center;overflow-x:auto;white-space:nowrap}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:660px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">AV</div>
+    <div><h1>LetterSpacing</h1><div class="sub">Tracking ⇄ em ⇄ px</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div><label for="tracking">Tracking (1/1000 em)</label><input type="number" id="tracking" value="50" step="1"></div>
+      <div><label for="em">em</label><input type="number" id="em" value="0.05" step="0.001"></div>
+      <div><label for="px">px</label><input type="number" id="px" value="0.8" step="0.1"></div>
+    </div>
+    <div class="fs"><label for="fs">Font size (px) — for em ⇄ px</label><input type="number" id="fs" value="16" min="1" step="1"></div>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card">
+    <div class="css mono" id="css"></div>
+    <div class="preview" id="preview">Typography</div>
+  </div>
+</main>
+<footer>
+  Design tools (Figma, Photoshop, InDesign) express tracking in units of <span class="mono">1/1000 em</span>, so tracking 50 = 0.05em. In px it depends on font size: <span class="mono">px = em × font-size</span>. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/letter-spacing">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  const trackingToEm = tracking => Number(tracking) / 1000;
+  const emToTracking = em => Number(em) * 1000;
+
+  function emToPx(em, fontSizePx){
+    const f = Number(fontSizePx);
+    if(!Number.isFinite(f) || f <= 0) throw new Error('font size must be > 0');
+    return Number(em) * f;
+  }
+  function pxToEm(px, fontSizePx){
+    const f = Number(fontSizePx);
+    if(!Number.isFinite(f) || f <= 0) throw new Error('font size must be > 0');
+    return Number(px) / f;
+  }
+
+  // From a tracking value + font size, produce em and px.
+  function convert(tracking, fontSizePx){
+    const em = trackingToEm(tracking);
+    return { em, px: emToPx(em, fontSizePx) };
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('css')){
+    const $ = id => document.getElementById(id);
+    const r = (n, d = 4) => Math.round(n * 10 ** d) / 10 ** d;
+
+    function paint(em){
+      $('css').textContent = `letter-spacing: ${r(em)}em;`;
+      $('preview').style.letterSpacing = em + 'em';
+    }
+    function fromTracking(){
+      try{ const c = convert($('tracking').value, $('fs').value); $('em').value = r(c.em); $('px').value = r(c.px); paint(c.em); $('err').textContent = ''; }
+      catch(e){ $('err').textContent = e.message; }
+    }
+    function fromEm(){
+      try{ const em = Number($('em').value); $('tracking').value = r(emToTracking(em), 2); $('px').value = r(emToPx(em, $('fs').value)); paint(em); $('err').textContent = ''; }
+      catch(e){ $('err').textContent = e.message; }
+    }
+    function fromPx(){
+      try{ const em = pxToEm($('px').value, $('fs').value); $('em').value = r(em); $('tracking').value = r(emToTracking(em), 2); paint(em); $('err').textContent = ''; }
+      catch(e){ $('err').textContent = e.message; }
+    }
+    $('tracking').addEventListener('input', fromTracking);
+    $('em').addEventListener('input', fromEm);
+    $('px').addEventListener('input', fromPx);
+    $('fs').addEventListener('input', fromTracking);
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('tracking-theme', cur); }catch(e){}
+    });
+    fromTracking();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { trackingToEm, emToTracking, emToPx, pxToEm, convert };
+</script>
+</body>
+</html>

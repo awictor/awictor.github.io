@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tumbrel — draw a path, watch it fall</title>
+<style>
+  :root{ --ink:#f3ede0; --accent:#e8a34a; --bar:#141c22cc; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; overflow:hidden; background:#0b1116; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; color:var(--ink); }
+  #c{ position:fixed; inset:0; display:block; touch-action:none; cursor:crosshair; }
+  #c.busy{ cursor:default; }
+  #bar{ position:fixed; left:50%; bottom:16px; transform:translateX(-50%); display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center;
+        padding:10px 14px; background:var(--bar); -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); border:1px solid #ffffff1a; border-radius:14px;
+        box-shadow:0 8px 30px #0009; max-width:min(94vw,920px); z-index:10; }
+  button,select{ font:inherit; color:var(--ink); background:#1e2a33; border:1px solid #ffffff1f; border-radius:9px; padding:7px 12px; cursor:pointer; transition:.15s; }
+  button:hover,select:hover{ background:#2a3a45; }
+  button.primary{ background:var(--accent); color:#20160a; border-color:transparent; font-weight:700; }
+  button.primary:hover{ filter:brightness(1.08); }
+  .ctl{ display:flex; flex-direction:column; gap:2px; font-size:11px; opacity:.85; }
+  .ctl input[type=range]{ width:96px; accent-color:var(--accent); }
+  .ctl span{ font-variant-numeric:tabular-nums; }
+  #title{ position:fixed; top:16px; left:20px; z-index:10; font-weight:800; letter-spacing:.5px; font-size:19px; }
+  #title small{ display:block; font-weight:400; font-size:11px; opacity:.6; letter-spacing:0; }
+  #hint{ position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); text-align:center; opacity:.5; font-size:15px; pointer-events:none; z-index:5; line-height:1.7; }
+  #toast{ position:fixed; top:16px; left:50%; transform:translateX(-50%); background:#000a; padding:8px 16px; border-radius:20px; font-size:13px; z-index:20; opacity:0; transition:.3s; pointer-events:none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="title">Tumbrel<small>draw a path · tap or Space to topple</small></div>
+<div id="hint">Drag to draw a domino run.<br>Then press <b>Topple</b> or hit <b>Space</b>.<br>Tap any tile to topple from there · press <b>R</b> to stand them back up.<br>Or load one from the <b>Gallery ▾</b></div>
+<div id="toast"></div>
+<div id="bar">
+  <button class="primary" id="btnTopple" title="Start the cascade (Space)">▶ Topple</button>
+  <button id="btnReset" title="Stand tiles back up (R)">↻ Reset</button>
+  <button id="btnUndo" title="Undo last stroke / restore replaced drawing">⤺ Undo</button>
+  <button id="btnClear" title="Remove everything">✕ Clear</button>
+  <select id="gallery">
+    <option value="">Gallery ▾</option>
+    <option value="spiral">Spiral</option>
+    <option value="heart">Heart</option>
+    <option value="switchback">Switchback maze</option>
+    <option value="letters">Letters “HI”</option>
+  </select>
+  <button id="btnShare" title="Copy a link that replays this exact layout">🔗 Share</button>
+  <button id="btnMute" title="Mute sound" aria-label="Mute sound">🔊</button>
+  <label class="ctl">Spacing <span id="vSpace"></span><input type="range" id="space" min="16" max="70" value="26"></label>
+  <label class="ctl">Height <span id="vHeight"></span><input type="range" id="height" min="24" max="62" value="36"></label>
+  <label class="ctl">Speed <span id="vSpeed"></span><input type="range" id="speed" min="40" max="200" value="100"></label>
+</div>
+<script>
+"use strict";
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const $ = id => document.getElementById(id);
+let W = 0, H = 0, dpr = 1;
+function resize(){ dpr = Math.min(window.devicePixelRatio||1, 2); W = innerWidth; H = innerHeight;
+  cv.width = W*dpr; cv.height = H*dpr; }
+addEventListener('resize', resize); resize();
+
+// ---- constants ----
+const THICK = 7, WIDTH = 16, TRIG = h => 0.5*h; // trigger radius scales with tile height
+const P = { space:26, height:36, speed:1 };
+const GRAV = 11;
+
+// ---- state ----
+let strokes = [];              // array of polylines [{x,y}...] (world = css px)
+let prevStrokes = null;        // single-level snapshot for undoing destructive ops
+let dominoes = [];             // derived tiles
+let idCounter = 0;
+let muted = false;
+const cam = { x:W/2, y:H/2, s:1, tx:W/2, ty:H/2, ts:1 };
+let replay = false, replayClock = 0, forkTimer = 0, endTimer = 0;
+
+// ---- audio ----
+let AC = null;
+function ac(){ if(!AC) AC = new (window.AudioContext||window.webkitAudioContext)();
+  if(AC.state === 'suspended') AC.resume(); return AC; }
+function click(i){
+  if(muted) return; const a = ac(), t = a.currentTime;
+  const o = a.createOscillator(), g = a.createGain();
+  o.type = 'triangle'; o.frequency.value = 150 + (i%40)*11;
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.28,t+0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+0.09);
+  o.connect(g).connect(a.destination); o.start(t); o.stop(t+0.1);
+}
+function chime(){
+  if(muted) return; const a = ac(), t = a.currentTime;
+  [880,1320,1760].forEach((f,k)=>{ const o=a.createOscillator(),g=a.createGain();
+    o.type='sine'; o.frequency.value=f;
+    g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.22/(k+1),t+0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+1.1);
+    o.connect(g).connect(a.destination); o.start(t); o.stop(t+1.2); });
+}
+
+// ---- geometry helpers ----
+const dist = (a,b) => Math.hypot(a.x-b.x, a.y-b.y);
+function resample(poly, step){
+  if(poly.length < 2) return [];
+  const out = [poly[0]]; let acc = 0;
+  for(let i=1;i<poly.length;i++){
+    let a = poly[i-1], b = poly[i], seg = dist(a,b);
+    while(acc + seg >= step){
+      const t = (step - acc)/seg;
+      const np = { x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t };
+      out.push(np); a = np; seg = dist(a,b); acc = 0;
+    }
+    acc += seg;
+  }
+  return out;
+}
+
+function buildDominoes(){
+  dominoes = []; idCounter = 0;
+  strokes.forEach((poly, run) => {
+    const pts = resample(poly, P.space);
+    if(pts.length < 2) return;
+    const baseHue = (run*67) % 360;
+    for(let i=0;i<pts.length;i++){
+      const a = pts[i], b = pts[i+1] || pts[i-1];
+      let dir = { x:b.x-a.x, y:b.y-a.y }; const L = Math.hypot(dir.x,dir.y)||1;
+      dir = { x:dir.x/L, y:dir.y/L };
+      if(i === pts.length-1){ dir = { x:-dir.x, y:-dir.y }; } // last: face forward along path
+      dominoes.push({ id:idCounter++, x:a.x, y:a.y, baseDir:dir, dir:{...dir},
+        theta:0, omega:0, state:'stand', hue:baseHue + (i/(pts.length-1||1))*80,
+        run, bell:(i === pts.length-1) });
+    }
+  });
+}
+
+// ---- toppling ----
+function fall(d, from){
+  if(d.state !== 'stand') return false;
+  d.state = 'falling'; d.theta = 0.05; d.omega = 0.5;
+  if(from){
+    const to = { x:d.x-from.x, y:d.y-from.y };
+    d.dir = (d.baseDir.x*to.x + d.baseDir.y*to.y) < 0
+      ? { x:-d.baseDir.x, y:-d.baseDir.y } : { ...d.baseDir };
+  } else d.dir = { ...d.baseDir };
+  d.bell ? chime() : click(d.id);
+  return true;
+}
+function toppleLeads(){
+  ac(); let any = false;
+  const seen = {};
+  for(const d of dominoes){ if(seen[d.run]===undefined) seen[d.run] = d; }
+  for(const run in seen){ const d = seen[run];
+    if(fall(d, { x:d.x-d.baseDir.x*10, y:d.y-d.baseDir.y*10 })) any = true; }
+  return any;
+}
+function standUp(){ for(const d of dominoes){ d.state='stand'; d.theta=0; d.omega=0; d.dir={...d.baseDir}; } }
+
+// ---- main loop ----
+let last = performance.now();
+function frame(now){
+  let rdt = Math.min((now-last)/1000, 0.05); last = now;
+
+  // time scaling for cinematic replay
+  let ts = 1;
+  if(replay){ replayClock += rdt; ts = Math.min(1, 0.32 + replayClock*1.3);
+    if(forkTimer > 0){ ts *= 0.42; forkTimer -= rdt; } }
+  const dt = rdt * P.speed * ts;
+
+  // physics
+  let newFalls = 0;
+  const h = P.height, tr = TRIG(h), tr2 = tr*tr;
+  for(const d of dominoes){
+    if(d.state !== 'falling') continue;
+    d.omega += GRAV * Math.sin(d.theta + 0.02) * dt;
+    d.theta += d.omega * dt;
+    if(d.theta >= Math.PI/2){ d.theta = Math.PI/2; d.omega = 0; d.state = 'down'; }
+  }
+  // propagation: a falling tip reaching a standing base kicks it off
+  for(const a of dominoes){
+    if(a.state !== 'falling') continue;
+    const reach = h * Math.sin(a.theta);
+    const rx = a.x + a.dir.x*reach, ry = a.y + a.dir.y*reach;
+    for(const b of dominoes){
+      if(b.state !== 'stand') continue;
+      const dx = rx-b.x, dy = ry-b.y;
+      if(dx*dx+dy*dy < tr2){ if(fall(b, { x:a.x, y:a.y })) newFalls++; }
+    }
+  }
+  if(newFalls >= 2) forkTimer = 0.4;
+
+  // camera
+  if(replay){
+    const active = dominoes.filter(d => d.state==='falling');
+    if(active.length){
+      let sx=0, sy=0; for(const d of active){ sx+=d.x; sy+=d.y; }
+      cam.tx = sx/active.length; cam.ty = sy/active.length; cam.ts = 2.0; endTimer = 0;
+    } else {
+      endTimer += rdt;
+      if(endTimer > 1.1) replay = false;      // cascade finished — release camera
+    }
+  }
+  if(!replay){ cam.tx = W/2; cam.ty = H/2; cam.ts = 1; }
+  const k = 1 - Math.exp(-rdt*4.5);
+  cam.x += (cam.tx-cam.x)*k; cam.y += (cam.ty-cam.y)*k; cam.s += (cam.ts-cam.s)*k;
+
+  render();
+  requestAnimationFrame(frame);
+}
+
+// ---- rendering ----
+function rect(cx, cy, len, wid, ang, fill){
+  ctx.save(); ctx.translate(cx,cy); ctx.rotate(ang);
+  ctx.fillStyle = fill; ctx.fillRect(-len/2,-wid/2,len,wid); ctx.restore();
+}
+function render(){
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  // felt table backdrop
+  const g = ctx.createRadialGradient(W/2,H*0.42,80,W/2,H/2,Math.max(W,H)*0.8);
+  g.addColorStop(0,'#123'); g.addColorStop(1,'#070c10');
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+
+  ctx.save();
+  ctx.translate(W/2,H/2); ctx.scale(cam.s,cam.s); ctx.translate(-cam.x,-cam.y);
+
+  // faint guide lines under each run
+  ctx.lineWidth = 2/cam.s; ctx.strokeStyle = '#ffffff12';
+  for(const poly of strokes){ if(poly.length<2) continue;
+    ctx.beginPath(); ctx.moveTo(poly[0].x,poly[0].y);
+    for(const p of poly) ctx.lineTo(p.x,p.y); ctx.stroke(); }
+
+  const h = P.height;
+  for(const d of dominoes){
+    const s = Math.sin(d.theta), c = Math.cos(d.theta);
+    const len = THICK*c + h*s;               // top-down footprint along fall direction
+    const ang = Math.atan2(d.dir.y, d.dir.x);
+    const midx = d.x + d.dir.x*len/2, midy = d.y + d.dir.y*len/2;
+    // drop shadow
+    rect(midx+3, midy+5, len, WIDTH, ang, 'rgba(0,0,0,0.32)');
+    if(d.bell){
+      const down = d.state==='down';
+      ctx.save(); ctx.translate(d.x,d.y);
+      ctx.fillStyle = down ? '#ffd27a' : '#c9962f';
+      ctx.beginPath(); ctx.arc(0,0,WIDTH*0.7,0,7); ctx.fill();
+      ctx.strokeStyle = '#fff5d8'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.restore(); continue;
+    }
+    const light = 64 - 26*s;                  // fallen tiles read darker
+    rect(midx, midy, len, WIDTH, ang, `hsl(${d.hue} 68% ${light}%)`);
+    // front highlight edge
+    rect(d.x + d.dir.x*len, d.y + d.dir.y*len, 3, WIDTH, ang, `hsl(${d.hue} 70% ${light+16}%)`);
+  }
+
+  // current drawing stroke
+  if(drawing && cur.length){
+    ctx.lineWidth = 3; ctx.strokeStyle = '#e8a34a'; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(cur[0].x,cur[0].y);
+    for(const p of cur) ctx.lineTo(p.x,p.y); ctx.stroke();
+  }
+  ctx.restore();
+  $('hint').style.display = (strokes.length||drawing) ? 'none' : 'block';
+  cv.classList.toggle('busy', replay);          // drawing/tapping is disabled during replay
+}
+
+// ---- pointer: draw / tap ----
+let drawing = false, cur = [], moved = 0;
+function toWorld(e){
+  const r = cv.getBoundingClientRect();
+  const sx = e.clientX-r.left, sy = e.clientY-r.top;
+  return { x:(sx-W/2)/cam.s + cam.x, y:(sy-H/2)/cam.s + cam.y };
+}
+cv.addEventListener('pointerdown', e=>{ if(replay) return; cv.setPointerCapture(e.pointerId);
+  drawing = true; cur = [toWorld(e)]; moved = 0; });
+cv.addEventListener('pointermove', e=>{ if(!drawing) return;
+  const p = toWorld(e); const d = dist(p, cur[cur.length-1]);
+  moved += d; if(d > 3) cur.push(p); });
+cv.addEventListener('pointerup', e=>{ if(!drawing) return; drawing = false;
+  const p = toWorld(e);
+  if(moved < 6){                              // tap → topple nearest tile
+    ac(); let best=null, bd=1e9;
+    for(const d of dominoes){ if(d.state!=='stand') continue; const dd=dist(d,p); if(dd<bd){bd=dd; best=d;} }
+    if(best && bd < 60) fall(best, p);
+  } else if(cur.length >= 2){                 // finalize a run
+    const run = strokes.length;
+    strokes.push(cur); buildDominoes();
+    if(!dominoes.some(d => d.run === run)){    // path too short for current spacing
+      strokes.pop(); buildDominoes();
+      toast('Path too short for the current spacing');
+    } else { prevStrokes = null; }             // a real edit clears the destructive-op snapshot
+  }
+  cur = [];
+});
+
+// ---- URL hash: compact encode/decode of quantized strokes + params ----
+const b36 = n => (n<0?'-':'') + Math.abs(Math.round(n)).toString(36);
+function encode(){
+  const ints = [P.space, P.height, strokes.length];
+  for(const poly of strokes){ ints.push(poly.length); let px=0, py=0;
+    for(const p of poly){ const x=Math.round(p.x), y=Math.round(p.y);
+      ints.push(x-px, y-py); px=x; py=y; } }
+  return 'd1_' + ints.map(b36).join('.');
+}
+const clamp = (v,lo,hi) => Math.min(hi, Math.max(lo, v));
+function decode(hash){
+  if(!hash.startsWith('d1_')) return false;
+  try{
+    const ints = hash.slice(3).split('.').map(s=>parseInt(s,36));
+    const need = v => { if(!Number.isFinite(v)) throw 0; return v; };
+    let i=0; const space = need(ints[i++]), height = need(ints[i++]), n = need(ints[i++]);
+    if(n < 0 || n > 500) throw 0;
+    const ns = [];
+    for(let s=0;s<n;s++){ const cnt = need(ints[i++]); if(cnt < 0 || cnt > 100000) throw 0;
+      const poly=[]; let px=0, py=0;
+      for(let j=0;j<cnt;j++){ px+=need(ints[i++]); py+=need(ints[i++]); poly.push({x:px,y:py}); }
+      ns.push(poly); }
+    P.space = clamp(space, 16, 70); P.height = clamp(height, 24, 62);
+    strokes = ns; syncSliders(); buildDominoes(); return true;
+  }catch(_){ return false; }
+}
+
+// ---- preset generators (centred on screen) ----
+function preset(name){
+  const cx = W/2, cy = H/2, m = Math.min(W,H);
+  if(name==='spiral'){ const p=[]; for(let a=0;a<Math.PI*7;a+=0.12){ const r=14+a*(m*0.028);
+      p.push({x:cx+Math.cos(a)*r, y:cy+Math.sin(a)*r}); } return [p]; }
+  if(name==='heart'){ const p=[], sc=m*0.017; for(let t=0;t<=Math.PI*2+0.05;t+=0.08){
+      const x=16*Math.pow(Math.sin(t),3);
+      const y=13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t);
+      p.push({x:cx+x*sc, y:cy-y*sc}); } return [p]; }
+  if(name==='switchback'){ const p=[], w=m*0.62, rows=5, gap=m*0.11, x0=cx-w/2, y0=cy-gap*2;
+      for(let r=0;r<rows;r++){ const y=y0+r*gap; const l=x0, rt=x0+w;
+        if(r%2===0){ p.push({x:l,y},{x:rt,y}); } else { p.push({x:rt,y},{x:l,y}); } }
+      return [p]; }
+  if(name==='letters'){ const u=m*0.16, gap=u*1.5; const bx=cx-gap*0.9, by=cy;
+      const V=(x,y0,y1)=>[{x,y:by+y0},{x,y:by+y1}];
+      const Hb=(x0,x1,y)=>[{x:bx+x0,y:by+y},{x:bx+x1,y:by+y}];
+      // H
+      const runs=[];
+      runs.push(V(bx,-u,u), V(bx+u,-u,u), Hb(0,u,0));
+      // I
+      const ix=bx+gap;
+      runs.push([{x:ix-u*0.5,y:by-u},{x:ix+u*0.5,y:by-u}],
+                [{x:ix,y:by-u},{x:ix,y:by+u}],
+                [{x:ix-u*0.5,y:by+u},{x:ix+u*0.5,y:by+u}]);
+      return runs; }
+  return [];
+}
+
+// ---- UI wiring ----
+function toast(t){ const el=$('toast'); el.textContent=t; el.style.opacity=1;
+  clearTimeout(el._t); el._t=setTimeout(()=>el.style.opacity=0,1600); }
+function syncSliders(){ $('space').value=P.space; $('height').value=P.height;
+  $('speed').value=Math.round(P.speed*100); updateLabels(); }
+function updateLabels(){ $('vSpace').textContent=P.space; $('vHeight').textContent=P.height;
+  $('vSpeed').textContent=P.speed.toFixed(2)+'×'; }
+
+$('btnTopple').onclick = ()=>{ standUp(); if(toppleLeads()){ replay=true; replayClock=0; endTimer=0; forkTimer=0; } };
+$('btnReset').onclick  = ()=>{ standUp(); replay=false; };
+$('btnUndo').onclick   = ()=>{ if(prevStrokes){ strokes = prevStrokes; prevStrokes = null; }
+  else { strokes.pop(); } buildDominoes(); };
+$('btnClear').onclick  = ()=>{ if(strokes.length) prevStrokes = strokes.slice();
+  strokes=[]; dominoes=[]; replay=false; location.hash='';
+  if(prevStrokes) toast('Cleared — press Undo to restore'); };
+$('btnMute').onclick   = ()=>{ muted=!muted; const b=$('btnMute');
+  b.textContent = muted?'🔇':'🔊'; b.title = b.ariaLabel = muted?'Unmute sound':'Mute sound'; };
+$('btnShare').onclick  = ()=>{ if(!strokes.length){ toast('Draw a run first'); return; }
+  location.hash = encode();
+  navigator.clipboard && navigator.clipboard.writeText(location.href).then(
+    ()=>toast('Share link copied to clipboard'), ()=>toast('Link is in the URL bar')); };
+$('gallery').onchange = e=>{ const v=e.target.value; if(!v) return; e.target.value='';
+  ac();                                        // create/resume audio while user activation is live
+  const hadWork = strokes.length > 0;
+  if(hadWork) prevStrokes = strokes.slice();
+  strokes = preset(v); buildDominoes(); location.hash = encode();
+  toast(hadWork ? 'Loaded “'+v+'” — Undo restores your drawing' : 'Loaded “'+v+'” — toppling');
+  setTimeout(()=>{ standUp(); if(toppleLeads()){ replay=true; replayClock=0; endTimer=0; } }, 450); };
+
+$('space').oninput  = e=>{ P.space=+e.target.value; updateLabels(); buildDominoes(); };
+$('height').oninput = e=>{ P.height=+e.target.value; updateLabels(); buildDominoes(); };
+$('speed').oninput  = e=>{ P.speed=(+e.target.value)/100; updateLabels(); };
+
+addEventListener('keydown', e=>{
+  const t = e.target && e.target.tagName;      // don't hijack keys aimed at the toolbar controls
+  if(t==='INPUT'||t==='SELECT'||t==='BUTTON'||t==='TEXTAREA') return;
+  if(e.code==='Space'){ e.preventDefault(); $('btnTopple').click(); }
+  else if(e.key==='r'||e.key==='R') $('btnReset').click(); });
+
+// ---- boot ----
+if(!(location.hash && decode(location.hash.slice(1)))){ P.space=26; P.height=36; }
+syncSliders();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

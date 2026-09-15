@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChmodCalc — Unix file permission calculator</title>
+<meta name="description" content="Free offline chmod calculator. Convert Unix file permissions between octal (755), symbolic (rwxr-xr-x), and plain English. Supports setuid, setgid, and the sticky bit. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/chmod-calc/">
+<style>
+  :root{
+    --c:#0d9488; --bg:#f8f8f9; --fg:#18181b; --muted:#52525b;
+    --card:#ffffff; --border:#e4e4e7; --code:#efeff1;
+  }
+  [data-theme="dark"]{
+    --bg:#09090b; --fg:#e7e7ea; --muted:#8b8b93; --card:#151518;
+    --border:#27272a; --code:#1c1c20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#14b8a6);display:grid;place-items:center;color:#fff;font-size:15px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:720px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  .inputs{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  input[type=text]{width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:1.15rem;letter-spacing:.04em;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  input[type=text]:focus{outline:2px solid var(--c);border-color:var(--c)}
+  input.bad{border-color:#dc2626;outline-color:#dc2626}
+  .matrix{margin-top:20px;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  table{border-collapse:collapse;width:100%;font-size:.92rem}
+  th,td{padding:10px 8px;text-align:center;border-bottom:1px solid var(--border)}
+  th{background:var(--code);font-size:.74rem;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
+  td:first-child,th:first-child{text-align:left;padding-left:16px;font-weight:600}
+  tr:last-child td{border-bottom:none}
+  .chk{width:20px;height:20px;cursor:pointer;accent-color:var(--c)}
+  .out{margin-top:20px;display:grid;grid-template-columns:1fr 1fr;gap:1px;
+    background:var(--border);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .cell{background:var(--card);padding:14px 16px}
+  .cell .k{font-size:.74rem;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+  .cell .v{font-family:ui-monospace,monospace;font-weight:700;font-size:1.4rem;margin-top:3px;color:var(--c);
+    cursor:pointer;user-select:all}
+  .desc{margin-top:16px;background:var(--code);border-radius:11px;padding:14px 16px;font-size:.9rem;color:var(--muted)}
+  .desc b{color:var(--fg)}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+  @media(max-width:520px){.inputs,.out{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('chmod.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">755</div>
+  <div>
+    <h1>ChmodCalc</h1>
+    <p class="sub">Unix file permission calculator</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <div class="inputs">
+      <div>
+        <label for="oct">Octal</label>
+        <input type="text" id="oct" value="0755" spellcheck="false" inputmode="numeric" maxlength="4">
+      </div>
+      <div>
+        <label for="sym">Symbolic</label>
+        <input type="text" id="sym" value="rwxr-xr-x" spellcheck="false" maxlength="9">
+      </div>
+    </div>
+
+    <div class="matrix">
+      <table>
+        <thead>
+          <tr><th>Who</th><th>Read</th><th>Write</th><th>Execute</th><th>Special</th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+
+    <div class="out">
+      <div class="cell"><div class="k">chmod command</div><div class="v" id="cmd">chmod 0755</div></div>
+      <div class="cell"><div class="k">ls -l style</div><div class="v" id="lsl">-rwxr-xr-x</div></div>
+    </div>
+
+    <div class="desc" id="desc"></div>
+
+    <p class="hint">Type an octal (e.g. <code>755</code>, <code>644</code>, <code>4755</code>) or a symbolic
+      string (<code>rwxr-xr-x</code>), or toggle the checkboxes. The special digit covers
+      <b>setuid</b> (4), <b>setgid</b> (2) and the <b>sticky</b> bit (1). Runs 100% locally.</p>
+  </div>
+</main>
+<footer>
+  ChmodCalc is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/chmod-calc">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function normalizeOctal(input){
+  var s = String(input).trim();
+  if(!/^[0-7]{3,4}$/.test(s)) throw new Error('invalid octal: ' + input);
+  return s.length === 3 ? '0' + s : s;
+}
+function digitToPerm(d){
+  d = Number(d) & 7;
+  return { r: !!(d & 4), w: !!(d & 2), x: !!(d & 1) };
+}
+function permToDigit(p){
+  return (p.r ? 4 : 0) + (p.w ? 2 : 0) + (p.x ? 1 : 0);
+}
+// special: 'setuid' | 'setgid' -> s/S ; 'sticky' -> t/T ; falsy -> x/-
+function triadSymbolic(p, special){
+  var x = p.x ? 'x' : '-';
+  if(special === 'sticky') x = p.x ? 't' : 'T';
+  else if(special) x = p.x ? 's' : 'S';
+  return (p.r ? 'r' : '-') + (p.w ? 'w' : '-') + x;
+}
+function octalToSymbolic(input){
+  var o = normalizeOctal(input);
+  var spec = Number(o[0]);
+  return triadSymbolic(digitToPerm(o[1]), (spec & 4) ? 'setuid' : null)
+       + triadSymbolic(digitToPerm(o[2]), (spec & 2) ? 'setgid' : null)
+       + triadSymbolic(digitToPerm(o[3]), (spec & 1) ? 'sticky' : null);
+}
+function parseTriad(chunk){
+  var r = chunk[0] === 'r';
+  var w = chunk[1] === 'w';
+  var xc = chunk[2], x = false, special = false;
+  if(xc === 'x') x = true;
+  else if(xc === '-') x = false;
+  else if(xc === 's' || xc === 't'){ x = true; special = true; }
+  else if(xc === 'S' || xc === 'T'){ x = false; special = true; }
+  return { r: r, w: w, x: x, special: special };
+}
+function symbolicToOctal(sym){
+  var s = String(sym).trim();
+  if(!/^[-rwxsStT]{9}$/.test(s)) throw new Error('invalid symbolic: ' + sym);
+  var u = parseTriad(s.slice(0, 3));
+  var g = parseTriad(s.slice(3, 6));
+  var o = parseTriad(s.slice(6, 9));
+  var spec = (u.special ? 4 : 0) + (g.special ? 2 : 0) + (o.special ? 1 : 0);
+  return '' + spec + permToDigit(u) + permToDigit(g) + permToDigit(o);
+}
+function describeOctal(input){
+  var o = normalizeOctal(input);
+  var spec = Number(o[0]);
+  var roles = ['owner', 'group', 'others'];
+  var out = {};
+  for(var i = 0; i < 3; i++){
+    var p = digitToPerm(o[i + 1]);
+    var acts = [];
+    if(p.r) acts.push('read');
+    if(p.w) acts.push('write');
+    if(p.x) acts.push('execute');
+    out[roles[i]] = acts;
+  }
+  out.setuid = !!(spec & 4);
+  out.setgid = !!(spec & 2);
+  out.sticky = !!(spec & 1);
+  return out;
+}
+function humanReadable(input){
+  var d = describeOctal(input);
+  function phrase(role, acts){
+    var name = role.charAt(0).toUpperCase() + role.slice(1);
+    if(acts.length === 0) return name + ' has no permissions';
+    return name + ' can ' + acts.join(', ');
+  }
+  var parts = [phrase('owner', d.owner), phrase('group', d.group), phrase('others', d.others)];
+  var flags = [];
+  if(d.setuid) flags.push('setuid');
+  if(d.setgid) flags.push('setgid');
+  if(d.sticky) flags.push('sticky bit');
+  if(flags.length) parts.push('special: ' + flags.join(', '));
+  return parts.join('. ') + '.';
+}
+
+if(typeof module !== 'undefined') module.exports = {
+  normalizeOctal, digitToPerm, permToDigit, triadSymbolic,
+  octalToSymbolic, parseTriad, symbolicToOctal, describeOctal, humanReadable
+};
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var octEl = document.getElementById('oct');
+  var symEl = document.getElementById('sym');
+  var rowsEl = document.getElementById('rows');
+  var cmdEl = document.getElementById('cmd');
+  var lslEl = document.getElementById('lsl');
+  var descEl = document.getElementById('desc');
+  var ROLES = [['owner', 'Owner'], ['group', 'Group'], ['others', 'Others']];
+  var SPECIALS = ['setuid', 'setgid', 'sticky'];
+
+  function buildRows(octal){
+    var o = normalizeOctal(octal);
+    var spec = Number(o[0]);
+    var html = '';
+    for(var i = 0; i < 3; i++){
+      var p = digitToPerm(o[i + 1]);
+      var specOn = !!(spec & (i === 0 ? 4 : i === 1 ? 2 : 1));
+      html += '<tr data-role="' + i + '"><td>' + ROLES[i][1] + '</td>' +
+        cellChk('r', p.r) + cellChk('w', p.w) + cellChk('x', p.x) + cellChk('s', specOn) + '</tr>';
+    }
+    rowsEl.innerHTML = html;
+  }
+  function cellChk(kind, on){
+    return '<td><input type="checkbox" class="chk" data-bit="' + kind + '"' + (on ? ' checked' : '') + '></td>';
+  }
+  function readMatrix(){
+    var rows = rowsEl.querySelectorAll('tr');
+    var spec = 0, digits = '';
+    for(var i = 0; i < rows.length; i++){
+      var boxes = rows[i].querySelectorAll('input');
+      var p = { r: boxes[0].checked, w: boxes[1].checked, x: boxes[2].checked };
+      if(boxes[3].checked) spec += (i === 0 ? 4 : i === 1 ? 2 : 1);
+      digits += permToDigit(p);
+    }
+    return '' + spec + digits;
+  }
+  function renderFrom(octal){
+    var o = normalizeOctal(octal);
+    var sym = octalToSymbolic(o);
+    buildRows(o);
+    octEl.value = o; octEl.classList.remove('bad');
+    symEl.value = sym; symEl.classList.remove('bad');
+    cmdEl.textContent = 'chmod ' + o;
+    lslEl.textContent = '-' + sym;
+    descEl.innerHTML = '<b>' + o + '</b> — ' + humanReadable(o);
+    try{ localStorage.setItem('chmod.oct', o); }catch(e){}
+  }
+
+  octEl.addEventListener('input', function(){
+    try{ renderFrom(octEl.value); }catch(e){ octEl.classList.add('bad'); }
+  });
+  symEl.addEventListener('input', function(){
+    try{ renderFrom(symbolicToOctal(symEl.value)); }catch(e){ symEl.classList.add('bad'); }
+  });
+  rowsEl.addEventListener('change', function(){
+    try{ renderFrom(readMatrix()); }catch(e){}
+  });
+  document.querySelector('.out').addEventListener('click', function(e){
+    var v = e.target.closest ? e.target.closest('.v') : null;
+    if(v && navigator.clipboard) navigator.clipboard.writeText(v.textContent);
+  });
+
+  var start = '0755';
+  try{ var s = localStorage.getItem('chmod.oct'); if(s !== null) start = s; }catch(e){}
+  try{ renderFrom(start); }catch(e){ renderFrom('0755'); }
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('chmod.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('chmod.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

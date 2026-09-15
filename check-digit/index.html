@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CheckDigit — barcode &amp; ISBN check-digit validator</title>
+<meta name="description" content="Free offline check-digit validator and calculator for EAN-13, UPC-A, ISBN-13, and ISBN-10 barcodes. Verify a code or compute its check digit. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/check-digit/">
+<style>
+  :root{
+    --c:#164e63; --bg:#f5fafb; --fg:#0d1f24; --muted:#4d6b73;
+    --card:#ffffff; --border:#d5e6ea; --code:#e5f1f4; --ok:#15803d; --bad:#dc2626;
+  }
+  [data-theme="dark"]{
+    --bg:#0a1417; --fg:#e3eef1; --muted:#83a0a8; --card:#10222700; --card:#102227;
+    --border:#20383e; --code:#152a30; --ok:#4ade80; --bad:#f87171;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#06b6d4);display:grid;place-items:center;color:#fff;font-size:18px}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:720px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  input{width:100%;padding:13px 15px;border:1px solid var(--border);border-radius:12px;
+    background:var(--bg);color:var(--fg);font-size:1.3rem;font-family:ui-monospace,monospace;letter-spacing:.06em}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .result{margin-top:18px}
+  .rcard{border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-top:10px}
+  .rcard .type{font-weight:700;font-size:.9rem}
+  .rcard .row{display:flex;justify-content:space-between;align-items:baseline;margin-top:6px;font-size:.9rem}
+  .rcard .row .lbl{color:var(--muted)}
+  .rcard .row .val{font-family:ui-monospace,monospace}
+  .status{font-weight:700}
+  .status.ok{color:var(--ok)}
+  .status.bad{color:var(--bad)}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('cd.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">▐│</div>
+  <div>
+    <h1>CheckDigit</h1>
+    <p class="sub">Barcode &amp; ISBN check-digit validator</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <label for="code">Barcode or ISBN</label>
+    <input id="code" value="9780306406157" spellcheck="false" autocomplete="off"
+      placeholder="EAN-13, UPC-A, ISBN-13, or ISBN-10">
+    <div class="result" id="result"></div>
+    <p class="hint">Enter a full code to validate its check digit, or the digits without the check
+      digit to compute it (12 for EAN-13/ISBN-13, 11 for UPC-A, 9 for ISBN-10). Runs entirely in your browser.</p>
+  </div>
+</main>
+<footer>
+  CheckDigit is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/check-digit">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function digits(s, len){
+  s = String(s);
+  if(!/^[0-9]+$/.test(s) || s.length !== len) return null;
+  return s.split('').map(Number);
+}
+// EAN-13 / ISBN-13: weights 1,3,1,3... from the left over 12 data digits
+function ean13CheckDigit(first12){
+  var d = digits(first12, 12);
+  if(!d) return null;
+  var sum = 0;
+  for(var i = 0; i < 12; i++) sum += d[i] * (i % 2 === 0 ? 1 : 3);
+  return (10 - sum % 10) % 10;
+}
+function ean13Valid(code){
+  var d = digits(code, 13);
+  if(!d) return false;
+  return ean13CheckDigit(code.slice(0, 12)) === d[12];
+}
+// UPC-A: weights 3,1,3,1... from the left over 11 data digits
+function upcaCheckDigit(first11){
+  var d = digits(first11, 11);
+  if(!d) return null;
+  var sum = 0;
+  for(var i = 0; i < 11; i++) sum += d[i] * (i % 2 === 0 ? 3 : 1);
+  return (10 - sum % 10) % 10;
+}
+function upcaValid(code){
+  var d = digits(code, 12);
+  if(!d) return false;
+  return upcaCheckDigit(code.slice(0, 11)) === d[11];
+}
+var isbn13CheckDigit = ean13CheckDigit;
+function isbn13Valid(code){ return ean13Valid(code); }
+// ISBN-10: weights 10..2 over 9 digits, mod 11, check may be 'X'
+function isbn10CheckChar(first9){
+  var d = digits(first9, 9);
+  if(!d) return null;
+  var sum = 0;
+  for(var i = 0; i < 9; i++) sum += d[i] * (10 - i);
+  var c = (11 - sum % 11) % 11;
+  return c === 10 ? 'X' : String(c);
+}
+function isbn10Valid(code){
+  code = String(code).toUpperCase();
+  if(!/^[0-9]{9}[0-9X]$/.test(code)) return false;
+  return isbn10CheckChar(code.slice(0, 9)) === code.charAt(9);
+}
+
+if(typeof module !== 'undefined') module.exports = {
+  ean13CheckDigit, ean13Valid, upcaCheckDigit, upcaValid,
+  isbn13CheckDigit, isbn13Valid, isbn10CheckChar, isbn10Valid
+};
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var codeEl = document.getElementById('code');
+  var resultEl = document.getElementById('result');
+
+  function statusRow(valid){
+    return '<div class="row"><span class="lbl">Check digit</span><span class="status ' +
+      (valid ? 'ok">✓ valid' : 'bad">✗ invalid') + '</span></div>';
+  }
+  function card(type, rows){
+    return '<div class="rcard"><div class="type">' + type + '</div>' + rows + '</div>';
+  }
+  function line(lbl, val){ return '<div class="row"><span class="lbl">'+lbl+'</span><span class="val">'+val+'</span></div>'; }
+
+  function render(){
+    var raw = codeEl.value.toUpperCase().replace(/[\s-]/g, '');
+    var out = '';
+    if(/^[0-9]{13}$/.test(raw)){
+      var v = ean13Valid(raw), exp = ean13CheckDigit(raw.slice(0, 12));
+      var kind = /^97[89]/.test(raw) ? 'ISBN-13 / EAN-13' : 'EAN-13';
+      out = card(kind, statusRow(v) + line('Expected check digit', exp) + line('Entered', raw.charAt(12)));
+    } else if(/^[0-9]{12}$/.test(raw)){
+      out = card('UPC-A', statusRow(upcaValid(raw)) + line('Expected check digit', upcaCheckDigit(raw.slice(0, 11)))) +
+            card('EAN-13 (as 12 data digits)', line('Check digit', ean13CheckDigit(raw)) + line('Full code', raw + ean13CheckDigit(raw)));
+    } else if(/^[0-9]{11}$/.test(raw)){
+      out = card('UPC-A (compute check)', line('Check digit', upcaCheckDigit(raw)) + line('Full code', raw + upcaCheckDigit(raw)));
+    } else if(/^[0-9]{10}$/.test(raw) || /^[0-9]{9}X$/.test(raw)){
+      out = card('ISBN-10', statusRow(isbn10Valid(raw)) + line('Expected check', isbn10CheckChar(raw.slice(0, 9))) + line('Entered', raw.charAt(9)));
+    } else if(/^[0-9]{9}$/.test(raw)){
+      out = card('ISBN-10 (compute check)', line('Check character', isbn10CheckChar(raw)) + line('Full ISBN', raw + isbn10CheckChar(raw)));
+    } else {
+      out = '<p class="hint">Enter 9–13 digits (ISBN-10 may end in X).</p>';
+    }
+    resultEl.innerHTML = out;
+    try{ localStorage.setItem('cd.code', codeEl.value); }catch(e){}
+  }
+  codeEl.addEventListener('input', render);
+  try{ var s = localStorage.getItem('cd.code'); if(s !== null) codeEl.value = s; }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('cd.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('cd.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

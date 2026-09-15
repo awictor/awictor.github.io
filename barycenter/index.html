@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Barycenter — gravity sandbox</title>
+<style>
+  :root{--ink:#e8ecff;--dim:#8a93c0;--acc:#6cf;--pan:rgba(14,17,34,.82);}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;background:#05070f;color:var(--ink);
+    font:13px/1.4 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    -webkit-user-select:none;user-select:none;touch-action:none;}
+  #sky{position:fixed;inset:0;display:block;cursor:crosshair}
+  #panel{position:fixed;top:12px;left:12px;width:216px;background:var(--pan);
+    border:1px solid rgba(120,140,220,.22);border-radius:12px;padding:12px 13px;
+    -webkit-backdrop-filter:blur(9px);backdrop-filter:blur(9px);box-shadow:0 8px 34px rgba(0,0,0,.5);z-index:5}
+  #panel.min{width:auto}
+  #panel.min .body{display:none}
+  h1{font-size:14px;letter-spacing:.5px;font-weight:650;display:flex;align-items:center;gap:7px}
+  h1 .dot{width:9px;height:9px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#bfe,#39f);
+    box-shadow:0 0 10px #4bf}
+  h1 .sp{flex:1}
+  h1 button{all:unset;cursor:pointer;color:var(--dim);font-size:15px;padding:0 3px;line-height:1}
+  .tag{color:var(--dim);font-size:10.5px;margin:2px 0 9px}
+  .row{display:flex;align-items:center;gap:8px;margin:7px 0}
+  .row label{flex:0 0 74px;color:var(--dim);font-size:11px}
+  .row output{flex:0 0 40px;text-align:right;font-variant-numeric:tabular-nums;font-size:11px;color:var(--acc)}
+  input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:3px;border-radius:3px;
+    background:linear-gradient(90deg,#39f,#6cf);outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
+    background:#eaf3ff;box-shadow:0 0 6px #6cf;cursor:pointer}
+  input[type=range]::-moz-range-thumb{width:13px;height:13px;border:none;border-radius:50%;background:#eaf3ff;box-shadow:0 0 6px #6cf;cursor:pointer}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:4px}
+  button.b{all:unset;cursor:pointer;text-align:center;padding:6px 4px;border-radius:7px;font-size:11px;
+    background:rgba(90,120,220,.16);border:1px solid rgba(120,150,230,.25);transition:.15s}
+  button.b:hover{background:rgba(110,150,255,.32)}
+  button.b:active{transform:translateY(1px)}
+  .chk{display:flex;flex-wrap:wrap;gap:5px 10px;margin:8px 0 4px}
+  .chk label{display:flex;align-items:center;gap:5px;color:var(--dim);font-size:11px;cursor:pointer}
+  .chk input{accent-color:#5bf}
+  .sec{margin-top:11px;border-top:1px solid rgba(120,140,220,.16);padding-top:9px}
+  .sec .h{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:#5a659a;margin-bottom:6px}
+  .keys{margin-top:10px;color:#5a659a;font-size:9.5px;line-height:1.6}
+  .keys b{color:var(--dim);font-weight:600}
+  #hint{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);color:var(--dim);
+    font-size:11.5px;background:rgba(10,13,28,.6);padding:6px 14px;border-radius:20px;
+    -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);z-index:4;pointer-events:none;transition:opacity .5s}
+  #count{position:fixed;top:14px;right:16px;color:var(--dim);font-size:11px;z-index:4;
+    font-variant-numeric:tabular-nums;text-align:right}
+  #count b{color:var(--acc)}
+</style>
+</head>
+<body>
+<canvas id="sky"></canvas>
+<div id="count">bodies <b id="nb">0</b><br><span id="fps"></span></div>
+<div id="panel">
+  <h1><span class="dot"></span>Barycenter<span class="sp"></span><button id="fold" title="collapse">▾</button></h1>
+  <div class="tag">drag empty space to fling a world · grab a body to flick it</div>
+  <div class="body">
+    <div class="row" title="Overall strength of gravity — higher pulls bodies together harder and faster."><label>gravity G</label><input id="G" type="range" min="0.05" max="2" step="0.01"><output id="Go"></output></div>
+    <div class="row" title="How close bodies can get before gravity is capped. Larger = gentler close passes and no slingshot blow-ups."><label>softening</label><input id="soft" type="range" min="1" max="40" step="1"><output id="softo"></output></div>
+    <div class="row" title="Mass of the next body you fling. Heavier bodies pull harder and are drawn larger."><label>spawn mass</label><input id="mass" type="range" min="40" max="3000" step="10"><output id="masso"></output></div>
+    <div class="row" title="Time-step size — how much the simulation advances per frame. Higher = faster but rougher motion."><label>sim speed</label><input id="speed" type="range" min="0.05" max="1.8" step="0.01"><output id="speedo"></output></div>
+    <div class="row" title="How long motion trails linger before fading. 0% = no trails, 100% = near-permanent streaks."><label>trails</label><input id="persist" type="range" min="0" max="1" step="0.01"><output id="persisto"></output></div>
+    <div class="chk">
+      <label><input id="merge" type="checkbox">merge</label>
+      <label><input id="showbary" type="checkbox">barycenter</label>
+      <label><input id="recenter" type="checkbox">auto-recenter</label>
+      <label><input id="field" type="checkbox">field</label>
+    </div>
+    <div class="sec"><div class="h">presets</div>
+      <div class="grid">
+        <button class="b" data-p="binary">Binary star</button>
+        <button class="b" data-p="fig8">Figure-8</button>
+        <button class="b" data-p="solar">Mini-solar</button>
+        <button class="b" data-p="tangle">3-body tangle</button>
+      </div>
+    </div>
+    <div class="sec"><div class="h">system</div>
+      <div class="grid">
+        <button class="b" id="pause">Pause</button>
+        <button class="b" id="step">Step</button>
+        <button class="b" id="rand">Randomize</button>
+        <button class="b" id="clear">Clear</button>
+        <button class="b" id="share" style="grid-column:1/3">Copy share link</button>
+      </div>
+    </div>
+    <div class="keys">keys · <b>space</b> pause · <b>→</b> step · <b>r</b> randomize · <b>c</b> clear · <b>h</b> panel</div>
+  </div>
+</div>
+<div id="hint">Drag from empty space to slingshot a new world into orbit</div>
+<script>
+"use strict";
+const cv=document.getElementById("sky"), ctx=cv.getContext("2d");
+const tc=document.createElement("canvas"), tx=tc.getContext("2d"); // trail layer
+const hc=document.createElement("canvas"), hx=hc.getContext("2d"); // heatmap layer (low-res)
+let W=0,H=0,DPR=1;
+const HCOLS=64, HROWS=36; hc.width=HCOLS; hc.height=HROWS;
+const hImg=hx.createImageData(HCOLS,HROWS);
+
+// ---- state ----
+const P={G:0.6, soft:6, mass:300, speed:0.6, persist:0.6,
+         merge:true, showbary:true, recenter:false, field:false};
+let bodies=[];           // {x,y,vx,vy,ax,ay,m,r,hue,held}
+let paused=false;
+let capFlash=-1e9;        // timestamp of the last cap eviction, for the counter cue
+const CAP=64;             // soft body cap (keeps O(n^2) forces smooth)
+const cam={ox:0,oy:0};   // world->screen offset
+const tcam={ox:0,oy:0};  // camera offset the trail buffer was last painted at
+const RB=1.15;           // radius base (r = RB * m^(1/3))
+const VSCALE=0.045;      // slingshot: velocity per pixel of drag
+const S8=170;            // figure-8 spatial scale
+
+const radiusOf=m=>Math.max(2.2, RB*Math.cbrt(m));
+const rnd=(a,b)=>a+Math.random()*(b-a);
+
+function resize(){
+  DPR=Math.min(2,window.devicePixelRatio||1);
+  W=innerWidth; H=innerHeight;
+  for(const c of [cv,tc]){c.width=W*DPR; c.height=H*DPR;}
+  cv.style.width=tc.style.width=W+"px"; cv.style.height=tc.style.height=H+"px";
+  ctx.setTransform(DPR,0,0,DPR,0,0); tx.setTransform(DPR,0,0,DPR,0,0);
+  tx.clearRect(0,0,W,H);
+}
+addEventListener("resize",resize);
+
+// ---- physics ----
+function bary(){ // center of mass in world coords
+  let M=0,x=0,y=0; for(const b of bodies){M+=b.m;x+=b.m*b.x;y+=b.m*b.y;}
+  return M?{x:x/M,y:y/M,M}:{x:W/2,y:H/2,M:0};
+}
+function accelField(px,py,skip){ // acceleration at a point from all (other) bodies
+  let ax=0,ay=0, s2=P.soft*P.soft;
+  for(const b of bodies){ if(b===skip)continue;
+    const dx=b.x-px, dy=b.y-py, d2=dx*dx+dy*dy+s2, inv=1/(d2*Math.sqrt(d2));
+    ax+=P.G*b.m*dx*inv; ay+=P.G*b.m*dy*inv;
+  } return [ax,ay];
+}
+function computeAccels(){
+  for(const b of bodies){b.ax=0;b.ay=0;}
+  const s2=P.soft*P.soft;
+  for(let i=0;i<bodies.length;i++){const a=bodies[i];
+    for(let j=i+1;j<bodies.length;j++){const b=bodies[j];
+      const dx=b.x-a.x, dy=b.y-a.y, d2=dx*dx+dy*dy+s2, inv=1/(d2*Math.sqrt(d2));
+      const fa=P.G*inv; a.ax+=fa*b.m*dx; a.ay+=fa*b.m*dy;
+      b.ax-=fa*a.m*dx; b.ay-=fa*a.m*dy;
+    }}
+}
+function substeps(dt){ // shrink dt when any pair gets close (crisp close passes)
+  let n=1, minSep=1e9, maxV=0;
+  for(let i=0;i<bodies.length;i++){const a=bodies[i]; maxV=Math.max(maxV,Math.hypot(a.vx,a.vy));
+    for(let j=i+1;j<bodies.length;j++){const b=bodies[j];
+      const s=Math.hypot(b.x-a.x,b.y-a.y)-a.r-b.r; if(s<minSep)minSep=s;}}
+  if(minSep<80&&bodies.length>1) n=Math.min(12,Math.ceil((maxV*dt)/Math.max(3,minSep*0.28))+1);
+  return Math.max(1,n);
+}
+function integrate(h){ // velocity-Verlet (symplectic)
+  computeAccels();
+  for(const b of bodies){ if(b.held)continue;
+    b.x+=b.vx*h+0.5*b.ax*h*h; b.y+=b.vy*h+0.5*b.ay*h*h; b.oax=b.ax; b.oay=b.ay; }
+  computeAccels();
+  for(const b of bodies){ if(b.held)continue;
+    b.vx+=0.5*(b.oax+b.ax)*h; b.vy+=0.5*(b.oay+b.ay)*h; }
+}
+function doMerges(){
+  for(let i=0;i<bodies.length;i++){for(let j=i+1;j<bodies.length;j++){
+    const a=bodies[i],b=bodies[j];
+    if(Math.hypot(b.x-a.x,b.y-a.y) < (a.r+b.r)*0.62){
+      const M=a.m+b.m, big=a.m>=b.m?a:b;
+      big.x=(a.m*a.x+b.m*b.x)/M; big.y=(a.m*a.y+b.m*b.y)/M;
+      big.vx=(a.m*a.vx+b.m*b.vx)/M; big.vy=(a.m*a.vy+b.m*b.vy)/M;
+      big.hue=(a.m*a.hue+b.m*b.hue)/M; big.m=M; big.r=radiusOf(M); big.held=a.held||b.held;
+      bodies.splice(j,1); if(big===a){i--;} return true;
+    }}}
+  return false;
+}
+function physics(){
+  if(paused||bodies.length===0)return;
+  const dt=P.speed, n=substeps(dt), h=dt/n;
+  for(let s=0;s<n;s++) integrate(h);
+  if(P.merge){let g=0; while(doMerges()&&g++<bodies.length);}
+}
+
+// ---- render ----
+const sx=x=>x+cam.ox, sy=y=>y+cam.oy;
+function drawHeat(){
+  const s2=P.soft*P.soft; let mx=1e-9;
+  const val=new Float32Array(HCOLS*HROWS);
+  for(let gy=0;gy<HROWS;gy++)for(let gx=0;gx<HCOLS;gx++){
+    const wx=(gx+0.5)/HCOLS*W-cam.ox, wy=(gy+0.5)/HROWS*H-cam.oy;
+    let p=0; for(const b of bodies){const dx=b.x-wx,dy=b.y-wy; p+=b.m/Math.sqrt(dx*dx+dy*dy+s2);}
+    val[gy*HCOLS+gx]=p; if(p>mx)mx=p;
+  }
+  const d=hImg.data;
+  for(let i=0;i<val.length;i++){ const t=Math.pow(val[i]/mx,0.45), k=i*4;
+    d[k]=t*t*90; d[k+1]=t*70+t*t*40; d[k+2]=40+t*150; d[k+3]=t*150;
+  }
+  hx.putImageData(hImg,0,0);
+  ctx.imageSmoothingEnabled=true; ctx.globalAlpha=0.85;
+  ctx.drawImage(hc,0,0,W,H); ctx.globalAlpha=1;
+}
+function paintTrails(){
+  // keep trails locked to the world: if the camera panned since last paint,
+  // shift the accumulated buffer by the same delta so dots stay under their bodies
+  const dcx=cam.ox-tcam.ox, dcy=cam.oy-tcam.oy;
+  if(dcx||dcy){
+    tx.globalCompositeOperation="copy";
+    tx.drawImage(tc,dcx,dcy,W,H);
+    tx.globalCompositeOperation="source-over";
+    tcam.ox=cam.ox; tcam.oy=cam.oy;
+  }
+  // fade the persistent trail layer, then stamp glowing dots
+  const fade=0.42*(1-P.persist)+0.03;
+  tx.globalCompositeOperation="source-over";
+  tx.fillStyle="rgba(3,4,10,"+fade+")"; tx.fillRect(0,0,W,H);
+  tx.globalCompositeOperation="lighter";
+  for(const b of bodies){
+    const spd=Math.hypot(b.vx,b.vy), lum=42+Math.min(38,spd*7);
+    const rr=Math.max(1.3,b.r*0.72);
+    tx.fillStyle="hsl("+b.hue+","+(70+Math.min(28,spd*4))+"%,"+lum+"%)";
+    tx.beginPath(); tx.arc(sx(b.x),sy(b.y),rr,0,7); tx.fill();
+  }
+  tx.globalCompositeOperation="source-over";
+}
+function drawGhost(g){ // g:{x,y,vx,vy} prospective body; forward-integrate the field
+  const pts=[]; let px=g.x,py=g.y,vx=g.vx,vy=g.vy, h=Math.max(P.speed,0.5);
+  for(let i=0;i<240;i++){
+    let [ax,ay]=accelField(px,py,null);
+    px+=vx*h+0.5*ax*h*h; py+=vy*h+0.5*ay*h*h;
+    let [ax2,ay2]=accelField(px,py,null);
+    vx+=0.5*(ax+ax2)*h; vy+=0.5*(ay+ay2)*h;
+    pts.push(px,py);
+    if(px< -W||px>2*W||py< -H||py>2*H)break;
+  }
+  ctx.save(); ctx.setLineDash([6,7]); ctx.lineWidth=1.4;
+  ctx.globalCompositeOperation="lighter";
+  for(let i=2;i<pts.length;i+=2){ const a=1-i/pts.length;
+    ctx.strokeStyle="hsla("+g.hue+",90%,72%,"+(a*0.8)+")";
+    ctx.beginPath(); ctx.moveTo(sx(pts[i-2]),sy(pts[i-1])); ctx.lineTo(sx(pts[i]),sy(pts[i+1])); ctx.stroke();
+  }
+  ctx.restore();
+  // launch marker + arrow
+  ctx.save(); ctx.globalCompositeOperation="lighter";
+  ctx.strokeStyle="rgba(150,200,255,.8)"; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(sx(g.x),sy(g.y)); ctx.lineTo(sx(g.ax0),sy(g.ay0)); ctx.stroke();
+  ctx.fillStyle="hsla("+g.hue+",90%,72%,.6)";
+  ctx.beginPath(); ctx.arc(sx(g.x),sy(g.y),radiusOf(P.mass),0,7); ctx.fill();
+  ctx.restore();
+}
+function render(){
+  ctx.clearRect(0,0,W,H);
+  // starfield backdrop tint
+  const bg=ctx.createRadialGradient(W/2,H*0.42,0,W/2,H*0.42,Math.max(W,H)*0.75);
+  bg.addColorStop(0,"#0a0f22"); bg.addColorStop(1,"#04060e");
+  ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+  if(P.field&&bodies.length) drawHeat();
+  paintTrails();
+  ctx.globalCompositeOperation="lighter"; ctx.drawImage(tc,0,0,W,H); ctx.globalCompositeOperation="source-over";
+  // bodies (crisp cores with bloom)
+  for(const b of bodies){
+    const X=sx(b.x),Y=sy(b.y);
+    ctx.shadowColor="hsl("+b.hue+",95%,60%)"; ctx.shadowBlur=b.r*2.2;
+    const g=ctx.createRadialGradient(X-b.r*.3,Y-b.r*.3,b.r*.1,X,Y,b.r);
+    g.addColorStop(0,"hsl("+b.hue+",100%,92%)");
+    g.addColorStop(.55,"hsl("+b.hue+",95%,64%)");
+    g.addColorStop(1,"hsl("+b.hue+",90%,34%)");
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(X,Y,b.r,0,7); ctx.fill();
+    if(b.held){ctx.shadowBlur=0;ctx.strokeStyle="#fff";ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.arc(X,Y,b.r+5,0,7);ctx.stroke();}
+  }
+  ctx.shadowBlur=0;
+  // aiming ghost
+  if(aim) drawGhost(aim);
+  // barycenter crosshair
+  if(P.showbary&&bodies.length){ const c=bary(),X=sx(c.x),Y=sy(c.y);
+    ctx.strokeStyle="rgba(120,255,210,.7)"; ctx.lineWidth=1.2;
+    ctx.beginPath();ctx.moveTo(X-9,Y);ctx.lineTo(X+9,Y);ctx.moveTo(X,Y-9);ctx.lineTo(X,Y+9);ctx.stroke();
+    ctx.beginPath();ctx.arc(X,Y,5,0,7);ctx.stroke();
+  }
+}
+
+// ---- camera ----
+function updateCam(){
+  let tox=0,toy=0;
+  if(P.recenter&&bodies.length){const c=bary(); tox=W/2-c.x; toy=H/2-c.y;}
+  cam.ox+=(tox-cam.ox)*0.06; cam.oy+=(toy-cam.oy)*0.06;
+}
+
+// ---- interaction ----
+let aim=null, grab=null, pointer={x:0,y:0,px:0,py:0};
+function toWorld(e){const r=cv.getBoundingClientRect(); return {x:e.clientX-r.left-cam.ox,y:e.clientY-r.top-cam.oy};}
+function hit(w){for(let i=bodies.length-1;i>=0;i--){const b=bodies[i];
+  if(Math.hypot(b.x-w.x,b.y-w.y)<=b.r+6)return b;} return null;}
+cv.addEventListener("pointerdown",e=>{
+  cv.setPointerCapture(e.pointerId); hideHint();
+  const w=toWorld(e), b=hit(w);
+  if(b){ grab=b; b.held=true; b.vx=b.vy=0; pointer={x:w.x,y:w.y,px:w.x,py:w.y}; }
+  else { const hue=rnd(0,360); aim={x:w.x,y:w.y,ax0:w.x,ay0:w.y,vx:0,vy:0,hue}; }
+});
+cv.addEventListener("pointermove",e=>{
+  const w=toWorld(e);
+  if(grab){ grab.x=w.x; grab.y=w.y; pointer.px=pointer.x;pointer.py=pointer.y;
+    pointer.x=w.x;pointer.y=w.y;
+    grab.vx=(w.x-pointer.px); grab.vy=(w.y-pointer.py); cv.style.cursor="grabbing"; }
+  else if(aim){ aim.ax0=w.x; aim.ay0=w.y;
+    aim.vx=(w.x-aim.x)*VSCALE; aim.vy=(w.y-aim.y)*VSCALE; }
+  else { cv.style.cursor = hit(w) ? "grab" : "crosshair"; }
+});
+function endPointer(e){
+  const w=toWorld(e);
+  if(grab){ grab.held=false; // flick velocity from recent pointer motion, capped
+    const vx=(w.x-pointer.px), vy=(w.y-pointer.py), sp=Math.hypot(vx,vy);
+    const k=sp>0? Math.min(sp,18)/sp*0.9:0; grab.vx=vx*k; grab.vy=vy*k; grab=null; }
+  else if(aim){ addBody(aim.x,aim.y,aim.vx,aim.vy,P.mass,aim.hue); aim=null; }
+  cv.style.cursor = hit(w) ? "grab" : "crosshair";
+  syncHash();
+}
+cv.addEventListener("pointerup",endPointer);
+cv.addEventListener("pointercancel",()=>{if(grab)grab.held=false;grab=null;aim=null;cv.style.cursor="crosshair";});
+
+function addBody(x,y,vx,vy,m,hue){
+  if(bodies.length>=CAP){bodies.shift();capFlash=performance.now();} // evict oldest, flag the cue
+  bodies.push({x,y,vx,vy,ax:0,ay:0,oax:0,oay:0,m,r:radiusOf(m),hue,held:false});
+}
+
+// ---- presets ----
+function clearAll(){bodies=[];tx.clearRect(0,0,W,H);}
+function preset(name){
+  clearAll(); const cx=W/2,cy=H/2;
+  if(name==="binary"){
+    const m=900,d=280,vr=Math.sqrt(P.G*2*m/d)/2;
+    addBody(cx-d/2,cy,0,vr,m,205); addBody(cx+d/2,cy,0,-vr,m,32);
+  } else if(name==="fig8"){
+    const m=1500, T=Math.sqrt(S8*S8*S8/(m*P.G)), vs=S8/T;
+    const R=[[.97000436,-.24308753],[-.97000436,.24308753],[0,0]];
+    const V=[[.466203685,.43236573],[.466203685,.43236573],[-.93240737,-.86473146]];
+    const hu=[50,320,190];
+    for(let i=0;i<3;i++) addBody(cx+R[i][0]*S8,cy+R[i][1]*S8, V[i][0]*vs,V[i][1]*vs, m,hu[i]);
+  } else if(name==="solar"){
+    const M=8000; addBody(cx,cy,0,0,M,45);
+    const pl=[[100,20],[160,32],[230,26],[310,18]], hu=[15,180,120,270];
+    pl.forEach((p,i)=>{const r=p[0],v=Math.sqrt(P.G*M/r),a=i*1.7;
+      addBody(cx+Math.cos(a)*r,cy+Math.sin(a)*r, -Math.sin(a)*v,Math.cos(a)*v, p[1],hu[i]);});
+  } else if(name==="tangle"){
+    for(let i=0;i<3;i++){const a=i*2.094;
+      addBody(cx+Math.cos(a)*150,cy+Math.sin(a)*150, rnd(-1,1),rnd(-1,1), rnd(500,1100),i*120+30);}
+  }
+  syncHash();
+}
+function randomize(){
+  clearAll(); const n=6+(Math.random()*8|0), cx=W/2,cy=H/2;
+  for(let i=0;i<n;i++){const a=rnd(0,6.28),r=rnd(80,Math.min(W,H)*0.4),
+    v=Math.sqrt(P.G*3000/r)*rnd(0.6,1.1);
+    addBody(cx+Math.cos(a)*r,cy+Math.sin(a)*r,-Math.sin(a)*v,Math.cos(a)*v,rnd(120,900),rnd(0,360));}
+  addBody(cx,cy,0,0,rnd(2500,4500),45); syncHash();
+}
+
+// ---- hash serialization ----
+const r1=x=>Math.round(x*10)/10, r3=x=>Math.round(x*1000)/1000;
+function flags(){return (P.merge?1:0)|(P.showbary?2:0)|(P.recenter?4:0)|(P.field?8:0);}
+function syncHash(){
+  const head=[r3(P.G),P.soft,P.mass,r3(P.speed),r3(P.persist),flags()].join(",");
+  const bs=bodies.map(b=>[r1(b.x),r1(b.y),r3(b.vx),r3(b.vy),r1(b.m),Math.round(b.hue)].join(",")).join(";");
+  history.replaceState(null,"","#"+head+"|"+bs);
+}
+function loadHash(){
+  const h=decodeURIComponent(location.hash.slice(1)); if(!h||h.indexOf("|")<0)return false;
+  try{
+    const [head,bs]=h.split("|"); const p=head.split(",").map(Number);
+    if(p.length<6||!p.slice(0,6).every(Number.isFinite))return false; // malformed/truncated header
+    P.G=p[0];P.soft=p[1];P.mass=p[2];P.speed=p[3];P.persist=p[4];
+    const f=p[5]|0; P.merge=!!(f&1);P.showbary=!!(f&2);P.recenter=!!(f&4);P.field=!!(f&8);
+    clearAll();
+    if(bs) for(const s of bs.split(";")){const v=s.split(",").map(Number);
+      if(v.length>=6&&isFinite(v[0])) addBody(v[0],v[1],v[2],v[3],v[4],v[5]);}
+    return true;
+  }catch(e){return false;}
+}
+
+// ---- UI wiring ----
+const $=id=>document.getElementById(id);
+const sliders=["G","soft","mass","speed","persist"];
+function refreshUI(){
+  for(const k of sliders){$(k).value=P[k];}
+  $("Go").textContent=P.G.toFixed(2); $("softo").textContent=P.soft;
+  $("masso").textContent=P.mass; $("speedo").textContent=P.speed.toFixed(2);
+  $("persisto").textContent=Math.round(P.persist*100)+"%";
+  $("merge").checked=P.merge;$("showbary").checked=P.showbary;
+  $("recenter").checked=P.recenter;$("field").checked=P.field;
+}
+sliders.forEach(k=>$(k).addEventListener("input",e=>{
+  P[k]=+e.target.value; refreshUI(); syncHash();}));
+["merge","showbary","recenter","field"].forEach(k=>$(k).addEventListener("change",e=>{
+  P[k]=e.target.checked; syncHash();}));
+document.querySelectorAll("[data-p]").forEach(b=>b.addEventListener("click",()=>preset(b.dataset.p)));
+$("pause").addEventListener("click",e=>{paused=!paused;e.target.textContent=paused?"Resume":"Pause";});
+$("step").addEventListener("click",()=>{const wp=paused;paused=false;physics();paused=wp;});
+$("clear").addEventListener("click",()=>{clearAll();syncHash();});
+$("rand").addEventListener("click",randomize);
+$("share").addEventListener("click",async e=>{ syncHash();
+  try{await navigator.clipboard.writeText(location.href);e.target.textContent="Copied!";}
+  catch{e.target.textContent="Copy failed";}
+  setTimeout(()=>e.target.textContent="Copy share link",1400);});
+$("fold").addEventListener("click",e=>{const p=$("panel");p.classList.toggle("min");
+  e.target.textContent=p.classList.contains("min")?"▸":"▾";});
+// keyboard shortcuts — route through the buttons so labels/state stay in sync
+addEventListener("keydown",e=>{
+  if(e.target&&e.target.tagName==="INPUT")return; // don't hijack focused sliders/checkboxes
+  const k=e.key;
+  if(k===" "){e.preventDefault();$("pause").click();}
+  else if(k==="ArrowRight"||k===".")$("step").click();
+  else if(k==="r"||k==="R")$("rand").click();
+  else if(k==="c"||k==="C")$("clear").click();
+  else if(k==="h"||k==="H")$("fold").click();
+});
+let hintGone=false;
+function hideHint(){if(!hintGone){hintGone=true;$("hint").style.opacity=0;}}
+function showHint(){if(hintGone){hintGone=false;$("hint").style.opacity=1;}} // re-open the loop when the field empties
+
+// ---- main loop ----
+let last=performance.now(),fAcc=0,fN=0;
+function frame(now){
+  physics(); updateCam(); render();
+  const dt=now-last; last=now; fAcc+=dt; fN++;
+  if(fN>=20){$("fps").textContent=Math.round(1000/(fAcc/fN))+" fps";fAcc=0;fN=0;}
+  const capped=(now-capFlash)<1200, nb=$("nb");
+  nb.textContent = capped ? CAP+" (max)" : bodies.length;
+  nb.style.color = capped ? "#ff9a63" : "";
+  if(bodies.length===0) showHint(); // empty field → re-surface the onboarding cue
+  requestAnimationFrame(frame);
+}
+addEventListener("hashchange",()=>{if(loadHash()){refreshUI();}});
+setInterval(()=>{if(!paused&&bodies.length)syncHash();},1200);
+
+// ---- boot ----
+resize();
+if(!loadHash()) preset("fig8");
+refreshUI();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

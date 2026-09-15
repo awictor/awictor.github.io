@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Vasculum — a slime-mold that draws itself</title>
+<style>
+  :root{ --ink:#e8e4da; --dim:#8a8578; --line:#2a2b30; --accent:#ff9e3d; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:#05060a; color:var(--ink);
+    font:13px/1.4 ui-monospace,"SF Mono",Menlo,Consolas,monospace; overflow:hidden; }
+  #stage{ position:fixed; inset:0; }
+  canvas{ position:absolute; inset:0; width:100%; height:100%; display:block; cursor:crosshair; }
+  #panel{ position:fixed; top:14px; left:14px; width:262px; max-height:calc(100% - 28px);
+    overflow-y:auto; padding:14px 15px 16px; border:1px solid var(--line);
+    border-radius:12px; background:rgba(8,9,14,.82);
+    -webkit-backdrop-filter:blur(9px); backdrop-filter:blur(9px);
+    box-shadow:0 12px 40px rgba(0,0,0,.5); transition:transform .3s ease,opacity .3s ease; z-index:5; }
+  #panel.hidden{ transform:translateX(-108%); opacity:0; }
+  h1{ margin:0 0 2px; font-size:16px; letter-spacing:.5px; font-weight:600;
+    background:linear-gradient(90deg,#ff9e3d,#ff5f6d); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .sub{ color:var(--dim); font-size:11px; margin:0 0 12px; }
+  .row{ margin:9px 0; }
+  .row label{ display:flex; justify-content:space-between; margin-bottom:3px; color:var(--dim); font-size:11px; }
+  .row label b{ color:var(--ink); font-weight:600; }
+  input[type=range]{ width:100%; height:3px; -webkit-appearance:none; appearance:none;
+    background:var(--line); border-radius:3px; outline:none; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:13px; height:13px; border-radius:50%;
+    background:var(--accent); cursor:pointer; box-shadow:0 0 8px rgba(255,158,61,.6); }
+  input[type=range]::-moz-range-thumb{ width:13px; height:13px; border:none; border-radius:50%;
+    background:var(--accent); cursor:pointer; }
+  .seg{ display:flex; flex-wrap:wrap; gap:5px; margin-top:4px; }
+  .seg button, .btn{ flex:1 1 auto; padding:6px 4px; font:inherit; font-size:11px; color:var(--dim);
+    background:#111218; border:1px solid var(--line); border-radius:7px; cursor:pointer; transition:.15s; white-space:nowrap; }
+  .seg button:hover, .btn:hover{ color:var(--ink); border-color:#3a3b42; }
+  .seg button.on{ color:#05060a; background:var(--accent); border-color:var(--accent); font-weight:600; }
+  .grp-title{ margin:15px 0 5px; font-size:10px; letter-spacing:1.4px; text-transform:uppercase; color:#5c5850; }
+  .btns{ display:flex; gap:6px; margin-top:6px; }
+  #hint{ position:fixed; bottom:12px; left:50%; transform:translateX(-50%); color:var(--dim);
+    font-size:11px; background:rgba(8,9,14,.6); padding:5px 12px; border-radius:20px; z-index:5;
+    pointer-events:none; transition:opacity .5s; }
+  #toggle{ position:fixed; top:14px; right:14px; z-index:6; width:34px; height:34px;
+    border-radius:9px; border:1px solid var(--line); background:rgba(8,9,14,.82); color:var(--accent);
+    font-size:17px; cursor:pointer; }
+  #fps{ color:var(--accent); }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c"></canvas></div>
+<button id="toggle" title="Toggle panel">≡</button>
+<div id="panel">
+  <h1>Vasculum</h1>
+  <p class="sub">A slime-mold that draws itself · <span id="fps">–</span> fps · <span id="pop">–</span> agents</p>
+
+  <div class="grp-title">Presets</div>
+  <div class="seg" id="presets"></div>
+
+  <div class="grp-title">Palette</div>
+  <div class="seg" id="palettes"></div>
+
+  <div class="grp-title">Behaviour</div>
+  <div class="row"><label>Sensor angle <b id="v_sa"></b></label><input type="range" id="sa" min="5" max="90" step="1"></div>
+  <div class="row"><label>Sensor distance <b id="v_sd"></b></label><input type="range" id="sd" min="2" max="40" step="1"></div>
+  <div class="row"><label>Turn speed <b id="v_ts"></b></label><input type="range" id="ts" min="5" max="90" step="1"></div>
+  <div class="row"><label>Step size <b id="v_ss"></b></label><input type="range" id="ss" min="20" max="200" step="5"></div>
+
+  <div class="grp-title">Field</div>
+  <div class="row"><label>Deposit <b id="v_dp"></b></label><input type="range" id="dp" min="5" max="100" step="1"></div>
+  <div class="row"><label>Decay <b id="v_dk"></b></label><input type="range" id="dk" min="1" max="30" step="1"></div>
+  <div class="row"><label>Diffusion <b id="v_df"></b></label><input type="range" id="df" min="0" max="100" step="1"></div>
+  <div class="row"><label>Glow <b id="v_gl"></b></label><input type="range" id="gl" min="0" max="100" step="1"></div>
+  <div class="row"><label>Population <b id="v_pop"></b></label><input type="range" id="pp" min="10" max="100" step="1"></div>
+
+  <div class="grp-title">Actions</div>
+  <div class="seg">
+    <button class="btn" id="amb">Ambient</button>
+    <button class="btn" id="reseed">Reseed</button>
+  </div>
+  <div class="btns">
+    <button class="btn" id="png">Export PNG</button>
+    <button class="btn" id="share">Copy link</button>
+  </div>
+</div>
+<div id="hint">drag to feed the colony · shift-drag repels · tap ≡ (or press H) to hide panel</div>
+
+<script>
+"use strict";
+(function(){
+// ---------- deterministic RNG (mulberry32) ----------
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+// ---------- palettes: 256-entry RGB LUTs ----------
+function buildLUT(stops){ // stops: [pos0..1, r,g,b]
+  const lut=new Uint8Array(256*3);
+  for(let i=0;i<256;i++){ const t=i/255; let a=stops[0], b=stops[stops.length-1];
+    for(let s=0;s<stops.length-1;s++){ if(t>=stops[s][0]&&t<=stops[s+1][0]){ a=stops[s]; b=stops[s+1]; break; } }
+    const span=(b[0]-a[0])||1, k=(t-a[0])/span;
+    lut[i*3]  =a[1]+(b[1]-a[1])*k; lut[i*3+1]=a[2]+(b[2]-a[2])*k; lut[i*3+2]=a[3]+(b[3]-a[3])*k; }
+  return lut;
+}
+const PALETTES={
+  amber:  buildLUT([[0,3,1,0],[.35,90,26,6],[.65,222,120,28],[.85,255,196,96],[1,255,246,214]]),
+  cyanmag:buildLUT([[0,2,2,10],[.3,20,60,120],[.55,40,200,220],[.78,220,60,200],[1,255,220,255]]),
+  ink:    buildLUT([[0,4,5,8],[.5,70,76,88],[.8,170,176,188],[1,246,248,252]]),
+  spectral:buildLUT([[0,4,2,14],[.25,40,20,150],[.45,20,150,140],[.62,120,210,60],[.8,250,180,40],[1,255,90,60]])
+};
+const PALNAMES=Object.keys(PALETTES);
+
+// ---------- presets ----------
+const PRESETS={
+  Veinwork:{sa:22,sd:18,ts:38,ss:120,dp:52,dk:8, df:38,gl:55,pop:70,pal:"amber"},
+  Lacework:{sa:45,sd:9, ts:60,ss:80, dp:30,dk:14,df:14,gl:45,pop:80,pal:"cyanmag"},
+  Dunes:   {sa:12,sd:30,ts:14,ss:150,dp:70,dk:5, df:70,gl:35,pop:60,pal:"spectral"},
+  Vortex:  {sa:32,sd:22,ts:80,ss:140,dp:44,dk:10,df:30,gl:70,pop:65,pal:"cyanmag",spin:1},
+  Cobweb:  {sa:60,sd:14,ts:26,ss:90, dp:24,dk:18,df:8, gl:40,pop:85,pal:"ink"}
+};
+// normalize preset objects to full param sets
+const PKEYS=["sa","sd","ts","ss","dp","dk","df","gl","pop","spin"];
+function fullPreset(p){ const base={sa:22,sd:18,ts:38,ss:120,dp:52,dk:8,df:38,gl:55,pop:70,spin:0};
+  return Object.assign({},base,p); }
+
+// ---------- state ----------
+const P={sa:22,sd:18,ts:38,ss:120,dp:52,dk:8,df:38,gl:55,pop:70,spin:0,pal:"amber",seed:1};
+let target=Object.assign({},P), morphT=1; // 1 == settled
+
+// ---------- canvas + field ----------
+const cv=document.getElementById("c"), ctx=cv.getContext("2d",{alpha:false});
+let W=0,H=0, trail=null, next=null, img=null, agents=null, activeCount=0, MAXA=0, DPR=1;
+
+function computeDims(){
+  // resolution scaled for performance; cap total field cells
+  const dpr=Math.min(window.devicePixelRatio||1, 1.5);
+  let w=Math.round(window.innerWidth*dpr), h=Math.round(window.innerHeight*dpr);
+  const CAP=1500000; // cells
+  const sc=Math.sqrt(CAP/(w*h)); if(sc<1){ w=Math.round(w*sc); h=Math.round(h*sc); }
+  return {w,h,dpr};
+}
+function alloc(){
+  const dim=computeDims();
+  DPR=dim.dpr; W=dim.w; H=dim.h; cv.width=W; cv.height=H;
+  trail=new Float32Array(W*H); next=new Float32Array(W*H);
+  img=ctx.createImageData(W,H);
+  const d=img.data; for(let i=3;i<d.length;i+=4) d[i]=255;
+  MAXA=60000; agents=new Float32Array(MAXA*3); // x,y,heading
+  seedAgents();
+}
+function seedAgents(){
+  const r=mulberry32(P.seed>>>0);
+  const cx=W/2, cy=H/2, rad=Math.min(W,H)*0.28;
+  for(let i=0;i<MAXA;i++){
+    const a=r()*Math.PI*2, rr=Math.sqrt(r())*rad;
+    agents[i*3]  =cx+Math.cos(a)*rr;
+    agents[i*3+1]=cy+Math.sin(a)*rr;
+    agents[i*3+2]=r()*Math.PI*2;
+  }
+}
+
+// ---------- simulation step ----------
+function sampleAt(x,y){
+  let ix=x|0, iy=y|0;
+  if(ix<0)ix+=W; else if(ix>=W)ix-=W;
+  if(iy<0)iy+=H; else if(iy>=H)iy-=H;
+  return trail[iy*W+ix];
+}
+function stepAgents(){
+  const sensAng=P.sa*Math.PI/180;
+  const sensD=P.sd*DPR;
+  const turn=P.ts*Math.PI/180;
+  const step=(P.ss/100)*DPR;
+  const dep=P.dp/100*1.4;
+  const spin=P.spin;
+  const n=activeCount;
+  for(let i=0;i<n;i++){
+    const b=i*3; let x=agents[b], y=agents[b+1], h=agents[b+2];
+    const fc=sampleAt(x+Math.cos(h)*sensD, y+Math.sin(h)*sensD);
+    const fl=sampleAt(x+Math.cos(h-sensAng)*sensD, y+Math.sin(h-sensAng)*sensD);
+    const fr=sampleAt(x+Math.cos(h+sensAng)*sensD, y+Math.sin(h+sensAng)*sensD);
+    if(fc>fl&&fc>fr){/*stay*/}
+    else if(fc<fl&&fc<fr){ h += (i&1?turn:-turn); }
+    else if(fl<fr){ h+=turn; }
+    else if(fr<fl){ h-=turn; }
+    if(spin) h+=0.06; // vortex bias
+    x+=Math.cos(h)*step; y+=Math.sin(h)*step;
+    if(x<0)x+=W; else if(x>=W)x-=W;
+    if(y<0)y+=H; else if(y>=H)y-=H;
+    agents[b]=x; agents[b+1]=y; agents[b+2]=h;
+    const idx=((y|0)*W+(x|0));
+    trail[idx]+=dep; if(trail[idx]>4)trail[idx]=4;
+  }
+}
+// separable-ish 3x3 box blur toward `next`, mixed by diffusion, then decay
+function diffuseDecay(){
+  const df=P.df/100, keep=1-df;
+  const decay=1-P.dk/1000;
+  const t=trail, o=next, w=W, h=H;
+  for(let y=0;y<h;y++){
+    const yp=(y-1+h)%h, yn=(y+1)%h, row=y*w, rp=yp*w, rn=yn*w;
+    for(let x=0;x<w;x++){
+      const xp=(x-1+w)%w, xn=(x+1)%w;
+      const sum=t[rp+xp]+t[rp+x]+t[rp+xn]+t[row+xp]+t[row+x]+t[row+xn]+t[rn+xp]+t[rn+x]+t[rn+xn];
+      const blur=sum*0.111111;
+      o[row+x]=(t[row+x]*keep+blur*df)*decay;
+    }
+  }
+  const tmp=trail; trail=next; next=tmp;
+}
+// ---------- render ----------
+function render(){
+  const lut=PALETTES[P.pal]||PALETTES.amber;
+  const glow=1+ P.gl/100*2.2;   // exposure/bloom multiplier
+  const d=img.data, t=trail, N=W*H;
+  for(let i=0,p=0;i<N;i++,p+=4){
+    let v=t[i]*glow; if(v>1)v=1;
+    // gamma for luminous falloff
+    v=Math.sqrt(v);
+    let li=(v*255)|0; if(li>255)li=255;
+    const q=li*3;
+    d[p]=lut[q]; d[p+1]=lut[q+1]; d[p+2]=lut[q+2];
+  }
+  ctx.putImageData(img,0,0);
+}
+
+// ---------- mouse food / repellent ----------
+let mouse=null;
+function stampFood(cx,cy,repel){
+  const R=26*DPR, amt=repel?-0.6:0.9;
+  const x0=cx-R|0,x1=cx+R|0,y0=cy-R|0,y1=cy+R|0;
+  for(let y=y0;y<y1;y++){ let yy=(y+H)%H; for(let x=x0;x<x1;x++){
+    const dx=x-cx,dy=y-cy,d2=dx*dx+dy*dy; if(d2>R*R)continue;
+    let xx=(x+W)%W; const f=(1-Math.sqrt(d2)/R)*amt;
+    const idx=yy*W+xx; trail[idx]+=f; if(trail[idx]<0)trail[idx]=0; if(trail[idx]>4)trail[idx]=4;
+  }}
+}
+
+// ---------- FPS governor ----------
+let fps=60, lastT=performance.now(), lastFpsShow=0;
+function governor(dt){
+  // exponential moving avg of instantaneous fps
+  const inst=1000/Math.max(dt,1); fps=fps*0.9+inst*0.1;
+  const want=(P.pop/100)*MAXA;
+  let cap=want;
+  if(fps<52) cap=activeCount*0.96;
+  else if(fps>58 && activeCount<want) cap=activeCount*1.03+200;
+  activeCount=Math.max(3000, Math.min(want, cap))|0;
+}
+
+// ---------- parameter morphing ----------
+function lerp(a,b,k){ return a+(b-a)*k; }
+function stepMorph(dt){
+  if(morphT>=1) return;
+  morphT=Math.min(1, morphT + dt/1200);
+  const k=morphT<.5?4*morphT*morphT*morphT:1-Math.pow(-2*morphT+2,3)/2; // easeInOutCubic
+  for(const key of PKEYS){ if(key==="spin"){ P.spin=target.spin; continue; }
+    P[key]=lerp(morphStart[key], target[key], k); }
+  syncUI();
+}
+let morphStart={};
+function morphTo(t){ morphStart=Object.assign({},P); target=Object.assign({},target,t); morphT=0;
+  if(t.pal) P.pal=t.pal; if(t.spin!==undefined) target.spin=t.spin; setPalActive(); }
+
+// ---------- ambient mode ----------
+let ambient=false, ambTimer=0, ambIdx=0, ambDrift=0;
+const PNAMES=Object.keys(PRESETS);
+function ambientTick(dt){
+  if(!ambient) return;
+  ambTimer+=dt; ambDrift+=dt;
+  // gentle continuous drift
+  if(morphT>=1 && ambDrift>60){ ambDrift=0;
+    P.sa=clamp(P.sa+(Math.random()-.5)*1.2,5,90);
+    P.df=clamp(P.df+(Math.random()-.5)*1.5,0,100);
+    target.sa=P.sa; target.df=P.df; syncUI();
+  }
+  if(ambTimer>9000){ ambTimer=0; ambIdx=(ambIdx+1)%PNAMES.length;
+    applyPreset(PNAMES[ambIdx], true); }
+}
+function clamp(v,a,b){ return v<a?a:v>b?b:v; }
+
+// ---------- main loop ----------
+function frame(now){
+  const dt=now-lastT; lastT=now;
+  governor(dt); stepMorph(dt); ambientTick(dt);
+  if(mouse){ stampFood(mouse.fx, mouse.fy, mouse.repel); }
+  stepAgents();
+  diffuseDecay();
+  render();
+  if(now-lastFpsShow>400){ document.getElementById("fps").textContent=fps.toFixed(0);
+    document.getElementById("pop").textContent=(activeCount/1000).toFixed(1)+"k"; lastFpsShow=now; }
+  requestAnimationFrame(frame);
+}
+
+// ---------- UI wiring ----------
+const S={sa:"sa",sd:"sd",ts:"ts",ss:"ss",dp:"dp",dk:"dk",df:"df",gl:"gl",pop:"pp"};
+const fmt={sa:v=>v+"°",sd:v=>v+"px",ts:v=>v+"°",ss:v=>(v/100).toFixed(2),
+  dp:v=>(v/100).toFixed(2),dk:v=>(v/1000).toFixed(3),df:v=>v+"%",gl:v=>v+"%",pop:v=>Math.round(v)+"%"};
+function syncUI(){
+  for(const k in S){ const el=document.getElementById(S[k]); if(!el)continue;
+    el.value=Math.round(P[k]); const lab=document.getElementById("v_"+(k==="pop"?"pop":k));
+    if(lab) lab.textContent=fmt[k]? fmt[k](P[k]):Math.round(P[k]); }
+}
+function wireSliders(){
+  for(const k in S){ const el=document.getElementById(S[k]);
+    el.addEventListener("input",()=>{ P[k]=+el.value; target[k]=+el.value; morphT=1;
+      const lab=document.getElementById("v_"+(k==="pop"?"pop":k)); if(lab)lab.textContent=fmt[k](P[k]);
+      [...presEl.children].forEach(c=>c.classList.remove("on")); pushHash(); }); }
+}
+// presets buttons
+const presEl=document.getElementById("presets");
+PNAMES.forEach(name=>{ const b=document.createElement("button"); b.textContent=name; b.dataset.p=name;
+  b.onclick=()=>applyPreset(name); presEl.appendChild(b); });
+function applyPreset(name, silent){
+  const p=fullPreset(PRESETS[name]);
+  morphTo(Object.assign({},p,{spin:PRESETS[name].spin||0}));
+  if(PRESETS[name].pal){ target.pal=PRESETS[name].pal; }
+  P.pal=PRESETS[name].pal||P.pal; setPalActive();
+  [...presEl.children].forEach(c=>c.classList.toggle("on",c.dataset.p===name));
+  if(!silent) pushHash();
+}
+// palette buttons
+const palEl=document.getElementById("palettes");
+const PALLABEL={amber:"Amber",cyanmag:"Cyan·Mag",ink:"Mono Ink",spectral:"Spectral"};
+PALNAMES.forEach(name=>{ const b=document.createElement("button"); b.textContent=PALLABEL[name]; b.dataset.pal=name;
+  b.onclick=()=>{ P.pal=name; setPalActive(); pushHash(); }; palEl.appendChild(b); });
+function setPalActive(){ [...palEl.children].forEach(c=>c.classList.toggle("on",c.dataset.pal===P.pal)); }
+
+// actions
+document.getElementById("reseed").onclick=()=>{ P.seed=(Math.random()*1e9)>>>0; seedAgents();
+  trail.fill(0); pushHash(); };
+document.getElementById("amb").onclick=(e)=>{ ambient=!ambient; ambTimer=0;
+  e.target.classList.toggle("on",ambient); e.target.textContent=ambient?"Ambient ●":"Ambient"; };
+document.getElementById("png").onclick=()=>{ const a=document.createElement("a");
+  a.download="vasculum-"+P.seed+".png"; a.href=cv.toDataURL("image/png"); a.click(); };
+document.getElementById("share").onclick=async()=>{ pushHash();
+  try{ await navigator.clipboard.writeText(location.href); flash("link copied ✓"); }
+  catch(_){ flash("copy failed — URL in address bar"); } };
+let hintFaded=false;
+function flash(msg){ const h=document.getElementById("hint"); const old=h.textContent;
+  h.textContent=msg; h.style.opacity=1; clearTimeout(flash._t);
+  flash._t=setTimeout(()=>{ h.textContent=old; h.style.opacity=hintFaded?0:1; },1600); }
+
+// panel toggle
+const panel=document.getElementById("panel"), toggle=document.getElementById("toggle");
+function togglePanel(){ panel.classList.toggle("hidden"); }
+toggle.onclick=togglePanel;
+addEventListener("keydown",e=>{ if(e.key==="h"||e.key==="H") togglePanel(); });
+
+// mouse interaction
+function toField(e){ const r=cv.getBoundingClientRect();
+  const px=(e.clientX-r.left)/r.width*W, py=(e.clientY-r.top)/r.height*H; return {fx:px|0,fy:py|0}; }
+cv.addEventListener("pointerdown",e=>{ const f=toField(e); mouse={fx:f.fx,fy:f.fy,repel:e.shiftKey};
+  cv.setPointerCapture(e.pointerId); });
+cv.addEventListener("pointermove",e=>{ if(mouse){ const f=toField(e); mouse.fx=f.fx; mouse.fy=f.fy; mouse.repel=e.shiftKey; } });
+cv.addEventListener("pointerup",()=>{ mouse=null; });
+cv.addEventListener("pointercancel",()=>{ mouse=null; });
+
+// ---------- hash serialize ----------
+function pushHash(){
+  const parts=[P.sa,P.sd,P.ts,P.ss,P.dp,P.dk,P.df,P.gl,P.pop,P.spin]
+    .map(v=>Math.round(v)).join(",");
+  const s=parts+"|"+PALNAMES.indexOf(P.pal)+"|"+(P.seed>>>0);
+  history.replaceState(null,"","#"+s);
+}
+function readHash(){
+  const h=location.hash.slice(1); if(!h) return false;
+  try{ const [nums,pi,seed]=h.split("|"); const a=nums.split(",").map(Number);
+    if(a.length<9||a.some(isNaN)) return false;
+    P.sa=a[0];P.sd=a[1];P.ts=a[2];P.ss=a[3];P.dp=a[4];P.dk=a[5];P.df=a[6];P.gl=a[7];P.pop=a[8];P.spin=a[9]||0;
+    P.pal=PALNAMES[+pi]||"amber"; P.seed=(+seed)>>>0||1; target=Object.assign({},P); morphT=1; return true;
+  }catch(_){ return false; }
+}
+
+// ---------- boot ----------
+alloc();
+const fromHash=readHash();
+if(!fromHash){ applyPreset("Veinwork",true); P.seed=1; }
+seedAgents();
+syncUI(); setPalActive();
+// Custom (hash-loaded) params match no preset, so clear highlights; on a fresh
+// boot leave the Veinwork button lit so the active preset is discoverable.
+if(fromHash) [...presEl.children].forEach(c=>c.classList.toggle("on",false));
+activeCount=Math.min(MAXA,(P.pop/100)*MAXA)|0;
+wireSliders();
+pushHash();
+setTimeout(()=>{ hintFaded=true; document.getElementById("hint").style.opacity=0; },7000);
+let rT; addEventListener("resize",()=>{ clearTimeout(rT); rT=setTimeout(()=>{
+  const d=computeDims(); if(d.w!==W||d.h!==H) alloc(); // skip reseed when size is unchanged
+},250); });
+requestAnimationFrame(t=>{ lastT=t; requestAnimationFrame(frame); });
+})();
+</script>
+</body>
+</html>

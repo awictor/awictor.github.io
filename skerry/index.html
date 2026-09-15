@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skerry — Hashiwokakero</title>
+<style>
+  :root{
+    --sea1:#c7e6f0; --sea2:#8fc4d8; --deep:#123b4d; --ink:#0f2733;
+    --rock1:#efe6d2; --rock2:#8c8471; --plank:#c99a52; --plankd:#7c5326;
+    --over:#d55e00; --cross:#0072b2; --done:#2e9e5b; --focus:#1b6fb0;
+    --panel:#f5f3ef; --line:#d8d0c2;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;color:var(--ink);
+    background:linear-gradient(160deg,#e9f4f8,#cfe6ef 60%,#bcdae6);min-height:100%;
+    display:flex;justify-content:center;padding:18px}
+  .wrap{width:100%;max-width:940px;display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:start}
+  h1{margin:0;font-size:22px;letter-spacing:.5px;color:var(--deep)}
+  h1 span{color:var(--plankd)}
+  .sub{margin:2px 0 12px;color:#3d5964;font-size:12.5px}
+  .board{background:#fff8;border-radius:14px;box-shadow:0 6px 24px #1236;padding:10px}
+  canvas{display:block;border-radius:10px;touch-action:none;max-width:100%;height:auto}
+  .side{display:flex;flex-direction:column;gap:10px;min-width:250px}
+  .bar{display:flex;flex-wrap:wrap;gap:6px}
+  button,select{font:inherit;padding:6px 11px;border-radius:8px;border:1px solid var(--line);
+    background:var(--panel);color:var(--ink);cursor:pointer;transition:.12s}
+  button:hover{background:#fff;box-shadow:0 2px 6px #1232}
+  button:active{transform:translateY(1px)}
+  button.p{background:var(--plank);border-color:var(--plankd);color:#3a2508;font-weight:600}
+  .stat{display:flex;gap:14px;align-items:center;font-variant-numeric:tabular-nums}
+  .stat b{color:var(--deep)}
+  .msg{min-height:20px;font-weight:600;color:var(--deep)}
+  .msg.win{color:var(--done)}
+  .log{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px;
+    height:230px;overflow:auto;font-size:12.5px}
+  .log h3{margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:#5a6b74}
+  .log ol{margin:0;padding-left:20px}
+  .log li{margin:3px 0;color:#22323b}
+  .log .empty{color:#7c8b93;font-style:italic}
+  .scrub{display:flex;align-items:center;gap:8px}
+  .scrub input[type=range]{flex:1}
+  label.d{display:flex;align-items:center;gap:5px;font-size:12.5px}
+  .hint{font-size:11.5px;color:#5a6b74}
+  kbd{background:#fff;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;font-size:11px}
+  @media(max-width:720px){
+    body{padding:10px}
+    .wrap{grid-template-columns:1fr}
+    .side{min-width:0}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="board"><canvas id="cv" width="500" height="500" tabindex="0" aria-label="Skerry puzzle board"></canvas></div>
+  <div class="side">
+    <div>
+      <h1>Skerry<span>·</span></h1>
+      <div class="sub">Hashiwokakero. Every skerry sprouts exactly its number of bridges; spans never cross; all islands join one archipelago.</div>
+    </div>
+    <div class="bar">
+      <button class="p" id="new">New</button>
+      <label class="d">Level
+        <select id="diff">
+          <option value="easy">Easy</option>
+          <option value="medium" selected>Medium</option>
+          <option value="hard">Hard</option>
+        </select>
+      </label>
+      <button id="daily">Daily</button>
+    </div>
+    <div class="bar">
+      <button id="hint">Hint</button>
+      <button id="auto">Auto-solve</button>
+      <button id="undo">Undo</button>
+      <button id="clear">Clear</button>
+      <button id="share">Share link</button>
+    </div>
+    <div class="stat"><span>⏱ <b id="timer">0:00</b></span><span>Islands left: <b id="left">–</b></span></div>
+    <div class="msg" id="msg">Drag between two islands to build a bridge.</div>
+    <div class="scrub">
+      <button id="prev" title="step back">◀</button>
+      <input type="range" id="scrub" min="0" max="0" value="0" aria-label="solve path scrubber">
+      <button id="next" title="step forward">▶</button>
+    </div>
+    <div class="log"><h3>Deduction log</h3><ol id="loglist"></ol></div>
+    <div class="hint">Drag / click two islands to cycle a span 0→1→2→0. Keyboard: <kbd>↑↓←→</kbd> pick a span, <kbd>Enter</kbd> cycles it.</div>
+  </div>
+</div>
+<script>
+"use strict";
+(function(){
+const cv=document.getElementById("cv"), ctx=cv.getContext("2d");
+const $=id=>document.getElementById(id);
+const M=34, CS=52, R=17;
+const FONT="-apple-system,Segoe UI,Roboto,sans-serif";
+const size=()=>2*M+(N-1)*CS;
+const DIFF={
+  easy:  {n:7,  count:9,  extra:0.28, minAdv:0},
+  medium:{n:9,  count:16, extra:0.34, minAdv:1},
+  hard:  {n:11, count:25, extra:0.42, minAdv:3}
+};
+let N=9, islands=[], edges=[], steps=[], solverIdx=0, undo=[], won=false;
+let t0=0, tick=null, focusIsl=0, activeEdge=-1, glow=0, crossFlash=null;
+
+// ---------- seeded PRNG (mulberry32) ----------
+function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+// ---------- geometry / edges ----------
+function key(a,b){return a<b?a+"_"+b:b+"_"+a;}
+function buildEdges(isl){
+  const at={}; isl.forEach((s,i)=>at[s.r*N+s.c]=i);
+  const es=[], seen={};
+  const add=(a,b,or)=>{const k=key(a,b); if(seen[k])return; seen[k]=1;
+    const A=isl[a],B=isl[b], e={a,b,or};
+    if(or==="h"){e.row=A.r;e.cmin=Math.min(A.c,B.c);e.cmax=Math.max(A.c,B.c);}
+    else{e.col=A.c;e.rmin=Math.min(A.r,B.r);e.rmax=Math.max(A.r,B.r);}
+    e.cur=0; es.push(e);};
+  isl.forEach((s,i)=>{
+    for(let c=s.c+1;c<N;c++){const j=at[s.r*N+c]; if(j!=null){add(i,j,"h");break;}}
+    for(let r=s.r+1;r<N;r++){const j=at[r*N+s.c]; if(j!=null){add(i,j,"v");break;}}
+  });
+  return es;
+}
+function cross(e1,e2){
+  if(e1.or===e2.or) return false;
+  const h=e1.or==="h"?e1:e2, v=e1.or==="h"?e2:e1;
+  return v.col>h.cmin && v.col<h.cmax && h.row>v.rmin && h.row<v.rmax;
+}
+function betweenCells(e){
+  const out=[];
+  if(e.or==="h"){for(let c=e.cmin+1;c<e.cmax;c++)out.push(e.row*N+c);}
+  else{for(let r=e.rmin+1;r<e.rmax;r++)out.push(r*N+e.col);}
+  return out;
+}
+
+// ---------- deterministic logic solver ----------
+// Sound forced-move propagation. If it fully solves, the puzzle is provably unique.
+function solve(isl,es){
+  const inc=isl.map(()=>[]); es.forEach((e,i)=>{inc[e.a].push(i);inc[e.b].push(i);});
+  const xs=es.map(()=>[]);
+  for(let i=0;i<es.length;i++)for(let j=i+1;j<es.length;j++)if(cross(es[i],es[j])){xs[i].push(j);xs[j].push(i);}
+  const lo=es.map(()=>0), hi=es.map(()=>2);
+  const st=[]; let ok=true, adv=0;
+  const block=i=>{for(const j of xs[i])if(hi[j]>0){if(lo[j]>0)ok=false;hi[j]=0;}};
+  let changed=true;
+  while(changed&&ok){
+    changed=false;
+    for(let v=0;v<isl.length&&ok;v++){
+      const clue=isl[v].clue, ie=inc[v];
+      let sLo=0,sHi=0; for(const e of ie){sLo+=lo[e];sHi+=hi[e];}
+      if(sLo>clue||sHi<clue){ok=false;break;}
+      for(const e of ie){
+        const minE=clue-(sHi-hi[e]);
+        if(minE>lo[e]){
+          let reason;
+          if(ie.length===1) reason=`Island ${clue} has one neighbour — this span is forced to fill.`;
+          else if(clue===sHi) reason=(ie.length===2&&clue===4)?`Corner 4 must double both arms.`:`Island ${clue} needs all its capacity — every arm fills (max-capacity).`;
+          else {reason=`Island ${clue}: the other arms max out short, so this span is forced (isolation-avoidance).`;adv++;}
+          for(let k=lo[e];k<minE;k++) st.push({edge:e,val:k+1,reason});
+          lo[e]=minE; changed=true; block(e);
+          sLo=0;sHi=0;for(const q of ie){sLo+=lo[q];sHi+=hi[q];}
+        }
+        const maxE=clue-(sLo-lo[e]);
+        if(maxE<hi[e]){hi[e]=maxE;changed=true;sLo=0;sHi=0;for(const q of ie){sLo+=lo[q];sHi+=hi[q];}}
+      }
+    }
+  }
+  const solved=ok && lo.every((l,i)=>l===hi[i]) &&
+    isl.every((s,v)=>inc[v].reduce((a,e)=>a+lo[e],0)===s.clue);
+  return {solved,steps:st,adv};
+}
+
+// ---------- generator ----------
+function generate(diff,rnd){
+  let target=diff.count;
+  for(let attempt=0;attempt<400;attempt++){
+    if(attempt&&attempt%80===0&&target>5) target--;
+    N=diff.n;
+    const iCells=new Set(), bCells=new Set(), isl=[], solE={};
+    let r=Math.floor(rnd()*N), c=Math.floor(rnd()*N);
+    isl.push({r,c}); iCells.add(r*N+c);
+    let tries=0;
+    while(isl.length<target && tries<target*40){
+      tries++;
+      const A=isl[Math.floor(rnd()*isl.length)];
+      const [dr,dc]=[[0,1],[0,-1],[1,0],[-1,0]][Math.floor(rnd()*4)];
+      const len=1+Math.floor(rnd()*3);
+      let br=0,bc=0,good=true; const path=[];
+      for(let s=1;s<=len;s++){
+        br=A.r+dr*s; bc=A.c+dc*s;
+        if(br<0||br>=N||bc<0||bc>=N){good=false;break;}
+        const cell=br*N+bc;
+        if(iCells.has(cell)||bCells.has(cell)){good=false;break;}
+        if(s<len)path.push(cell);
+      }
+      if(!good)continue;
+      const ai=isl.indexOf(A), bi=isl.length; isl.push({r:br,c:bc}); iCells.add(br*N+bc);
+      path.forEach(x=>bCells.add(x));
+      solE[key(ai,bi)]=rnd()<0.4?2:1;
+    }
+    if(isl.length<Math.max(4,target-3))continue;
+    const es=buildEdges(isl);
+    // extra edges (cycles) where the span is unobstructed
+    for(const e of es){
+      if(solE[key(e.a,e.b)])continue;
+      if(rnd()>=diff.extra)continue;
+      const cells=betweenCells(e);
+      if(cells.some(x=>bCells.has(x)||iCells.has(x)))continue;
+      solE[key(e.a,e.b)]=rnd()<0.35?2:1;
+      cells.forEach(x=>bCells.add(x));
+    }
+    // clues from solution degrees
+    isl.forEach(s=>s.clue=0);
+    for(const e of es){const v=solE[key(e.a,e.b)]||0; if(v){isl[e.a].clue+=v;isl[e.b].clue+=v;}}
+    if(isl.some(s=>s.clue===0||s.clue>8))continue;
+    const res=solve(isl,es);
+    if(!res.solved)continue;
+    if(res.adv<diff.minAdv)continue;
+    islands=isl; edges=es; steps=res.steps; return true;
+  }
+  return false;
+}
+
+// ---------- load / hash ----------
+function encodeHash(){
+  const o={n:N,i:islands.map(s=>[s.r,s.c,s.clue])};
+  return btoa(JSON.stringify(o)).replace(/=+$/,"");
+}
+function loadFromHash(){
+  try{
+    const o=JSON.parse(atob(location.hash.slice(1)));
+    N=o.n; islands=o.i.map(a=>({r:a[0],c:a[1],clue:a[2]}));
+    edges=buildEdges(islands);
+    steps=solve(islands,edges).steps;
+    return true;
+  }catch(e){return false;}
+}
+
+// ---------- game state ----------
+function reset(){
+  edges.forEach(e=>e.cur=0); undo=[]; won=false; solverIdx=0; glow=0;
+  focusIsl=0; activeEdge=-1; selI=-1; downI=-1;
+  $("scrub").max=steps.length; $("scrub").value=0;
+  $("loglist").innerHTML='<li class="empty">Solve, hint, or scrub the auto-solver to fill this log.</li>';
+  const s=size(), dpr=window.devicePixelRatio||1;
+  cv.width=s*dpr; cv.height=s*dpr;
+  cv.style.width=s+"px"; cv.style.height=s+"px";
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  t0=Date.now(); startTimer(); message("Drag between two islands to build a bridge."); draw(); updateLeft();
+}
+function newBoard(daily){
+  const d=DIFF[$("diff").value];
+  let seed, tag;
+  if(daily){const t=new Date();seed=t.getUTCFullYear()*10000+(t.getUTCMonth()+1)*100+t.getUTCDate();tag=" (daily "+seed+", UTC)";}
+  else{seed=(Math.random()*2**31)>>>0;tag="";}
+  // Perturb the seed on retry so even a stubborn daily seed resolves (and never recurses forever).
+  let ok=false;
+  for(let attempt=0;attempt<48&&!ok;attempt++) ok=generate(d,mulberry(seed+attempt));
+  if(!ok){message("Couldn't generate a board — try New or a lower level.");return;}
+  location.hash=""; reset();
+  if(daily)message("Daily skerry"+tag+" — same board for everyone today.");
+}
+
+// ---------- rules ----------
+function edgeIdx(a,b){return edges.findIndex(e=>(e.a===a&&e.b===b)||(e.a===b&&e.b===a));}
+function cycle(i,record=true){
+  if(won)return;
+  const e=edges[i], nv=(e.cur+1)%3;
+  if(nv>0){
+    for(let j=0;j<edges.length;j++) if(j!==i&&edges[j].cur>0&&cross(e,edges[j])){
+      crossFlash=[i,j]; message("Spans can't cross — clear the other bridge first."); draw();
+      setTimeout(()=>{crossFlash=null;draw();},450); return;
+    }
+  }
+  if(record)undo.push({i,prev:e.cur});
+  e.cur=nv; afterMove();
+}
+function afterMove(){draw();updateLeft();checkWin();}
+function updateLeft(){
+  let bad=0,left=0;
+  islands.forEach((s,v)=>{const t=deg(v); if(t>s.clue)bad++; if(t!==s.clue)left++;});
+  $("left").textContent=left+(bad?" ("+bad+" over)":"");
+}
+function deg(v){let s=0;edges.forEach(e=>{if(e.a===v||e.b===v)s+=e.cur;});return s;}
+function checkWin(){
+  if(islands.some((s,v)=>deg(v)!==s.clue))return;
+  const p=islands.map((_,i)=>i), f=x=>p[x]===x?x:(p[x]=f(p[x]));
+  edges.forEach(e=>{if(e.cur>0)p[f(e.a)]=f(e.b);});
+  const root=f(0);
+  if(islands.every((_,i)=>f(i)===root)){
+    won=true; stopTimer(); glow=1; message("Solved! One connected archipelago. ⚓",true);
+    draw(); const fade=setInterval(()=>{glow-=0.05;draw();if(glow<=0)clearInterval(fade);},40);
+  }
+}
+
+// ---------- solver-driven views ----------
+function logSteps(n){
+  const ol=$("loglist"); ol.innerHTML="";
+  if(n===0){ol.innerHTML='<li class="empty">Solve, hint, or scrub the auto-solver to fill this log.</li>';return;}
+  for(let i=0;i<n;i++){const li=document.createElement("li");li.textContent=steps[i].reason;ol.appendChild(li);}
+  ol.scrollTop=ol.scrollHeight;
+}
+function applyUpTo(n){
+  edges.forEach(e=>e.cur=0);
+  for(let i=0;i<n;i++)edges[steps[i].edge].cur=steps[i].val;
+  solverIdx=n; $("scrub").value=n; undo=[];
+  logSteps(n); draw(); updateLeft();
+  message(n<steps.length?("Step "+n+"/"+steps.length+": "+ (n?steps[n-1].reason:"start")) :"Full solution — proof complete. Scrub back or Clear to keep playing.");
+}
+function hint(){
+  if(won)return;
+  const k=steps.findIndex(s=>edges[s.edge].cur<s.val);
+  if(k<0){message("No forced span left from logic here.");return;}
+  const s=steps[k]; undo.push({i:s.edge,prev:edges[s.edge].cur});
+  edges[s.edge].cur=s.val;
+  const ol=$("loglist"); if(ol.querySelector(".empty"))ol.innerHTML="";
+  const li=document.createElement("li");li.textContent=s.reason;ol.appendChild(li);ol.scrollTop=ol.scrollHeight;
+  message("Hint: "+s.reason); afterMove();
+}
+let autoT=null;
+function autoSolve(){
+  if(autoT){clearInterval(autoT);autoT=null;$("auto").textContent="Auto-solve";return;}
+  $("auto").textContent="Stop"; let i=0; applyUpTo(0);
+  autoT=setInterval(()=>{i++; applyUpTo(i); if(i>=steps.length){clearInterval(autoT);autoT=null;$("auto").textContent="Auto-solve";}},260);
+}
+
+// ---------- keyboard ----------
+function edgeInDir(v,dr,dc){
+  const S=islands[v];
+  for(let i=0;i<edges.length;i++){const e=edges[i]; if(e.a!==v&&e.b!==v)continue;
+    const o=islands[e.a===v?e.b:e.a];
+    const sr=Math.sign(o.r-S.r), sc=Math.sign(o.c-S.c);
+    if(sr===dr&&sc===dc)return i;
+  }
+  return -1;
+}
+cv.addEventListener("keydown",e=>{
+  const dirs={ArrowRight:[0,1],ArrowLeft:[0,-1],ArrowDown:[1,0],ArrowUp:[-1,0]};
+  if(dirs[e.key]){e.preventDefault();const[dr,dc]=dirs[e.key];const ei=edgeInDir(focusIsl,dr,dc);
+    if(ei>=0){if(activeEdge===ei){const ed=edges[ei];focusIsl=ed.a===focusIsl?ed.b:ed.a;activeEdge=-1;}else activeEdge=ei;}
+    draw();
+  }else if(e.key==="Enter"||e.key===" "){e.preventDefault();if(activeEdge>=0)cycle(activeEdge);}
+});
+
+// ---------- pointer ----------
+function hit(x,y){
+  for(let i=0;i<islands.length;i++){const s=islands[i];
+    if(Math.hypot(x-(M+s.c*CS),y-(M+s.r*CS))<=R+4)return i;}
+  return -1;
+}
+let downI=-1, selI=-1;
+function xy(ev){const r=cv.getBoundingClientRect(),k=size()/r.width;return[(ev.clientX-r.left)*k,(ev.clientY-r.top)*k];}
+cv.addEventListener("pointerdown",ev=>{cv.focus();const[x,y]=xy(ev);downI=hit(x,y);});
+cv.addEventListener("pointerup",ev=>{
+  const[x,y]=xy(ev); const up=hit(x,y);
+  if(downI>=0&&up>=0&&up!==downI){const i=edgeIdx(downI,up);if(i>=0){cycle(i);focusIsl=up;selI=-1;downI=-1;return;}}
+  if(up>=0&&up===downI){
+    if(selI>=0&&selI!==up){const i=edgeIdx(selI,up);if(i>=0){cycle(i);selI=-1;focusIsl=up;downI=-1;return;}}
+    selI=up; focusIsl=up; draw();
+  }
+  downI=-1;
+});
+
+// ---------- render ----------
+function px(c){return M+c*CS;} function py(r){return M+r*CS;}
+function drawSpan(e){
+  const x1=px(islands[e.a].c),y1=py(islands[e.a].r),x2=px(islands[e.b].c),y2=py(islands[e.b].r);
+  const off=e.cur===2?4:0, perp=e.or==="h"?[0,1]:[1,0];
+  const draw=o=>{
+    ctx.lineCap="round";
+    ctx.strokeStyle="#7c5326";ctx.lineWidth=7;
+    ctx.beginPath();ctx.moveTo(x1+perp[0]*o,y1+perp[1]*o);ctx.lineTo(x2+perp[0]*o,y2+perp[1]*o);ctx.stroke();
+    ctx.strokeStyle="#d9a441";ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(x1+perp[0]*o,y1+perp[1]*o);ctx.lineTo(x2+perp[0]*o,y2+perp[1]*o);ctx.stroke();
+  };
+  if(e.cur===2){draw(off);draw(-off);
+    // rope ties
+    ctx.strokeStyle="#8a6a3a";ctx.lineWidth=1.5;const n=e.or==="h"?(e.cmax-e.cmin):(e.rmax-e.rmin);
+    for(let k=1;k<=n*2;k++){const t=k/(n*2+1),mx=x1+(x2-x1)*t,my=y1+(y2-y1)*t;
+      ctx.beginPath();ctx.moveTo(mx+perp[0]*off,my+perp[1]*off);ctx.lineTo(mx-perp[0]*off,my-perp[1]*off);ctx.stroke();}
+  }else draw(0);
+}
+function draw(){
+  const W=size();
+  const g=ctx.createLinearGradient(0,0,0,W);
+  g.addColorStop(0,"#cfeef7");g.addColorStop(.55,"#a4d3e3");g.addColorStop(1,"#7fb9cd");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,W);
+  ctx.strokeStyle="rgba(255,255,255,.18)";ctx.lineWidth=1;
+  for(let r=0;r<N;r++){ctx.beginPath();ctx.moveTo(0,py(r)+CS/2);ctx.lineTo(W,py(r)+CS/2);ctx.stroke();}
+  edges.forEach((e,i)=>{if(e.cur>0)drawSpan(e);
+    if(crossFlash&&crossFlash.indexOf(i)>=0){const A=islands[e.a],B=islands[e.b];
+      ctx.strokeStyle="#0072b2";ctx.lineWidth=3;ctx.setLineDash([6,4]);
+      ctx.beginPath();ctx.moveTo(px(A.c),py(A.r));ctx.lineTo(px(B.c),py(B.r));ctx.stroke();ctx.setLineDash([]);}
+  });
+  if(activeEdge>=0){const e=edges[activeEdge],A=islands[e.a],B=islands[e.b];
+    ctx.strokeStyle="#1b6fb0";ctx.lineWidth=2;ctx.setLineDash([3,4]);
+    ctx.beginPath();ctx.moveTo(px(A.c),py(A.r));ctx.lineTo(px(B.c),py(B.r));ctx.stroke();ctx.setLineDash([]);}
+  islands.forEach((s,v)=>{
+    const x=px(s.c),y=py(s.r),t=deg(v),over=t>s.clue,done=t===s.clue;
+    const rg=ctx.createRadialGradient(x-5,y-6,3,x,y,R);
+    rg.addColorStop(0,"#f3ead6");rg.addColorStop(1,"#8c8471");
+    ctx.fillStyle=rg;ctx.beginPath();ctx.arc(x,y,R,0,7);ctx.fill();
+    ctx.lineWidth=over?4:(done?3:2.5);
+    ctx.strokeStyle=over?"#d55e00":(done?"#2e9e5b":"#5a5343");
+    ctx.stroke();
+    if(v===focusIsl){ctx.strokeStyle="#1b6fb0";ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,y,R+4,0,7);ctx.stroke();}
+    ctx.fillStyle="#22323b";ctx.font="bold 16px "+FONT;ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.fillText(s.clue,x,y+1);
+    if(!won&&!done){const rem=s.clue-t;ctx.fillStyle=over?"#d55e00":"#0f2733";
+      ctx.font="10px "+FONT;ctx.fillText(rem>0?("−"+rem):("+"+(-rem)),x,y+R-2.5);}
+  });
+  if(selI>=0&&islands[selI]){const s=islands[selI],x=px(s.c),y=py(s.r);
+    ctx.strokeStyle="#d55e00";ctx.lineWidth=2;ctx.setLineDash([4,4]);
+    ctx.beginPath();ctx.arc(x,y,R+7,0,7);ctx.stroke();ctx.setLineDash([]);}
+  if(glow>0){ctx.save();ctx.globalAlpha=glow*0.55;ctx.strokeStyle="#2e9e5b";ctx.lineWidth=10;
+    edges.forEach(e=>{if(e.cur>0){ctx.beginPath();ctx.moveTo(px(islands[e.a].c),py(islands[e.a].r));ctx.lineTo(px(islands[e.b].c),py(islands[e.b].r));ctx.stroke();}});
+    ctx.restore();}
+}
+
+// ---------- ui ----------
+function message(m,win){$("msg").textContent=m;$("msg").className="msg"+(win?" win":"");}
+function startTimer(){stopTimer();tick=setInterval(()=>{const s=Math.floor((Date.now()-t0)/1000);$("timer").textContent=Math.floor(s/60)+":"+String(s%60).padStart(2,"0");},250);}
+function stopTimer(){if(tick){clearInterval(tick);tick=null;}}
+$("new").onclick=()=>newBoard(false);
+$("daily").onclick=()=>newBoard(true);
+$("diff").onchange=()=>newBoard(false);
+$("hint").onclick=hint;
+$("auto").onclick=autoSolve;
+$("undo").onclick=()=>{if(won||!undo.length)return;const u=undo.pop();edges[u.i].cur=u.prev;afterMove();};
+$("clear").onclick=()=>{
+  if(autoT){clearInterval(autoT);autoT=null;$("auto").textContent="Auto-solve";}
+  edges.forEach(e=>e.cur=0); undo=[]; won=false; solverIdx=0; glow=0; selI=-1; activeEdge=-1;
+  $("scrub").value=0; logSteps(0); draw(); updateLeft();
+  if(!tick){t0=Date.now();startTimer();}
+  message("Board cleared — same skerry, fresh start.");};
+$("share").onclick=()=>{location.hash=encodeHash();
+  if(navigator.clipboard)navigator.clipboard.writeText(location.href).then(()=>message("Link copied to clipboard."),()=>message("Link is in the address bar."));
+  else message("Link is in the address bar.");};
+$("scrub").oninput=e=>{if(autoT){clearInterval(autoT);autoT=null;$("auto").textContent="Auto-solve";}applyUpTo(+e.target.value);};
+$("prev").onclick=()=>applyUpTo(Math.max(0,solverIdx-1));
+$("next").onclick=()=>applyUpTo(Math.min(steps.length,solverIdx+1));
+
+// ---------- boot ----------
+if(location.hash.length>1&&loadFromHash()){reset();message("Loaded a shared skerry.");}
+else newBoard(false);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WeaselWords — Weasel &amp; Filler Word Detector</title>
+<meta name="description" content="Highlight weasel words and filler intensifiers (very, really, quite, basically, several…) in your writing, with a count and density score. 100% offline, nothing leaves your browser.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('weasel-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#d97706;
+    --bg:#faf6f0; --card:#ffffff; --fg:#211a11; --muted:#6a5c46; --line:#efe6d7; --shadow:0 1px 3px rgba(0,0,0,.08);
+    --hl:#d97706;
+  }
+  [data-theme="dark"]{
+    --bg:#14100a; --card:#1d1710; --fg:#f5efe4; --muted:#a89577; --line:#2c2418; --shadow:0 1px 3px rgba(0,0,0,.5);
+    --hl:#f59e0b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#b45309);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:720px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  textarea{width:100%;min-height:150px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem;resize:vertical;line-height:1.7}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:4px}
+  .stat{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+  .stat .v{font-size:1.6rem;font-weight:800;color:var(--c)}
+  .stat .k{color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+  h2{font-size:.82rem;margin:0 0 10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  .render{line-height:1.9;font-size:1.05rem;word-wrap:break-word}
+  .render mark{background:color-mix(in srgb,var(--hl) 35%,transparent);color:inherit;border-radius:3px;padding:1px 3px;font-weight:600}
+  .chips{margin-top:12px;display:flex;flex-wrap:wrap;gap:6px}
+  .chip{background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:3px 11px;font-size:.85rem}
+  .chip b{color:var(--c)}
+  .none{color:var(--muted);font-size:.9rem}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🦫</div>
+    <div><h1>WeaselWords</h1><div class="sub">Weasel &amp; filler word detector</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="text">Your writing</label>
+    <textarea id="text" spellcheck="false">This is basically a very simple idea that is really quite good and will probably work in several cases.</textarea>
+    <div class="stats">
+      <div class="stat"><div class="v" id="sWeasel">—</div><div class="k">Weasel words</div></div>
+      <div class="stat"><div class="v" id="sWords">—</div><div class="k">Words</div></div>
+      <div class="stat"><div class="v" id="sDensity">—</div><div class="k">Density</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Highlighted</h2>
+    <div class="render" id="render"></div>
+    <div class="chips" id="chips"></div>
+  </div>
+</main>
+<footer>
+  Weasel words are vague qualifiers and filler intensifiers that weaken a sentence without adding meaning. Cutting them tightens your prose. A heuristic (word-list) check, so use judgment. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/weasel-words">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  const WEASELS = new Set([
+    'very', 'really', 'quite', 'simply', 'just', 'actually', 'basically', 'fairly',
+    'several', 'various', 'many', 'extremely', 'remarkably', 'surprisingly', 'mostly',
+    'largely', 'relatively', 'completely', 'literally', 'definitely', 'certainly',
+    'probably', 'somewhat', 'rather', 'essentially', 'virtually', 'totally',
+    'particularly', 'generally', 'usually', 'often', 'sometimes', 'clearly',
+    'obviously', 'arguably', 'significantly', 'substantially', 'exceedingly',
+    'vast', 'huge', 'tiny', 'few', 'exceptionally'
+  ]);
+
+  const norm = w => String(w).toLowerCase().replace(/[^a-z]/g, '');
+
+  function isWeasel(word){ return WEASELS.has(norm(word)); }
+
+  function analyze(text){
+    const tokens = String(text).split(/\s+/).filter(Boolean);
+    const wordCount = tokens.filter(t => norm(t)).length;
+    const matches = [];
+    const flagged = new Set();
+    tokens.forEach((tok, i) => {
+      if(isWeasel(tok)){ matches.push({ index: i, word: norm(tok) }); flagged.add(i); }
+    });
+    return {
+      tokens, wordCount,
+      matches, weaselCount: matches.length,
+      density: wordCount ? matches.length / wordCount : 0,
+      flagged
+    };
+  }
+
+  // Count of each distinct weasel word, most frequent first.
+  function tally(text){
+    const counts = {};
+    for(const m of analyze(text).matches) counts[m.word] = (counts[m.word] || 0) + 1;
+    return Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('text')){
+    const $ = id => document.getElementById(id);
+    const esc = s => s.replace(/[&<>]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]));
+
+    function render(){
+      const a = analyze($('text').value);
+      $('sWeasel').textContent = a.weaselCount;
+      $('sWords').textContent = a.wordCount;
+      $('sDensity').textContent = (a.density * 100).toFixed(1) + '%';
+
+      $('render').innerHTML = a.tokens.map((t, i) =>
+        a.flagged.has(i) ? `<mark>${esc(t)}</mark>` : esc(t)
+      ).join(' ') || '<span class="none">Type or paste some text.</span>';
+
+      const t = tally($('text').value);
+      $('chips').innerHTML = t.length
+        ? t.map(([w, c]) => `<span class="chip">${esc(w)} <b>×${c}</b></span>`).join('')
+        : (a.wordCount ? '<span class="none">No weasel words — nice and firm.</span>' : '');
+    }
+    $('text').addEventListener('input', render);
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('weasel-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { WEASELS, isWeasel, analyze, tally };
+</script>
+</body>
+</html>

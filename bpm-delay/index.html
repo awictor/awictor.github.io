@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BpmDelay — BPM to Delay Time &amp; Note Duration Calculator</title>
+<meta name="description" content="Turn a tempo (BPM) into millisecond delay times and note durations — straight, dotted and triplet — for every note value, plus the matching LFO frequency in Hz. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('bpm-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#d946ef;
+    --bg:#faf3fb; --card:#ffffff; --fg:#1f1622; --muted:#68586c; --line:#f0e2f2; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#140a16; --card:#1e1220; --fg:#f4ecf6; --muted:#a88faf; --line:#2c1c30; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:700px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#a21caf);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:700px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  .bpmrow{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:center}
+  input[type=number]{width:100%;padding:14px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.8rem;text-align:center;font-weight:800}
+  input[type=range]{width:100%;accent-color:var(--c);margin-top:12px}
+  table{width:100%;border-collapse:collapse;font-size:.92rem}
+  th,td{padding:8px 6px;border-bottom:1px solid var(--line);text-align:right}
+  th:first-child,td:first-child{text-align:left}
+  th{color:var(--muted);font-weight:600;font-size:.72rem;text-transform:uppercase}
+  td.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:700px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🎛️</div>
+    <div><h1>BpmDelay</h1><div class="sub">Tempo → delay time &amp; note durations</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="bpm">Tempo (BPM)</label>
+    <div class="bpmrow"><input type="number" id="bpm" value="120" min="20" max="300" step="1"></div>
+    <input type="range" id="bpmr" min="40" max="240" value="120" step="1">
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card">
+    <table id="tbl">
+      <thead><tr><th>Note</th><th>Straight</th><th>Dotted</th><th>Triplet</th><th>Hz</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</main>
+<footer>
+  Delay times from tempo: a quarter note = 60000 / BPM ms. Dotted notes are ×1.5, triplets ×2⁄3. The Hz column is the matching LFO / tremolo rate (1000 / straight-ms). 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/bpm-delay">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  // Milliseconds per quarter-note beat.
+  function msPerBeat(bpm){
+    const b = Number(bpm);
+    if(!Number.isFinite(b) || b <= 0) throw new Error('BPM must be > 0');
+    return 60000 / b;
+  }
+
+  // Duration of a note. noteFraction is a fraction of a whole note
+  // (1 = whole, 1/4 = quarter, 1/8 = eighth …). modifier: straight | dotted | triplet.
+  function durationMs(bpm, noteFraction, modifier = 'straight'){
+    const f = Number(noteFraction);
+    if(!Number.isFinite(f) || f <= 0) throw new Error('note fraction must be > 0');
+    let ms = msPerBeat(bpm) * (f / 0.25);   // quarter note = 1 beat
+    if(modifier === 'dotted') ms *= 1.5;
+    else if(modifier === 'triplet') ms *= 2 / 3;
+    else if(modifier !== 'straight') throw new Error('unknown modifier: ' + modifier);
+    return ms;
+  }
+
+  // LFO / delay frequency in Hz for a given delay time (ms).
+  const hz = ms => 1000 / ms;
+
+  const NOTES = [
+    { name: 'Whole',        f: 1 },
+    { name: 'Half',         f: 1 / 2 },
+    { name: 'Quarter',      f: 1 / 4 },
+    { name: 'Eighth',       f: 1 / 8 },
+    { name: 'Sixteenth',    f: 1 / 16 },
+    { name: 'Thirty-second',f: 1 / 32 }
+  ];
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('tbl')){
+    const $ = id => document.getElementById(id);
+    const r = n => n >= 100 ? Math.round(n) : Math.round(n * 10) / 10;
+
+    function render(){
+      try{
+        const bpm = +$('bpm').value;
+        $('tbl').querySelector('tbody').innerHTML = NOTES.map(nt => {
+          const s = durationMs(bpm, nt.f, 'straight');
+          const d = durationMs(bpm, nt.f, 'dotted');
+          const t = durationMs(bpm, nt.f, 'triplet');
+          return `<tr><td>${nt.name}</td><td class="mono">${r(s)} ms</td><td class="mono">${r(d)} ms</td><td class="mono">${r(t)} ms</td><td class="mono">${(hz(s)).toFixed(2)}</td></tr>`;
+        }).join('');
+        $('err').textContent = '';
+      }catch(e){ $('tbl').querySelector('tbody').innerHTML = ''; $('err').textContent = e.message; }
+    }
+    $('bpm').addEventListener('input', () => { $('bpmr').value = $('bpm').value; render(); });
+    $('bpmr').addEventListener('input', () => { $('bpm').value = $('bpmr').value; render(); });
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('bpm-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { msPerBeat, durationMs, hz, NOTES };
+</script>
+</body>
+</html>

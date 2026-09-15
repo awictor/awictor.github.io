@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heddle — Procedural Scottish Tartans</title>
+<style>
+  :root{
+    --bg:#14110d; --panel:#1e1a14; --panel2:#26211a; --line:#3a3226;
+    --ink:#eee6d6; --dim:#a89a80; --accent:#d98a3d; --accent2:#e6a95c;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(1200px 700px at 70% -10%,#221d15,#14110d 60%);
+    color:var(--ink);
+    font:15px/1.5 "Segoe UI",system-ui,sans-serif;
+    display:flex;min-height:100%;
+  }
+  #stage{
+    flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    padding:28px;gap:16px;min-width:0;
+  }
+  .title{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;justify-content:center}
+  .title h1{margin:0;font-size:26px;letter-spacing:.5px}
+  .title h1 b{color:var(--accent)}
+  .title .sub{color:var(--dim);font-size:13px}
+  #cloth{
+    border-radius:8px;box-shadow:0 22px 50px -18px #000, 0 0 0 1px var(--line), inset 0 0 40px rgba(0,0,0,.35);
+    background:#000;max-width:min(78vh,620px);width:100%;height:auto;aspect-ratio:1;
+    image-rendering:auto;
+  }
+  .plate{text-align:center}
+  .plate .name{font-size:22px;font-weight:600;letter-spacing:.3px}
+  .plate .name span{color:var(--accent2)}
+  .plate .meta{color:var(--dim);font-size:12.5px;margin-top:3px}
+  .notation{
+    font-family:"Cascadia Mono",Consolas,monospace;font-size:12.5px;color:var(--ink);
+    background:var(--panel);border:1px solid var(--line);border-radius:6px;
+    padding:6px 12px;margin-top:8px;display:inline-block;max-width:90%;word-break:break-word;
+  }
+  #rail{
+    width:288px;flex:none;background:var(--panel);border-left:1px solid var(--line);
+    padding:22px 20px;display:flex;flex-direction:column;gap:18px;overflow:auto;
+  }
+  .brand{font-weight:700;letter-spacing:2px;font-size:13px;color:var(--accent);text-transform:uppercase}
+  .brand small{display:block;color:var(--dim);letter-spacing:.4px;font-weight:400;font-size:11px;margin-top:3px}
+  .group{display:flex;flex-direction:column;gap:8px}
+  .lbl{font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:var(--dim)}
+  .seg{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .seg.four{grid-template-columns:1fr 1fr}
+  .seg button, select{
+    background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:6px;
+    padding:8px 6px;font-size:12.5px;cursor:pointer;transition:.12s;text-align:center;
+  }
+  select{width:100%;padding:9px 8px}
+  .seg button:hover{border-color:var(--accent)}
+  .seg button.on{background:var(--accent);color:#1a1408;border-color:var(--accent);font-weight:600}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .check{display:flex;align-items:center;gap:9px;cursor:pointer;user-select:none;font-size:13px}
+  .check input{accent-color:var(--accent);width:16px;height:16px}
+  .btn{
+    background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:6px;
+    padding:10px;font-size:13px;cursor:pointer;transition:.12s;width:100%;
+  }
+  .btn:hover{border-color:var(--accent);color:var(--accent2)}
+  .btn.primary{background:var(--accent);color:#1a1408;border-color:var(--accent);font-weight:600}
+  .btn.primary:hover{background:var(--accent2);color:#1a1408}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .foot{color:var(--dim);font-size:11px;line-height:1.45;border-top:1px solid var(--line);padding-top:14px;margin-top:auto}
+  .toast{
+    position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);
+    background:var(--accent);color:#1a1408;padding:9px 18px;border-radius:20px;font-size:13px;font-weight:600;
+    opacity:0;pointer-events:none;transition:.25s;box-shadow:0 8px 20px -6px #000;z-index:9;
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .scaleVal{color:var(--accent2);font-variant-numeric:tabular-nums}
+  /* keyboard focus visibility on the dark theme */
+  .seg button:focus-visible, select:focus-visible, .btn:focus-visible,
+  input[type=range]:focus-visible, .check input:focus-visible{
+    outline:2px solid var(--accent);outline-offset:2px;
+  }
+  /* mobile: stack the rail under the cloth, no horizontal scroll */
+  @media(max-width:720px){
+    body{flex-direction:column}
+    #stage{padding:18px 14px}
+    #cloth{max-width:min(92vw,560px)}
+    #rail{
+      width:100%;flex:none;border-left:none;border-top:1px solid var(--line);
+      padding:20px 16px;
+    }
+    .foot{margin-top:16px}
+  }
+</style>
+</head>
+<body>
+  <main id="stage">
+    <div class="title">
+      <h1><b>Heddle</b> · loom</h1>
+      <span class="sub">weave a clan out of a seed</span>
+    </div>
+    <canvas id="cloth" width="600" height="600"></canvas>
+    <div class="plate">
+      <div class="name" id="tName">—</div>
+      <div class="meta" id="tMeta">—</div>
+      <div class="notation" id="tSett">—</div>
+    </div>
+  </main>
+
+  <aside id="rail">
+    <div class="brand">Heddle<small>procedural tartan generator</small></div>
+
+    <div class="group">
+      <div class="lbl">Tradition</div>
+      <select id="mode">
+        <option value="Ancient">Ancient — muted vegetable dye</option>
+        <option value="Modern">Modern — saturated</option>
+        <option value="Hunting">Hunting — greens &amp; browns</option>
+        <option value="Dress">Dress — light ground</option>
+      </select>
+    </div>
+
+    <div class="group">
+      <div class="lbl">Weave structure</div>
+      <div class="seg four" id="weave">
+        <button data-w="twill22" class="on">2/2 twill</button>
+        <button data-w="twill21">2/1 twill</button>
+        <button data-w="plain">plain</button>
+        <button data-w="herring">herringbone</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="row"><span class="lbl">Thread scale</span><span class="scaleVal" id="scaleVal">6px</span></div>
+      <input type="range" id="scale" min="4" max="12" step="1" value="6">
+      <label class="check"><input type="checkbox" id="aged"> Aged / weathered fade</label>
+    </div>
+
+    <div class="group">
+      <div class="lbl">Generate</div>
+      <button class="btn primary" id="rand">⚂ Randomize tartan</button>
+      <div class="grid2">
+        <button class="btn" id="reThreads">Reshuffle threads</button>
+        <button class="btn" id="reColors">Reshuffle colors</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="lbl">Export</div>
+      <div class="grid2">
+        <button class="btn" id="copySett">Copy sett</button>
+        <button class="btn" id="copyCss">Copy CSS</button>
+      </div>
+      <div class="grid2">
+        <button class="btn" id="dlPng">Download PNG</button>
+        <button class="btn" id="dlSvg">Download SVG</button>
+      </div>
+      <button class="btn" id="copyLink">Copy share link</button>
+    </div>
+
+    <div class="foot">
+      A tartan is a mirror-symmetric thread-count "sett" rendered through a twill weave. Every
+      crossing blends warp over weft, giving the muted mid-tones of real cloth. State lives in the
+      URL — same link, same tartan, forever.
+    </div>
+  </aside>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+// ---------- PRNG + color math ----------
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+const hx=h=>{h=h.replace('#','');return[parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];};
+const clamp=v=>Math.max(0,Math.min(255,Math.round(v)));
+const toHex=(r,g,b)=>'#'+[r,g,b].map(v=>clamp(v).toString(16).padStart(2,'0')).join('');
+function mix(a,b,t){const A=hx(a),B=hx(b);return toHex(A[0]*t+B[0]*(1-t),A[1]*t+B[1]*(1-t),A[2]*t+B[2]*(1-t));}
+function weather(h){const c=hx(h),beige=[201,188,160],t=0.22;let r=c[0]*(1-t)+beige[0]*t,g=c[1]*(1-t)+beige[1]*t,b=c[2]*(1-t)+beige[2]*t;const lum=(r+g+b)/3,d=0.28;return toHex(r*(1-d)+lum*d,g*(1-d)+lum*d,b*(1-d)+lum*d);}
+
+// ---------- Palettes (per tradition) ----------
+const PALETTES={
+  Modern:{colors:[{code:'R',hex:'#C8102E'},{code:'B',hex:'#003478'},{code:'G',hex:'#0A6B3B'},{code:'K',hex:'#141414'},{code:'Y',hex:'#F5C518'},{code:'W',hex:'#F4F1E9'},{code:'P',hex:'#5B2A86'},{code:'A',hex:'#3E8FD0'}],ground:[1,2,3],accent:[0,2,4,6,7]},
+  Ancient:{colors:[{code:'R',hex:'#B0574A'},{code:'B',hex:'#4C6C88'},{code:'G',hex:'#6E7B54'},{code:'K',hex:'#33342E'},{code:'Y',hex:'#CDB96B'},{code:'W',hex:'#E7DFCB'},{code:'T',hex:'#8A6E4B'},{code:'A',hex:'#8FA9C0'}],ground:[1,2,3],accent:[0,2,4,6,7]},
+  Hunting:{colors:[{code:'G',hex:'#26402A'},{code:'DG',hex:'#16281A'},{code:'T',hex:'#4E3A26'},{code:'K',hex:'#1B1B1B'},{code:'B',hex:'#2C4A5A'},{code:'Y',hex:'#96833F'},{code:'N',hex:'#77776B'},{code:'R',hex:'#7A3A30'}],ground:[0,1,2],accent:[2,3,4,5,7]},
+  Dress:{colors:[{code:'W',hex:'#F1EDE1'},{code:'R',hex:'#C8102E'},{code:'K',hex:'#161616'},{code:'B',hex:'#1D3E7A'},{code:'Y',hex:'#E0BE45'},{code:'G',hex:'#2E6A4E'},{code:'A',hex:'#A6C7E2'},{code:'P',hex:'#6A3A8A'}],ground:[0],accent:[1,3,4,5,7]}
+};
+
+// ---------- Name generator ----------
+const PRE=['Mac','Glen','Strath','Dun','Kil','Inver','Bal','Auch','Loch','Craig','Ard','Cairn','Ross','Braemar'];
+const ROOT=['gyle','rannoch','lomond','vern','more','fyne','garry','birnie','ochy','lyne','veagh','tarff','shiel','wick','airn','dowan','crannich'];
+function clanName(seed){const r=mulberry32(seed^0x9e3779b9);let p=PRE[Math.floor(r()*PRE.length)],root=ROOT[Math.floor(r()*ROOT.length)];if(p==='Mac')root=root[0].toUpperCase()+root.slice(1);return p+root;}
+
+// ---------- State ----------
+const state={mode:'Ancient',weave:'twill22',scale:6,aged:false,seedP:0,seedS:0};
+const rnd=()=>Math.floor(Math.random()*1e9);
+
+// ---------- Sett synthesis ----------
+function genSett(){
+  const P=PALETTES[state.mode];
+  const rp=mulberry32(state.seedP),rs=mulberry32(state.seedS);
+  const gi=P.ground[Math.floor(rp()*P.ground.length)];
+  const dark=P.colors.findIndex(c=>c.code==='K');
+  const guard=dark<0?gi:dark;
+  const pool=P.accent.filter(x=>x!==gi);
+  for(let k=pool.length-1;k>0;k--){const m=Math.floor(rp()*(k+1));[pool[k],pool[m]]=[pool[m],pool[k]];}
+  const nAcc=2+Math.floor(rs()*3);
+  const accents=pool.slice(0,Math.min(nAcc,pool.length));
+  const big=[24,32,40,48],med=[12,16,20];
+  const pk=(r,a)=>a[Math.floor(r()*a.length)];
+  const stripes=[{c:gi,n:pk(rs,big)}];
+  accents.forEach((a,idx)=>{
+    if(rs()<0.55&&a!==guard) stripes.push({c:guard,n:4});
+    stripes.push({c:a,n:pk(rs,idx===0?big:med)});
+    stripes.push({c:gi,n:pk(rs,med)});
+  });
+  return {gi,stripes,colors:P.colors};
+}
+const mirror=s=>s.concat(s.slice(1,-1).reverse());
+function expand(unit){const t=[];for(const s of unit)for(let k=0;k<s.n;k++)t.push(s.c);return t;}
+
+// ---------- Weave interlacement ----------
+const m4=(a,n)=>((a%n)+n)%n;
+function warpUp(i,j,w){
+  if(w==='plain') return m4(i+j,2)===0;
+  if(w==='twill21') return m4(i-j,3)<2;
+  if(w==='herring'){const ii=(Math.floor(i/8)%2===0)?i:-i;return m4(ii-j,4)<2;}
+  return m4(i-j,4)<2; // 2/2 twill
+}
+
+// ---------- Render ----------
+const cache={};
+function cell(warp,weft,up){
+  const key=warp+weft+(up?1:0)+(state.aged?1:0);
+  if(cache[key])return cache[key];
+  const top=up?warp:weft, bot=up?weft:warp;
+  let c=mix(top,bot,0.72);
+  if(state.aged)c=weather(c);
+  return cache[key]=c;
+}
+const SHEEN_L='rgba(255,247,230,0.09)', SHEEN_D='rgba(0,0,0,0.11)';
+function drawWeave(ctx,threads,colors,cp,cols,rows,w){
+  const L=threads.length, hi=Math.max(1,cp*0.34);
+  for(let j=0;j<rows;j++){
+    const yj=colors[threads[j%L]].hex, y=j*cp;
+    for(let i=0;i<cols;i++){
+      const xi=colors[threads[i%L]].hex, up=warpUp(i,j,w), x=i*cp;
+      ctx.fillStyle=cell(xi,yj,up);
+      ctx.fillRect(x,y,cp,cp);
+      // tactile: directional thread sheen (band granularity)
+      if(up){ctx.fillStyle=SHEEN_L;ctx.fillRect(x,y,hi,cp);ctx.fillStyle=SHEEN_D;ctx.fillRect(x+cp-hi,y,hi,cp);}
+      else  {ctx.fillStyle=SHEEN_L;ctx.fillRect(x,y,cp,hi);ctx.fillStyle=SHEEN_D;ctx.fillRect(x,y+cp-hi,cp,hi);}
+    }
+  }
+  // faint diagonal twill sheen
+  if(w!=='plain'){
+    ctx.save();ctx.globalAlpha=0.05;ctx.strokeStyle='#fff';ctx.lineWidth=1;
+    const W=cols*cp,H=rows*cp,step=cp*4;
+    for(let d=-H;d<W;d+=step){ctx.beginPath();ctx.moveTo(d,0);ctx.lineTo(d+H,H);ctx.stroke();}
+    ctx.restore();
+  }
+}
+
+// ---------- Pipeline ----------
+let CUR=null;
+function render(){
+  const s=genSett();
+  const unit=mirror(s.stripes), threads=expand(unit);
+  CUR={s,unit,threads};
+  const cv=document.getElementById('cloth'), ctx=cv.getContext('2d');
+  // HiDPI: size the backing store to devicePixelRatio so per-thread sheen stays crisp.
+  const dpr=Math.max(1,window.devicePixelRatio||1);
+  const cssW=cv.clientWidth||Math.min(620,window.innerWidth||620);
+  cv.width=cv.height=Math.round(cssW*dpr);
+  const cp=state.scale*dpr, cols=Math.ceil(cv.width/cp), rows=Math.ceil(cv.height/cp);
+  drawWeave(ctx,threads,s.colors,cp,cols,rows,state.weave);
+  // labels
+  const total=threads.length;
+  document.getElementById('tName').innerHTML=clanName(state.seedP^state.seedS)+' <span>Tartan</span>';
+  document.getElementById('tMeta').textContent=state.mode+' · '+
+    ({twill22:'2/2 twill',twill21:'2/1 twill',plain:'plain weave',herring:'herringbone'})[state.weave]+
+    ' · '+total+' threads / sett'+(state.aged?' · weathered':'');
+  document.getElementById('tSett').textContent=s.stripes.map(x=>s.colors[x.c].code+x.n).join(' ');
+  writeHash();
+}
+
+// ---------- Exports ----------
+const gcd=(a,b)=>{while(b){[a,b]=[b,a%b];}return a;};
+const lcm=(a,b)=>a/gcd(a,b)*b;
+// smallest tile (in threads) that repeats BOTH the sett (period L) and the
+// weave interlacement, so 2/1 twill (period 3) and herringbone (period 16) tile seamlessly too.
+const weavePeriod=w=>w==='plain'?2:w==='twill21'?3:w==='herring'?16:4;
+function tileCanvas(){ // one seamless repeat, phase-aligned for every weave
+  const L=CUR.threads.length;
+  const N=lcm(L,weavePeriod(state.weave));
+  // seamlessness depends only on thread count N; bound the pixel size so a
+  // 4x herringbone tile at large scale can't blow past the canvas limit.
+  const cp=Math.max(1,Math.min(state.scale,Math.floor(4096/N)||1));
+  const cv=document.createElement('canvas'); cv.width=N*cp; cv.height=N*cp;
+  drawWeave(cv.getContext('2d'),CUR.threads,CUR.s.colors,cp,N,N,state.weave);
+  return cv;
+}
+function runs(){ // group full repeat into color runs
+  const t=CUR.threads,out=[];let c=t[0],n=0;
+  for(const v of t){if(v===c)n++;else{out.push([c,n]);c=v;n=1;}}out.push([c,n]);return out;
+}
+function cssSnippet(){
+  const R=runs(),colors=CUR.s.colors,px=3;let pos=0,stops=[];
+  for(const [c,n] of R){const h=colors[c].hex;stops.push(h+' '+pos+'px '+(pos+n*px)+'px');pos+=n*px;}
+  const g=deg=>'repeating-linear-gradient('+deg+'deg,'+stops.join(',')+')';
+  return '/* '+clanName(state.seedP^state.seedS)+' Tartan */\nbackground-color:'+colors[CUR.s.gi].hex+
+    ';\nbackground-image:'+g(90)+','+g(0)+';\nbackground-blend-mode:multiply;';
+}
+function svgSnippet(){
+  const L=CUR.threads.length,colors=CUR.s.colors,t=CUR.threads;let warp='',weft='';
+  for(let i=0;i<L;i++){const h=colors[t[i]].hex;warp+='<rect x="'+i+'" width="1" height="'+L+'" fill="'+h+'"/>';weft+='<rect y="'+i+'" width="'+L+'" height="1" fill="'+h+'" opacity="0.5"/>';}
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="480" shape-rendering="crispEdges">'+
+    '<defs><pattern id="tartan" width="'+L+'" height="'+L+'" patternUnits="userSpaceOnUse">'+warp+weft+
+    '</pattern></defs><rect width="100%" height="100%" fill="url(#tartan)"/></svg>';
+}
+function download(name,url){const a=document.createElement('a');a.href=url;a.download=name;a.click();}
+
+// ---------- Hash state ----------
+function writeHash(){
+  const q=new URLSearchParams({m:state.mode,w:state.weave,s:state.scale,a:state.aged?1:0,p:state.seedP,t:state.seedS});
+  history.replaceState(null,'','#'+q.toString());
+}
+function readHash(){
+  const q=new URLSearchParams(location.hash.slice(1));
+  state.mode=PALETTES[q.get('m')]?q.get('m'):'Ancient';
+  state.weave=['twill22','twill21','plain','herring'].includes(q.get('w'))?q.get('w'):'twill22';
+  state.scale=Math.min(12,Math.max(4,+q.get('s')||6));
+  state.aged=q.get('a')==='1';
+  state.seedP=+q.get('p')||rnd();
+  state.seedS=+q.get('t')||rnd();
+}
+
+// ---------- UI wiring ----------
+let toastT;
+function toast(msg){const el=document.getElementById('toast');el.textContent=msg;el.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>el.classList.remove('show'),1400);}
+function syncUI(){
+  document.getElementById('mode').value=state.mode;
+  document.getElementById('scale').value=state.scale;
+  document.getElementById('scaleVal').textContent=state.scale+'px';
+  document.getElementById('aged').checked=state.aged;
+  document.querySelectorAll('#weave button').forEach(b=>b.classList.toggle('on',b.dataset.w===state.weave));
+}
+function fallbackCopy(txt,label){
+  try{
+    const ta=document.createElement('textarea');
+    ta.value=txt;ta.setAttribute('readonly','');
+    ta.style.cssText='position:fixed;top:-1000px;opacity:0';
+    document.body.appendChild(ta);ta.select();
+    const ok=document.execCommand('copy');
+    document.body.removeChild(ta);
+    toast(ok?label+' copied':'copy blocked');
+  }catch(e){toast('copy blocked');}
+}
+// navigator.clipboard is undefined in non-secure contexts (e.g. file:// on Safari),
+// where accessing .writeText throws synchronously before any Promise exists — guard it.
+function copy(txt,label){
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(()=>toast(label+' copied')).catch(()=>fallbackCopy(txt,label));
+  }else{
+    fallbackCopy(txt,label);
+  }
+}
+
+document.getElementById('mode').onchange=e=>{state.mode=e.target.value;render();};
+document.getElementById('scale').oninput=e=>{state.scale=+e.target.value;document.getElementById('scaleVal').textContent=state.scale+'px';render();};
+document.getElementById('aged').onchange=e=>{state.aged=e.target.checked;render();};
+document.querySelectorAll('#weave button').forEach(b=>b.onclick=()=>{state.weave=b.dataset.w;syncUI();render();});
+document.getElementById('rand').onclick=()=>{state.seedP=rnd();state.seedS=rnd();render();toast('new tartan');};
+document.getElementById('reThreads').onclick=()=>{state.seedS=rnd();render();toast('threads reshuffled');};
+document.getElementById('reColors').onclick=()=>{state.seedP=rnd();render();toast('palette reshuffled');};
+document.getElementById('copySett').onclick=()=>copy(document.getElementById('tSett').textContent,'Sett notation');
+document.getElementById('copyCss').onclick=()=>copy(cssSnippet(),'CSS');
+document.getElementById('dlPng').onclick=()=>download(clanName(state.seedP^state.seedS)+'-tartan.png',tileCanvas().toDataURL('image/png'));
+document.getElementById('dlSvg').onclick=()=>{const b=new Blob([svgSnippet()],{type:'image/svg+xml'});const url=URL.createObjectURL(b);download(clanName(state.seedP^state.seedS)+'-tartan.svg',url);setTimeout(()=>URL.revokeObjectURL(url),0);};
+document.getElementById('copyLink').onclick=()=>copy(location.href,'Share link');
+window.addEventListener('hashchange',()=>{readHash();syncUI();render();});
+// re-render on resize / DPR change so the weave stays crisp and the layout adapts
+let rsT;window.addEventListener('resize',()=>{clearTimeout(rsT);rsT=setTimeout(render,120);});
+
+// ---------- Boot ----------
+readHash();syncUI();render();
+</script>
+</body>
+</html>

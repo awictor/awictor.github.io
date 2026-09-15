@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rasterisk — a demoscene in a textbox</title>
+<style>
+  :root{ --bg:#05060a; --panel:#0c1018; --edge:#1c2636; --ink:#9fb2c8; --hi:#7fffbf; --amber:#ffb347; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:ui-monospace,"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace}
+  #app{display:flex;height:100vh;overflow:hidden}
+  #stage{flex:1;position:relative;background:#000;min-width:0}
+  #screen{width:100%;height:100%;display:block;filter:drop-shadow(0 0 2px currentColor)}
+  #screen.glow{filter:drop-shadow(0 0 3px #0f6) drop-shadow(0 0 8px #0a4)}
+  #scan{position:absolute;inset:0;pointer-events:none;
+    background:repeating-linear-gradient(0deg,rgba(0,0,0,0),rgba(0,0,0,0) 2px,rgba(0,0,0,.28) 3px,rgba(0,0,0,0) 4px),
+      radial-gradient(ellipse at center,rgba(0,0,0,0) 55%,rgba(0,0,0,.55) 100%)}
+  #scan.off{display:none}
+  #panel{width:326px;flex:none;background:var(--panel);border-left:1px solid var(--edge);
+    padding:12px 14px;overflow-y:auto;font-size:12px}
+  h1{font-size:15px;margin:0 0 2px;color:var(--hi);letter-spacing:1px}
+  h1 b{color:var(--amber)}
+  .sub{font-size:10px;color:#8ea1b8;margin:0 0 12px}
+  label{display:block;margin:11px 0 3px;color:#7f92aa;text-transform:uppercase;font-size:9.5px;letter-spacing:.6px}
+  textarea{width:100%;height:52px;resize:vertical;background:#030407;color:var(--hi);
+    border:1px solid var(--edge);border-radius:4px;padding:7px;font:12px ui-monospace,monospace;line-height:1.4}
+  textarea:focus{outline:none;border-color:var(--hi)}
+  #err{min-height:14px;font-size:10px;color:#ff6a6a;margin-top:3px;white-space:pre-wrap}
+  #err.ok{color:#3a7a52}
+  select,input[type=text]{width:100%;background:#030407;color:var(--ink);border:1px solid var(--edge);
+    border-radius:4px;padding:5px 6px;font:12px ui-monospace,monospace}
+  input[type=range]{width:100%;accent-color:var(--hi);margin:2px 0}
+  .row{display:flex;gap:6px}.row>*{flex:1;min-width:0}
+  .chips,.presets{display:flex;flex-wrap:wrap;gap:4px}
+  .chip,button{cursor:pointer;font:11px ui-monospace,monospace;color:var(--ink);
+    background:#121a26;border:1px solid var(--edge);border-radius:4px;padding:5px 8px}
+  .chip:hover,button:hover{border-color:var(--hi);color:var(--hi)}
+  .chip:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible{
+    outline:none;border-color:var(--hi);box-shadow:0 0 0 2px rgba(127,255,191,.35)}
+  .presets button{flex:1 0 30%;padding:6px 4px;text-align:center}
+  button.act{background:#132a20;border-color:#2c6a4a;color:var(--hi)}
+  button.act:hover{background:#1a3a2c}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .val{color:var(--hi);float:right;font-size:9.5px}
+  .foot{margin-top:14px;font-size:9.5px;color:#7f92aa;line-height:1.5}
+  .foot code{color:#7f92aa}
+  #cells{position:absolute;left:8px;bottom:6px;font-size:9.5px;color:#3a4658;pointer-events:none}
+  @media(max-width:640px){
+    #app{flex-direction:column}
+    #stage{flex:none;height:50vh}
+    #panel{width:auto;flex:1;border-left:none;border-top:1px solid var(--edge)}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <canvas id="screen"></canvas>
+    <div id="scan"></div>
+    <div id="cells"></div>
+  </div>
+  <div id="panel">
+    <h1>RASTER<b>*</b>ISK</h1>
+    <p class="sub">a demoscene in a textbox &middot; f(x,y,t)&rarr;glyph</p>
+
+    <label>Expression &mdash; return a number</label>
+    <textarea id="expr" spellcheck="false"></textarea>
+    <div id="err" class="ok">ok</div>
+    <div class="row" style="margin-top:6px">
+      <button id="mutate" class="act">⚡ mutate</button>
+      <button id="rand">🎲 random</button>
+      <button id="attractBtn">▶ attract</button>
+    </div>
+
+    <label>Helpers &mdash; click to insert</label>
+    <div class="chips" id="chips"></div>
+
+    <label>Presets &mdash; load &amp; remix</label>
+    <div class="presets" id="presets"></div>
+
+    <div class="grid2">
+      <div><label>Color</label>
+        <select id="mode">
+          <option value="green">green phosphor</option>
+          <option value="amber">amber CRT</option>
+          <option value="mono">mono</option>
+          <option value="rainbow">value→hue</option>
+          <option value="twotone">two-tone</option>
+        </select></div>
+      <div><label>Density <span class="val" id="dV"></span></label>
+        <input type="range" id="d" min="7" max="26" step="1"></div>
+    </div>
+
+    <label>Ramp (dark→light) <button id="inv" style="float:right;padding:1px 6px">invert</button></label>
+    <input type="text" id="ramp" spellcheck="false">
+
+    <div class="grid2">
+      <div><label>Gain <span class="val" id="gV"></span></label><input type="range" id="g" min="0.05" max="3" step="0.01"></div>
+      <div><label>Bias <span class="val" id="bV"></span></label><input type="range" id="b" min="-1" max="1.5" step="0.01"></div>
+      <div><label>Contrast <span class="val" id="cV"></span></label><input type="range" id="c" min="0.4" max="4" step="0.01"></div>
+      <div><label>Speed <span class="val" id="sV"></span></label><input type="range" id="s" min="0" max="3" step="0.01"></div>
+    </div>
+
+    <div class="row" style="margin-top:10px">
+      <button id="pause">⏸ pause</button>
+      <button id="glowB" class="act">✦ glow</button>
+      <button id="scanB" class="act">▤ scan</button>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <button id="copy">📋 text</button>
+      <button id="png">🖼 PNG</button>
+      <button id="rec">⏺ loop</button>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <button id="share">🔗 copy share link</button>
+    </div>
+
+    <div class="foot">
+      <b style="color:#7f92aa">vars</b> <code>y</code> ∈[-1,1], <code>x</code> scaled by aspect (|x|&gt;1 on wide screens) &middot; <code>t</code> seconds<br>
+      <b style="color:#7f92aa">h</b> all Math + <code>fract clamp mix step smoothstep hash noise fbm warp</code><br>
+      try <code>fbm(x*3+t*.1,y*3,t*.2)</code> or <code>sin(hypot(x,y)*12-t*4)</code>
+    </div>
+  </div>
+</div>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const cv=$("screen"), ctx=cv.getContext("2d",{alpha:false});
+
+/* ---------- seeded helper library (bound as `h`, exposed via with()) ---------- */
+let SEED=1337;
+function hash(n){ n=Math.sin(n*127.1+SEED*13.13)*43758.5453; return n-Math.floor(n); }
+function h3(i,j,k){ return hash(i*1.7+j*311.7+k*74.7); }
+function noise(x,y,z){ // 3D value noise, trilinear + smooth fade
+  z=z||0;
+  const xi=Math.floor(x),yi=Math.floor(y),zi=Math.floor(z);
+  let xf=x-xi,yf=y-yi,zf=z-zi;
+  const fx=xf*xf*(3-2*xf),fy=yf*yf*(3-2*yf),fz=zf*zf*(3-2*zf);
+  function L(a,b,t){return a+(b-a)*t;}
+  const c000=h3(xi,yi,zi),c100=h3(xi+1,yi,zi),c010=h3(xi,yi+1,zi),c110=h3(xi+1,yi+1,zi),
+        c001=h3(xi,yi,zi+1),c101=h3(xi+1,yi,zi+1),c011=h3(xi,yi+1,zi+1),c111=h3(xi+1,yi+1,zi+1);
+  const x00=L(c000,c100,fx),x10=L(c010,c110,fx),x01=L(c001,c101,fx),x11=L(c011,c111,fx);
+  return L(L(x00,x10,fy),L(x01,x11,fy),fz); // 0..1
+}
+function fbm(x,y,z){ let a=0,amp=.5,f=1; for(let o=0;o<4;o++){a+=amp*noise(x*f,y*f,(z||0)*f); f*=2; amp*=.5;} return a; }
+function warp(x,y,z){ z=z||0; return fbm(x+fbm(x,y,z), y+fbm(x+5.2,y+1.3,z), z); }
+function fract(v){return v-Math.floor(v);}
+function clamp(v,a,b){a=a===undefined?0:a;b=b===undefined?1:b;return v<a?a:v>b?b:v;}
+function mix(a,b,t){return a+(b-a)*t;}
+function step(e,v){return v<e?0:1;}
+function smoothstep(a,b,v){const t=clamp((v-a)/(b-a));return t*t*(3-2*t);}
+const H=Object.assign(Object.create(null),{fract,clamp,mix,step,smoothstep,hash,noise,fbm,warp});
+for(const k of Object.getOwnPropertyNames(Math)) H[k]=Math[k];
+const CHIPS=["sin","cos","tan","hypot","atan2","abs","sqrt","exp","pow","min","max","sign","floor","PI",
+  "fract","clamp","mix","step","smoothstep","hash","noise","fbm","warp"];
+
+/* ---------- presets ---------- */
+const PRESETS={
+  plasma:"(sin(x*4+t)+sin(y*4+t*1.3)+sin((x+y)*3+t)+sin(hypot(x,y)*5-t*2))/4",
+  ripple:"sin(hypot(x,y)*12 - t*4)",
+  tunnel:"sin(7/(hypot(x,y)+0.12) + atan2(y,x)*4 + t*2)",
+  spiral:"sin(atan2(y,x)*6 + hypot(x,y)*11 - t*3)",
+  metaballs:"(exp(-7*hypot(x-sin(t*.7)*.6,y-cos(t)*.6)**2)+exp(-7*hypot(x+cos(t*.9)*.6,y-sin(t*1.3)*.6)**2)+exp(-7*hypot(x-cos(t*1.1)*.5,y+sin(t*.8)*.6)**2))*2-1",
+  checker:"sign(sin(x*6+sin(y*3+t))*sin(y*6+cos(x*3+t)))",
+  interference:"(sin(hypot(x-.5,y)*15-t*3)+sin(hypot(x+.5,y)*15-t*3))/2",
+  clouds:"fbm(x*2+t*.12,y*2,t*.2)*2.4-1",
+  marble:"sin((x*3 + fbm(x*2,y*2,t*.1)*4)*3 + t)",
+  flow:"warp(x*1.6+t*.1, y*1.6, t*.25)*2.2-1"
+};
+
+/* ---------- state ---------- */
+const st={e:PRESETS.plasma,r:" .:-=+*#%@",m:"green",g:0.5,b:0.5,c:1,s:1,d:13,inv:0,glow:1,scan:1,seed:SEED};
+let fn=null, paused=false, t0=performance.now(), tPause=0, palette=[], attract=false, attractT=0, idle=0;
+
+/* ---------- compile ---------- */
+function compile(expr){
+  try{
+    const f=new Function("x","y","t","h","with(h){return ("+expr+");}");
+    const v=f(0.1,0.2,0.3,H); // smoke test
+    if(typeof v!=="number"||!isFinite(v)) throw new Error("must return a finite number");
+    fn=f; $("err").textContent="ok"; $("err").className="ok"; return true;
+  }catch(e){ $("err").textContent="✗ "+e.message; $("err").className=""; return false; }
+}
+
+/* ---------- palette (64 colors) ---------- */
+function buildPalette(){
+  palette=[];
+  for(let k=0;k<64;k++){ const i=k/63; palette.push(colorAt(i)); }
+}
+function colorAt(i){
+  switch(st.m){
+    case"amber": return `rgb(${(50+i*205)|0},${(30+i*160)|0},${(i*i*40)|0})`;
+    case"mono": {const v=(40+i*215)|0; return `rgb(${v},${v},${v})`;}
+    case"rainbow": return `hsl(${(i*300)|0},92%,${(22+i*48)|0}%)`;
+    case"twotone": return `rgb(${(20+i*40)|0},${(20+i*150)|0},${(60+i*195)|0})`;
+    default: return `rgb(${(i*i*90)|0},${(40+i*210)|0},${(30+i*120)|0})`; // green phosphor
+  }
+}
+
+/* ---------- grid metrics ---------- */
+let cw=8,ch=14,cols=80,rows=40,W=0,Hh=0,dpr=1;
+function layout(){
+  dpr=Math.min(2,window.devicePixelRatio||1);
+  W=cv.clientWidth; Hh=cv.clientHeight;
+  cv.width=W*dpr; cv.height=Hh*dpr;
+  let fs=st.d;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.font=fs+"px ui-monospace,monospace"; ctx.textBaseline="top";
+  cw=ctx.measureText("M").width||fs*0.6; ch=fs*1.18;
+  cols=Math.max(8,Math.floor(W/cw)); rows=Math.max(6,Math.floor(Hh/ch));
+  // cap total cells for perf: shrink grid if needed (never touches font)
+  const MAX=13000;
+  let guard=0;
+  while(cols*rows>MAX && guard++<200){ fs+=1; ctx.font=fs+"px ui-monospace,monospace";
+    cw=ctx.measureText("M").width||fs*0.6; ch=fs*1.18;
+    cols=Math.max(8,Math.floor(W/cw)); rows=Math.max(6,Math.floor(Hh/ch)); }
+  $("cells").textContent=cols+"×"+rows+" = "+(cols*rows)+" cells";
+}
+
+/* ---------- render ---------- */
+function evalCell(nx,ny,t){ let v; try{ v=fn(nx,ny,t,H); }catch(_){ v=0; } if(!isFinite(v))v=0;
+  // normalize: gain/bias then contrast around 0.5
+  let i=v*st.g+st.b; i=(i-0.5)*st.c+0.5; return i<0?0:i>1?1:i;
+}
+function frame(now){
+  try{
+    // re-arm attract after a stretch of inactivity (idle is stamped by touch())
+    if(!attract && !paused && now-idle>45000) setAttract(true);
+    const t=(paused?tPause:(now-t0)/1000)*st.s;
+    if(attract && !paused) morph(now);
+    ctx.fillStyle="#000"; ctx.fillRect(0,0,W,Hh);
+    const rampStr=(typeof st.r==="string"&&st.r)?st.r:" .:#";
+    const ramp=st.inv?[...rampStr].reverse().join(""):rampStr, RL=ramp.length;
+    for(let r=0;r<rows;r++){
+      const ny=(r/(rows-1))*2-1, yPix=r*ch;
+      let run="", runCI=-1, runX=0;
+      for(let cX=0;cX<cols;cX++){
+        const nx=((cX/(cols-1))*2-1)*(cols/rows>1?cols/rows:1);
+        const i=evalCell(nx,ny,t);
+        const gi=Math.min(RL-1,(i*RL)|0), ci=Math.min(63,(i*64)|0);
+        if(ci!==runCI){ if(run){ctx.fillStyle=palette[runCI];ctx.fillText(run,runX,yPix);} run=""; runCI=ci; runX=cX*cw; }
+        run+=ramp[gi];
+      }
+      if(run){ctx.fillStyle=palette[runCI];ctx.fillText(run,runX,yPix);}
+    }
+  }catch(_){ /* never let a bad frame kill the RAF loop */ }
+  requestAnimationFrame(frame);
+}
+
+/* ---------- attract mode: auto-morph across presets ---------- */
+const P_KEYS=Object.keys(PRESETS);
+let pTo=PRESETS.clouds;
+function morph(now){
+  // swap to a new preset + color mode every ~9s while attract mode is on
+  if(now-attractT>9000){ attractT=now; setExpr(pTo,false);
+    pTo=PRESETS[P_KEYS[(Math.random()*P_KEYS.length)|0]];
+    st.m=["green","amber","rainbow","twotone"][(Math.random()*4)|0]; buildPalette(); $("mode").value=st.m; }
+}
+function setAttract(on){ attract=on; attractT=performance.now()-9000; $("attractBtn").classList.toggle("act",on);
+  $("attractBtn").textContent=on?"⏹ attract":"▶ attract"; }
+
+/* ---------- UI wiring ---------- */
+function setExpr(e,user){ st.e=e; $("expr").value=e; compile(e); highlightPreset(); if(user)touch(); }
+function highlightPreset(){ const cur=Object.keys(PRESETS).find(k=>PRESETS[k]===st.e);
+  const box=$("presets"); if(box)[...box.children].forEach(b=>b.classList.toggle("act",b.textContent===cur)); }
+function touch(){ idle=performance.now(); if(attract)setAttract(false); syncHash(); }
+function num(id,key,fmt){ const el=$(id),v=$(id[0]+"V");
+  el.value=st[key]; if(v)v.textContent=(fmt?fmt(st[key]):st[key]);
+  el.oninput=()=>{ st[key]=parseFloat(el.value); if(v)v.textContent=(fmt?fmt(st[key]):st[key]);
+    if(key==="d")layout(); touch(); }; }
+
+function buildUI(){
+  // chips
+  $("chips").innerHTML=""; CHIPS.forEach(c=>{ const b=document.createElement("span"); b.className="chip"; b.textContent=c;
+    b.onclick=()=>{ const ta=$("expr"),p=ta.selectionStart||ta.value.length;
+      const ins=c+(/^(PI)$/.test(c)?"":"("); ta.value=ta.value.slice(0,p)+ins+ta.value.slice(p);
+      ta.focus(); ta.selectionStart=ta.selectionEnd=p+ins.length; setExpr(ta.value,true); };
+    $("chips").appendChild(b); });
+  // presets
+  $("presets").innerHTML=""; Object.keys(PRESETS).forEach(k=>{ const b=document.createElement("button");
+    b.textContent=k; b.onclick=()=>setExpr(PRESETS[k],true); $("presets").appendChild(b); });
+  $("expr").value=st.e;
+  $("expr").oninput=()=>{ st.e=$("expr").value; compile(st.e); highlightPreset(); touch(); };
+  $("ramp").value=st.r; $("ramp").oninput=()=>{ st.r=$("ramp").value||" .:#"; touch(); };
+  $("mode").value=st.m; $("mode").onchange=()=>{ st.m=$("mode").value; buildPalette(); touch(); };
+  num("d","d",v=>v+"px"); num("g","g",v=>v.toFixed(2)); num("b","b",v=>v.toFixed(2));
+  num("c","c",v=>v.toFixed(2)); num("s","s",v=>v.toFixed(2));
+  $("inv").onclick=()=>{ st.inv=st.inv?0:1; touch(); };
+  $("pause").onclick=()=>{ if(!paused){tPause=(performance.now()-t0)/1000;} else {t0=performance.now()-tPause*1000;}
+    paused=!paused; $("pause").textContent=paused?"▶ play":"⏸ pause"; $("pause").classList.toggle("act",paused); };
+  $("glowB").onclick=()=>{ st.glow=st.glow?0:1; applyFx(); touch(); };
+  $("scanB").onclick=()=>{ st.scan=st.scan?0:1; applyFx(); touch(); };
+  $("attractBtn").onclick=()=>setAttract(!attract);
+  $("mutate").onclick=()=>{ setExpr(mutate(st.e),true); };
+  $("rand").onclick=()=>{ SEED=st.seed=(Math.random()*99999)|0; const k=P_KEYS[(Math.random()*P_KEYS.length)|0];
+    setExpr(mutate(PRESETS[k]),true); };
+  $("copy").onclick=copyText; $("png").onclick=savePNG; $("rec").onclick=recordLoop;
+  $("share").onclick=()=>{ syncHash(); clip(location.href).then(()=>flash($("share"),"✓ link copied")).catch(()=>flash($("share"),"✗ blocked")); };
+}
+function applyFx(){ cv.classList.toggle("glow",!!st.glow); $("scan").classList.toggle("off",!st.scan);
+  $("glowB").classList.toggle("act",!!st.glow); $("scanB").classList.toggle("act",!!st.scan); }
+function mutate(expr){ return expr.replace(/([A-Za-z_]?)(\d*\.\d+|\d+)/g, (m,pre,num)=>{
+  if(pre) return m; // digit preceded by an identifier char -> part of a name (e.g. atan2), leave it
+  const f=parseFloat(num)*(1+(Math.random()*0.6-0.3));
+  return (num.includes(".")||Math.random()<.5)?f.toFixed(2):String(Math.max(1,Math.round(f))); }); }
+function flash(btn,msg){ const o=btn.textContent; btn.textContent=msg; setTimeout(()=>btn.textContent=o,1200); }
+// clipboard with execCommand fallback for file:// / insecure / permission-denied contexts
+function clip(text){
+  const p=navigator.clipboard&&navigator.clipboard.writeText(text);
+  if(p&&p.then) return p;
+  return new Promise((res,rej)=>{ try{
+    const ta=document.createElement("textarea"); ta.value=text;
+    ta.style.position="fixed"; ta.style.top="0"; ta.style.opacity="0";
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    const ok=document.execCommand("copy"); document.body.removeChild(ta);
+    ok?res():rej(new Error("copy failed"));
+  }catch(e){ rej(e); } });
+}
+
+/* ---------- exports ---------- */
+function snapshotText(){ const t=(paused?tPause:(performance.now()-t0)/1000)*st.s;
+  const ramp=st.inv?[...st.r].reverse().join(""):st.r,RL=ramp.length; let out="";
+  for(let r=0;r<rows;r++){ const ny=(r/(rows-1))*2-1; let line="";
+    for(let cX=0;cX<cols;cX++){ const nx=((cX/(cols-1))*2-1)*(cols/rows>1?cols/rows:1);
+      const i=evalCell(nx,ny,t); line+=ramp[Math.min(RL-1,(i*RL)|0)]; } out+=line.replace(/\s+$/,"")+"\n"; }
+  return out; }
+function copyText(){ clip(snapshotText()).then(()=>flash($("copy"),"✓ copied")).catch(()=>flash($("copy"),"✗ blocked")); }
+function savePNG(){ const a=document.createElement("a"); a.download="rasterisk.png"; a.href=cv.toDataURL("image/png"); a.click(); }
+function recordLoop(){
+  if(!cv.captureStream||typeof MediaRecorder==="undefined"){ flash($("rec"),"unsupported"); return; }
+  const type=MediaRecorder.isTypeSupported("video/webm;codecs=vp9")?"video/webm;codecs=vp9":"video/webm";
+  const rec=new MediaRecorder(cv.captureStream(30),{mimeType:type,videoBitsPerSecond:6e6}), chunks=[];
+  rec.ondataavailable=e=>e.data.size&&chunks.push(e.data);
+  rec.onstop=()=>{ const a=document.createElement("a"); a.download="rasterisk.webm";
+    a.href=URL.createObjectURL(new Blob(chunks,{type})); a.click(); $("rec").textContent="⏺ loop"; $("rec").classList.remove("act"); };
+  $("rec").textContent="● rec 4s…"; $("rec").classList.add("act"); rec.start(); setTimeout(()=>rec.stop(),4000);
+}
+
+/* ---------- share state <-> hash ---------- */
+function syncHash(){ const s={...st}; delete s.scan;
+  history.replaceState(null,"","#"+encodeURIComponent(JSON.stringify(s))); }
+function loadHash(){
+  if(!location.hash||location.hash.length<3) return false;
+  try{ const s=JSON.parse(decodeURIComponent(location.hash.slice(1))); Object.assign(st,s);
+    if(st.seed)SEED=st.seed; return true; }catch(_){ return false; }
+}
+// coerce/clamp loaded (or hand-edited) state so a corrupt hash can't break the loop
+function sanitizeState(){
+  const cl=(v,lo,hi,d)=>{ v=parseFloat(v); return isFinite(v)?Math.min(hi,Math.max(lo,v)):d; };
+  if(typeof st.e!=="string"||!st.e) st.e=PRESETS.plasma;
+  if(typeof st.r!=="string"||!st.r) st.r=" .:-=+*#%@";
+  if(!["green","amber","mono","rainbow","twotone"].includes(st.m)) st.m="green";
+  st.g=cl(st.g,0.05,3,0.5); st.b=cl(st.b,-1,1.5,0.5); st.c=cl(st.c,0.4,4,1);
+  st.s=cl(st.s,0,3,1); st.d=Math.round(cl(st.d,7,26,13));
+  st.inv=st.inv?1:0; st.glow=st.glow?1:0; st.scan=st.scan?1:0;
+  SEED=st.seed=isFinite(+st.seed)?+st.seed:1337;
+}
+
+/* ---------- boot ---------- */
+function boot(){
+  const hadHash=loadHash();
+  sanitizeState();
+  idle=performance.now();
+  buildUI(); buildPalette(); applyFx(); layout(); compile(st.e); highlightPreset();
+  // reflect loaded values into sliders
+  ["d","g","b","c","s"].forEach(k=>{ $(k).value=st[k]; const v=$(k[0]+"V");
+    if(v)v.textContent=(k==="d")?st.d+"px":(+st[k]).toFixed(2); });
+  $("mode").value=st.m; $("ramp").value=st.r; $("expr").value=st.e;
+  if(!hadHash) setAttract(true); // first-time visit: lush motion immediately
+  requestAnimationFrame(frame);
+}
+window.addEventListener("resize",layout);
+boot();
+</script>
+</body>
+</html>

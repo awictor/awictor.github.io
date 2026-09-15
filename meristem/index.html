@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meristem — differential-growth lab</title>
+<style>
+  :root{ --bg:#0b0d12; --panel:#12151d; --edge:#232838; --ink:#e8ecf4; --dim:#8891a6; --acc:#5be0c8; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font:13px/1.45 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  #app{display:flex;height:100vh;width:100vw;overflow:hidden}
+  #stage{flex:1;position:relative;min-width:0}
+  #cv{display:block;width:100%;height:100%;cursor:crosshair}
+  #hud{position:absolute;left:14px;bottom:12px;font:11px ui-monospace,Menlo,Consolas,monospace;
+    color:var(--dim);background:rgba(11,13,18,.55);padding:5px 9px;border-radius:6px;pointer-events:none;
+    letter-spacing:.02em;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+  #hud b{color:var(--acc);font-weight:600}
+  aside{width:288px;flex:none;background:var(--panel);border-left:1px solid var(--edge);
+    overflow-y:auto;padding:16px 16px 40px}
+  h1{margin:0;font-size:16px;letter-spacing:.06em;font-weight:700}
+  h1 span{color:var(--acc)}
+  .sub{color:var(--dim);font-size:11px;margin:2px 0 16px}
+  .grp{margin:0 0 16px}
+  .grp>label.hd{display:block;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--dim);margin:0 0 8px;font-weight:600}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:7px 0}
+  .row label{color:var(--dim);flex:none;width:82px}
+  .row input[type=range]{flex:1;accent-color:var(--acc);height:3px}
+  .row .val{width:44px;text-align:right;font:11px ui-monospace,monospace;color:var(--ink)}
+  select,button{font:inherit;color:var(--ink);background:#1a1f2b;border:1px solid var(--edge);
+    border-radius:7px;padding:6px 9px;cursor:pointer}
+  select{width:100%}
+  .btns{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+  .btns.three{grid-template-columns:1fr 1fr 1fr}
+  button:hover{border-color:var(--acc);color:#fff}
+  button.on{background:var(--acc);color:#07120f;border-color:var(--acc);font-weight:600}
+  .presets{display:flex;flex-wrap:wrap;gap:6px}
+  .presets button{flex:1 1 auto;padding:6px 8px;font-size:11px}
+  .fieldmode{display:flex;gap:6px}
+  .fieldmode button{flex:1;padding:6px 4px;font-size:11px}
+  .chk{display:flex;align-items:center;gap:7px;color:var(--dim);cursor:pointer;user-select:none}
+  .chk input{accent-color:var(--acc)}
+  .tip{color:var(--dim);font-size:10.5px;margin-top:6px;line-height:1.4}
+  button[disabled]{opacity:.4;cursor:not-allowed}
+  button[disabled]:hover{border-color:var(--edge);color:var(--dim)}
+  @media(max-width:640px){
+    #app{flex-direction:column}
+    #stage{flex:1;min-height:52vh}
+    aside{width:100%;flex:none;border-left:none;border-top:1px solid var(--edge);max-height:48vh}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div id="hud">seed <b id="hk">1</b> · nodes <b id="hn">0</b> · gen <b id="hg">0</b> · <b id="hs">growing</b></div>
+  </div>
+  <aside>
+    <h1>Meri<span>stem</span></h1>
+    <div class="sub">differential-growth lab</div>
+
+    <div class="grp">
+      <label class="hd">Gallery — one click</label>
+      <div class="presets" id="presets"></div>
+    </div>
+
+    <div class="grp">
+      <label class="hd">Playback</label>
+      <div class="btns three">
+        <button id="play">Pause</button>
+        <button id="step">Step</button>
+        <button id="reset">Reset</button>
+      </div>
+    </div>
+
+    <div class="grp">
+      <label class="hd">Seed & form</label>
+      <div class="row"><label>Shape</label>
+        <select id="shape">
+          <option value="ring">ring</option>
+          <option value="line">line segment</option>
+          <option value="poly">polygon</option>
+          <option value="dual">dual loop</option>
+        </select></div>
+      <div class="row"><label>Palette</label>
+        <select id="palette">
+          <option value="coral">brain coral</option>
+          <option value="biolum">bioluminescent</option>
+          <option value="ink">ink on rice paper</option>
+          <option value="magma">magma vein</option>
+        </select></div>
+      <div class="row"><label>Style</label>
+        <select id="style">
+          <option value="gradient">curvature + age</option>
+          <option value="ridge">ridge (embossed)</option>
+          <option value="fill">filled silhouette</option>
+        </select></div>
+      <div class="btns"><button id="newseed">New seed</button>
+        <label class="chk" style="justify-content:center"><input type="checkbox" id="bounded" checked>bounded</label></div>
+    </div>
+
+    <div class="grp" id="sliders">
+      <label class="hd">Growth parameters</label>
+    </div>
+
+    <div class="grp">
+      <label class="hd">Field editing — click canvas</label>
+      <div class="fieldmode" id="fieldmode">
+        <button data-m="none" class="on">off</button>
+        <button data-m="attract">attract</button>
+        <button data-m="repel">repel</button>
+      </div>
+      <div class="tip">Drop points the curve bends toward or away from. Right-click a point to delete.</div>
+      <div id="fieldsliders" style="margin-top:8px"></div>
+      <div class="btns" style="margin-top:8px"><button id="clearf">Clear fields</button><button id="share">Copy link</button></div>
+    </div>
+
+    <div class="grp">
+      <label class="hd">Export</label>
+      <div class="btns"><button id="png">PNG frame</button><button id="rec">● Record clip</button></div>
+      <div class="tip">Record grows a fresh specimen from the seed and saves a WebM of the whole timelapse.</div>
+    </div>
+  </aside>
+</div>
+<script>
+"use strict";
+const $=s=>document.querySelector(s);
+const cv=$("#cv"), ctx=cv.getContext("2d");
+const dpr=Math.min(window.devicePixelRatio||1,2);
+let W=0,H=0;
+
+// ---- deterministic PRNG ----
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+let rnd=mulberry32(1);
+
+// ---- palettes (rgb stops precomputed) ----
+const raw={
+  coral:{bg:"#170a10",st:["#2c1420","#7a2d3d","#c85a52","#f0a878","#ffe9cf"]},
+  biolum:{bg:"#020509",st:["#04202b","#0a6f7d","#12b7a4","#63f6c7","#ecfff6"]},
+  ink:{bg:"#f3ecda",st:["#d6c9a8","#9c8f70","#5a5140","#2a2419","#0a0704"]},
+  magma:{bg:"#0c0604",st:["#2a0d06","#7a1e0c","#d1531a","#f5a623","#fff2b0"]}
+};
+const hx=c=>[parseInt(c.slice(1,3),16),parseInt(c.slice(3,5),16),parseInt(c.slice(5,7),16)];
+const PAL={};for(const k in raw)PAL[k]={bg:raw[k].bg,rgb:raw[k].st.map(hx)};
+let pal=PAL.coral;
+function col(t){t=t<0?0:t>1?1:t;const s=pal.rgb,x=t*(s.length-1),i=x|0,f=x-i,
+  a=s[i],b=s[Math.min(s.length-1,i+1)];
+  return`rgb(${a[0]+(b[0]-a[0])*f|0},${a[1]+(b[1]-a[1])*f|0},${a[2]+(b[2]-a[2])*f|0})`;}
+
+// ---- parameters ----
+const P={seed:1,shape:"ring",palette:"coral",style:"gradient",bounded:true,
+  attraction:0.22,repulRadius:22,repulForce:1.0,maxEdge:9,jitter:0.3,speed:3,maxNodes:2600,
+  fieldRadius:90,fieldStrength:0.6};
+const SL=[["attraction","Attraction",0,1,.01],["repulRadius","Repel radius",4,40,1],
+  ["repulForce","Repel force",0,2,.01],["maxEdge","Edge split",4,30,1],
+  ["jitter","Jitter",0,2,.01],["speed","Speed",1,6,1],["maxNodes","Node budget",300,4000,50]];
+const FSL=[["fieldRadius","Radius",20,200,1],["fieldStrength","Strength",0.1,1.5,.01]];
+const ALLSL=SL.concat(FSL);
+
+// ---- state ----
+let nodes=[],gen=0,running=true,fields=[],fieldMode="none",grown=false;
+const closed=()=>P.shape!=="line";
+function setRunning(v){running=v;const p=$("#play");if(p){p.textContent=running?"Pause":"Play";p.classList.toggle("on",running);}}
+
+function initShape(){
+  nodes=[];gen=0;rnd=mulberry32(P.seed>>>0);
+  const cx=W/2,cy=H/2,R=Math.min(W,H)*0.18;
+  const wob=()=>1+(rnd()*2-1)*0.04;
+  if(P.shape==="line"){
+    const n=40,x0=W*0.2,x1=W*0.8;
+    for(let i=0;i<n;i++)nodes.push({x:x0+(x1-x0)*i/(n-1),y:cy+(rnd()*2-1)*4,age:0});
+  }else if(P.shape==="poly"){
+    const sides=5,per=14;
+    for(let s=0;s<sides;s++)for(let k=0;k<per;k++){
+      const a=(s+k/per)/sides*Math.PI*2;nodes.push({x:cx+Math.cos(a)*R*wob(),y:cy+Math.sin(a)*R*wob(),age:0});}
+  }else if(P.shape==="dual"){
+    for(const off of [-1,1])for(let i=0;i<48;i++){const a=i/48*Math.PI*2;
+      nodes.push({x:cx+off*R*1.1+Math.cos(a)*R*0.7*wob(),y:cy+Math.sin(a)*R*0.7*wob(),age:0});}
+  }else{
+    const n=64;for(let i=0;i<n;i++){const a=i/n*Math.PI*2;
+      nodes.push({x:cx+Math.cos(a)*R*wob(),y:cy+Math.sin(a)*R*wob(),age:0});}
+  }
+}
+function reset(){initShape();recDone=false;grown=false;setRunning(true);draw();updateHud();}
+
+// ---- growth engine ----
+let grid=new Map();
+function buildGrid(R){grid.clear();for(let i=0;i<nodes.length;i++){
+  const k=(nodes[i].x/R|0)+","+(nodes[i].y/R|0);let a=grid.get(k);if(!a)grid.set(k,a=[]);a.push(i);}}
+
+function relax(){
+  const R=P.repulRadius,n=nodes.length,cl=closed();
+  buildGrid(R);
+  const dx=new Float32Array(n),dy=new Float32Array(n);
+  for(let i=0;i<n;i++){
+    const a=nodes[i];
+    let pi,ni;
+    if(cl){pi=(i-1+n)%n;ni=(i+1)%n;}else{pi=i-1;ni=i+1;}
+    if(pi>=0&&ni<n){const p=nodes[pi],q=nodes[ni];
+      dx[i]+=((p.x+q.x)/2-a.x)*P.attraction;dy[i]+=((p.y+q.y)/2-a.y)*P.attraction;}
+    const cx=a.x/R|0,cy=a.y/R|0;
+    for(let gx=cx-1;gx<=cx+1;gx++)for(let gy=cy-1;gy<=cy+1;gy++){
+      const arr=grid.get(gx+","+gy);if(!arr)continue;
+      for(let m=0;m<arr.length;m++){const j=arr[m];if(j===i)continue;
+        const b=nodes[j];let ddx=a.x-b.x,ddy=a.y-b.y,d2=ddx*ddx+ddy*ddy;
+        if(d2<R*R&&d2>1e-4){const d=Math.sqrt(d2),f=(1-d/R)*P.repulForce;
+          dx[i]+=ddx/d*f;dy[i]+=ddy/d*f;}}}
+    dx[i]+=(rnd()*2-1)*P.jitter;dy[i]+=(rnd()*2-1)*P.jitter;
+    for(let k=0;k<fields.length;k++){const f=fields[k];let ddx=a.x-f.x,ddy=a.y-f.y,
+      d=Math.sqrt(ddx*ddx+ddy*ddy)+1e-6;if(d<f.r){const s=(1-d/f.r)*f.k;dx[i]+=ddx/d*s;dy[i]+=ddy/d*s;}}
+    if(P.bounded){const m=18;
+      if(a.x<m)dx[i]+=(m-a.x)*.12;if(a.x>W-m)dx[i]-=(a.x-W+m)*.12;
+      if(a.y<m)dy[i]+=(m-a.y)*.12;if(a.y>H-m)dy[i]-=(a.y-H+m)*.12;}
+  }
+  const cap=3.2;
+  for(let i=0;i<n;i++){let vx=dx[i],vy=dy[i];const m=Math.sqrt(vx*vx+vy*vy);
+    if(m>cap){vx=vx/m*cap;vy=vy/m*cap;}nodes[i].x+=vx;nodes[i].y+=vy;}
+}
+function splitEdges(){
+  if(nodes.length>=P.maxNodes)return;
+  const cl=closed(),n=nodes.length,out=[];
+  for(let i=0;i<n;i++){const a=nodes[i];out.push(a);
+    const j=cl?(i+1)%n:i+1;if(j>=n)break;
+    const b=nodes[j],d=Math.hypot(b.x-a.x,b.y-a.y);
+    if(d>P.maxEdge&&out.length<P.maxNodes)out.push({x:(a.x+b.x)/2,y:(a.y+b.y)/2,age:gen});}
+  nodes=out;
+}
+function tick(){for(let s=0;s<P.speed;s++)relax();splitEdges();gen++;}
+
+// ---- render ----
+function curv(i,n){
+  let pi,ni;
+  if(closed()){pi=(i-1+n)%n;ni=(i+1)%n;}
+  else{if(i===0||i===n-1)return 0;pi=i-1;ni=i+1;} // open ends have no defined bend
+  const p=nodes[pi],a=nodes[i],q=nodes[ni];
+  const a1=Math.atan2(a.y-p.y,a.x-p.x),a2=Math.atan2(q.y-a.y,q.x-a.x);
+  let d=Math.abs(a2-a1);if(d>Math.PI)d=2*Math.PI-d;return d/Math.PI;}
+
+function draw(){
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.fillStyle=pal.bg;ctx.fillRect(0,0,W,H);
+  const n=nodes.length,cl=closed();if(n<2){drawFields();return;}
+  ctx.lineJoin="round";ctx.lineCap="round";
+
+  if(P.style==="fill"){
+    ctx.beginPath();ctx.moveTo(nodes[0].x,nodes[0].y);
+    for(let i=1;i<n;i++)ctx.lineTo(nodes[i].x,nodes[i].y);ctx.closePath();
+    ctx.fillStyle=col(0.72);ctx.globalAlpha=.9;ctx.fill();ctx.globalAlpha=1;
+    ctx.lineWidth=1.1;ctx.strokeStyle=col(0.15);ctx.stroke();drawFields();return;
+  }
+  const ridge=P.style==="ridge";
+  ctx.lineWidth=ridge?2.6:1.5;
+  for(let i=0;i<n;i++){
+    const j=cl?(i+1)%n:i+1;if(j>=n)break;
+    const a=nodes[i],b=nodes[j];
+    const cvv=curv(i,n),ageN=Math.min(1,(gen-a.age)/280),t=0.62*cvv+0.38*(1-ageN);
+    if(ridge){ // dark offset then lit line = emboss
+      ctx.strokeStyle="rgba(0,0,0,.38)";ctx.beginPath();
+      ctx.moveTo(a.x+1.4,a.y+1.4);ctx.lineTo(b.x+1.4,b.y+1.4);ctx.stroke();}
+    ctx.strokeStyle=col(t);ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+  }
+  drawFields();
+}
+function drawFields(){
+  for(const f of fields){ctx.beginPath();ctx.arc(f.x,f.y,f.r,0,7);
+    ctx.strokeStyle=f.k<0?"rgba(91,224,200,.35)":"rgba(255,110,90,.35)";ctx.lineWidth=1;ctx.stroke();
+    ctx.beginPath();ctx.arc(f.x,f.y,3.5,0,7);ctx.fillStyle=f.k<0?"#5be0c8":"#ff6e5a";ctx.fill();}
+}
+function updateHud(){$("#hk").textContent=P.seed;$("#hn").textContent=nodes.length;
+  $("#hg").textContent=gen;$("#hs").textContent=grown?"grown":(running?"growing":"paused");}
+
+// ---- main loop ----
+let recDone=false;
+function frame(){
+  if(running){
+    tick();
+    if(nodes.length>=P.maxNodes){
+      if(rec&&!recDone){recDone=true;setTimeout(stopRec,300);}
+      if(!grown){grown=true;setRunning(false);} // budget reached: settle, stop burning CPU
+    }
+  }
+  draw();updateHud();requestAnimationFrame(frame);
+}
+
+// ---- URL hash (shareable specimen) ----
+let hashTimer=0;
+function writeHash(){clearTimeout(hashTimer);hashTimer=setTimeout(()=>{
+  const f=fields.map(o=>[+(o.x/W).toFixed(3),+(o.y/H).toFixed(3),+o.k.toFixed(3),Math.round(o.r)]);
+  const s=encodeURIComponent(JSON.stringify({p:P,f}));
+  history.replaceState(null,"","#g="+s);},250);}
+function readHash(){try{const m=location.hash.match(/g=([^&]+)/);if(!m)return false;
+  const o=JSON.parse(decodeURIComponent(m[1]));Object.assign(P,o.p);
+  pendingF=o.f||[];return true;}catch(e){return false;}}
+let pendingF=null;
+function applyPendingFields(){if(!pendingF)return;
+  fields=pendingF.map(a=>{
+    // new format [x,y,k,r]; legacy format [x,y,sign] (sign 1=repel,0=attract)
+    const k=a.length>3?+a[2]:(a[2]?0.7:-0.55);
+    const r=a.length>3?a[3]:(P.fieldRadius||90);
+    return{x:a[0]*W,y:a[1]*H,r,k};});
+  pendingF=null;}
+
+// ---- presets (one-click gallery) ----
+const PRESETS={
+  "brain coral":{shape:"ring",palette:"coral",style:"gradient",attraction:.22,repulRadius:22,repulForce:1.0,maxEdge:9,jitter:.3,bounded:true,seed:7},
+  "dual loop":{shape:"dual",palette:"biolum",style:"gradient",attraction:.2,repulRadius:24,repulForce:1.05,maxEdge:10,jitter:.35,bounded:true,seed:23},
+  "spiky urchin":{shape:"poly",palette:"magma",style:"ridge",attraction:.12,repulRadius:30,repulForce:1.5,maxEdge:12,jitter:.5,bounded:true,seed:88},
+  "tight cerebral":{shape:"ring",palette:"ink",style:"gradient",attraction:.28,repulRadius:16,repulForce:.9,maxEdge:6,jitter:.2,bounded:true,seed:42},
+  "loose seaweed":{shape:"line",palette:"biolum",style:"gradient",attraction:.14,repulRadius:30,repulForce:1.0,maxEdge:12,jitter:.7,bounded:true,seed:5}
+};
+function applyPreset(o){Object.assign(P,{maxNodes:2600},o);fields=[];pal=PAL[P.palette];syncUI();reset();writeHash();}
+
+// ---- build UI ----
+function buildSliders(defs,box){
+  for(const[k,lab,mn,mx,st]of defs){const r=document.createElement("div");r.className="row";
+    r.innerHTML=`<label>${lab}</label><input type="range" min="${mn}" max="${mx}" step="${st}" data-k="${k}"><span class="val" data-v="${k}"></span>`;
+    box.appendChild(r);const inp=r.querySelector("input");
+    inp.addEventListener("input",()=>{P[k]=parseFloat(inp.value);r.querySelector(".val").textContent=P[k];writeHash();});}}
+function syncUI(){
+  for(const[k]of ALLSL){const i=document.querySelector(`input[data-k="${k}"]`);if(i){i.value=P[k];
+    document.querySelector(`[data-v="${k}"]`).textContent=P[k];}}
+  $("#shape").value=P.shape;$("#palette").value=P.palette;$("#style").value=P.style;$("#bounded").checked=P.bounded;}
+function buildPresets(){const box=$("#presets");
+  for(const name in PRESETS){const b=document.createElement("button");b.textContent=name;
+    b.onclick=()=>applyPreset(PRESETS[name]);box.appendChild(b);}}
+
+// ---- wire controls ----
+function wire(){
+  $("#play").onclick=()=>{if(!running&&grown){reset();return;}setRunning(!running);}; // resume from a grown state by regrowing
+  $("#step").onclick=()=>{tick();draw();updateHud();};
+  $("#reset").onclick=()=>reset();
+  $("#newseed").onclick=()=>{P.seed=(Math.random()*1e9)>>>0;reset();writeHash();};
+  $("#bounded").onchange=e=>{P.bounded=e.target.checked;writeHash();};
+  for(const id of["shape","palette","style"])$("#"+id).onchange=e=>{P[id]=e.target.value;
+    if(id==="palette")pal=PAL[P.palette];if(id==="shape")reset();else draw();writeHash();};
+  $("#clearf").onclick=()=>{fields=[];draw();writeHash();};
+  $("#share").onclick=()=>{writeHash();const b=$("#share");
+    const done=()=>{b.textContent="Copied!";setTimeout(()=>b.textContent="Copy link",1200);};
+    const fallback=()=>{ // file:// / insecure contexts have no navigator.clipboard
+      try{const ta=document.createElement("textarea");ta.value=location.href;
+        ta.style.cssText="position:fixed;top:0;left:0;opacity:0";document.body.appendChild(ta);
+        ta.focus();ta.select();const ok=document.execCommand("copy");document.body.removeChild(ta);
+        if(ok)done();else prompt("Copy this link:",location.href);}
+      catch(e){prompt("Copy this link:",location.href);}};
+    if(navigator.clipboard&&navigator.clipboard.writeText)
+      navigator.clipboard.writeText(location.href).then(done).catch(fallback);
+    else fallback();};
+  $("#png").onclick=()=>cv.toBlob(b=>dl(URL.createObjectURL(b),"meristem-"+P.seed+".png"));
+  $("#rec").onclick=toggleRec;
+  document.querySelectorAll("#fieldmode button").forEach(b=>b.onclick=()=>{
+    fieldMode=b.dataset.m;document.querySelectorAll("#fieldmode button").forEach(x=>x.classList.remove("on"));
+    b.classList.add("on");});
+  cv.addEventListener("contextmenu",e=>{e.preventDefault();const[x,y]=pos(e);
+    let bi=-1,bd=1e9;fields.forEach((f,i)=>{const d=Math.hypot(f.x-x,f.y-y);if(d<f.r&&d<bd){bd=d;bi=i;}});
+    if(bi>=0){fields.splice(bi,1);draw();writeHash();}});
+  cv.addEventListener("pointerdown",e=>{if(e.button!==0||fieldMode==="none")return;
+    const[x,y]=pos(e);const s=P.fieldStrength;
+    fields.push({x,y,r:P.fieldRadius,k:fieldMode==="attract"?-s:s});draw();writeHash();});
+}
+function pos(e){const r=cv.getBoundingClientRect();return[e.clientX-r.left,e.clientY-r.top];}
+function dl(url,name){const a=document.createElement("a");a.href=url;a.download=name;a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),4000);}
+
+// ---- recording (timelapse WebM) ----
+let rec=null,chunks=[];
+const canRecord=()=>!!window.MediaRecorder&&typeof cv.captureStream==="function";
+function pickMime(){for(const m of["video/webm;codecs=vp9","video/webm;codecs=vp8","video/webm","video/mp4"])
+  if(MediaRecorder.isTypeSupported(m))return m;return"";}
+function extFor(mime){return mime&&mime.indexOf("mp4")>=0?"mp4":"webm";}
+function toggleRec(){if(rec){stopRec();return;}
+  if(!canRecord()){alert("Recording is not supported in this browser.");return;}
+  const mime=pickMime();
+  let stream;
+  try{stream=cv.captureStream(30);}
+  catch(err){alert("Recording is not supported in this browser.");return;}
+  reset();setRunning(true);
+  try{rec=new MediaRecorder(stream,mime?{mimeType:mime}:undefined);}
+  catch(err){rec=null;alert("Recording could not start in this browser.");return;}
+  chunks=[];
+  rec.ondataavailable=e=>e.data.size&&chunks.push(e.data);
+  rec.onstop=()=>{const mt=(rec&&rec.mimeType)||mime||"video/webm";
+    const blob=new Blob(chunks,{type:mt.split(";")[0]});
+    dl(URL.createObjectURL(blob),"meristem-"+P.seed+"."+extFor(mt));
+    rec=null;$("#rec").textContent="● Record clip";$("#rec").classList.remove("on");};
+  rec.start();$("#rec").textContent="■ Stop & save";$("#rec").classList.add("on");}
+function stopRec(){if(rec&&rec.state!=="inactive")rec.stop();}
+
+// ---- boot ----
+function resize(){const s=$("#stage").getBoundingClientRect();
+  const nW=Math.max(1,Math.floor(s.width)),nH=Math.max(1,Math.floor(s.height));
+  const first=W===0;W=nW;H=nH;cv.width=W*dpr;cv.height=H*dpr;cv.style.width=W+"px";cv.style.height=H+"px";
+  if(first){applyPendingFields();reset();}else draw();}
+function init(){
+  buildSliders(SL,$("#sliders"));buildSliders(FSL,$("#fieldsliders"));buildPresets();wire();
+  if(!canRecord()){const b=$("#rec");b.disabled=true;b.title="Recording is not supported in this browser";}
+  if(!readHash()){Object.assign(P,PRESETS["brain coral"]);}
+  pal=PAL[P.palette]||PAL.coral;syncUI();
+  window.addEventListener("resize",resize);
+  resize();
+  requestAnimationFrame(frame);
+}
+init();
+</script>
+</body>
+</html>

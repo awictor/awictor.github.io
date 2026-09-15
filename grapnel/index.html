@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Grapnel</title>
+<style>
+  html,body{margin:0;height:100%;background:#05060a;overflow:hidden;
+    font-family:'Segoe UI',system-ui,sans-serif;color:#cfe;touch-action:none;-webkit-user-select:none;user-select:none}
+  #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+  canvas{display:block;background:#05060a;image-rendering:auto;box-shadow:0 0 80px #0af3 inset}
+  #toast{position:fixed;left:50%;top:14px;transform:translateX(-50%);
+    background:#0af;color:#012;padding:6px 14px;border-radius:20px;font-weight:700;
+    font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none}
+  #toast.show{opacity:.95}
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas></div>
+<div id="toast"></div>
+<script>
+(()=>{
+"use strict";
+const cv=document.getElementById('c'),g=cv.getContext('2d'),toast=document.getElementById('toast');
+let W=0,H=0,DPR=1;
+function resize(){
+  DPR=Math.min(devicePixelRatio||1,2);
+  W=Math.min(innerWidth,900); H=Math.min(innerHeight,640);
+  cv.style.width=W+'px'; cv.style.height=H+'px';
+  cv.width=W*DPR; cv.height=H*DPR; g.setTransform(DPR,0,0,DPR,0,0);
+}
+addEventListener('resize',resize); resize();
+
+// ---- seeded RNG (mulberry32) ----
+// `rand` is the DETERMINISTIC stream: consumed ONLY by genStep() so a given
+// seed always builds the identical chasm. Cosmetic randomness (particles,
+// screen-shake jitter) uses Math.random() so it never pollutes generation.
+function hashStr(s){let h=1779033703^s.length;for(let i=0;i<s.length;i++){h=Math.imul(h^s.charCodeAt(i),3432918353);h=h<<13|h>>>19;}return h>>>0;}
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function readSeed(){const m=/seed=([\w]+)/.exec(location.hash);return m?m[1]:(Math.random().toString(36).slice(2,8));}
+let seed=readSeed(), rand=mulberry32(hashStr(seed));
+const REDUCE=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const SHAKEK=REDUCE?0:1;
+let muted=localStorage.getItem('grapnel_mute')==='1';
+
+// ---- audio ----
+let AC=null;
+function ac(){if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){}}return AC;}
+function blip(freq,dur,type,vol,slide){if(muted)return;const a=ac();if(!a)return;const t=a.currentTime;
+  const o=a.createOscillator(),gn=a.createGain();o.type=type||'sine';o.frequency.setValueAtTime(freq,t);
+  if(slide)o.frequency.exponentialRampToValueAtTime(Math.max(20,freq*slide),t+dur);
+  gn.gain.setValueAtTime(0.0001,t);gn.gain.exponentialRampToValueAtTime(vol||0.2,t+0.008);
+  gn.gain.exponentialRampToValueAtTime(0.0001,t+dur);o.connect(gn).connect(a.destination);o.start(t);o.stop(t+dur+0.02);}
+function twang(f){blip(f,0.18,'triangle',0.28,0.6);}
+function whoosh(){blip(180,0.22,'sawtooth',0.14,2.4);}
+function ping(n){blip(520+n*40,0.12,'square',0.16,1.6);}
+function thud(){if(muted)return;const a=ac();if(!a)return;const t=a.currentTime;const o=a.createOscillator(),gn=a.createGain();
+  o.type='sine';o.frequency.setValueAtTime(160,t);o.frequency.exponentialRampToValueAtTime(30,t+0.4);
+  gn.gain.setValueAtTime(0.5,t);gn.gain.exponentialRampToValueAtTime(0.0001,t+0.45);o.connect(gn).connect(a.destination);o.start(t);o.stop(t+0.5);}
+
+// ---- world / tuning ----
+const GRAV=1400, SCROLL0=200, ROPE_MIN=70, ROPE_MAX=260, GRAB_RANGE=300;
+const CEIL=64;                       // ceiling thickness band top
+let anchors=[], hazards=[];          // hazards: {type,x,y,w,h}
+let camX=0, best=+(localStorage.getItem('grapnel_best')||0);
+
+// player
+let P={};
+function resetPlayer(){P={x:120,y:H*0.4,vx:260,vy:0,attached:false,len:0,ang:0,av:0,alive:true};}
+
+// generation cursor
+let genX=0, lastAnchorX=0;
+function floorY(){return H-40;}
+
+function reset(){
+  rand=mulberry32(hashStr(seed));
+  anchors=[]; hazards=[]; camX=0; genX=0; combo=0; mult=1; dist=0; score=0; bonus=0;
+  shake=0; slowmo=0; particles=[]; trail=[]; running=true; deathT=0; hasGrabbed=false; runT=0;
+  resetPlayer();
+  lastAnchorX=60;
+  anchors.push({x:60,y:CEIL+30,used:false});
+  // pre-fill
+  for(let i=0;i<40;i++) genStep();
+}
+
+// Solvability: place next anchor within reachable ballistic envelope of previous.
+// Difficulty ramps by GENERATION POSITION (lastAnchorX), never by live player
+// distance, so genStep() is a pure function of the seeded rand stream + cursor.
+function genStep(){
+  const diff=Math.min(1,lastAnchorX/12000);         // 0..1 difficulty
+  const gap=90+diff*70+rand()*70;                   // horizontal spacing grows
+  const nx=lastAnchorX+gap;
+  // anchor hangs from ceiling; deeper as difficulty rises but stays reachable
+  const drop=30+rand()*(90+diff*90);
+  const ny=CEIL+Math.min(drop, H*0.5);
+  anchors.push({x:nx,y:ny,used:false});
+  // hazards between anchors, always leaving a swing lane
+  const midx=(lastAnchorX+nx)/2;
+  const r=rand();
+  if(r<0.35+diff*0.25){ // floor spikes
+    const sw=26+rand()*40;
+    hazards.push({type:'spike',x:midx-sw/2,y:floorY()-30,w:sw,h:30});
+  } else if(r<0.6+diff*0.2){ // stalactite from ceiling, but not past reachable arc
+    const sh=40+rand()*(60+diff*80);
+    hazards.push({type:'stal',x:midx-10,y:CEIL,w:20+rand()*16,h:Math.min(sh,H*0.55)});
+  }
+  lastAnchorX=nx; genX=nx;
+}
+
+// ---- state vars ----
+let combo=0,mult=1,dist=0,score=0,bonus=0,shake=0,slowmo=0,particles=[],trail=[],running=true,deathT=0,grazeCd=0;
+let held=false, target=null, ready=true, hasGrabbed=false, runT=0, grabT=0, btnHover=false, copiedT=0;
+
+function nearestAnchor(){
+  let bestA=null,bd=1e9;
+  for(const a of anchors){
+    if(a.x<camX-40) continue;
+    const dx=a.x-P.x, dy=a.y-P.y, d=Math.hypot(dx,dy);
+    if(a.x>P.x-30 && d<GRAB_RANGE && dy>-10 && d<bd){bd=d;bestA=a;}
+  }
+  return bestA;
+}
+
+function attach(a){
+  P.attached=true; P.anchor=a;
+  const dx=P.x-a.x, dy=P.y-a.y;
+  P.len=Math.max(ROPE_MIN,Math.min(ROPE_MAX,Math.hypot(dx,dy)));
+  P.ang=Math.atan2(dy,dx);
+  // project current velocity onto tangential direction to seed swing
+  const tx=-Math.sin(P.ang), ty=Math.cos(P.ang);
+  const vt=P.vx*tx+P.vy*ty;
+  P.av=vt/P.len;
+  if(!hasGrabbed){hasGrabbed=true;grabT=runT;}
+  if(!a.used){a.used=true; combo++; mult=1+Math.floor(combo/3); ping(combo);}
+  twang(300+Math.min(400,P.len));
+  burst(a.x,a.y,'#0af',10);
+  shake=Math.min(shake+4,10);
+}
+function release(){
+  if(!P.attached)return;
+  const a=P.anchor;
+  // tangential velocity handoff
+  const tx=-Math.sin(P.ang), ty=Math.cos(P.ang);
+  const spd=P.av*P.len;
+  P.vx=tx*spd; P.vy=ty*spd;
+  P.attached=false; P.anchor=null;
+  whoosh(); burst(P.x,P.y,'#fd4',14); shake=Math.min(shake+3,10);
+}
+
+function burst(x,y,col,n){
+  for(let i=0;i<n;i++){const an=Math.random()*6.28,sp=40+Math.random()*220;
+    particles.push({x,y,vx:Math.cos(an)*sp,vy:Math.sin(an)*sp,life:.5+Math.random()*.4,max:.9,col});}
+}
+function graze(x,y){
+  if(grazeCd>0)return;
+  grazeCd=0.5; combo++; mult=1+Math.floor(combo/3);
+  slowmo=REDUCE?0:0.16; bonus+=25*mult; ping(combo+4);
+  burst(x,y,'#f6f',18); shake=Math.min(shake+5,12);
+  showToast('GRAZE +'+(25*mult));
+}
+let toastT=0;
+function showToast(t){toast.textContent=t;toast.classList.add('show');toastT=1.1;}
+
+function die(reason){
+  if(!P.alive)return; P.alive=false; running=false; deathT=1.6;
+  thud(); shake=14; burst(P.x,P.y,'#f44',40);
+  if(dist>best){best=Math.floor(dist);localStorage.setItem('grapnel_best',best);}
+}
+
+// ---- input ----
+function toggleMute(){ muted=!muted; localStorage.setItem('grapnel_mute',muted?'1':'0'); showToast(muted?'Muted':'Sound on'); }
+function press(){ if(ac()&&AC.state==='suspended')AC.resume();
+  if(ready){ ready=false; running=true; last=performance.now(); acc=0; return; } // begin play on first input
+  if(!running){ if(deathT<=0){ cv.style.cursor='default'; btnHover=false; reset(); } return; } // retry ONLY after death anim; keep same seed. no-op during death window
+  held=true;
+  const a=target||nearestAnchor();
+  if(a) attach(a);
+}
+function relf(){ held=false; release(); }
+addEventListener('mousedown',e=>{e.preventDefault();press();});
+addEventListener('mouseup',e=>{e.preventDefault();relf();});
+addEventListener('touchstart',e=>{e.preventDefault();press();},{passive:false});
+addEventListener('touchend',e=>{e.preventDefault();relf();},{passive:false});
+addEventListener('keydown',e=>{
+  if(e.code==='KeyM'){toggleMute();return;}
+  if(e.code==='KeyC'&&!running&&!ready){copyLink();return;}
+  if(e.repeat)return; press();
+});
+addEventListener('keyup',()=>relf());
+
+function copyLink(){
+  // location.origin is the string "null" under file://, so build from href instead.
+  const url=location.href.split('#')[0]+'#seed='+seed;
+  location.hash='seed='+seed;
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).then(()=>{copiedT=1.4;showToast('Challenge link copied!');},
+      ()=>{copiedT=1.4;showToast('Seed: '+seed);});
+  } else { copiedT=1.4; showToast('Seed: '+seed); }
+}
+// click + hover handling on death screen for copy button
+cv.addEventListener('click',e=>{
+  if(running||ready)return;
+  const r=cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
+  if(btnBox && mx>btnBox.x&&mx<btnBox.x+btnBox.w&&my>btnBox.y&&my<btnBox.y+btnBox.h) copyLink();
+});
+cv.addEventListener('mousemove',e=>{
+  if(running||ready||!btnBox){if(btnHover){btnHover=false;cv.style.cursor='default';}return;}
+  const r=cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
+  btnHover = mx>btnBox.x&&mx<btnBox.x+btnBox.w&&my>btnBox.y&&my<btnBox.y+btnBox.h;
+  cv.style.cursor=btnHover?'pointer':'default';
+});
+let btnBox=null;
+
+// ---- physics (fixed timestep) ----
+let acc=0, last=performance.now();
+const DT=1/120;
+function step(dt){
+  const scroll=SCROLL0+Math.min(220,dist/40);
+  if(P.attached){
+    // pendulum: gravity torque
+    P.av += (GRAV*Math.cos(P.ang)/P.len)*dt;
+    P.av *= 0.999;                       // slight damping
+    P.ang += P.av*dt;
+    // rope length control: reel toward comfortable length
+    P.x = P.anchor.x + Math.cos(P.ang)*P.len;
+    P.y = P.anchor.y + Math.sin(P.ang)*P.len;
+    P.vx=-Math.sin(P.ang)*P.av*P.len;
+    P.vy= Math.cos(P.ang)*P.av*P.len;
+  } else {
+    P.vy += GRAV*dt;
+    P.x += P.vx*dt;
+    P.y += P.vy*dt;
+  }
+  // world scroll: move camera; player must keep pace (relative)
+  camX += scroll*dt;
+  dist = Math.max(dist, (P.x-120));
+  score = Math.floor(dist) + bonus; // distance plus accumulated graze bonuses
+  runT += dt;
+
+  // extend generation
+  while(genX < camX + W + 400) genStep();
+  // cull
+  if(anchors.length>200) anchors=anchors.filter(a=>a.x>camX-100);
+  if(hazards.length>120) hazards=hazards.filter(h=>h.x+h.w>camX-100);
+
+  // fail: fell behind camera (left edge) or off screen
+  if(P.x < camX-20) die('behind');
+  if(P.y > floorY()-8){ // floor / belly-flop
+    // spikes?
+    P.y=floorY()-8;
+    die('floor');
+  }
+  if(P.y < -40){ P.y=-40; if(P.vy<0)P.vy=0; }
+
+  // hazard collisions + graze
+  const px=P.x, py=P.y, pr=9;
+  for(const h of hazards){
+    if(h.x+h.w<px-40||h.x>px+40)continue;
+    // nearest point on rect
+    const nxp=Math.max(h.x,Math.min(px,h.x+h.w));
+    const nyp=Math.max(h.y,Math.min(py,h.y+h.h));
+    const d=Math.hypot(px-nxp,py-nyp);
+    if(d<pr){ die('hazard'); }
+    else if(d<pr+14 && (Math.abs(P.vx)+Math.abs(P.vy))>150){ graze(nxp,nyp); }
+  }
+
+  // timers
+  if(grazeCd>0)grazeCd-=dt;
+  if(slowmo>0)slowmo-=dt;
+  // particles
+  for(const p of particles){p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=600*dt;p.vx*=0.98;}
+  particles=particles.filter(p=>p.life>0);
+  // trail
+  trail.push({x:P.x,y:P.y,life:0.4});
+  for(const t of trail)t.life-=dt;
+  if(trail.length>60)trail.shift();
+  trail=trail.filter(t=>t.life>0);
+  if(shake>0)shake=Math.max(0,shake-30*dt);
+  if(toastT>0){toastT-=dt; if(toastT<=0)toast.classList.remove('show');}
+}
+
+// ---- render ----
+function draw(){
+  g.clearRect(0,0,W,H);
+  // velocity-scaled zoom-out
+  const spd=Math.hypot(P.vx,P.vy);
+  const zoom=Math.max(0.7,1-(spd-300)/2600);
+  const sx=(shake>0?(Math.random()-0.5)*shake*SHAKEK:0), sy=(shake>0?(Math.random()-0.5)*shake*SHAKEK:0);
+  g.save();
+  g.translate(W/2+sx,H/2+sy); g.scale(zoom,zoom); g.translate(-W/2,-H/2);
+  g.translate(-camX,0);
+
+  // background depth lines
+  g.strokeStyle='rgba(40,80,140,.15)';g.lineWidth=1;
+  for(let i=Math.floor(camX/120)*120;i<camX+W+120;i+=120){g.beginPath();g.moveTo(i,0);g.lineTo(i,H);g.stroke();}
+
+  // ceiling band
+  g.fillStyle='#0b1424';g.fillRect(camX-40,0,W+80,CEIL);
+  g.fillStyle='#12233d';for(let i=Math.floor(camX/24)*24;i<camX+W;i+=24){g.fillRect(i,CEIL-6,12,6);}
+  // floor
+  g.fillStyle='#0b1424';g.fillRect(camX-40,floorY(),W+80,H-floorY());
+  g.fillStyle='#1a2c46';g.fillRect(camX-40,floorY(),W+80,4);
+
+  // best-distance ghost marker
+  if(best>0){const bx=120+best;g.strokeStyle='rgba(120,255,180,.5)';g.setLineDash([6,8]);g.lineWidth=2;
+    g.beginPath();g.moveTo(bx,0);g.lineTo(bx,H);g.stroke();g.setLineDash([]);
+    g.fillStyle='rgba(120,255,180,.8)';g.font='11px sans-serif';g.fillText('BEST',bx+4,H*0.5);}
+
+  // hazards
+  for(const h of hazards){
+    if(h.x+h.w<camX-40||h.x>camX+W+40)continue;
+    if(h.type==='spike'){g.fillStyle='#e35';const n=Math.max(1,Math.floor(h.w/12));
+      for(let i=0;i<n;i++){const bx=h.x+i*(h.w/n);g.beginPath();g.moveTo(bx,h.y+h.h);g.lineTo(bx+h.w/n/2,h.y);g.lineTo(bx+h.w/n,h.y+h.h);g.closePath();g.fill();}}
+    else{g.fillStyle='#3a5f8f';g.beginPath();g.moveTo(h.x,h.y);g.lineTo(h.x+h.w,h.y);g.lineTo(h.x+h.w/2,h.y+h.h);g.closePath();g.fill();}
+  }
+
+  // anchors
+  for(const a of anchors){
+    if(a.x<camX-40||a.x>camX+W+40)continue;
+    g.strokeStyle='rgba(120,160,220,.4)';g.lineWidth=2;g.beginPath();g.moveTo(a.x,0);g.lineTo(a.x,a.y);g.stroke();
+    g.fillStyle=a.used?'#456':'#8cf';g.beginPath();g.arc(a.x,a.y,6,0,6.28);g.fill();
+  }
+
+  // telegraph target
+  target = P.attached?null:nearestAnchor();
+  if(target && running){
+    const t=performance.now()/300;
+    g.strokeStyle='rgba(0,200,255,.35)';g.setLineDash([5,6]);g.lineWidth=2;
+    g.beginPath();g.moveTo(P.x,P.y);g.lineTo(target.x,target.y);g.stroke();g.setLineDash([]);
+    g.strokeStyle='rgba(0,220,255,'+(0.5+0.4*Math.sin(t*3))+')';g.lineWidth=2;
+    const rr=10+2*Math.sin(t*3);
+    g.beginPath();g.arc(target.x,target.y,rr,0,6.28);g.stroke();
+    g.beginPath();g.moveTo(target.x-rr-4,target.y);g.lineTo(target.x-rr+2,target.y);
+    g.moveTo(target.x+rr-2,target.y);g.lineTo(target.x+rr+4,target.y);
+    g.moveTo(target.x,target.y-rr-4);g.lineTo(target.x,target.y-rr+2);
+    g.moveTo(target.x,target.y+rr-2);g.lineTo(target.x,target.y+rr+4);g.stroke();
+  }
+
+  // trail
+  for(const t of trail){const al=t.life/0.4;g.fillStyle='rgba(120,220,255,'+(al*0.5)+')';
+    g.beginPath();g.arc(t.x,t.y,7*al+1,0,6.28);g.fill();}
+
+  // rope
+  if(P.attached){g.strokeStyle='#dff';g.lineWidth=2.5;g.beginPath();g.moveTo(P.anchor.x,P.anchor.y);g.lineTo(P.x,P.y);g.stroke();}
+
+  // particles
+  for(const p of particles){const al=p.life/p.max;g.fillStyle=p.col;g.globalAlpha=Math.max(0,al);
+    g.beginPath();g.arc(p.x,p.y,3*al+1,0,6.28);g.fill();}
+  g.globalAlpha=1;
+
+  // player spark
+  const grd=g.createRadialGradient(P.x,P.y,0,P.x,P.y,12);
+  grd.addColorStop(0,'#fff');grd.addColorStop(.5,'#4cf');grd.addColorStop(1,'rgba(60,200,255,0)');
+  g.fillStyle=grd;g.beginPath();g.arc(P.x,P.y,12,0,6.28);g.fill();
+  g.fillStyle='#fff';g.beginPath();g.arc(P.x,P.y,4,0,6.28);g.fill();
+
+  g.restore();
+
+  // ---- HUD ----
+  g.fillStyle='#dff';g.font='bold 22px sans-serif';g.textAlign='left';
+  g.fillText(Math.floor(dist)+'m',16,32);
+  g.font='13px sans-serif';g.fillStyle='#8ad';
+  g.fillText('best '+best+'m',16,50);
+  g.textAlign='right';
+  g.fillStyle=mult>1?'#fd4':'#8ad';g.font='bold 20px sans-serif';
+  g.fillText('x'+mult+(combo>0?'  ('+combo+')':''),W-16,32);
+  // seed readout: bottom-left, out of the toast's lane, lighter tone for contrast
+  g.font='11px sans-serif';g.fillStyle='#89b';g.textAlign='left';
+  g.fillText('seed '+seed,16,H-14);
+  // mute glyph, bottom-right
+  g.textAlign='right';g.fillStyle=muted?'#f66':'#89b';g.font='12px sans-serif';
+  g.fillText((muted?'🔇':'🔊')+' M',W-14,H-14);
+
+  if(ready){
+    g.fillStyle='rgba(3,5,12,.78)';g.fillRect(0,0,W,H);
+    g.textAlign='center';
+    g.fillStyle='#4cf';g.font='bold 54px sans-serif';g.fillText('GRAPNEL',W/2,H/2-40);
+    g.fillStyle='#dff';g.font='16px sans-serif';
+    g.fillText('HOLD to grapple the glowing anchor · RELEASE to fling',W/2,H/2+4);
+    g.fillStyle='#8ad';g.font='bold 18px sans-serif';
+    g.fillText('tap / hold / any key to start',W/2,H/2+44);
+  } else if(!running){
+    g.fillStyle='rgba(3,5,12,.7)';g.fillRect(0,0,W,H);
+    g.textAlign='center';
+    g.fillStyle='#f66';g.font='bold 40px sans-serif';g.fillText('WIPEOUT',W/2,H/2-70);
+    g.fillStyle='#dff';g.font='bold 26px sans-serif';g.fillText(Math.floor(dist)+'m'+'   x'+mult,W/2,H/2-30);
+    g.fillStyle='#8ad';g.font='14px sans-serif';
+    g.fillText('best '+best+'m   ·   seed '+seed,W/2,H/2);
+    // copy button (hover tint + transient "Copied!" state)
+    const bw=230,bh=40;btnBox={x:W/2-bw/2,y:H/2+24,w:bw,h:bh};
+    g.fillStyle=copiedT>0?'#3d8':(btnHover?'#3cf':'#0af');g.fillRect(btnBox.x,btnBox.y,bw,bh);
+    g.fillStyle='#012';g.font='bold 15px sans-serif';
+    g.fillText(copiedT>0?'COPIED!':'COPY CHALLENGE LINK  (C)',W/2,H/2+50);
+    g.fillStyle='#8ad';g.font='13px sans-serif';
+    if(deathT<=0)g.fillText('press any key / tap to retry',W/2,H/2+90);
+  } else {
+    // tutorial hint on a real timer: full until first grab (or 5s), then fades
+    const a = hasGrabbed ? Math.max(0,1-(runT-grabT)/0.6)
+                         : (runT<5?1:Math.max(0,1-(runT-5)));
+    if(a>0){
+      g.globalAlpha=a;
+      g.textAlign='center';g.fillStyle='#dff';g.font='16px sans-serif';
+      g.fillText('HOLD to grapple the glowing anchor · RELEASE to fling',W/2,H-24);
+      g.globalAlpha=1;
+    }
+  }
+}
+
+// ---- loop ----
+function frame(now){
+  let dt=(now-last)/1000; last=now; if(dt>0.1)dt=0.1;
+  if(copiedT>0)copiedT-=dt;
+  const scale=slowmo>0?0.3:1;
+  if(running&&!ready){acc+=dt*scale;while(acc>=DT){step(DT);acc-=DT;}}
+  else if(!running){ if(deathT>0)deathT-=dt; if(shake>0)shake=Math.max(0,shake-20*dt);
+        for(const p of particles){p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=600*dt;}
+        particles=particles.filter(p=>p.life>0);
+        if(toastT>0){toastT-=dt;if(toastT<=0)toast.classList.remove('show');} }
+  draw();
+  requestAnimationFrame(frame);
+}
+reset();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

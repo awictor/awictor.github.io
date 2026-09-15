@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Snellwork — a light-bending optical bench</title>
+<style>
+  :root{
+    --bg:#05060a; --panel:#0c0f18; --panel2:#11151f; --edge:#1e2534;
+    --ink:#e8ecf6; --dim:#8a93a8; --accent:#ff8a3d; --accent2:#5ac8ff;
+    --good:#66e08a; --warn:#ffcf5a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden;
+    -webkit-font-smoothing:antialiased;}
+  #app{display:flex;height:100%;width:100%}
+  #stage{position:relative;flex:1;min-width:0;background:radial-gradient(120% 120% at 50% 40%,#0a0d15 0%,#05060a 70%)}
+  #stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  #glow{z-index:1}
+  #overlay{z-index:2;touch-action:none;cursor:crosshair}
+  #topbar{position:absolute;z-index:3;left:14px;top:12px;pointer-events:none;user-select:none}
+  #topbar h1{margin:0;font-size:19px;letter-spacing:.5px;font-weight:700;
+    background:linear-gradient(90deg,#ff8a3d,#ffd36a,#5ac8ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+  #topbar .sub{font-size:11px;color:var(--dim);margin-top:2px;max-width:420px;line-height:1.4}
+  #hint{position:absolute;z-index:3;left:14px;bottom:12px;font-size:11px;color:var(--dim);
+    pointer-events:none;user-select:none;line-height:1.5;text-shadow:0 1px 3px #000}
+  #hint b{color:var(--accent2)}
+
+  /* Panel */
+  #panel{width:312px;flex:0 0 312px;background:linear-gradient(180deg,var(--panel),#080a10);
+    border-left:1px solid var(--edge);height:100%;overflow-y:auto;overflow-x:hidden;
+    padding:14px 14px 40px;scrollbar-width:thin;scrollbar-color:#2a3346 transparent}
+  #panel::-webkit-scrollbar{width:9px}
+  #panel::-webkit-scrollbar-thumb{background:#232c3d;border-radius:5px}
+  .sec{margin-bottom:16px}
+  .sec>.lbl{font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim);
+    margin:0 0 8px;font-weight:600;display:flex;align-items:center;gap:6px}
+  .sec>.lbl::after{content:"";flex:1;height:1px;background:var(--edge)}
+
+  .palette{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .palette button{display:flex;align-items:center;gap:7px;padding:7px 8px;border-radius:8px;
+    border:1px solid var(--edge);background:var(--panel2);color:var(--ink);font-size:11.5px;cursor:pointer;
+    text-align:left;transition:.12s;font-weight:500}
+  .palette button:hover{border-color:var(--accent);background:#161b28;transform:translateY(-1px)}
+  .palette .ic{width:16px;height:16px;flex:0 0 16px}
+
+  .btnrow{display:flex;gap:6px;flex-wrap:wrap}
+  .btn{flex:1;min-width:0;padding:8px 6px;border-radius:8px;border:1px solid var(--edge);
+    background:var(--panel2);color:var(--ink);font-size:11.5px;cursor:pointer;transition:.12s;font-weight:600;white-space:nowrap}
+  .btn:hover{border-color:var(--accent);background:#161b28}
+  .btn.on{border-color:var(--accent);background:#2a1a0e;color:var(--accent)}
+  .btn.warn:hover{border-color:#ff5a5a;color:#ff8a8a}
+
+  .ctl{margin-bottom:9px}
+  .ctl label{display:flex;justify-content:space-between;font-size:11px;color:var(--dim);margin-bottom:3px}
+  .ctl label .v{color:var(--ink);font-variant-numeric:tabular-nums;font-weight:600}
+  input[type=range]{-webkit-appearance:none;width:100%;height:4px;border-radius:3px;
+    background:#232c3d;outline:none;cursor:pointer}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;
+    background:var(--accent);border:2px solid #1a1206;box-shadow:0 0 6px rgba(255,138,61,.6);cursor:pointer}
+  input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--accent);border:2px solid #1a1206;cursor:pointer}
+  select{width:100%;padding:8px;border-radius:8px;border:1px solid var(--edge);background:var(--panel2);
+    color:var(--ink);font-size:12px;cursor:pointer}
+
+  #selInfo{font-size:11px;color:var(--dim);background:var(--panel2);border:1px solid var(--edge);
+    border-radius:8px;padding:9px 10px;margin-bottom:9px;line-height:1.5}
+  #selInfo .t{color:var(--accent);font-weight:700;font-size:12.5px}
+  #selEmpty{font-size:11.5px;color:var(--dim);line-height:1.5;padding:2px}
+
+  .gallery{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .thumb{position:relative;border-radius:9px;overflow:hidden;border:1px solid var(--edge);cursor:pointer;
+    background:#000;transition:.14s}
+  .thumb:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:0 6px 18px rgba(0,0,0,.5)}
+  .thumb canvas{width:100%;display:block;aspect-ratio:3/2}
+  .thumb .cap{position:absolute;left:0;right:0;bottom:0;font-size:9.5px;font-weight:600;
+    padding:10px 6px 4px;color:#fff;background:linear-gradient(0deg,rgba(0,0,0,.85),transparent);
+    letter-spacing:.3px}
+
+  #toast{position:absolute;z-index:6;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);
+    background:#151b28;border:1px solid var(--accent);color:var(--ink);padding:9px 16px;border-radius:9px;
+    font-size:12.5px;opacity:0;transition:.25s;pointer-events:none;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  #expOverlay{position:absolute;inset:0;z-index:7;background:rgba(4,5,9,.86);display:none;
+    align-items:center;justify-content:center;flex-direction:column;gap:14px;
+    -webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+  #expOverlay.show{display:flex}
+  #expOverlay .ring{width:56px;height:56px;border:4px solid #232c3d;border-top-color:var(--accent);
+    border-radius:50%;animation:spin .9s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #expOverlay .txt{font-size:13px;color:var(--dim)}
+  .foot{font-size:10px;color:#5a6479;line-height:1.5;border-top:1px solid var(--edge);padding-top:10px}
+  .kbd{display:inline-block;background:#1a2130;border:1px solid var(--edge);border-radius:4px;
+    padding:0 5px;font-size:10px;color:var(--ink);font-family:ui-monospace,monospace}
+
+  /* Narrow / mobile: stack the panel under the stage so shared links stay usable */
+  @media (max-width:720px){
+    #app{flex-direction:column}
+    #stage{flex:1 1 auto;min-height:0}
+    #panel{width:100%;flex:0 0 auto;max-height:46vh;border-left:none;border-top:1px solid var(--edge)}
+    #topbar .sub{max-width:none}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <canvas id="glow"></canvas>
+    <canvas id="overlay"></canvas>
+    <div id="topbar">
+      <h1>Snellwork</h1>
+      <div class="sub">A light-bending optical bench. Drag lenses, prisms &amp; mirrors — real rays refract, disperse into rainbows, and pool into glowing caustics.</div>
+    </div>
+    <div id="hint">
+      <b>Drag</b> to move · grab the <b>orange ring</b> to rotate · <b>scroll</b> over a selected element to tune it<br>
+      <span class="kbd">D</span> drift · <span class="kbd">E</span> export · <span class="kbd">Del</span> delete · <span class="kbd">C</span> clear · <span class="kbd">S</span> share · <span class="kbd">Ctrl+Z</span> undo
+    </div>
+    <div id="toast"></div>
+    <div id="expOverlay"><div class="ring"></div><div class="txt">Rendering wallpaper…</div></div>
+  </div>
+
+  <div id="panel">
+    <div class="sec">
+      <div class="lbl">Scene</div>
+      <div class="btnrow" style="margin-bottom:6px">
+        <button class="btn" id="btnDrift">◐ Drift</button>
+        <button class="btn" id="btnShare">⇪ Share</button>
+        <button class="btn" id="btnExport">▣ Export</button>
+      </div>
+      <div class="btnrow">
+        <button class="btn warn" id="btnClear">Clear scene</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="lbl">Presets</div>
+      <select id="presetSel">
+        <option value="">— load a preset —</option>
+      </select>
+    </div>
+
+    <div class="sec">
+      <div class="lbl">Add element</div>
+      <div class="palette" id="palette"></div>
+    </div>
+
+    <div class="sec">
+      <div class="lbl">Selected</div>
+      <div id="selInfo" style="display:none"></div>
+      <div id="selEmpty">Nothing selected. Click an element on the bench, or add one above. Its physical parameters — IOR, curvature, wavelength — appear here.</div>
+      <div id="params"></div>
+      <div class="btnrow" id="selBtns" style="display:none;margin-top:8px">
+        <button class="btn" id="btnDup">Duplicate</button>
+        <button class="btn warn" id="btnDel">Delete</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="lbl">Render</div>
+      <div class="ctl">
+        <label>Exposure <span class="v" id="expV">1.6</span></label>
+        <input type="range" id="expR" min="0.2" max="6" step="0.1" value="1.6">
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="lbl">Gallery — click to remix</div>
+      <div class="gallery" id="gallery"></div>
+    </div>
+
+    <div class="foot">
+      Zero dependencies · single file · real physics (Snell's law, total internal reflection, Cauchy dispersion, additive caustic accumulation). The whole scene lives in the URL — copy the address bar to share.
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ============================================================================
+   Snellwork — a single-file 2D ray-optics playground.
+   Physics: Snell refraction, total internal reflection, mirror reflection,
+   wavelength-dependent (Cauchy) dispersion. Rendering: rays deposit energy
+   into a float accumulation buffer that is tone-mapped each frame, so
+   converging light blooms into photographic caustics.
+   ========================================================================== */
+
+/* ---------------------------- constants ---------------------------------- */
+const MAXB = 16;        // max bounces per ray
+const EPS  = 0.4;       // surface offset to avoid self-intersection
+const FAR  = 3200;      // max ray length for escaping rays
+const DEP  = 0.6;       // energy deposited per pixel per ray
+const DECAY = 0.85;     // accumulation decay while the scene is moving
+const REF_L = 0.589;    // reference wavelength (µm) for IOR quoting
+let   nextId = 1;
+
+/* ---------------------------- math helpers -------------------------------- */
+function refract(dx,dy,nx,ny,eta){
+  // d,n unit; n points against the incoming ray (cosi>0). eta = n1/n2.
+  const cosi = -(dx*nx+dy*ny);
+  const sin2 = eta*eta*(1-cosi*cosi);
+  if(sin2 > 1) return null;               // total internal reflection
+  const cost = Math.sqrt(1-sin2);
+  const k = eta*cosi - cost;
+  return [eta*dx + k*nx, eta*dy + k*ny];
+}
+function iorAt(mat, wlNm){
+  // Cauchy-style dispersion around the reference wavelength.
+  const l = wlNm/1000;                    // µm
+  return mat.ior + (mat.dispersion||0) * (1/(l*l) - 1/(REF_L*REF_L));
+}
+function wlRGB(wl){
+  // Approximate visible-spectrum colour (Bruton).
+  let r=0,g=0,b=0;
+  if(wl<380)wl=380; if(wl>780)wl=780;
+  if(wl<440){r=-(wl-440)/60;b=1;}
+  else if(wl<490){g=(wl-440)/50;b=1;}
+  else if(wl<510){g=1;b=-(wl-510)/20;}
+  else if(wl<580){r=(wl-510)/70;g=1;}
+  else if(wl<645){r=1;g=-(wl-645)/65;}
+  else{r=1;}
+  let f=1;
+  if(wl<420)f=0.3+0.7*(wl-380)/40;
+  else if(wl>700)f=0.3+0.7*(780-wl)/80;
+  return [r*f,g*f,b*f];
+}
+function rgbCss(c){return 'rgb('+(c[0]*255|0)+','+(c[1]*255|0)+','+(c[2]*255|0)+')';}
+
+/* ---------------------------- element model ------------------------------- */
+const DEFAULTS = {
+  'source-point':{rays:240,intensity:1.0,wavelength:560,spread:6.283},
+  'source-beam' :{rays:240,intensity:1.0,wavelength:520,width:200},
+  'source-laser':{rays:7,  intensity:2.4,wavelength:645,width:5},
+  'source-white':{rays:360,intensity:1.1,width:180},
+  'lens-convex' :{ior:1.52,dispersion:0.008,aperture:180,curvature:210},
+  'lens-concave':{ior:1.52,dispersion:0.008,aperture:180,curvature:230},
+  'prism'       :{ior:1.52,dispersion:0.024,size:150},
+  'block'       :{ior:1.50,dispersion:0.006,w:190,h:150},
+  'mirror-flat' :{aperture:210,refl:0.97},
+  'mirror-parabolic':{aperture:230,curvature:0.0042,refl:0.97},
+  'mirror-spherical':{aperture:210,curvature:270,refl:0.97},
+  'aperture'    :{aperture:520,gap:36},
+  'absorber'    :{w:70,h:190}
+};
+const SCHEMA = {
+  'source-point':[['rays','Rays',10,700,10],['intensity','Brightness',0.1,3,0.1],['wavelength','Wavelength (nm)',400,680,1],['spread','Fan width (rad)',0.15,6.283,0.02]],
+  'source-beam' :[['rays','Rays',10,700,10],['intensity','Brightness',0.1,3,0.1],['wavelength','Wavelength (nm)',400,680,1],['width','Beam width',10,520,5]],
+  'source-laser':[['rays','Rays',1,40,1],['intensity','Brightness',0.2,5,0.1],['wavelength','Wavelength (nm)',400,680,1],['width','Width',1,40,1]],
+  'source-white':[['rays','Rays',20,800,10],['intensity','Brightness',0.1,3,0.1],['width','Beam width',10,520,5]],
+  'lens-convex' :[['ior','Index of refraction',1.01,2.6,0.01],['curvature','Curvature radius',70,700,5],['aperture','Aperture',40,420,5],['dispersion','Dispersion',0,0.05,0.001]],
+  'lens-concave':[['ior','Index of refraction',1.01,2.6,0.01],['curvature','Curvature radius',70,700,5],['aperture','Aperture',40,420,5],['dispersion','Dispersion',0,0.05,0.001]],
+  'prism'       :[['ior','Index of refraction',1.01,2.6,0.01],['dispersion','Dispersion',0,0.06,0.001],['size','Size',50,340,5]],
+  'block'       :[['ior','Index of refraction',1.01,2.6,0.01],['dispersion','Dispersion',0,0.05,0.001],['w','Width',30,460,5],['h','Height',30,400,5]],
+  'mirror-flat' :[['aperture','Length',40,520,5],['refl','Reflectivity',0.5,1,0.01]],
+  'mirror-parabolic':[['aperture','Length',60,520,5],['curvature','Curvature',0.0005,0.02,0.0002],['refl','Reflectivity',0.5,1,0.01]],
+  'mirror-spherical':[['aperture','Length',60,460,5],['curvature','Radius',90,900,5],['refl','Reflectivity',0.5,1,0.01]],
+  'aperture'    :[['aperture','Length',80,900,10],['gap','Slit gap',2,300,2]],
+  'absorber'    :[['w','Width',20,400,5],['h','Height',20,460,5]]
+};
+const WHEELKEY = {
+  'source-point':'wavelength','source-beam':'wavelength','source-laser':'wavelength','source-white':'intensity',
+  'lens-convex':'curvature','lens-concave':'curvature','prism':'ior','block':'ior',
+  'mirror-flat':'refl','mirror-parabolic':'curvature','mirror-spherical':'curvature',
+  'aperture':'gap','absorber':'h'
+};
+const PRETTY = {
+  'source-point':'Point source','source-beam':'Beam source','source-laser':'Laser','source-white':'White source',
+  'lens-convex':'Convex lens','lens-concave':'Concave lens','prism':'Prism','block':'Glass block',
+  'mirror-flat':'Flat mirror','mirror-parabolic':'Parabolic mirror','mirror-spherical':'Spherical mirror',
+  'aperture':'Aperture','absorber':'Absorber'
+};
+const PALETTE = [
+  'source-point','source-beam','source-laser','source-white',
+  'lens-convex','lens-concave','prism','block',
+  'mirror-flat','mirror-parabolic','mirror-spherical','aperture','absorber'
+];
+const isSource = e => e.type.startsWith('source');
+
+function createElement(type,x,y,angle){
+  const el = Object.assign({}, DEFAULTS[type]);
+  el.type=type; el.x=x; el.y=y; el.angle=angle||0; el.id=nextId++;
+  return el;
+}
+
+/* ---------------------------- geometry ------------------------------------ */
+function tx(px,py,el){
+  const c=Math.cos(el.angle), s=Math.sin(el.angle);
+  return [el.x + px*c - py*s, el.y + px*s + py*c];
+}
+function localShape(el){
+  const t=el.type;
+  if(t==='lens-convex'){
+    const H=el.aperture, R=Math.max(el.curvature,H/2+2), a=Math.sqrt(R*R-(H/2)*(H/2)), N=24, pts=[];
+    for(let i=0;i<=N;i++){const y=-H/2+H*i/N; pts.push([a-Math.sqrt(R*R-y*y),y]);}
+    for(let i=0;i<=N;i++){const y=H/2-H*i/N; pts.push([-a+Math.sqrt(R*R-y*y),y]);}
+    return {pts,closed:true};
+  }
+  if(t==='lens-concave'){
+    const H=el.aperture, R=Math.max(el.curvature,H/2+2), N=24;
+    const off=Math.sqrt(R*R-(H/2)*(H/2)), sag=R-off, T=2*sag+H*0.16, pts=[];
+    for(let i=0;i<=N;i++){const y=-H/2+H*i/N; const s=Math.sqrt(R*R-y*y)-off; pts.push([-T/2+s,y]);}
+    for(let i=0;i<=N;i++){const y=H/2-H*i/N; const s=Math.sqrt(R*R-y*y)-off; pts.push([T/2-s,y]);}
+    return {pts,closed:true};
+  }
+  if(t==='prism'){
+    const r=el.size/Math.sqrt(3), pts=[];
+    for(const ad of [-90,150,30]){const a=ad*Math.PI/180; pts.push([r*Math.cos(a),r*Math.sin(a)]);}
+    return {pts,closed:true};
+  }
+  if(t==='block')   {const w=el.w,h=el.h; return {pts:[[-w/2,-h/2],[w/2,-h/2],[w/2,h/2],[-w/2,h/2]],closed:true};}
+  if(t==='absorber'){const w=el.w,h=el.h; return {pts:[[-w/2,-h/2],[w/2,-h/2],[w/2,h/2],[-w/2,h/2]],closed:true,absorb:true};}
+  if(t==='mirror-flat'){const H=el.aperture; return {pts:[[0,-H/2],[0,H/2]],closed:false};}
+  if(t==='mirror-parabolic'){const H=el.aperture,c=el.curvature,N=28,pts=[]; for(let i=0;i<=N;i++){const y=-H/2+H*i/N; pts.push([c*y*y,y]);} return {pts,closed:false};}
+  if(t==='mirror-spherical'){const H=el.aperture,R=Math.max(el.curvature,H/2+2),N=28,off=Math.sqrt(R*R-(H/2)*(H/2)),pts=[]; for(let i=0;i<=N;i++){const y=-H/2+H*i/N; pts.push([Math.sqrt(R*R-y*y)-off,y]);} return {pts,closed:false};}
+  if(t==='aperture'){const H=el.aperture,g=el.gap; return {segsLocal:[[[0,-H/2],[0,-g/2]],[[0,g/2],[0,H/2]]],absorb:true};}
+  return {pts:[],closed:false};
+}
+function matFor(el,ls){
+  if(ls.absorb) return {kind:'absorb'};
+  if(el.type.startsWith('mirror')) return {kind:'mirror',refl:el.refl};
+  return {kind:'glass',ior:el.ior,dispersion:el.dispersion};
+}
+function buildGeometry(el){
+  if(isSource(el)) return null;
+  const ls=localShape(el), mat=matFor(el,ls), segs=[];
+  let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
+  const bump=P=>{if(P[0]<minx)minx=P[0];if(P[0]>maxx)maxx=P[0];if(P[1]<miny)miny=P[1];if(P[1]>maxy)maxy=P[1];};
+  let outline=null;
+  if(ls.segsLocal){
+    for(const s of ls.segsLocal){const A=tx(s[0][0],s[0][1],el),B=tx(s[1][0],s[1][1],el);segs.push({ax:A[0],ay:A[1],bx:B[0],by:B[1]});bump(A);bump(B);}
+  } else {
+    outline = ls.pts.map(p=>tx(p[0],p[1],el));
+    const n=outline.length, lim=ls.closed?n:n-1;
+    for(let i=0;i<lim;i++){const A=outline[i],B=outline[(i+1)%n];segs.push({ax:A[0],ay:A[1],bx:B[0],by:B[1]});}
+    for(const P of outline) bump(P);
+  }
+  if(ls.closed && outline){
+    let cx=0,cy=0; for(const P of outline){cx+=P[0];cy+=P[1];} cx/=outline.length; cy/=outline.length;
+    for(const sg of segs){
+      const mx=(sg.ax+sg.bx)/2,my=(sg.ay+sg.by)/2, ex=sg.bx-sg.ax,ey=sg.by-sg.ay;
+      let nx=ey,ny=-ex; const L=Math.hypot(nx,ny)||1; nx/=L;ny/=L;
+      if(nx*(mx-cx)+ny*(my-cy)<0){nx=-nx;ny=-ny;}
+      sg.nx=nx; sg.ny=ny;
+    }
+  } else {
+    for(const sg of segs){const ex=sg.bx-sg.ax,ey=sg.by-sg.ay; const L=Math.hypot(ey,ex)||1; sg.nx=ey/L; sg.ny=-ex/L;}
+  }
+  return {segs,mat,box:{minx:minx-2,miny:miny-2,maxx:maxx+2,maxy:maxy+2},outline,closed:ls.closed,el};
+}
+
+/* ---------------------------- intersection -------------------------------- */
+function raySeg(ox,oy,dx,dy,ax,ay,bx,by){
+  const ex=bx-ax,ey=by-ay, den=dx*ey-dy*ex;
+  if(Math.abs(den)<1e-12) return -1;
+  const rx=ax-ox,ry=ay-oy;
+  const t=(rx*ey-ry*ex)/den, u=(rx*dy-ry*dx)/den;
+  if(t>1e-6 && u>=-1e-9 && u<=1+1e-9) return t;
+  return -1;
+}
+function rayBox(ox,oy,dx,dy,b){
+  let tmin=-Infinity,tmax=Infinity;
+  if(Math.abs(dx)<1e-12){ if(ox<b.minx||ox>b.maxx) return false; }
+  else{ let t1=(b.minx-ox)/dx,t2=(b.maxx-ox)/dx; if(t1>t2){const s=t1;t1=t2;t2=s;} tmin=Math.max(tmin,t1); tmax=Math.min(tmax,t2); }
+  if(Math.abs(dy)<1e-12){ if(oy<b.miny||oy>b.maxy) return false; }
+  else{ let t1=(b.miny-oy)/dy,t2=(b.maxy-oy)/dy; if(t1>t2){const s=t1;t1=t2;t2=s;} tmin=Math.max(tmin,t1); tmax=Math.min(tmax,t2); }
+  return tmax>=Math.max(0,tmin);
+}
+function exitT(ox,oy,dx,dy,W,H){
+  let tmax=Infinity;
+  if(Math.abs(dx)>1e-12){const t1=(0-ox)/dx,t2=(W-ox)/dx; tmax=Math.min(tmax,Math.max(t1,t2));}
+  if(Math.abs(dy)>1e-12){const t1=(0-oy)/dy,t2=(H-oy)/dy; tmax=Math.min(tmax,Math.max(t1,t2));}
+  return tmax;
+}
+function nearestHit(ox,oy,dx,dy,geos){
+  let bt=Infinity,bs=null,bm=null;
+  for(const g of geos){
+    if(!g) continue;
+    if(!rayBox(ox,oy,dx,dy,g.box)) continue;
+    for(const sg of g.segs){
+      const t=raySeg(ox,oy,dx,dy,sg.ax,sg.ay,sg.bx,sg.by);
+      if(t>1e-4 && t<bt){bt=t;bs=sg;bm=g.mat;}
+    }
+  }
+  return bs?{t:bt,seg:bs,mat:bm}:null;
+}
+
+/* ---------------------------- deposit / trace ----------------------------- */
+function deposit(x0,y0,x1,y1,r,g,b,e,accum,W,H){
+  const dx=x1-x0,dy=y1-y0;
+  const steps=Math.max(1,Math.ceil(Math.hypot(dx,dy)));
+  const sx=dx/steps, sy=dy/steps;
+  let x=x0,y=y0;
+  for(let i=0;i<=steps;i++){
+    const ix=x|0, iy=y|0;
+    if(ix>=0 && iy>=0 && ix<W && iy<H){
+      const idx=(iy*W+ix)*3;
+      accum[idx]+=r*e; accum[idx+1]+=g*e; accum[idx+2]+=b*e;
+    }
+    x+=sx; y+=sy;
+  }
+}
+function traceRay(ox,oy,dx,dy,wl,cr,cg,cb,inten,geos,accum,W,H){
+  for(let b=0;b<MAXB;b++){
+    const hit=nearestHit(ox,oy,dx,dy,geos);
+    let hx,hy;
+    if(hit){ hx=ox+dx*hit.t; hy=oy+dy*hit.t; }
+    else{
+      let te=exitT(ox,oy,dx,dy,W,H);
+      if(!(te>0)) return;
+      te=Math.min(te,FAR); hx=ox+dx*te; hy=oy+dy*te;
+    }
+    deposit(ox,oy,hx,hy,cr,cg,cb,inten*DEP,accum,W,H);
+    if(!hit) return;
+    const sg=hit.seg, mat=hit.mat;
+    if(mat.kind==='absorb') return;
+    let ndx,ndy;
+    if(mat.kind==='mirror'){
+      const dot=dx*sg.nx+dy*sg.ny;
+      ndx=dx-2*dot*sg.nx; ndy=dy-2*dot*sg.ny;
+      inten*=mat.refl;
+    } else {
+      const nb=iorAt(mat,wl);
+      const entering=(dx*sg.nx+dy*sg.ny)<0;
+      const Nx=entering?sg.nx:-sg.nx, Ny=entering?sg.ny:-sg.ny, eta=entering?1/nb:nb;
+      const rf=refract(dx,dy,Nx,Ny,eta);
+      if(!rf){ const dot=dx*Nx+dy*Ny; ndx=dx-2*dot*Nx; ndy=dy-2*dot*Ny; }
+      else { ndx=rf[0]; ndy=rf[1]; }
+      const L=Math.hypot(ndx,ndy)||1; ndx/=L; ndy/=L;
+    }
+    ox=hx+ndx*EPS; oy=hy+ndy*EPS; dx=ndx; dy=ndy;
+    if(inten<0.015) return;
+  }
+}
+function emitSource(s,geos,accum,W,H,rmul){
+  const n=Math.max(1,Math.round(s.rays*rmul));
+  const ca=Math.cos(s.angle), sa=Math.sin(s.angle);
+  for(let i=0;i<n;i++){
+    let ox,oy,dx,dy,wl;
+    if(s.type==='source-point'){
+      const ang=s.angle + s.spread*((i+Math.random())/n) - s.spread/2;
+      ox=s.x; oy=s.y; dx=Math.cos(ang); dy=Math.sin(ang); wl=s.wavelength;
+    } else if(s.type==='source-white'){
+      const off=((i+Math.random())/n-0.5)*s.width;
+      ox=s.x - sa*off; oy=s.y + ca*off; dx=ca; dy=sa; wl=400+280*Math.random();
+    } else {
+      const off=((i+Math.random())/n-0.5)*s.width;
+      ox=s.x - sa*off; oy=s.y + ca*off; dx=ca; dy=sa; wl=s.wavelength;
+    }
+    const rgb=wlRGB(wl);
+    traceRay(ox,oy,dx,dy,wl,rgb[0],rgb[1],rgb[2],s.intensity,geos,accum,W,H);
+  }
+}
+function traceScene(els,geos,accum,W,H,rmul){
+  for(const s of els) if(isSource(s)) emitSource(s,geos,accum,W,H,rmul);
+}
+function tonemap(accum,frames,data,W,H,exposure){
+  const inv=exposure/Math.max(1,frames);
+  for(let i=0,p=0;i<W*H;i++,p+=4){
+    let r=accum[i*3]*inv, g=accum[i*3+1]*inv, b=accum[i*3+2]*inv;
+    r=1-Math.exp(-r); g=1-Math.exp(-g); b=1-Math.exp(-b);
+    data[p]=255*Math.pow(r,0.4545); data[p+1]=255*Math.pow(g,0.4545); data[p+2]=255*Math.pow(b,0.4545); data[p+3]=255;
+  }
+}
+
+/* ---------------------------- presets ------------------------------------- */
+const PRESETS = {
+  'Rainbow prism':(W,H)=>{
+    const s=createElement('source-white',W*0.13,H*0.5,0); s.width=H*0.16; s.rays=520; s.intensity=1.2;
+    const p=createElement('prism',W*0.52,H*0.54,0.55); p.size=Math.min(W,H)*0.30; p.dispersion=0.03; p.ior=1.53;
+    return [s,p];
+  },
+  'Magnifier caustic':(W,H)=>{
+    const s=createElement('source-white',W*0.12,H*0.5,0); s.width=H*0.62; s.rays=620; s.intensity=1.0;
+    const l=createElement('lens-convex',W*0.44,H*0.5,0); l.aperture=H*0.62; l.curvature=H*0.62; l.ior=1.5; l.dispersion=0.012;
+    return [s,l];
+  },
+  'Mirror kaleidoscope':(W,H)=>{
+    const els=[]; const cx=W*0.52,cy=H*0.5, R=Math.min(W,H)*0.34, K=6;
+    const s=createElement('source-white',cx,cy,0); s.type='source-point'; Object.assign(s,DEFAULTS['source-point']); s.x=cx;s.y=cy;s.type='source-point'; s.rays=520; s.spread=6.283; s.intensity=1.1; s.wavelength=520;
+    els.push(s);
+    for(let j=0;j<K;j++){
+      const a=j*2*Math.PI/K;
+      const m=createElement('mirror-flat', cx+Math.cos(a)*R, cy+Math.sin(a)*R, a+Math.PI);
+      m.aperture=2*R*Math.sin(Math.PI/K)*1.08; m.refl=0.98;
+      els.push(m);
+    }
+    return els;
+  },
+  'Fiber waveguide':(W,H)=>{
+    const blk=createElement('block',W*0.52,H*0.5,0.06); blk.w=W*0.72; blk.h=H*0.14; blk.ior=1.5; blk.dispersion=0.004;
+    const lz=createElement('source-laser', W*0.13, H*0.5, 0.16); lz.wavelength=505; lz.rays=9; lz.width=H*0.09; lz.intensity=2.6;
+    return [lz,blk];
+  },
+  'Telescope':(W,H)=>{
+    const s=createElement('source-white',W*0.1,H*0.5,0); s.width=H*0.42; s.rays=560; s.intensity=1.0;
+    const obj=createElement('lens-convex',W*0.4,H*0.5,0); obj.aperture=H*0.46; obj.curvature=H*0.7; obj.ior=1.52;
+    const eye=createElement('lens-convex',W*0.66,H*0.5,0); eye.aperture=H*0.28; eye.curvature=H*0.34; eye.ior=1.52;
+    return [s,obj,eye];
+  },
+  'Spectral cascade':(W,H)=>{
+    const s=createElement('source-white',W*0.12,H*0.42,0.1); s.width=H*0.12; s.rays=520; s.intensity=1.15;
+    const p1=createElement('prism',W*0.4,H*0.5,0.5); p1.size=Math.min(W,H)*0.22; p1.dispersion=0.03;
+    const p2=createElement('prism',W*0.66,H*0.6,-2.1); p2.size=Math.min(W,H)*0.22; p2.dispersion=0.03;
+    return [s,p1,p2];
+  }
+};
+
+/* ============================================================================
+   Main renderer + interaction
+   ========================================================================== */
+const stage=document.getElementById('stage');
+const glow=document.getElementById('glow'), overlay=document.getElementById('overlay');
+const gctx=glow.getContext('2d'), octx=overlay.getContext('2d');
+let W=0,H=0, accum=null, glowImg=null, frames=0, prevMoving=false;
+let exposure=1.6, drift=false, driftStart=0;
+let elements=[], selected=null;
+const pointer={active:false,mode:null,dx:0,dy:0};
+let lastEdit=0, raf=0, hashTimer=0;
+
+/* Undo: snapshot the elements array before any destructive op so Ctrl+Z / the
+   toast action can restore a hand-tuned scene. Elements are plain data → JSON clone. */
+const undoStack=[];
+function pushUndo(){ undoStack.push(JSON.stringify(elements)); if(undoStack.length>50) undoStack.shift(); }
+function undo(){
+  if(!undoStack.length){ toast('Nothing to undo'); return; }
+  elements=JSON.parse(undoStack.pop()); selected=null;
+  renderParams(); queueHash(); resetAccum(); toast('Undo');
+}
+
+function resetAccum(){ if(accum)accum.fill(0); frames=0; prevMoving=false; }
+
+function sizeCanvas(){
+  const r=stage.getBoundingClientRect();
+  W=Math.max(320,Math.min(1400,Math.round(r.width)));
+  H=Math.max(240,Math.round(r.height));
+  glow.width=W; glow.height=H; overlay.width=W; overlay.height=H;
+  accum=new Float32Array(W*H*3);
+  glowImg=gctx.createImageData(W,H);
+  resetAccum();
+}
+
+function hitR(el){
+  if(isSource(el)) return 22;
+  const v=el.aperture||el.size||Math.max(el.w||0,el.h||0)||80;
+  // Grab radius tracks the element's actual half-extent so the whole drawn
+  // body stays clickable even at large apertures/widths (was capped at 155).
+  return v/2+16;
+}
+
+function applyDrift(now){
+  const t=(now-driftStart)/1000;
+  for(const el of elements){
+    const sd=el._seed;
+    el.x=el._bx + 42*Math.sin(t*0.23+sd)*Math.sin(t*0.11+sd*1.3);
+    el.y=el._by + 34*Math.cos(t*0.19+sd*0.7);
+    el.angle=el._ba + 0.28*Math.sin(t*0.13+sd);
+  }
+}
+function snapshotDrift(){
+  driftStart=performance.now();
+  elements.forEach((el,i)=>{ el._bx=el.x; el._by=el.y; el._ba=el.angle; el._seed=(el.id*1.7+i*0.9)%6.283; });
+}
+
+/* ------------------------------ frame loop -------------------------------- */
+function frame(){
+  const now=performance.now();
+  if(drift) applyDrift(now);
+  const geos=elements.map(buildGeometry);
+  const moving = drift || pointer.active || (now-lastEdit<160);
+  if(prevMoving && !moving) resetAccum();
+  if(moving){
+    for(let i=0;i<accum.length;i++) accum[i]*=DECAY;
+    frames=1/(1-DECAY);
+  } else {
+    frames++;
+    if(frames>4000) frames=4000; // avoid unbounded growth on a static scene
+  }
+  traceScene(elements,geos,accum,W,H,1);
+  tonemap(accum,frames,glowImg.data,W,H,exposure);
+  gctx.putImageData(glowImg,0,0);
+  drawOverlay(geos);
+  prevMoving=moving;
+  updateThumbs();
+  raf=requestAnimationFrame(frame);
+}
+
+/* ------------------------------ overlay ----------------------------------- */
+function drawOverlay(geos){
+  octx.clearRect(0,0,W,H);
+  for(let i=0;i<elements.length;i++){
+    const el=elements[i], sel=el===selected;
+    if(isSource(el)) drawSource(el,sel);
+    else drawBody(el,geos[i],sel);
+  }
+  if(selected){ const g=geos[elements.indexOf(selected)]; drawReadout(selected,g); }
+}
+function drawHandles(el){
+  const r=hitR(el)+6;
+  octx.strokeStyle='rgba(255,138,61,0.55)'; octx.lineWidth=1.4; octx.setLineDash([4,5]);
+  octx.beginPath(); octx.arc(el.x,el.y,r,0,7); octx.stroke(); octx.setLineDash([]);
+  const hx=el.x+Math.cos(el.angle)*r, hy=el.y+Math.sin(el.angle)*r;
+  octx.strokeStyle='rgba(255,138,61,0.55)'; octx.beginPath(); octx.moveTo(el.x,el.y); octx.lineTo(hx,hy); octx.stroke();
+  octx.fillStyle='#ff8a3d'; octx.beginPath(); octx.arc(hx,hy,6,0,7); octx.fill();
+  octx.beginPath(); octx.arc(el.x,el.y,3,0,7); octx.fill();
+}
+function drawBody(el,g,sel){
+  if(!g) return;
+  octx.save();
+  if(el.type==='aperture'){
+    octx.strokeStyle=sel?'#ffce8a':'#8a93a8'; octx.lineWidth=6; octx.lineCap='round';
+    for(const sg of g.segs){octx.beginPath();octx.moveTo(sg.ax,sg.ay);octx.lineTo(sg.bx,sg.by);octx.stroke();}
+  } else if(g.outline){
+    octx.beginPath();
+    octx.moveTo(g.outline[0][0],g.outline[0][1]);
+    for(let k=1;k<g.outline.length;k++) octx.lineTo(g.outline[k][0],g.outline[k][1]);
+    if(g.closed) octx.closePath();
+    if(g.mat.kind==='glass'){
+      octx.fillStyle=sel?'rgba(120,180,255,0.11)':'rgba(120,170,255,0.055)'; octx.fill();
+      octx.strokeStyle=sel?'rgba(160,205,255,0.95)':'rgba(130,180,255,0.4)'; octx.lineWidth=sel?1.6:1.2; octx.stroke();
+    } else if(g.mat.kind==='mirror'){
+      octx.strokeStyle=sel?'#d6ecff':'rgba(205,228,255,0.72)'; octx.lineWidth=sel?3.2:2.4; octx.lineCap='round'; octx.stroke();
+    } else {
+      octx.fillStyle=sel?'rgba(64,64,74,0.72)':'rgba(42,42,52,0.62)'; octx.fill();
+      octx.strokeStyle='rgba(130,130,150,0.6)'; octx.lineWidth=1.2; octx.stroke();
+    }
+  }
+  octx.restore();
+  if(sel) drawHandles(el);
+}
+function drawSource(el,sel){
+  const col = el.type==='source-white' ? '#ffffff' : rgbCss(wlRGB(el.wavelength));
+  octx.save();
+  octx.shadowColor=col; octx.shadowBlur=14; octx.fillStyle=col;
+  octx.beginPath(); octx.arc(el.x,el.y,6,0,7); octx.fill(); octx.shadowBlur=0;
+  const ca=Math.cos(el.angle), sa=Math.sin(el.angle);
+  if(el.type!=='source-point'){
+    octx.strokeStyle=col; octx.lineWidth=2;
+    octx.beginPath(); octx.moveTo(el.x,el.y); octx.lineTo(el.x+ca*22,el.y+sa*22); octx.stroke();
+    const w=el.width;
+    octx.globalAlpha=0.45; octx.lineWidth=1.4;
+    octx.beginPath(); octx.moveTo(el.x - sa*w/2, el.y + ca*w/2); octx.lineTo(el.x + sa*w/2, el.y - ca*w/2); octx.stroke();
+    octx.globalAlpha=1;
+  } else {
+    octx.strokeStyle=col; octx.globalAlpha=0.35; octx.lineWidth=1.2;
+    for(let k=0;k<10;k++){const a=el.angle - el.spread/2 + el.spread*k/9; octx.beginPath();octx.moveTo(el.x,el.y);octx.lineTo(el.x+Math.cos(a)*16,el.y+Math.sin(a)*16);octx.stroke();}
+    octx.globalAlpha=1;
+  }
+  octx.restore();
+  if(sel) drawHandles(el);
+}
+function probe(el,g){
+  if(!g || g.mat.kind!=='glass') return null;
+  let src=null,bd=1e18;
+  for(const s of elements) if(isSource(s)){const d=(s.x-el.x)**2+(s.y-el.y)**2; if(d<bd){bd=d;src=s;}}
+  if(!src) return null;
+  let dx=el.x-src.x, dy=el.y-src.y; const L=Math.hypot(dx,dy)||1; dx/=L; dy/=L;
+  let bt=1e18,bs=null;
+  for(const sg of g.segs){const t=raySeg(src.x,src.y,dx,dy,sg.ax,sg.ay,sg.bx,sg.by); if(t>1e-4&&t<bt){bt=t;bs=sg;}}
+  if(!bs) return null;
+  let cosi=Math.min(1,Math.abs(dx*bs.nx+dy*bs.ny));
+  const aoi=Math.acos(cosi)*180/Math.PI;
+  const nb=iorAt(g.mat,550), sinr=Math.sin(Math.acos(cosi))/nb;
+  if(sinr>1) return {aoi,tir:true};
+  return {aoi,ref:Math.asin(sinr)*180/Math.PI,tir:false, hx:src.x+dx*bt, hy:src.y+dy*bt};
+}
+function focalInfo(el){
+  const ax=Math.cos(el.angle), ay=Math.sin(el.angle);
+  if(el.type==='lens-convex'){const n=iorAt({ior:el.ior,dispersion:el.dispersion},589); const f=el.curvature/(2*(n-1)); return {f, x:el.x+ax*f, y:el.y+ay*f, real:true};}
+  if(el.type==='lens-concave'){const n=iorAt({ior:el.ior,dispersion:el.dispersion},589); const f=el.curvature/(2*(n-1)); return {f:-f, virtual:true};}
+  if(el.type==='mirror-spherical'){const f=el.curvature/2; return {f, x:el.x+ax*f, y:el.y+ay*f, real:true};}
+  if(el.type==='mirror-parabolic'){const f=1/(4*el.curvature); return {f, x:el.x+ax*f, y:el.y+ay*f, real:true};}
+  return null;
+}
+function drawReadout(el,g){
+  const lines=[PRETTY[el.type]];
+  if(g && g.mat.kind==='glass'){
+    lines.push('n(589) = '+iorAt(g.mat,589).toFixed(3));
+    const pr=probe(el,g);
+    if(pr){
+      lines.push('AOI '+pr.aoi.toFixed(1)+'°');
+      if(pr.tir) lines.push('▶ TOTAL INTERNAL REFLECTION');
+      else lines.push('refracted '+pr.ref.toFixed(1)+'°');
+      if(pr.hx!=null){ octx.fillStyle='#ffce8a'; octx.beginPath(); octx.arc(pr.hx,pr.hy,3.5,0,7); octx.fill(); }
+    }
+  } else if(g && g.mat.kind==='mirror'){
+    lines.push('reflectivity '+(el.refl*100|0)+'%');
+  }
+  const fi=focalInfo(el);
+  if(fi){
+    lines.push('f = '+(fi.f>=0?'':'−')+Math.abs(Math.round(fi.f))+' px'+(fi.virtual?' (virtual)':''));
+    if(fi.real && fi.x>-200 && fi.x<W+200 && fi.y>-200 && fi.y<H+200){
+      octx.save(); octx.strokeStyle='rgba(255,206,138,0.9)'; octx.lineWidth=1.4;
+      octx.beginPath(); octx.moveTo(fi.x-7,fi.y); octx.lineTo(fi.x+7,fi.y); octx.moveTo(fi.x,fi.y-7); octx.lineTo(fi.x,fi.y+7); octx.stroke();
+      octx.beginPath(); octx.arc(fi.x,fi.y,10,0,7); octx.setLineDash([2,3]); octx.stroke(); octx.setLineDash([]);
+      octx.fillStyle='rgba(255,206,138,0.95)'; octx.font='10px ui-monospace,monospace'; octx.fillText('F',fi.x+12,fi.y-8);
+      octx.restore();
+    }
+  }
+  // panel box near element
+  octx.save();
+  octx.font='11px ui-monospace,monospace';
+  let wmax=0; for(const s of lines) wmax=Math.max(wmax,octx.measureText(s).width);
+  const pad=8, lh=15, bw=wmax+pad*2, bh=lines.length*lh+pad*2-4;
+  let bx=el.x+hitR(el)+14, by=el.y-bh/2;
+  if(bx+bw>W-6) bx=el.x-hitR(el)-14-bw;
+  if(by<6) by=6; if(by+bh>H-6) by=H-6-bh;
+  octx.fillStyle='rgba(8,11,18,0.9)'; octx.strokeStyle='rgba(255,138,61,0.5)'; octx.lineWidth=1;
+  roundRect(octx,bx,by,bw,bh,7); octx.fill(); octx.stroke();
+  for(let i=0;i<lines.length;i++){
+    octx.fillStyle = i===0 ? '#ff8a3d' : (lines[i].indexOf('TOTAL')>=0 ? '#66e08a' : '#cfd6e6');
+    octx.fillText(lines[i], bx+pad, by+pad+lh*i+8);
+  }
+  octx.restore();
+}
+function roundRect(c,x,y,w,h,r){
+  c.beginPath();
+  c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r);
+  c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath();
+}
+
+/* ------------------------------ interaction ------------------------------- */
+function toCanvas(e){
+  const r=overlay.getBoundingClientRect();
+  return {x:(e.clientX-r.left)*(W/r.width), y:(e.clientY-r.top)*(H/r.height)};
+}
+overlay.addEventListener('pointerdown',e=>{
+  overlay.setPointerCapture(e.pointerId);
+  const p=toCanvas(e);
+  lastEdit=performance.now();
+  if(selected){
+    const r=hitR(selected)+6, hx=selected.x+Math.cos(selected.angle)*r, hy=selected.y+Math.sin(selected.angle)*r;
+    if(Math.hypot(p.x-hx,p.y-hy)<13){ pointer.active=true; pointer.mode='rotate'; return; }
+  }
+  let hit=null;
+  for(let i=elements.length-1;i>=0;i--){ if(Math.hypot(p.x-elements[i].x,p.y-elements[i].y)<hitR(elements[i])){hit=elements[i];break;} }
+  if(hit){ selected=hit; pointer.active=true; pointer.mode='move'; pointer.dx=p.x-hit.x; pointer.dy=p.y-hit.y; renderParams(); }
+  else { selected=null; renderParams(); }
+});
+overlay.addEventListener('pointermove',e=>{
+  const p=toCanvas(e);
+  if(!pointer.active){
+    // Hover affordance: show what a click here would do.
+    let cur='crosshair';
+    if(selected){
+      const r=hitR(selected)+6, hx=selected.x+Math.cos(selected.angle)*r, hy=selected.y+Math.sin(selected.angle)*r;
+      if(Math.hypot(p.x-hx,p.y-hy)<13) cur='alias'; // over the rotate handle
+    }
+    if(cur==='crosshair'){
+      for(let i=elements.length-1;i>=0;i--){ if(Math.hypot(p.x-elements[i].x,p.y-elements[i].y)<hitR(elements[i])){ cur='grab'; break; } }
+    }
+    overlay.style.cursor=cur;
+    return;
+  }
+  if(!selected) return;
+  lastEdit=performance.now();
+  overlay.style.cursor = pointer.mode==='rotate' ? 'alias' : 'grabbing';
+  if(pointer.mode==='move'){ selected.x=p.x-pointer.dx; selected.y=p.y-pointer.dy; }
+  else { selected.angle=Math.atan2(p.y-selected.y,p.x-selected.x); }
+  if(drift) snapshotDrift();
+  queueHash();
+});
+overlay.addEventListener('pointerup',()=>{ pointer.active=false; pointer.mode=null; overlay.style.cursor='crosshair'; queueHash(); });
+overlay.addEventListener('wheel',e=>{
+  if(!selected) return;
+  e.preventDefault();
+  const key=WHEELKEY[selected.type];
+  const spec=SCHEMA[selected.type].find(s=>s[0]===key); if(!spec) return;
+  const [,,mn,mx,st]=spec, dir=e.deltaY<0?1:-1;
+  selected[key]=Math.max(mn,Math.min(mx, +(selected[key]+dir*st).toFixed(5)));
+  lastEdit=performance.now(); if(drift) snapshotDrift();
+  renderParams(); queueHash();
+},{passive:false});
+
+window.addEventListener('keydown',e=>{
+  const tag=(e.target.tagName||'').toLowerCase();
+  if(tag==='input'||tag==='select'||tag==='textarea') return;
+  if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z'){ e.preventDefault(); undo(); return; }
+  if(e.ctrlKey||e.metaKey) return; // don't hijack other browser shortcuts
+  const k=e.key.toLowerCase();
+  if(k==='d'){ toggleDrift(); }
+  else if(k==='e'){ exportPNG(); }
+  else if(k==='c'){ clearScene(); }
+  else if(k==='s'){ share(); }
+  else if((e.key==='Delete'||e.key==='Backspace') && selected){ e.preventDefault(); deleteSelected(); }
+});
+
+/* ------------------------------ scene ops --------------------------------- */
+function addElement(type){
+  const el=createElement(type, W*0.5+(Math.random()*80-40), H*0.5+(Math.random()*80-40), 0);
+  elements.push(el); selected=el; if(drift) snapshotDrift();
+  renderParams(); queueHash();
+}
+function deleteSelected(){
+  if(!selected) return;
+  pushUndo();
+  elements=elements.filter(x=>x!==selected); selected=null;
+  renderParams(); queueHash(); resetAccum(); toast('Deleted — Ctrl+Z to undo');
+}
+function duplicateSelected(){
+  if(!selected) return;
+  const c=Object.assign({},selected); c.id=nextId++; c.x+=30; c.y+=30;
+  delete c._bx; delete c._by; delete c._ba; delete c._seed;
+  elements.push(c); selected=c; if(drift) snapshotDrift();
+  renderParams(); queueHash();
+}
+let clearArmed=0;
+function clearScene(){
+  // Two-step confirm: first press arms, a second press within 2s wipes. Undo still restores.
+  if(!elements.length){ return; }
+  if(performance.now()-clearArmed>2000){ clearArmed=performance.now(); toast('Clear scene? press again to confirm'); return; }
+  clearArmed=0; pushUndo();
+  elements=[]; selected=null; renderParams(); queueHash(); resetAccum(); toast('Scene cleared — Ctrl+Z to undo');
+}
+function loadPreset(name){
+  if(!PRESETS[name]) return;
+  elements=PRESETS[name](W,H); selected=null;
+  if(drift) snapshotDrift();
+  renderParams(); syncHashNow(); resetAccum();
+}
+function toggleDrift(){
+  drift=!drift;
+  document.getElementById('btnDrift').classList.toggle('on',drift);
+  if(drift) snapshotDrift();
+  else { renderParams(); }
+}
+
+/* ------------------------------ UI: params -------------------------------- */
+const paramsEl=document.getElementById('params');
+const selInfo=document.getElementById('selInfo');
+const selEmpty=document.getElementById('selEmpty');
+const selBtns=document.getElementById('selBtns');
+function renderParams(){
+  paramsEl.innerHTML='';
+  if(!selected){ selInfo.style.display='none'; selEmpty.style.display='block'; selBtns.style.display='none'; return; }
+  selEmpty.style.display='none'; selInfo.style.display='block'; selBtns.style.display='flex';
+  selInfo.innerHTML='<span class="t">'+PRETTY[selected.type]+'</span>';
+  for(const [key,label,mn,mx,st] of SCHEMA[selected.type]){
+    const ctl=document.createElement('div'); ctl.className='ctl';
+    const val=selected[key];
+    const disp = st<1 ? (+val).toFixed(st<0.01?4:(st<0.1?3:2)) : Math.round(val);
+    ctl.innerHTML='<label>'+label+' <span class="v">'+disp+'</span></label>';
+    const inp=document.createElement('input');
+    inp.type='range'; inp.min=mn; inp.max=mx; inp.step=st; inp.value=val;
+    const v=ctl.querySelector('.v');
+    inp.addEventListener('input',()=>{
+      selected[key]=+inp.value;
+      v.textContent = st<1 ? (+inp.value).toFixed(st<0.01?4:(st<0.1?3:2)) : Math.round(+inp.value);
+      lastEdit=performance.now(); if(drift) snapshotDrift();
+      queueHash();
+    });
+    ctl.appendChild(inp); paramsEl.appendChild(ctl);
+  }
+}
+
+/* ------------------------------ palette / buttons ------------------------- */
+function iconSVG(type){
+  const c={source:'#ffd36a',glass:'#5ac8ff',mirror:'#cfe8ff',other:'#8a93a8'};
+  let col=c.other;
+  if(type.startsWith('source'))col=c.source; else if(type.startsWith('mirror'))col=c.mirror;
+  else if(['lens-convex','lens-concave','prism','block'].includes(type))col=c.glass;
+  let inner='';
+  if(type==='source-point') inner='<circle cx="8" cy="8" r="3" fill="'+col+'"/><g stroke="'+col+'" stroke-width="1"><line x1="8" y1="1" x2="8" y2="4"/><line x1="8" y1="12" x2="8" y2="15"/><line x1="1" y1="8" x2="4" y2="8"/><line x1="12" y1="8" x2="15" y2="8"/></g>';
+  else if(type.startsWith('source')) inner='<circle cx="4" cy="8" r="2.5" fill="'+col+'"/><g stroke="'+col+'" stroke-width="1"><line x1="7" y1="8" x2="15" y2="8"/><line x1="7" y1="5" x2="15" y2="5"/><line x1="7" y1="11" x2="15" y2="11"/></g>';
+  else if(type==='lens-convex') inner='<path d="M6 2 Q11 8 6 14 Q1 8 6 2 Z" fill="none" stroke="'+col+'" stroke-width="1.3"/>';
+  else if(type==='lens-concave') inner='<path d="M3 2 Q7 8 3 14 M11 2 Q7 8 11 14" fill="none" stroke="'+col+'" stroke-width="1.3"/><path d="M3 2 L11 2 M3 14 L11 14" stroke="'+col+'" stroke-width="1.3"/>';
+  else if(type==='prism') inner='<path d="M8 2 L14 13 L2 13 Z" fill="none" stroke="'+col+'" stroke-width="1.3"/>';
+  else if(type==='block') inner='<rect x="3" y="3" width="10" height="10" fill="none" stroke="'+col+'" stroke-width="1.3"/>';
+  else if(type.startsWith('mirror')) inner='<line x1="8" y1="2" x2="8" y2="14" stroke="'+col+'" stroke-width="2"/><line x1="9" y1="3" x2="12" y2="6" stroke="'+col+'" stroke-width="1"/>';
+  else if(type==='aperture') inner='<line x1="8" y1="2" x2="8" y2="6" stroke="'+col+'" stroke-width="2"/><line x1="8" y1="10" x2="8" y2="14" stroke="'+col+'" stroke-width="2"/>';
+  else if(type==='absorber') inner='<rect x="4" y="3" width="8" height="10" fill="'+col+'" opacity="0.5"/>';
+  return '<svg class="ic" viewBox="0 0 16 16">'+inner+'</svg>';
+}
+const palEl=document.getElementById('palette');
+for(const type of PALETTE){
+  const b=document.createElement('button');
+  b.innerHTML=iconSVG(type)+'<span>'+PRETTY[type]+'</span>';
+  b.addEventListener('click',()=>addElement(type));
+  palEl.appendChild(b);
+}
+const presetSel=document.getElementById('presetSel');
+for(const name of Object.keys(PRESETS)){
+  const o=document.createElement('option'); o.value=name; o.textContent=name; presetSel.appendChild(o);
+}
+presetSel.addEventListener('change',()=>{ if(presetSel.value){ loadPreset(presetSel.value); presetSel.value=''; } });
+
+document.getElementById('btnDrift').addEventListener('click',toggleDrift);
+document.getElementById('btnShare').addEventListener('click',share);
+document.getElementById('btnExport').addEventListener('click',()=>exportPNG());
+document.getElementById('btnClear').addEventListener('click',clearScene);
+document.getElementById('btnDel').addEventListener('click',deleteSelected);
+document.getElementById('btnDup').addEventListener('click',duplicateSelected);
+const expR=document.getElementById('expR'), expV=document.getElementById('expV');
+expR.addEventListener('input',()=>{ exposure=+expR.value; expV.textContent=exposure.toFixed(1); queueHash(); });
+
+/* ------------------------------ hash state -------------------------------- */
+function b64enc(s){ return btoa(encodeURIComponent(s).replace(/%([0-9A-F]{2})/g,(m,p)=>String.fromCharCode(parseInt(p,16)))); }
+function b64dec(s){ return decodeURIComponent(Array.prototype.map.call(atob(s),c=>'%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)).join('')); }
+function pack(el){
+  const o={t:el.type,x:Math.round(el.x),y:Math.round(el.y),a:+el.angle.toFixed(3)};
+  for(const k in DEFAULTS[el.type]) o[k]=+(+el[k]).toFixed(4);
+  return o;
+}
+function unpack(o){
+  const el=Object.assign({},DEFAULTS[o.t]);
+  el.type=o.t; el.x=o.x; el.y=o.y; el.angle=o.a; el.id=nextId++;
+  for(const k in DEFAULTS[o.t]) if(o[k]!=null) el[k]=o[k];
+  return el;
+}
+function serialize(){ return {v:1,ex:+exposure.toFixed(2),e:elements.map(pack)}; }
+function syncHashNow(){
+  const s=JSON.stringify(serialize());
+  history.replaceState(null,'','#'+b64enc(s));
+}
+function queueHash(){ clearTimeout(hashTimer); hashTimer=setTimeout(syncHashNow,220); }
+function loadFromHash(){
+  const h=location.hash.slice(1);
+  if(!h) return false;
+  try{
+    const obj=JSON.parse(b64dec(h));
+    if(!obj||!Array.isArray(obj.e)) return false;
+    elements=obj.e.filter(o=>DEFAULTS[o.t]).map(unpack);
+    if(obj.ex){ exposure=obj.ex; expR.value=exposure; expV.textContent=exposure.toFixed(1); }
+    selected=null; return true;
+  }catch(err){ return false; }
+}
+
+/* ------------------------------ share / export --------------------------- */
+function toast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('show');
+  clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1800);
+}
+function share(){
+  syncHashNow();
+  const url=location.href;
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).then(()=>toast('Shareable link copied to clipboard'),()=>toast('Link is in the address bar'));
+  } else toast('Link is in the address bar');
+}
+function exportPNG(factor){
+  factor=factor||2;
+  const ov=document.getElementById('expOverlay'); ov.classList.add('show');
+  const EW=Math.min(4200, Math.round(W*factor));
+  const sc=EW/W;
+  const EH=Math.round(H*sc); // derive height from the SAME scale so aspect never diverges when EW clamps
+  const els=elements.map(el=>{
+    const c=Object.assign({},el);
+    for(const k of ['x','y','aperture','size','w','h','width','gap']) if(c[k]!=null) c[k]*=sc;
+    // curvature is a true length (radius) for lenses/spherical mirrors → scales with sc,
+    // but for a parabolic mirror it's the inverse-length coefficient c in x=c*y² → divide by sc.
+    if(c.curvature!=null) c.curvature = el.type==='mirror-parabolic' ? el.curvature/sc : el.curvature*sc;
+    return c;
+  });
+  const eacc=new Float32Array(EW*EH*3);
+  const geos=els.map(buildGeometry);
+  let done=0; const TOTAL=180;
+  function step(){
+    const batch=12;
+    for(let i=0;i<batch && done<TOTAL;i++,done++) traceScene(els,geos,eacc,EW,EH,1);
+    if(done<TOTAL){ requestAnimationFrame(step); return; }
+    const cv=document.createElement('canvas'); cv.width=EW; cv.height=EH;
+    const ctx=cv.getContext('2d'); const img=ctx.createImageData(EW,EH);
+    tonemap(eacc,TOTAL,img.data,EW,EH,exposure);
+    ctx.putImageData(img,0,0);
+    cv.toBlob(blob=>{
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob); a.download='snellwork-'+Date.now()+'.png';
+      a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+      ov.classList.remove('show'); toast('Wallpaper exported ('+EW+'×'+EH+')');
+    },'image/png');
+  }
+  requestAnimationFrame(step);
+}
+
+/* ------------------------------ gallery thumbnails ------------------------ */
+const thumbs=[];
+function buildGallery(){
+  const gal=document.getElementById('gallery');
+  const names=Object.keys(PRESETS);
+  const TW=168, TH=112;
+  for(const name of names){
+    const wrap=document.createElement('div'); wrap.className='thumb';
+    const cv=document.createElement('canvas'); cv.width=TW; cv.height=TH;
+    const cap=document.createElement('div'); cap.className='cap'; cap.textContent=name;
+    wrap.appendChild(cv); wrap.appendChild(cap); gal.appendChild(wrap);
+    wrap.addEventListener('click',()=>{ loadPreset(name); toast('Loaded "'+name+'" — remix it'); });
+    const els=PRESETS[name](TW,TH);
+    els.forEach((el,i)=>{ el._bx=el.x; el._by=el.y; el._ba=el.angle; el._seed=(el.id*1.7+i*0.9)%6.283; });
+    thumbs.push({name,cv,ctx:cv.getContext('2d'),img:cv.getContext('2d').createImageData(TW,TH),
+      accum:new Float32Array(TW*TH*3),els,W:TW,H:TH,t0:performance.now()});
+  }
+}
+let lastThumbTick=0;
+function updateThumbs(){
+  const now=performance.now();
+  // Throttle to ~18fps and pause entirely when the tab is hidden — the offscreen
+  // gallery is a nicety, not worth burning CPU/battery every main frame.
+  if(document.hidden || now-lastThumbTick<55) return;
+  lastThumbTick=now;
+  for(const th of thumbs){
+    const t=(now-th.t0)/1000;
+    for(const el of th.els){
+      const sd=el._seed;
+      el.x=el._bx + th.W*0.05*Math.sin(t*0.22+sd)*Math.sin(t*0.1+sd);
+      el.y=el._by + th.H*0.06*Math.cos(t*0.18+sd*0.7);
+      el.angle=el._ba + 0.22*Math.sin(t*0.12+sd);
+    }
+    const geos=th.els.map(buildGeometry);
+    const a=th.accum; for(let i=0;i<a.length;i++) a[i]*=DECAY;
+    traceScene(th.els,geos,a,th.W,th.H,0.28);
+    tonemap(a,1/(1-DECAY),th.img.data,th.W,th.H,exposure*0.9);
+    th.ctx.putImageData(th.img,0,0);
+  }
+}
+
+/* ------------------------------ boot -------------------------------------- */
+function boot(){
+  sizeCanvas();
+  if(!loadFromHash()) loadPreset('Rainbow prism');
+  renderParams();
+  buildGallery();
+  syncHashNow();
+  raf=requestAnimationFrame(frame);
+}
+let resizeT=0;
+window.addEventListener('resize',()=>{ clearTimeout(resizeT); resizeT=setTimeout(()=>{ sizeCanvas(); },160); });
+boot();
+</script>
+</body>
+</html>

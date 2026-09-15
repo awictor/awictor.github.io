@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Room Modes Calculator — axial standing waves</title>
+<meta name="description" content="Find the axial room modes (standing-wave resonances) of a room from its dimensions, to place bass traps and pick good listening spots. Uses f = n·c/2L. Offline, no tracking.">
+<style>
+  :root{
+    --c:#a21caf;
+    --bg:#f8ebf7; --card:#ffffff; --fg:#2c0d2a; --muted:#834b7f;
+    --line:#eed2eb; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#180514; --card:#240c20; --fg:#f2d9ee; --muted:#c088b8;
+    --line:#3a1834; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.78rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .row>div{flex:1 1 120px}
+  input{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.05rem;font-weight:600;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  table{width:100%;border-collapse:collapse;margin-top:16px;font-size:.92rem}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th{font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  td.f{font-family:ui-monospace,monospace;font-weight:800;color:var(--c)}
+  .axis{display:inline-block;font-size:.72rem;font-weight:700;padding:2px 7px;border-radius:6px;background:var(--bg);border:1px solid var(--line)}
+  .err{color:#dc2626;font-size:.86rem;margin-top:10px;text-align:center;min-height:1em}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .note code{background:var(--bg);padding:1px 5px;border-radius:5px}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🎚️</div>
+  <div>
+    <h1>Room Modes</h1>
+    <p>axial standing waves in a room</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="row">
+      <div><label>Length (m)</label><input id="len" value="5.0"></div>
+      <div><label>Width (m)</label><input id="wid" value="4.0"></div>
+      <div><label>Height (m)</label><input id="hgt" value="2.6"></div>
+      <div><label>Air temp (°C)</label><input id="temp" value="20"></div>
+    </div>
+    <table>
+      <thead><tr><th>Mode</th><th>Axis</th><th>Frequency</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>What room modes are</h2>
+    <p class="note">Between two parallel walls, sound waves whose half-wavelength divides evenly into the distance reinforce themselves into <b>standing waves</b> — these are <b>axial room modes</b>. Their frequencies are <code>f = n &middot; c / (2L)</code>, where <b>c</b> is the speed of sound (~343 m/s at 20 °C, <code>331.3 + 0.606&middot;T</code>), <b>L</b> is the wall spacing, and <b>n</b> = 1, 2, 3… At those frequencies the room boosts or cancels bass depending on where you sit, which is why some spots sound boomy and others thin. Rooms where two dimensions share a mode (or are simple multiples) have the worst pile-ups; aim for spread-out modes and treat the lowest ones with bass traps in the corners. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function speedOfSound(tempC){
+    if(tempC <= -273.15) throw new Error('temperature below absolute zero');
+    return 331.3 + 0.606 * tempC;
+  }
+  function axialMode(dimension, n, c){
+    if(c === undefined) c = 343;
+    if(dimension <= 0) throw new Error('dimension must be > 0');
+    if(n < 1) throw new Error('mode number must be >= 1');
+    if(c <= 0) throw new Error('speed of sound must be > 0');
+    return n * c / (2 * dimension);
+  }
+  function axialModes(length, width, height, count, c){
+    if(count === undefined) count = 3;
+    if(c === undefined) c = 343;
+    if(count < 1) throw new Error('count must be >= 1');
+    var dims = [['length', length], ['width', width], ['height', height]];
+    var modes = [];
+    for(var i = 0; i < dims.length; i++){
+      for(var n = 1; n <= count; n++){
+        modes.push({ axis: dims[i][0], n: n, freq: axialMode(dims[i][1], n, c) });
+      }
+    }
+    modes.sort(function(a, b){ return a.freq - b.freq; });
+    return modes;
+  }
+
+  if(typeof module !== 'undefined') module.exports = { speedOfSound:speedOfSound, axialMode:axialMode, axialModes:axialModes };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var $ = function(id){ return document.getElementById(id); };
+    function render(){
+      $('err').textContent = '';
+      $('rows').innerHTML = '';
+      try{
+        var c = speedOfSound(parseFloat($('temp').value));
+        var modes = axialModes(parseFloat($('len').value), parseFloat($('wid').value), parseFloat($('hgt').value), 3, c);
+        modes.forEach(function(m){
+          var tr = document.createElement('tr');
+          tr.innerHTML = '<td>' + m.axis.charAt(0).toUpperCase() + ' &times;' + m.n +
+            '</td><td><span class="axis">' + m.axis + '</span></td><td class="f">' + m.freq.toFixed(1) + ' Hz</td>';
+          $('rows').appendChild(tr);
+        });
+      }catch(e){ $('err').textContent = e.message; }
+    }
+    ['len','wid','hgt','temp'].forEach(function(id){ $(id).addEventListener('input', render); });
+    render();
+
+    var root = document.documentElement, tb = $('theme');
+    function setTheme(t){ root.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? '☀️' : '🌙'; try{ localStorage.setItem('roommodes-theme', t); }catch(e){} }
+    var saved; try{ saved = localStorage.getItem('roommodes-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); });
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sell-Through Rate Calculator — with weeks of supply</title>
+<meta name="description" content="Calculate sell-through rate, weeks and days of supply, and a reorder flag from units sold and inventory. For retail and FBA sellers. Offline, no tracking.">
+<style>
+  :root{
+    --c:#0d9488;
+    --bg:#eef7f5; --card:#ffffff; --fg:#0a1f1c; --muted:#4c635f;
+    --line:#d4e8e4; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#07130f; --card:#0f1c19; --fg:#e3f2ee; --muted:#8caba4;
+    --line:#1a2d28; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:560px){.grid{grid-template-columns:1fr}}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin:10px 0 5px}
+  input{width:100%;font:inherit;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--fg)}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .hero{margin-top:20px;text-align:center;padding:20px;border-radius:12px;background:var(--bg);border:1px solid var(--line)}
+  .hero .n{font-size:2.8rem;font-weight:800;color:var(--c);line-height:1}
+  .hero .k{color:var(--muted);font-size:.82rem;text-transform:uppercase;letter-spacing:.05em;margin-top:4px}
+  .hero .cat{font-weight:700;margin-top:8px}
+  .rows{margin-top:14px}
+  .row{display:flex;justify-content:space-between;padding:10px 0;border-top:1px solid var(--line);font-size:.95rem}
+  .row .k{color:var(--muted)}
+  .row .v{font-weight:700;font-variant-numeric:tabular-nums}
+  .err{color:#dc2626;font-size:.86rem;margin-top:12px;min-height:1em}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">📦</div>
+  <div>
+    <h1>Sell-Through Rate</h1>
+    <p>Sell-through %, weeks of supply &amp; reorder flag</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div><label>Units sold (this period)</label><input id="sold" type="number" step="any" value="75"></div>
+      <div><label>Units received (into stock)</label><input id="received" type="number" step="any" value="100"></div>
+      <div><label>Current stock on hand</label><input id="stock" type="number" step="any" value="60"></div>
+      <div><label>Average weekly sales (units)</label><input id="weekly" type="number" step="any" value="20"></div>
+      <div><label>Lead time (weeks)</label><input id="lead" type="number" step="any" value="2"></div>
+      <div><label>Safety stock (weeks)</label><input id="safety" type="number" step="any" value="1"></div>
+    </div>
+    <div class="err" id="err"></div>
+    <div class="hero"><div class="n" id="rate">—</div><div class="k">sell-through rate</div><div class="cat" id="flag"></div></div>
+    <div class="rows" id="rows"></div>
+  </div>
+
+  <div class="card">
+    <h2>What these mean</h2>
+    <p class="note"><b>Sell-through rate</b> is the share of received inventory that sold in a period: <code>units sold ÷ units received</code>. High sell-through means demand is outpacing supply (watch for stockouts); low means overstock. <b>Weeks of supply</b> is how long current stock lasts at the recent sales pace (<code>stock ÷ weekly sales</code>). When weeks of supply drops below your <b>lead time + safety stock</b>, it's time to reorder. Handy for retail and Amazon/FBA restock planning. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function pos(v, name){ if(typeof v !== 'number' || !isFinite(v) || v <= 0) throw new Error(name + ' must be a positive number'); return v; }
+  function nonNeg(v, name){ if(typeof v !== 'number' || !isFinite(v) || v < 0) throw new Error(name + ' must be zero or more'); return v; }
+  // Sell-through as a fraction: units sold / units received.
+  function sellThrough(sold, received){ nonNeg(sold, 'units sold'); pos(received, 'units received'); return sold / received; }
+  // Weeks of supply: current stock / average weekly sales.
+  function weeksOfSupply(stock, avgWeeklySales){ nonNeg(stock, 'stock'); pos(avgWeeklySales, 'weekly sales'); return stock / avgWeeklySales; }
+  // Days of supply from weeks of supply.
+  function daysOfSupply(stock, avgWeeklySales){ return weeksOfSupply(stock, avgWeeklySales) * 7; }
+  // Should we reorder? True when weeks of supply <= lead time + safety stock.
+  function reorderNeeded(stock, avgWeeklySales, leadWeeks, safetyWeeks){
+    nonNeg(leadWeeks, 'lead time'); nonNeg(safetyWeeks, 'safety stock');
+    return weeksOfSupply(stock, avgWeeklySales) <= (leadWeeks + safetyWeeks);
+  }
+  function analyze(o){
+    return {
+      sellThrough: sellThrough(o.sold, o.received),
+      weeksOfSupply: weeksOfSupply(o.stock, o.weekly),
+      daysOfSupply: daysOfSupply(o.stock, o.weekly),
+      reorder: reorderNeeded(o.stock, o.weekly, o.lead, o.safety)
+    };
+  }
+
+  if(typeof module !== 'undefined') module.exports = { sellThrough:sellThrough, weeksOfSupply:weeksOfSupply, daysOfSupply:daysOfSupply, reorderNeeded:reorderNeeded, analyze:analyze };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var pct = function(x){ return (x * 100).toLocaleString(undefined, { maximumFractionDigits: 1 }) + '%'; };
+    var f1 = function(x){ return x.toLocaleString(undefined, { maximumFractionDigits: 1 }); };
+    function render(){
+      var err = document.getElementById('err');
+      err.textContent = '';
+      try{
+        var r = analyze({
+          sold: parseFloat(document.getElementById('sold').value),
+          received: parseFloat(document.getElementById('received').value),
+          stock: parseFloat(document.getElementById('stock').value),
+          weekly: parseFloat(document.getElementById('weekly').value),
+          lead: parseFloat(document.getElementById('lead').value) || 0,
+          safety: parseFloat(document.getElementById('safety').value) || 0
+        });
+        document.getElementById('rate').textContent = pct(r.sellThrough);
+        document.getElementById('flag').textContent = r.reorder ? '⚠ Reorder now' : '✓ Stock is sufficient';
+        document.getElementById('rows').innerHTML =
+          '<div class="row"><span class="k">Weeks of supply</span><span class="v">' + f1(r.weeksOfSupply) + '</span></div>' +
+          '<div class="row"><span class="k">Days of supply</span><span class="v">' + f1(r.daysOfSupply) + '</span></div>';
+      }catch(e){ document.getElementById('rate').textContent='—'; document.getElementById('flag').textContent=''; document.getElementById('rows').innerHTML=''; err.textContent = e.message; }
+    }
+    ['sold','received','stock','weekly','lead','safety'].forEach(function(id){ document.getElementById(id).addEventListener('input', render); });
+    render();
+
+    var root=document.documentElement, tb=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); tb.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('sellthrough-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('sellthrough-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

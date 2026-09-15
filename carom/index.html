@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Carom — dynamical billiards</title>
+<style>
+  :root{ --ink:#e8f6ef; --dim:#7fae9d; --accent:#5ff0c0; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; overflow:hidden; background:
+      radial-gradient(120% 120% at 50% 30%, #0b2a22 0%, #061512 55%, #020807 100%);
+      color:var(--ink); font:13px/1.4 "Segoe UI",system-ui,sans-serif; -webkit-user-select:none; user-select:none; }
+  #stage{ position:fixed; inset:0; }
+  canvas{ position:absolute; inset:0; width:100%; height:100%; }
+  #ui{ position:fixed; top:14px; left:14px; width:236px; padding:14px 15px 12px;
+      background:rgba(4,20,16,.72); -webkit-backdrop-filter:blur(9px); backdrop-filter:blur(9px);
+      border:1px solid rgba(95,240,192,.22); border-radius:12px;
+      box-shadow:0 8px 30px rgba(0,0,0,.45); }
+  #ui h1{ margin:0 0 2px; font-size:16px; letter-spacing:.5px; color:var(--accent); font-weight:700; }
+  #ui .sub{ margin:0 0 11px; font-size:10.5px; color:var(--dim); }
+  .row{ display:flex; align-items:center; justify-content:space-between; margin:7px 0; gap:8px; }
+  .row label{ color:var(--dim); font-size:11px; white-space:nowrap; }
+  .row .val{ color:var(--ink); font-variant-numeric:tabular-nums; font-size:11px; min-width:34px; text-align:right; }
+  input[type=range]{ -webkit-appearance:none; appearance:none; height:3px; flex:1; border-radius:3px;
+      background:linear-gradient(90deg,var(--accent),#2b7d66); outline:none; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:13px; height:13px; border-radius:50%;
+      background:var(--ink); border:2px solid var(--accent); cursor:pointer; }
+  input[type=range]::-moz-range-thumb{ width:13px; height:13px; border-radius:50%;
+      background:var(--ink); border:2px solid var(--accent); cursor:pointer; }
+  button:focus-visible, select:focus-visible, input[type=range]:focus-visible, .chk input:focus-visible{
+      outline:2px solid var(--accent); outline-offset:2px; }
+  select{ background:#06231c; color:var(--ink); border:1px solid rgba(95,240,192,.3); border-radius:6px;
+      padding:3px 6px; font-size:11px; flex:1; }
+  .btns{ display:flex; gap:6px; margin-top:10px; flex-wrap:wrap; }
+  button{ background:rgba(95,240,192,.1); color:var(--ink); border:1px solid rgba(95,240,192,.3);
+      border-radius:6px; padding:5px 8px; font-size:11px; cursor:pointer; transition:.15s; flex:1; }
+  button:hover{ background:rgba(95,240,192,.24); }
+  button:active{ transform:translateY(1px); }
+  .presets{ display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-top:9px; }
+  .presets button{ font-size:10px; padding:5px 4px; }
+  .presets button.active{ background:rgba(95,240,192,.34); border-color:var(--accent); color:var(--accent); }
+  .chk{ display:flex; align-items:center; gap:7px; margin-top:9px; cursor:pointer; color:var(--dim); font-size:11px; }
+  .chk input{ accent-color:var(--accent); }
+  #hud{ position:fixed; top:14px; right:14px; padding:11px 14px; text-align:right;
+      background:rgba(4,20,16,.6); -webkit-backdrop-filter:blur(9px); backdrop-filter:blur(9px);
+      border:1px solid rgba(95,240,192,.18); border-radius:11px; min-width:150px; }
+  #hud .k{ color:var(--dim); font-size:10px; letter-spacing:.4px; text-transform:uppercase; }
+  #hud .v{ font-size:18px; color:var(--accent); font-variant-numeric:tabular-nums; margin-bottom:6px; font-weight:600; }
+  #hud .v.small{ font-size:14px; }
+  #hint{ position:fixed; bottom:12px; left:0; right:0; text-align:center; color:var(--dim); font-size:11px; opacity:.75; }
+  /* narrow screens: shrink UI, drop HUD to bottom-right so the two panels never collide */
+  @media (max-width:560px){
+    #ui{ width:182px; padding:10px 11px 9px; }
+    #ui h1{ font-size:14px; }
+    #hud{ top:auto; bottom:14px; right:14px; min-width:112px; padding:8px 11px; }
+    #hud .v{ font-size:15px; }
+    #hud .v.small{ font-size:12px; }
+    #hint{ display:none; }
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="c"></canvas>
+</div>
+<div id="ui">
+  <h1>Carom</h1>
+  <p class="sub">One ball · perfect reflection · forever</p>
+  <div class="row"><label>Table</label>
+    <select id="shape">
+      <option value="circle">Circle</option>
+      <option value="ellipse">Ellipse</option>
+      <option value="stadium">Stadium</option>
+      <option value="polygon">Polygon</option>
+    </select></div>
+  <div class="row" id="rSides"><label>Sides</label><input type="range" id="sides" min="3" max="9" step="1"><span class="val" id="vSides"></span></div>
+  <div class="row" id="rEcc"><label>Eccentricity</label><input type="range" id="ecc" min="0" max="0.94" step="0.01"><span class="val" id="vEcc"></span></div>
+  <div class="row"><label>Speed</label><input type="range" id="speed" min="1" max="40" step="1"><span class="val" id="vSpeed"></span></div>
+  <div class="row"><label>Persistence</label><input type="range" id="persist" min="0.7" max="1" step="0.005"><span class="val" id="vPersist"></span></div>
+  <label class="chk"><input type="checkbox" id="twin"> Twin ball (chaos sensitivity)</label>
+  <div class="btns">
+    <button id="pause">Pause</button>
+    <button id="clear">Clear</button>
+    <button id="shot">PNG</button>
+  </div>
+  <div class="presets" id="presets"></div>
+</div>
+<div id="hud">
+  <div class="k">Orbit</div><div class="v small" id="hType">—</div>
+  <div class="k">Rotation (p,q)</div><div class="v" id="hPQ">—</div>
+  <div class="k">Coverage</div><div class="v" id="hFill">—</div>
+</div>
+<div id="hint">Drag the <b>dot</b> to move the launch point · drag the <b>arrow tip</b> to aim</div>
+
+<script>
+"use strict";
+const cvs = document.getElementById('c'), ctx = cvs.getContext('2d');
+const trail = document.createElement('canvas'), tctx = trail.getContext('2d');
+const EPS = 1e-6, STAD_L = 1.4, G = 64;
+
+// ---------- state ----------
+const state = { shape:'ellipse', sides:5, ecc:0.75, sx:-0.7, sy:0.3, ang:-0.4,
+                speed:6, persist:0.985, twin:false };
+let W=0, H=0, scale=1, cx=0, cy=0, extX=1, extY=1, cellW=1;
+let bpts=[], insideMask=null, visited=null, visitedCount=0, insideTotal=1;
+let running=true, periodic=null;
+let primary=null, twinBall=null;
+
+// ---------- geometry helpers ----------
+const ellB = ()=> Math.sqrt(1 - state.ecc*state.ecc);
+function vert(i,n){ const a = 2*Math.PI*i/n - Math.PI/2; return [Math.cos(a), Math.sin(a)]; }
+
+function containsPt(x,y){
+  const s = state.shape;
+  if(s==='circle')  return x*x + y*y <= 1;
+  if(s==='ellipse'){ const b=ellB(); return x*x + (y*y)/(b*b) <= 1; }
+  if(s==='stadium'){ const L=STAD_L; if(Math.abs(x)<=L) return Math.abs(y)<=1;
+      const dx=Math.abs(x)-L; return dx*dx + y*y <= 1; }
+  const n=state.sides;                       // convex polygon (ccw)
+  for(let i=0;i<n;i++){ const V=vert(i,n), Wv=vert((i+1)%n,n);
+    if((Wv[0]-V[0])*(y-V[1]) - (Wv[1]-V[1])*(x-V[0]) < -1e-9) return false; }
+  return true;
+}
+
+// nearest boundary intersection -> {t, nx, ny}  (nx,ny = unit normal)
+function hitCircle(px,py,dx,dy){ const b=px*dx+py*dy, c=px*px+py*py-1, d=b*b-c;
+  if(d<0) return null; const t=-b+Math.sqrt(d); const hx=px+t*dx, hy=py+t*dy;
+  return {t, nx:hx, ny:hy}; }
+function hitEllipse(px,py,dx,dy){ const b=ellB(), ib=1/(b*b);
+  const A=dx*dx+dy*dy*ib, B=2*(px*dx+py*dy*ib), C=px*px+py*py*ib-1;
+  const d=B*B-4*A*C; if(d<0) return null; const t=(-B+Math.sqrt(d))/(2*A);
+  const hx=px+t*dx, hy=py+t*dy; let nx=hx, ny=hy*ib, m=Math.hypot(nx,ny);
+  return {t, nx:nx/m, ny:ny/m}; }
+function segHit(px,py,dx,dy,ax,ay,bx,by,nx,ny){ const ex=bx-ax, ey=by-ay;
+  const det=ex*dy-ey*dx; if(Math.abs(det)<1e-12) return null;
+  const rx=ax-px, ry=ay-py; const t=(ex*ry-rx*ey)/det, s=(dx*ry-dy*rx)/det;
+  if(t>1e-9 && s>=-1e-9 && s<=1+1e-9) return {t,nx,ny}; return null; }
+function arcHit(px,py,dx,dy,ccx,valid){ const ox=px-ccx, b=ox*dx+py*dy, c=ox*ox+py*py-1;
+  const d=b*b-c; if(d<0) return null; const sq=Math.sqrt(d); let best=null;
+  for(const t of [-b-sq,-b+sq]){ if(t>1e-9){ const hx=px+t*dx, hy=py+t*dy;
+    if(valid(hx)){ let nx=ccx-hx, ny=-hy, m=Math.hypot(nx,ny);
+      if(!best||t<best.t) best={t, nx:nx/m, ny:ny/m}; } } } return best; }
+function hitPolygon(px,py,dx,dy){ const n=state.sides; let best=null;
+  for(let i=0;i<n;i++){ const V=vert(i,n), Wv=vert((i+1)%n,n);
+    let ex=Wv[0]-V[0], ey=Wv[1]-V[1], m=Math.hypot(ex,ey);
+    let nx=ey/m, ny=-ex/m;                       // inward normal (points to origin)
+    if(nx*V[0]+ny*V[1] > 0){ nx=-nx; ny=-ny; }
+    const h=segHit(px,py,dx,dy,V[0],V[1],Wv[0],Wv[1],nx,ny);
+    if(h && (!best||h.t<best.t)) best=h; } return best; }
+function hitStadium(px,py,dx,dy){ const L=STAD_L; let best=null;
+  const cand=h=>{ if(h && (!best||h.t<best.t)) best=h; };
+  cand(segHit(px,py,dx,dy,-L,1,L,1,0,-1));
+  cand(segHit(px,py,dx,dy,-L,-1,L,-1,0,1));
+  cand(arcHit(px,py,dx,dy, L, x=>x>=L));
+  cand(arcHit(px,py,dx,dy,-L, x=>x<=-L));
+  return best; }
+function hit(px,py,dx,dy){ switch(state.shape){
+  case 'circle': return hitCircle(px,py,dx,dy);
+  case 'ellipse': return hitEllipse(px,py,dx,dy);
+  case 'stadium': return hitStadium(px,py,dx,dy);
+  default: return hitPolygon(px,py,dx,dy); } }
+
+// ---------- boundary polyline (drawing) ----------
+function boundary(){ const p=[]; const s=state.shape;
+  if(s==='circle'||s==='ellipse'){ const b=s==='ellipse'?ellB():1;
+    for(let i=0;i<=160;i++){ const a=2*Math.PI*i/160; p.push([Math.cos(a), b*Math.sin(a)]); } }
+  else if(s==='polygon'){ const n=state.sides; for(let i=0;i<=n;i++) p.push(vert(i%n,n)); }
+  else { const L=STAD_L; // top, right cap, bottom, left cap
+    p.push([-L,1],[L,1]);
+    for(let i=0;i<=48;i++){ const a=Math.PI/2 - Math.PI*i/48; p.push([L+Math.cos(a), Math.sin(a)]); }
+    p.push([-L,-1]);
+    for(let i=0;i<=48;i++){ const a=-Math.PI/2 - Math.PI*i/48; p.push([-L+Math.cos(a), Math.sin(a)]); } }
+  return p; }
+
+// ---------- coordinate mapping ----------
+const S = (x,y)=>[cx + x*scale, cy - y*scale];
+
+// ---------- setup / reset ----------
+function computeExtent(){ const s=state.shape;
+  if(s==='ellipse'){ extX=1; extY=ellB(); }
+  else if(s==='stadium'){ extX=STAD_L+1; extY=1; }
+  else { extX=1; extY=1; } }
+function buildFillGrid(){ insideMask=new Uint8Array(G*G); visited=new Uint8Array(G*G);
+  visitedCount=0; insideTotal=0; cellW=2*extX/G;
+  for(let iy=0;iy<G;iy++) for(let ix=0;ix<G;ix++){
+    const x=-extX+(ix+0.5)*2*extX/G, y=-extY+(iy+0.5)*2*extY/G;
+    if(containsPt(x,y)){ insideMask[iy*G+ix]=1; insideTotal++; } }
+  if(insideTotal===0) insideTotal=1; }
+function resize(){ const dpr=Math.min(window.devicePixelRatio||1,2);
+  W=window.innerWidth; H=window.innerHeight;
+  for(const cv of [cvs,trail]){ cv.width=W*dpr; cv.height=H*dpr; }
+  ctx.setTransform(dpr,0,0,dpr,0,0); tctx.setTransform(dpr,0,0,dpr,0,0);
+  refresh(); }
+function refresh(){ computeExtent();
+  scale = Math.min((W/2-46)/extX, (H/2-46)/extY);
+  cx=W/2; cy=H/2; bpts=boundary(); buildFillGrid(); relaunch(); writeHash(); syncUI(); }
+function newBall(dseed){ return { x:state.sx, y:state.sy, dx:Math.cos(state.ang+dseed),
+    dy:Math.sin(state.ang+dseed), bounces:0, wind:0, lastAng:null,
+    ref:null }; }
+function relaunch(){ tctx.clearRect(0,0,W,H); primary=newBall(0);
+  twinBall = state.twin ? newBall(1e-5) : null; periodic=null;
+  visited.fill(0); visitedCount=0; }
+
+// ---------- physics + tracing ----------
+function stepBall(ball, isPrimary){
+  const h=hit(ball.x, ball.y, ball.dx, ball.dy);
+  if(!h){ ball.x=state.sx; ball.y=state.sy; return; }  // degenerate grazing hit: re-seed to interior start
+  const hx=ball.x + h.t*ball.dx, hy=ball.y + h.t*ball.dy;
+  // chord
+  const p1=S(ball.x,ball.y), p2=S(hx,hy);
+  let col;
+  if(state.twin) col = isPrimary ? 'hsla(30,95%,62%,0.5)' : 'hsla(190,90%,60%,0.5)';
+  else col = 'hsla('+((ball.bounces*3)%360)+',92%,62%,0.34)';
+  tctx.strokeStyle=col; tctx.lineWidth=1;
+  tctx.beginPath(); tctx.moveTo(p1[0],p1[1]); tctx.lineTo(p2[0],p2[1]); tctx.stroke();
+  // reflect
+  const dot=ball.dx*h.nx + ball.dy*h.ny;
+  ball.dx -= 2*dot*h.nx; ball.dy -= 2*dot*h.ny;
+  const m=Math.hypot(ball.dx,ball.dy); ball.dx/=m; ball.dy/=m;
+  const px=ball.x, py=ball.y;
+  ball.x = hx + ball.dx*EPS; ball.y = hy + ball.dy*EPS;
+  ball.bounces++;
+  if(isPrimary){ markFill(px,py,hx,hy); detect(ball,hx,hy); }
+}
+function markFill(x1,y1,x2,y2){ const d=Math.hypot(x2-x1,y2-y1);
+  const n=Math.max(1,Math.ceil(d/(cellW*0.5)));
+  for(let i=0;i<=n;i++){ const x=x1+(x2-x1)*i/n, y=y1+(y2-y1)*i/n;
+    const ix=Math.floor((x+extX)/(2*extX)*G), iy=Math.floor((y+extY)/(2*extY)*G);
+    if(ix<0||iy<0||ix>=G||iy>=G) continue; const k=iy*G+ix;
+    if(insideMask[k] && !visited[k]){ visited[k]=1; visitedCount++; } } }
+function detect(ball,hx,hy){
+  const a=Math.atan2(hy,hx);
+  if(ball.lastAng!==null){ let d=a-ball.lastAng;
+    while(d>Math.PI) d-=2*Math.PI; while(d<-Math.PI) d+=2*Math.PI; ball.wind+=d; }
+  ball.lastAng=a;
+  if(!ball.ref){ ball.ref={x:hx,y:hy,dx:ball.dx,dy:ball.dy,b:ball.bounces,w:ball.wind}; return; }
+  if(periodic) return;
+  const r=ball.ref, q=ball.bounces-r.b;
+  if(q>=2){ const dist=Math.hypot(hx-r.x,hy-r.y);
+    const align=ball.dx*r.dx+ball.dy*r.dy;
+    if(dist<0.02 && align>0.9997){
+      const p=Math.max(1,Math.round(Math.abs(ball.wind-r.w)/(2*Math.PI)));
+      periodic={p,q}; } }
+}
+
+// ---------- render ----------
+function drawTable(){ ctx.beginPath();
+  for(let i=0;i<bpts.length;i++){ const s=S(bpts[i][0],bpts[i][1]);
+    i?ctx.lineTo(s[0],s[1]):ctx.moveTo(s[0],s[1]); }
+  ctx.closePath();
+  ctx.fillStyle='rgba(3,14,11,0.55)'; ctx.fill();
+  ctx.save(); ctx.shadowColor='rgba(95,240,192,0.6)'; ctx.shadowBlur=14;
+  ctx.strokeStyle='rgba(150,255,214,0.82)'; ctx.lineWidth=1.5; ctx.stroke(); ctx.restore(); }
+function dot(x,y,r,fill){ const s=S(x,y); ctx.beginPath();
+  ctx.arc(s[0],s[1],r,0,7); ctx.fillStyle=fill; ctx.fill(); }
+function drawHandles(){
+  // aim arrow
+  const tx=state.sx+Math.cos(state.ang)*0.28, ty=state.sy+Math.sin(state.ang)*0.28;
+  const a=S(state.sx,state.sy), b=S(tx,ty);
+  ctx.strokeStyle='rgba(95,240,192,0.85)'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke();
+  const ah=Math.atan2(b[1]-a[1],b[0]-a[0]);
+  ctx.beginPath(); ctx.moveTo(b[0],b[1]);
+  ctx.lineTo(b[0]-9*Math.cos(ah-0.4), b[1]-9*Math.sin(ah-0.4));
+  ctx.lineTo(b[0]-9*Math.cos(ah+0.4), b[1]-9*Math.sin(ah+0.4));
+  ctx.closePath(); ctx.fillStyle='rgba(95,240,192,0.85)'; ctx.fill();
+  dot(tx,ty,5,'rgba(95,240,192,0.95)');
+  // start dot
+  ctx.save(); ctx.shadowColor='#fff'; ctx.shadowBlur=8; dot(state.sx,state.sy,6,'#fff'); ctx.restore();
+}
+function frame(){
+  // fade (persistence) via alpha erase — keeps felt behind
+  if(state.persist<1){ tctx.globalCompositeOperation='destination-out';
+    tctx.fillStyle='rgba(0,0,0,'+((1-state.persist)*0.7)+')'; tctx.fillRect(0,0,W,H); }
+  tctx.globalCompositeOperation='lighter';
+  if(running){ for(let i=0;i<state.speed;i++){ stepBall(primary,true);
+      if(twinBall) stepBall(twinBall,false); } }
+  ctx.clearRect(0,0,W,H);
+  drawTable();
+  ctx.globalCompositeOperation='lighter'; ctx.drawImage(trail,0,0,W,H); ctx.globalCompositeOperation='source-over';
+  drawTable();                          // re-stroke boundary on top for crisp edge
+  dot(primary.x,primary.y,3,'#fff');
+  if(twinBall) dot(twinBall.x,twinBall.y,3,'#5fe0ff');
+  drawHandles();
+  updateHUD();
+  requestAnimationFrame(frame);
+}
+function updateHUD(){ let type;
+  if(periodic) type='periodic';
+  else if(primary.bounces<40) type='tracing…';
+  else type = state.shape==='stadium' ? 'ergodic (chaotic)' : 'quasiperiodic';
+  document.getElementById('hType').textContent=type;
+  document.getElementById('hPQ').textContent = periodic ? '('+periodic.p+','+periodic.q+')' : '—';
+  const fillEl=document.getElementById('hFill');
+  fillEl.textContent = (100*visitedCount/insideTotal).toFixed(1)+'%';
+  // coverage % only means "ergodic fill" while chaotic/tracing — grey it out for closed/quasiperiodic orbits
+  const meaningful = type.indexOf('ergodic')===0 || type==='tracing…';
+  fillEl.style.color = meaningful ? '' : 'var(--dim)';
+}
+
+// ---------- presets ----------
+function polyStar(n,k){ const ap=Math.cos(Math.PI/n);
+  const mid=i=>{ const a=2*Math.PI*(i+0.5)/n - Math.PI/2; return [ap*Math.cos(a), ap*Math.sin(a)]; };
+  const m0=mid(0), mk=mid(k);
+  return { shape:'polygon', sides:n, sx:m0[0]*0.996, sy:m0[1]*0.996,
+           ang:Math.atan2(mk[1]-m0[1], mk[0]-m0[0]) }; }
+const PRESETS=[
+  ['Ellipse caustic', ()=>({shape:'ellipse',ecc:0.75,sx:-0.7,sy:0.3,ang:-0.4})],
+  ['Pentagon 5-star', ()=>polyStar(5,2)],
+  ['Heptagram {7/3}', ()=>polyStar(7,3)],
+  ['Stadium chaos',   ()=>({shape:'stadium',sx:0.1,sy:0.15,ang:0.7})],
+  ['Circle rosette',  ()=>({shape:'circle',sx:0,sy:0.6,ang:0.22})],
+  ['Whispering ring', ()=>({shape:'circle',sx:0,sy:0.92,ang:0.05})],
+  ['Square diamond',  ()=>polyStar(4,1)],
+  ['Fagnano triangle',()=>polyStar(3,1)],
+];
+let presetBtns=[];
+function clearActivePreset(){ presetBtns.forEach(b=>b.classList.remove('active')); }
+function applyPreset(fn,idx){ Object.assign(state, fn()); refresh();
+  clearActivePreset(); if(idx!=null && presetBtns[idx]) presetBtns[idx].classList.add('active'); }
+
+// ---------- hash serialization ----------
+function writeHashNow(){ const s=state;
+  const q='sh='+s.shape+'&n='+s.sides+'&e='+s.ecc.toFixed(2)+'&x='+s.sx.toFixed(4)
+    +'&y='+s.sy.toFixed(4)+'&a='+s.ang.toFixed(4)+'&sp='+s.speed+'&p='+s.persist.toFixed(3)
+    +'&tw='+(s.twin?1:0);
+  // Safari throttles replaceState to ~100 calls / 30s and throws SecurityError past that — guard it
+  try{ history.replaceState(null,'','#'+q); }catch(e){} }
+// Coalesce hash writes: a brisk drag or slider sweep fires >100 events/sec; debounce to one trailing write
+let hashTimer=null;
+function writeHash(){ clearTimeout(hashTimer); hashTimer=setTimeout(writeHashNow,180); }
+const KNOWN_SHAPES=['circle','ellipse','stadium','polygon'];
+const clamp=(v,lo,hi)=>Math.min(hi,Math.max(lo,v));
+function parseHash(){ const h=location.hash.slice(1); if(!h) return false;
+  const q={}; h.split('&').forEach(kv=>{ const [k,v]=kv.split('='); q[k]=v; });
+  if(!KNOWN_SHAPES.includes(q.sh)) return false;   // unknown/malformed shape -> fall back to default preset
+  state.shape=q.sh;
+  state.sides=clamp(Math.round(+q.n||5),3,9);       // must match the 3-9 slider range
+  state.ecc=clamp(+q.e||0,0,0.94);                  // e>=1 -> ellB()=NaN froze the whole sim
+  state.sx=Number.isFinite(+q.x)?+q.x:0; state.sy=Number.isFinite(+q.y)?+q.y:0;
+  state.ang=Number.isFinite(+q.a)?+q.a:0;
+  state.speed=clamp(Math.round(+q.sp||6),1,40);
+  state.persist=clamp(q.p!=null?+q.p:0.985,0.7,1);
+  state.twin=q.tw==='1'; return true; }
+
+// ---------- UI wiring ----------
+function syncUI(){
+  document.getElementById('shape').value=state.shape;
+  document.getElementById('sides').value=state.sides;
+  document.getElementById('ecc').value=state.ecc;
+  document.getElementById('speed').value=state.speed;
+  document.getElementById('persist').value=state.persist;
+  document.getElementById('twin').checked=state.twin;
+  document.getElementById('vSides').textContent=state.sides;
+  document.getElementById('vEcc').textContent=state.ecc.toFixed(2);
+  document.getElementById('vSpeed').textContent=state.speed;
+  document.getElementById('vPersist').textContent=state.persist>=1?'∞':state.persist.toFixed(2);
+  document.getElementById('rSides').style.display=state.shape==='polygon'?'flex':'none';
+  document.getElementById('rEcc').style.display=state.shape==='ellipse'?'flex':'none';
+}
+function ensureInside(){ if(containsPt(state.sx,state.sy)) return;
+  for(let i=0;i<60 && !containsPt(state.sx,state.sy);i++){ state.sx*=0.94; state.sy*=0.94; } }
+const on=(id,ev,fn)=>document.getElementById(id).addEventListener(ev,fn);
+on('shape','change',e=>{ state.shape=e.target.value; ensureInside(); refresh(); clearActivePreset(); });
+on('sides','input',e=>{ state.sides=+e.target.value; ensureInside(); refresh(); clearActivePreset(); });
+on('ecc','input',e=>{ state.ecc=+e.target.value; ensureInside(); refresh(); clearActivePreset(); });
+on('speed','input',e=>{ state.speed=+e.target.value; syncUI(); writeHash(); clearActivePreset(); });
+on('persist','input',e=>{ state.persist=+e.target.value; syncUI(); writeHash(); clearActivePreset(); });
+on('twin','change',e=>{ state.twin=e.target.checked; relaunch(); writeHash(); clearActivePreset(); });
+function togglePause(){ running=!running; document.getElementById('pause').textContent=running?'Pause':'Play'; }
+on('pause','click',togglePause);
+on('clear','click',()=>{ tctx.clearRect(0,0,W,H); visited.fill(0); visitedCount=0; });
+on('shot','click',()=>{
+  // The dark felt backdrop lives in the CSS body gradient, not the canvas — composite it in so the
+  // exported PNG matches the on-screen render instead of a transparent surround.
+  const tmp=document.createElement('canvas'); tmp.width=cvs.width; tmp.height=cvs.height;
+  const t=tmp.getContext('2d'); const w=tmp.width, hgt=tmp.height;
+  const g=t.createRadialGradient(w*0.5,hgt*0.3,0, w*0.5,hgt*0.3, Math.hypot(w,hgt)*1.05);
+  g.addColorStop(0,'#0b2a22'); g.addColorStop(0.55,'#061512'); g.addColorStop(1,'#020807');
+  t.fillStyle=g; t.fillRect(0,0,w,hgt); t.drawImage(cvs,0,0);
+  const a=document.createElement('a');
+  a.download='carom-'+state.shape+'.png'; a.href=tmp.toDataURL('image/png'); a.click(); });
+const pc=document.getElementById('presets');
+PRESETS.forEach(([name,fn],idx)=>{ const b=document.createElement('button');
+  b.textContent=name; b.onclick=()=>applyPreset(fn,idx); presetBtns.push(b); pc.appendChild(b); });
+
+// ---------- pointer interaction ----------
+let drag=null;
+function toTable(ev){ const r=cvs.getBoundingClientRect();
+  const px=ev.clientX-r.left, py=ev.clientY-r.top;
+  return [(px-cx)/scale, -(py-cy)/scale, px, py]; }
+cvs.addEventListener('pointerdown',ev=>{ const [tx,ty,px,py]=toTable(ev);
+  const st=S(state.sx,state.sy);
+  const tipx=state.sx+Math.cos(state.ang)*0.28, tipy=state.sy+Math.sin(state.ang)*0.28;
+  const tp=S(tipx,tipy);
+  const dS=Math.hypot(px-st[0],py-st[1]), dT=Math.hypot(px-tp[0],py-tp[1]);
+  if(dT<26 && dT<=dS) drag='aim'; else if(dS<26) drag='start';
+  else return; cvs.setPointerCapture(ev.pointerId); });
+cvs.addEventListener('pointermove',ev=>{ if(!drag) return; const [tx,ty]=toTable(ev);
+  if(drag==='start'){ const ox=state.sx, oy=state.sy; state.sx=tx; state.sy=ty;
+    if(!containsPt(tx,ty)){ state.sx=ox; state.sy=oy; } }
+  else { state.ang=Math.atan2(ty-state.sy, tx-state.sx); }
+  clearActivePreset(); relaunch(); writeHash(); });
+const endDrag=()=>drag=null;
+cvs.addEventListener('pointerup',endDrag); cvs.addEventListener('pointercancel',endDrag);
+
+// ---------- boot ----------
+window.addEventListener('resize',resize);
+// Space toggles pause for keyboard parity (ignore while typing in a control)
+window.addEventListener('keydown',e=>{ if(e.code==='Space'){ const t=e.target.tagName;
+  if(t==='INPUT'||t==='SELECT'||t==='BUTTON') return; e.preventDefault(); togglePause(); } });
+const fromHash=parseHash();
+if(!fromHash){ Object.assign(state, PRESETS[0][1]()); presetBtns[0].classList.add('active'); }
+ensureInside();                       // hand-edited hash coords may land outside the table
+// Respect reduced-motion: start paused (still renders a static frame) rather than animating forever
+if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+  running=false; document.getElementById('pause').textContent='Play'; }
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

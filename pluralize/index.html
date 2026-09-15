@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pluralize — English Plural / Singular Converter</title>
+<meta name="description" content="Pluralize or singularize English words with irregulars, uncountables, and standard rules, plus count agreement. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('pluralize-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#a21caf;
+    --bg:#f7f5f8; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e9e2ec; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#150f16; --card:#1e1720; --fg:#f2ecf4; --muted:#a596a8; --line:#332839; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#86198f);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:720px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+  .res{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px;text-align:center}
+  .res span{display:block;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .res b{font-size:1.4rem}
+  .tag{display:inline-block;margin-top:12px;padding:4px 12px;border-radius:999px;background:var(--line);color:var(--muted);font-size:.8rem;font-weight:700}
+  .count{display:flex;gap:12px;align-items:end;margin-top:16px}
+  .count input{width:90px}
+  .agree{font-size:1.2rem;font-weight:700;color:var(--c)}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">📚</div>
+    <div><h1>Pluralize</h1><div class="sub">English plural ⇄ singular, with count agreement</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="word">Word (enter the singular form)</label>
+    <input id="word" value="child" spellcheck="false" autocapitalize="off">
+    <div class="two">
+      <div class="res"><span>Plural</span><b id="plural">—</b></div>
+      <div class="res"><span>Singular</span><b id="singular">—</b></div>
+    </div>
+    <span class="tag" id="tag"></span>
+    <div class="count">
+      <div><label for="n">Count</label><input type="number" id="n" value="3" min="0"></div>
+      <div style="flex:1"><label>Agreement</label><div class="agree" id="agree">—</div></div>
+    </div>
+  </div>
+</main>
+<footer>
+  Rule-based — great for common words, imperfect on rare ones. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/pluralize">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  const UNCOUNTABLE = new Set(['sheep', 'fish', 'series', 'species', 'deer', 'information', 'equipment', 'money', 'rice', 'moose', 'aircraft', 'news']);
+  const IRREGULAR = {
+    child: 'children', person: 'people', man: 'men', woman: 'women', mouse: 'mice',
+    goose: 'geese', foot: 'feet', tooth: 'teeth', ox: 'oxen', cactus: 'cacti',
+    focus: 'foci', datum: 'data', analysis: 'analyses', crisis: 'crises',
+    knife: 'knives', life: 'lives', wife: 'wives', leaf: 'leaves', wolf: 'wolves', half: 'halves'
+  };
+  const IRREGULAR_INV = Object.fromEntries(Object.entries(IRREGULAR).map(([s, p]) => [p, s]));
+
+  function matchCase(src, out){
+    if(/^[A-Z]+$/.test(src)) return out.toUpperCase();
+    if(/^[A-Z]/.test(src)) return out.charAt(0).toUpperCase() + out.slice(1);
+    return out;
+  }
+
+  function pluralize(word){
+    const w = String(word), lower = w.toLowerCase();
+    if(UNCOUNTABLE.has(lower)) return w;
+    if(IRREGULAR[lower]) return matchCase(w, IRREGULAR[lower]);
+    if(/(?:s|x|z|ch|sh)$/i.test(w)) return w + 'es';
+    if(/[^aeiou]y$/i.test(w)) return w.replace(/y$/i, 'ies');
+    if(/(?:fe|f)$/i.test(w)) return w.replace(/fe?$/i, 'ves');
+    return w + 's';
+  }
+
+  function singularize(word){
+    const w = String(word), lower = w.toLowerCase();
+    if(UNCOUNTABLE.has(lower)) return w;
+    if(IRREGULAR_INV[lower]) return matchCase(w, IRREGULAR_INV[lower]);
+    if(/ies$/i.test(w)) return w.replace(/ies$/i, 'y');
+    if(/ves$/i.test(w)) return w.replace(/ves$/i, 'f');
+    if(/(?:ses|xes|zes|ches|shes)$/i.test(w)) return w.replace(/es$/i, '');
+    if(/s$/i.test(w) && !/ss$/i.test(w)) return w.replace(/s$/i, '');
+    return w;
+  }
+
+  // count agreement, assuming `word` is the singular form
+  function withCount(n, word){
+    return `${n} ${Math.abs(n) === 1 ? word : pluralize(word)}`;
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('plural')){
+    const $ = id => document.getElementById(id);
+
+    function render(){
+      const w = $('word').value.trim();
+      if(!w){ $('plural').textContent = '—'; $('singular').textContent = '—'; $('tag').textContent = ''; $('agree').textContent = '—'; return; }
+      $('plural').textContent = pluralize(w);
+      $('singular').textContent = singularize(w);
+      const lower = w.toLowerCase();
+      $('tag').textContent = UNCOUNTABLE.has(lower) ? 'uncountable' : (IRREGULAR[lower] || IRREGULAR_INV[lower]) ? 'irregular' : 'regular';
+      const n = Number($('n').value);
+      $('agree').textContent = isFinite(n) ? withCount(n, w) : '—';
+    }
+
+    ['word', 'n'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('pluralize-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { pluralize, singularize, withCount, matchCase };
+</script>
+</body>
+</html>

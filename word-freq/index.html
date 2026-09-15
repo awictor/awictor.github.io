@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WordFreq — word frequency counter</title>
+<meta name="description" content="Free offline word frequency counter. Paste text to see the most common words with counts, total and unique word counts, and options to ignore case and common stopwords. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/word-freq/">
+<style>
+  :root{
+    --c:#78350f; --bg:#fcf9f4; --fg:#231a0f; --muted:#77654b;
+    --card:#ffffff; --border:#ece0cf; --code:#f6eddf;
+  }
+  [data-theme="dark"]{
+    --bg:#16110a; --fg:#f1e9dc; --muted:#b49f83; --card:#221a10;
+    --border:#3a2c1a; --code:#2c2113;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:760px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#d97706);display:grid;place-items:center;color:#fff;font-size:20px}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:760px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  textarea{width:100%;min-height:150px;padding:12px 14px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:.95rem;line-height:1.55;resize:vertical}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .opts{display:flex;gap:18px;flex-wrap:wrap;margin:14px 0}
+  .opts label{display:flex;align-items:center;gap:7px;font-size:.86rem;font-weight:600;margin:0;cursor:pointer}
+  .stat{display:flex;gap:1px;background:var(--border);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:14px}
+  .stat .cell{background:var(--card);padding:12px 15px;flex:1;text-align:center}
+  .stat .k{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+  .stat .v{font-family:ui-monospace,monospace;font-weight:700;font-size:1.3rem;color:var(--c)}
+  .list{display:flex;flex-direction:column;gap:5px;max-height:340px;overflow:auto}
+  .item{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center}
+  .item .w{font-family:ui-monospace,monospace;font-size:.9rem;position:relative;padding:5px 8px;border-radius:6px;overflow:hidden}
+  .item .w .bar{position:absolute;inset:0;background:var(--code);z-index:0}
+  .item .w span{position:relative;z-index:1}
+  .item .c{font-family:ui-monospace,monospace;font-weight:700;color:var(--c)}
+  .hint{color:var(--muted);font-size:.82rem;margin:14px 0 0}
+  footer{max-width:760px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('wf.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">≡</div>
+  <div>
+    <h1>WordFreq</h1>
+    <p class="sub">Word frequency counter</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <label for="in">Text</label>
+    <textarea id="in" spellcheck="false" placeholder="Paste text to analyze…">The quick brown fox jumps over the lazy dog. The dog was not amused, and the fox ran on.</textarea>
+    <div class="opts">
+      <label><input type="checkbox" id="ci" checked> Ignore case</label>
+      <label><input type="checkbox" id="sw"> Ignore common words</label>
+    </div>
+    <div class="stat" id="stat"></div>
+    <div class="list" id="list"></div>
+    <p class="hint">Words are split on non-letter characters (apostrophes kept). Everything runs locally.</p>
+  </div>
+</main>
+<footer>
+  WordFreq is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/word-freq">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+var STOPWORDS = {};
+('the a an and or but of to in is it that this for on with as are was be by at from he she they we you i not').split(' ')
+  .forEach(function(w){ STOPWORDS[w] = true; });
+
+function tokenize(text, caseSensitive){
+  var t = String(text);
+  if(!caseSensitive) t = t.toLowerCase();
+  var m = t.match(/[A-Za-z0-9']+/g);
+  return m ? m.filter(function(w){ return /[A-Za-z0-9]/.test(w); }) : [];
+}
+function countFrequency(text, opts){
+  opts = opts || {};
+  var words = tokenize(text, opts.caseSensitive);
+  var counts = {};
+  words.forEach(function(w){
+    if(opts.stopwords && STOPWORDS[w.toLowerCase()]) return;
+    counts[w] = (counts[w] || 0) + 1;
+  });
+  return Object.keys(counts).map(function(w){ return { word: w, count: counts[w] }; })
+    .sort(function(a, b){ return b.count - a.count || (a.word < b.word ? -1 : a.word > b.word ? 1 : 0); });
+}
+function stats(text, opts){
+  var words = tokenize(text, opts && opts.caseSensitive);
+  var uniq = {};
+  words.forEach(function(w){ uniq[w] = true; });
+  return { total: words.length, unique: Object.keys(uniq).length };
+}
+
+if(typeof module !== 'undefined') module.exports = { STOPWORDS, tokenize, countFrequency, stats };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var inEl = document.getElementById('in');
+  var ciEl = document.getElementById('ci');
+  var swEl = document.getElementById('sw');
+  var statEl = document.getElementById('stat');
+  var listEl = document.getElementById('list');
+
+  function render(){
+    var opts = { caseSensitive: !ciEl.checked, stopwords: swEl.checked };
+    var freq = countFrequency(inEl.value, opts);
+    var s = stats(inEl.value, opts);
+    statEl.innerHTML =
+      '<div class="cell"><div class="k">Total words</div><div class="v">' + s.total + '</div></div>' +
+      '<div class="cell"><div class="k">Unique words</div><div class="v">' + s.unique + '</div></div>' +
+      '<div class="cell"><div class="k">Shown</div><div class="v">' + freq.length + '</div></div>';
+    var max = freq.length ? freq[0].count : 1;
+    listEl.innerHTML = freq.slice(0, 200).map(function(f){
+      var pct = Math.round(f.count / max * 100);
+      return '<div class="item"><div class="w"><div class="bar" style="width:' + pct + '%"></div>' +
+        '<span>' + f.word.replace(/</g, '&lt;') + '</span></div><div class="c">' + f.count + '</div></div>';
+    }).join('');
+    try{
+      localStorage.setItem('wf.in', inEl.value);
+      localStorage.setItem('wf.ci', ciEl.checked ? '1' : '0');
+      localStorage.setItem('wf.sw', swEl.checked ? '1' : '0');
+    }catch(e){}
+  }
+  [inEl].forEach(function(e){ e.addEventListener('input', render); });
+  [ciEl, swEl].forEach(function(e){ e.addEventListener('change', render); });
+  try{
+    var si = localStorage.getItem('wf.in'); if(si !== null) inEl.value = si;
+    if(localStorage.getItem('wf.ci') === '0') ciEl.checked = false;
+    if(localStorage.getItem('wf.sw') === '1') swEl.checked = true;
+  }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('wf.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('wf.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

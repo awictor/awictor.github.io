@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Soundex — Phonetic Name Code &amp; Sound-Alike Matcher</title>
+<meta name="description" content="Compute the American Soundex code for a word or name, and check whether two names sound alike. 100% offline, nothing leaves your browser.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('soundex-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#0d9488;
+    --bg:#f1f8f7; --card:#ffffff; --fg:#12201e; --muted:#566b67; --line:#daeae7; --shadow:0 1px 3px rgba(0,0,0,.08);
+    --ok:#16a34a; --no:#dc2626;
+  }
+  [data-theme="dark"]{
+    --bg:#07130f; --card:#0f1c19; --fg:#e7f4f1; --muted:#84a29c; --line:#1a2b27; --shadow:0 1px 3px rgba(0,0,0,.5);
+    --ok:#4ade80; --no:#f87171;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:640px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#0f766e);display:flex;align-items:center;justify-content:center;font-size:20px;color:#fff;font-weight:800}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:640px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.1rem}
+  .code{text-align:center;margin-top:14px}
+  .code .v{font-size:3rem;font-weight:800;color:var(--c);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;letter-spacing:.1em}
+  h2{font-size:.82rem;margin:0 0 10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  .pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .match{text-align:center;margin-top:14px;font-size:1.05rem}
+  .match .badge{display:inline-block;padding:4px 14px;border-radius:999px;font-weight:700}
+  .match .badge.ok{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
+  .match .badge.no{background:color-mix(in srgb,var(--no) 18%,transparent);color:var(--no)}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:640px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo mono">R163</div>
+    <div><h1>Soundex</h1><div class="sub">Phonetic name code</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="name">Word or name</label>
+    <input id="name" value="Robert" spellcheck="false">
+    <div class="code"><div class="v" id="code">—</div></div>
+  </div>
+  <div class="card">
+    <h2>Do two names sound alike?</h2>
+    <div class="pair">
+      <div><label for="a">Name A</label><input id="a" value="Robert" spellcheck="false"></div>
+      <div><label for="b">Name B</label><input id="b" value="Rupert" spellcheck="false"></div>
+    </div>
+    <div class="match" id="match"></div>
+  </div>
+</main>
+<footer>
+  American Soundex codes a name as a letter plus three digits so similar-sounding names share a code (Robert &amp; Rupert → R163). It's the classic fuzzy-matching algorithm for search &amp; genealogy. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/soundex">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic (American Soundex) ----------
+  const CODES = { B:1,F:1,P:1,V:1, C:2,G:2,J:2,K:2,Q:2,S:2,X:2,Z:2, D:3,T:3, L:4, M:5,N:5, R:6 };
+  const codeOf = c => CODES[c] || 0;
+
+  function soundex(name){
+    const s = String(name).toUpperCase().replace(/[^A-Z]/g, '');
+    if(!s) return '';
+    let out = s[0];
+    let prev = codeOf(s[0]);          // suppress an immediately-following same-code letter
+    for(let i = 1; i < s.length && out.length < 4; i++){
+      const ch = s[i], d = codeOf(ch);
+      if(d !== 0){
+        if(d !== prev) out += d;
+        prev = d;
+      }else if(ch !== 'H' && ch !== 'W'){
+        prev = 0;                     // a vowel resets, so equal codes on both sides both count
+      }                               // H/W do NOT reset — they merge equal codes
+    }
+    return (out + '000').slice(0, 4);
+  }
+
+  // Do two names share a Soundex code?
+  const soundsAlike = (a, b) => {
+    const ca = soundex(a), cb = soundex(b);
+    return ca !== '' && ca === cb;
+  };
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('code')){
+    const $ = id => document.getElementById(id);
+
+    function render(){
+      $('code').textContent = soundex($('name').value) || '—';
+      const ca = soundex($('a').value), cb = soundex($('b').value);
+      const alike = soundsAlike($('a').value, $('b').value);
+      $('match').innerHTML = ($('a').value.trim() && $('b').value.trim())
+        ? `<span class="mono">${ca || '—'}</span> vs <span class="mono">${cb || '—'}</span> — ` +
+          `<span class="badge ${alike ? 'ok' : 'no'}">${alike ? '✓ sound alike' : '✗ different'}</span>`
+        : '';
+    }
+    ['name', 'a', 'b'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('soundex-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { CODES, soundex, soundsAlike };
+</script>
+</body>
+</html>

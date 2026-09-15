@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Trilobyte — procedural trilobite fossil generator</title>
+<style>
+  :root{
+    --walnut:#241a12; --walnut2:#31241a; --brass:#c9a24b; --parch:#ece2c9;
+    --ink:#2b2016; --line:#4a3826; --accent:#c8772f;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    font-family:Georgia,"Times New Roman",serif;
+    color:var(--parch);
+    background:
+      radial-gradient(120% 90% at 50% -10%, #3a2b1d 0%, #241a12 55%, #171009 100%);
+    display:flex;min-height:100vh;
+  }
+  /* sidebar */
+  aside{
+    width:320px;flex:0 0 320px;padding:22px 22px 30px;
+    background:linear-gradient(180deg,#2c2016,#1d150d);
+    border-right:2px solid #0d0905;box-shadow:inset -8px 0 22px rgba(0,0,0,.45);
+    overflow-y:auto;
+  }
+  aside h1{
+    font-size:30px;margin:0 0 2px;letter-spacing:.5px;color:#f3ead2;
+    text-shadow:0 2px 0 #000;
+  }
+  aside h1 b{color:var(--brass)}
+  .tag{font-size:12.5px;color:#b6a179;margin:0 0 20px;line-height:1.45;font-style:italic}
+  .grp{margin:0 0 16px}
+  .grp>label{display:flex;justify-content:space-between;font-size:12px;
+    color:#d9c9a6;letter-spacing:.4px;margin-bottom:5px;text-transform:uppercase}
+  .grp>label span{color:var(--brass);font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:var(--accent);cursor:pointer;height:20px}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  .seedbox{display:flex;gap:8px;align-items:center;margin-bottom:6px}
+  .seedbox input{flex:1;min-width:0;background:#160f08;border:1px solid var(--line);
+    color:var(--brass);font-family:inherit;font-size:15px;padding:7px 9px;border-radius:5px}
+  button{
+    font-family:inherit;font-size:13px;letter-spacing:.3px;cursor:pointer;
+    background:linear-gradient(180deg,#3c2c1c,#271b10);color:#efe2c6;
+    border:1px solid var(--line);border-radius:6px;padding:8px 11px;
+    box-shadow:0 1px 0 #000, inset 0 1px 0 rgba(255,255,255,.06);
+    transition:.12s;
+  }
+  button:hover{border-color:var(--brass);color:#fff}
+  button.pri{background:linear-gradient(180deg,#c8772f,#8f4f19);border-color:#5c3210;color:#fff2df;font-weight:bold}
+  button.on{background:linear-gradient(180deg,#c9a24b,#8a6d24);border-color:#5c4712;color:#1d150d}
+  .seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .seg button{border:0;border-radius:0;flex:1;box-shadow:none}
+  .seg button+button{border-left:1px solid var(--line)}
+  hr{border:0;border-top:1px solid #4a3826;opacity:.5;margin:18px 0}
+  .hint{font-size:11px;color:#8a7860;line-height:1.5;margin-top:14px}
+  /* stage */
+  main{flex:1;display:flex;align-items:center;justify-content:center;padding:28px;min-width:0}
+  #stage{width:100%;max-width:560px;filter:drop-shadow(0 26px 40px rgba(0,0,0,.55))}
+  #stage svg{width:100%;height:auto;display:block;border-radius:6px;border:1px solid #0d0905}
+  .cabinet{
+    display:grid;grid-template-columns:repeat(3,1fr);gap:12px;
+    background:linear-gradient(180deg,#2c2016,#1a120a);padding:14px;border-radius:10px;
+    border:2px solid #0d0905;box-shadow:inset 0 3px 16px rgba(0,0,0,.6);
+    max-width:820px;
+  }
+  .cell{background:#0d0905;border-radius:5px;overflow:hidden;cursor:pointer;
+    border:1px solid #3a2b1d;transition:.12s;position:relative}
+  .cell:hover{border-color:var(--brass);transform:translateY(-2px)}
+  .cell svg{border:0;border-radius:0}
+  #stage.cab{max-width:820px;filter:none}
+  #reset{margin-top:8px}
+  /* keyboard focus */
+  button:focus-visible, input[type=range]:focus-visible, .seedbox input:focus-visible{
+    outline:2px solid var(--brass);outline-offset:2px}
+  /* shape controls don't apply in cabinet drawer mode */
+  body.cab-active #shape, body.cab-active .enroll-grp{opacity:.35;pointer-events:none;filter:saturate(.3)}
+  /* export confirmation toast */
+  #toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(12px);
+    background:#1d150d;color:#f1e6cd;border:1px solid var(--brass);border-radius:8px;
+    padding:10px 16px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.5);
+    opacity:0;pointer-events:none;transition:.2s;z-index:50}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  /* responsive: stack sidebar above stage on narrow screens */
+  @media (max-width:720px){
+    body{flex-direction:column}
+    aside{width:100%;flex:none;border-right:0;border-bottom:2px solid #0d0905;
+      box-shadow:inset 0 -8px 22px rgba(0,0,0,.45)}
+    main{padding:18px}
+  }
+</style>
+</head>
+<body>
+<aside>
+  <h1>Trilo<b>byte</b></h1>
+  <p class="tag">Seed a slab, grow a museum-grade extinct arthropod with its own Latin name.</p>
+
+  <div class="grp">
+    <label>Seed</label>
+    <div class="seedbox">
+      <input id="seed" type="text" inputmode="numeric" spellcheck="false"/>
+      <button id="rand" title="New random specimen">⟳</button>
+    </div>
+    <button id="reset" title="Discard slider tweaks and restore the seed's canonical specimen">↺ Reset to seed</button>
+  </div>
+
+  <div id="shape">
+  <div class="grp"><label>Thorax segments <span id="v_segments"></span></label>
+    <input id="segments" type="range" min="5" max="14" step="1"></div>
+  <div class="grp"><label>Body taper <span id="v_taper"></span></label>
+    <input id="taper" type="range" min="0.2" max="0.8" step="0.01"></div>
+  <div class="grp"><label>Elongation <span id="v_elong"></span></label>
+    <input id="elong" type="range" min="0.8" max="1.5" step="0.01"></div>
+  <div class="grp"><label>Glabella bulge <span id="v_glabella"></span></label>
+    <input id="glabella" type="range" min="0.4" max="1.4" step="0.01"></div>
+  <div class="grp"><label>Spininess <span id="v_spininess"></span></label>
+    <input id="spininess" type="range" min="0" max="1.2" step="0.01"></div>
+  <div class="grp"><label>Genal spines <span id="v_genal"></span></label>
+    <input id="genal" type="range" min="0" max="1.2" step="0.01"></div>
+  <div class="grp"><label>Eye size <span id="v_eyeSize"></span></label>
+    <input id="eyeSize" type="range" min="0.4" max="1.6" step="0.01"></div>
+
+  <div class="grp"><label>Compound eyes</label>
+    <div class="seg" id="eyeToggle">
+      <button data-eye="holo">Holochroal</button>
+      <button data-eye="schizo">Schizochroal</button>
+    </div>
+  </div>
+  </div><!-- /#shape -->
+
+  <hr/>
+
+  <div class="grp enroll-grp"><label>Enrollment <span id="v_enroll"></span></label>
+    <input id="enroll" type="range" min="0" max="1" step="0.01"></div>
+  <div class="row" style="margin-bottom:8px">
+    <button id="roll" class="pri" style="flex:2">Roll ⟲ / Unroll</button>
+    <button id="ease" class="on" style="flex:1" title="Toggle easing">Ease</button>
+  </div>
+
+  <hr/>
+
+  <div class="row">
+    <button id="cabinet" style="flex:1" title="Show a 3x3 drawer of seeded specimens">Cabinet drawer</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button id="png" class="pri" style="flex:1" title="Rasterize the specimen card to a PNG (2.5x)">Export PNG card</button>
+    <button id="svg" style="flex:1" title="Download the specimen card as vector SVG (fidelity-safe)">Export SVG</button>
+  </div>
+
+  <p class="hint">The seed lives in the URL hash — copy the link to share this exact specimen. Slider and eye tweaks stay local; they are <em>not</em> saved in the link, so use <b>Reset to seed</b> to return to the seed's canonical fossil. In Cabinet drawer, click any specimen to deep-link into its own view.</p>
+</aside>
+
+<main><div id="stage"></div></main>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+
+/* ---- seeded PRNG ---- */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+const pick=(r,a)=>a[Math.floor(r()*a.length)];
+const cap=s=>s[0].toUpperCase()+s.slice(1);
+
+/* ---- taxonomy word banks ---- */
+const GEN_ROOTS=["crypto","wallis","elrath","paradox","phaco","isotel","ceraton","odonto","daln","asaph","trino","redlich","olenus","calym","flexi","ellipso","ampyx","selen","homalon","bumast","hypago","estonio"];
+const GEN_TAILS=["lithus","ops","ites","aspis","cephalus","urus","ella","gnathus","cara","onia","pyge","noides"];
+const SP_ROOTS=["vast","horr","magn","gracil","spinos","regal","mir","nobil","fer","elegan","robust","tenu","grand","obscur","ornat","imperi","sabul","boreal"];
+const SP_TAILS=["ator","ensis","ifer","osus","alis","icus","atus","inus"," oides".trim(),"anus"];
+const LOCS=["Wheeler Shale, Utah","Anti-Atlas, Morocco","Burgess Pass, B.C.","Llandeilo, Wales","Jince Fm., Bohemia","Emu Bay, S. Australia","Djado Plateau, Niger","Weeks Fm., Utah","Hunsrück Slate, Germany","St. Petersburg, Russia","Marjum Fm., Utah","Fezouata Fm., Morocco"];
+const PERIODS=["Cambrian","Ordovician","Silurian","Devonian"];
+const PALETTES={
+  Cambrian:{stone1:"#cdb489",fossil:"#6e5230",fur:"#4a361d",chip:"#7fa14a"},
+  Ordovician:{stone1:"#c39a7b",fossil:"#6b3f27",fur:"#472715",chip:"#12a480"},
+  Silurian:{stone1:"#c6c8bf",fossil:"#5b5f54",fur:"#3b3e35",chip:"#b7d98f"},
+  Devonian:{stone1:"#a89478",fossil:"#4b3b28",fur:"#2c2115",chip:"#cf8a3a"}
+};
+const ROLLMAX=222; // total curl in degrees at full enrollment
+
+/* ---- seed -> anatomy DNA ---- */
+function genDNA(seed){
+  const r=mulberry32(seed>>>0);
+  const period=pick(r,PERIODS);
+  return {
+    seed:seed>>>0, period,
+    genus:cap(pick(r,GEN_ROOTS)+pick(r,GEN_TAILS)),
+    species:pick(r,SP_ROOTS)+pick(r,SP_TAILS),
+    locality:pick(r,LOCS),
+    segments:6+Math.floor(r()*8),
+    taper:0.3+r()*0.42,
+    elong:0.88+r()*0.5,
+    glabella:0.6+r()*0.7,
+    spininess:0.15+r()*0.9,
+    genal:r()*1.1,
+    eyeSize:0.6+r()*0.8,
+    eyeType:r()<0.5?"holo":"schizo",
+    enroll:0,
+    palette:PALETTES[period]
+  };
+}
+
+const mir=s=>`<g transform="scale(-1,1)">${s}</g>`;
+
+/* ---- anatomy builders (drawn in a centered frame, axis at x=0) ---- */
+function cephalon(P,hh,hH){
+  const p=P.palette;
+  const gr=hh*0.3*(0.7+P.glabella*0.5), gcy=-hH*0.52, gry=hH*0.34;
+  const gl=P.genal*95;
+  const shield=`<path d="M${-hh} 6 Q${-hh*1.03} ${-hH*0.92} 0 ${-hH} Q${hh*1.03} ${-hH*0.92} ${hh} 6 Q0 ${20} ${-hh} 6 Z" class="fo"/>`;
+  const genal=`<path d="M${hh*0.92} 3 Q${hh+16} ${38} ${hh*0.55+gl*0.5} ${30+gl} L${hh*0.34+gl*0.42} ${38+gl} Q${hh*0.62} ${24} ${hh*0.72} 8 Z" class="fo"/>`;
+  const glab=`<ellipse cx="0" cy="${gcy}" rx="${gr}" ry="${gry}" class="fo"/>`;
+  let furrows="";
+  for(let i=1;i<=3;i++){const y=gcy-gry*0.55+i*gry*0.42;furrows+=`<path d="M${-gr*0.82} ${y} Q0 ${y+3} ${gr*0.82} ${y}" fill="none" stroke="${p.fur}" stroke-width="1.1" stroke-linecap="round"/>`;}
+  // dorsal (axial) furrows separating glabella from cheeks
+  const df=`<path d="M${-gr*1.05} ${gcy-gry} Q${-gr*1.2} ${gcy+gry*0.6} ${-gr*0.7} 4" fill="none" stroke="${p.fur}" stroke-width="1.2"/>`;
+  const eR=6+8*P.eyeSize, ex=gr+eR+5, ey=gcy+4;
+  let eye;
+  if(P.eyeType==="schizo"){
+    let lens=""; for(let i=0;i<4;i++){lens+=`<circle cx="${ex-eR*0.5+ (i%2)*eR*0.9}" cy="${ey-eR*0.8+Math.floor(i/2)*eR*1.1}" r="${eR*0.4}" fill="${p.fossil}" stroke="${p.fur}" stroke-width="0.8"/>`;}
+    eye=`<path d="M${ex-eR} ${ey+eR} Q${ex-eR*1.1} ${ey-eR*1.4} ${ex+eR} ${ey-eR} Q${ex+eR*0.9} ${ey+eR*1.2} ${ex-eR} ${ey+eR} Z" fill="${p.fur}"/>`+lens;
+  }else{
+    let dots=""; for(let i=0;i<9;i++){const a=i/9*6.28;dots+=`<circle cx="${ex+Math.cos(a)*eR*0.5}" cy="${ey+Math.sin(a)*eR*0.7}" r="0.9" fill="${p.fossil}"/>`;}
+    eye=`<path d="M${ex-eR} ${ey+eR*0.9} Q${ex-eR*1.1} ${ey-eR*1.6} ${ex+eR*0.9} ${ey-eR} Q${ex+eR*1.3} ${ey+eR*1.3} ${ex-eR} ${ey+eR*0.9} Z" fill="${p.fur}"/>`+dots;
+  }
+  return shield+genal+mir(genal)+glab+furrows+df+mir(df)+eye+mir(eye);
+}
+
+function segment(P,k,n,segH,hh){
+  const p=P.palette;
+  const half=hh*0.9*(1-P.taper*(k/n));
+  const ax=half*0.34;
+  const sp=P.spininess*(20-9*(k/n));
+  const tipY=segH*0.62;
+  const rp=`M${ax} 3 Q${half*0.72} 1 ${half} ${segH*0.28} L${half+sp} ${tipY} Q${half*0.6} ${segH-1} ${ax} ${segH-2} Z`;
+  const pleura=`<path d="${rp}" class="fo"/><path d="M${ax} ${segH*0.5} Q${half*0.6} ${segH*0.44} ${half} ${segH*0.4}" fill="none" stroke="${p.fur}" stroke-width="1" stroke-linecap="round"/>`;
+  const rr=Math.min(ax,segH*0.42);
+  const ring=`<rect x="${-ax}" y="1.5" width="${2*ax}" height="${segH-3}" rx="${rr}" class="fo"/><line x1="0" y1="3" x2="0" y2="${segH-3}" stroke="${p.fur}" stroke-width="1"/>`;
+  return pleura+mir(pleura)+ring;
+}
+
+function pygidium(P,n,hh,pygH){
+  const p=P.palette;
+  const half=hh*0.9*(1-P.taper*0.96);
+  const term=P.spininess*22;
+  const outline=`M${-half} 2 Q${-half*0.55} ${pygH} 0 ${pygH+term} Q${half*0.55} ${pygH} ${half} 2 Q0 ${-3} ${-half} 2 Z`;
+  const rr=3+Math.round(P.taper*4);
+  let ribs="";
+  for(let i=1;i<rr;i++){const y=(pygH/rr)*i, w=half*(1-i/rr*0.72);ribs+=`<path d="M${-w} ${y} Q0 ${y+5} ${w} ${y}" fill="none" stroke="${p.fur}" stroke-width="1" stroke-linecap="round"/>`;}
+  return `<path d="${outline}" class="fo"/>`+ribs+`<line x1="0" y1="1" x2="0" y2="${pygH*0.82}" stroke="${p.fur}" stroke-width="1.1"/>`;
+}
+
+/* fold thorax + pygidium into a nested chain so enrollment compounds per joint */
+function fold(parts,angle,segH){
+  let inner=parts[parts.length-1];
+  for(let i=parts.length-2;i>=0;i--){
+    inner=parts[i]+`<g transform="translate(0,${segH}) rotate(${angle})">${inner}</g>`;
+  }
+  return inner;
+}
+
+/* ---- SVG defs: carved-relief + speckled-stone filters ---- */
+function defs(P,uid){
+  const p=P.palette, s=P.seed;
+  return `<defs>
+    <filter id="slab-${uid}" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="4" seed="${s%50}" stitchTiles="stitch" result="n"/>
+      <feColorMatrix in="n" type="saturate" values="0" result="m"/>
+      <feComponentTransfer in="m" result="soft"><feFuncR type="linear" slope="0.42" intercept="0.58"/><feFuncG type="linear" slope="0.42" intercept="0.58"/><feFuncB type="linear" slope="0.42" intercept="0.58"/><feFuncA type="linear" slope="0" intercept="1"/></feComponentTransfer>
+      <feBlend in="SourceGraphic" in2="soft" mode="multiply"/>
+    </filter>
+    <filter id="crack-${uid}"><feTurbulence type="turbulence" baseFrequency="0.028" numOctaves="2" seed="${(s%37)+3}" result="t"/><feDisplacementMap in="SourceGraphic" in2="t" scale="16" xChannelSelector="R" yChannelSelector="G"/></filter>
+    <filter id="fossil-${uid}" x="-25%" y="-25%" width="150%" height="150%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012 0.02" numOctaves="2" seed="${s%100}" result="warp"/>
+      <feDisplacementMap in="SourceGraphic" in2="warp" scale="5" xChannelSelector="R" yChannelSelector="G" result="disp"/>
+      <feGaussianBlur in="disp" stdDeviation="1.3" result="b"/>
+      <feSpecularLighting in="b" surfaceScale="${(2.2+P.glabella).toFixed(2)}" specularConstant="0.85" specularExponent="16" lighting-color="#fff4df" result="sp"><feDistantLight azimuth="235" elevation="58"/></feSpecularLighting>
+      <feComposite in="sp" in2="disp" operator="in" result="spc"/>
+      <feBlend in="disp" in2="spc" mode="screen" result="lit"/>
+      <feDropShadow dx="1" dy="3" stdDeviation="3" flood-color="#000" flood-opacity="0.45"/>
+    </filter>
+  </defs>`;
+}
+
+/* ---- specimen group only (isolated so enrollment can animate without
+   rebuilding the expensive slab/defs filter stack every frame) ---- */
+function specimenGroup(P,uid){
+  const p=P.palette, n=P.segments;
+  const segH=26*P.elong, hh=94, hH=118;
+  const pygH=64+42*P.taper;
+  const perAngle=(P.enroll*ROLLMAX/(n+1));
+  const parts=[];
+  for(let k=0;k<n;k++) parts.push(segment(P,k,n,segH,hh));
+  parts.push(pygidium(P,n,hh,pygH));
+  const chain=fold(parts,perAngle,segH);
+  const head=cephalon(P,hh,hH);
+
+  const contentH=hH+n*segH+pygH;
+  const contentW=2*(hh+P.genal*95+P.spininess*22)+24;
+  const sc=Math.min(430/contentH, 384/contentW, 1.15);
+  const ty=48+hH*sc;
+  return `<g id="spec-${uid}" transform="translate(210,${ty.toFixed(1)}) scale(${sc.toFixed(3)})"><g fill="${p.fossil}" filter="url(#fossil-${uid})">${head}<g transform="rotate(${perAngle.toFixed(2)})">${chain}</g></g></g>`;
+}
+
+/* ---- compose one full specimen card (or mini cabinet cell) ---- */
+function buildSVG(P,uid,mini){
+  const p=P.palette;
+  const specimen=specimenGroup(P,uid);
+
+  const cracks=`<g stroke="${p.fur}" stroke-width="1" fill="none" opacity="0.22" filter="url(#crack-${uid})">
+    <path d="M20 90 L180 130 L300 110 L410 170"/><path d="M60 470 L150 360 L250 400 L380 300"/></g>`;
+  const slab=`<rect width="420" height="500" fill="${p.stone1}"/><rect width="420" height="500" fill="${p.stone1}" filter="url(#slab-${uid})"/>${cracks}`;
+
+  let label, H;
+  if(mini){
+    H=500;
+    label=`<rect x="0" y="466" width="420" height="34" fill="rgba(24,16,8,.62)"/><text x="210" y="489" text-anchor="middle" fill="#f1e6cd" font-family="Georgia,serif" font-style="italic" font-size="16">${P.genus} ${P.species}</text>`;
+  }else{
+    H=620;
+    label=`<g transform="translate(0,500)">
+      <rect width="420" height="120" fill="#ece2c9"/><rect width="420" height="5" fill="${p.fossil}"/>
+      <text x="26" y="46" font-family="Georgia,serif" font-style="italic" font-size="27" fill="#2b2016">${P.genus} ${P.species}</text>
+      <text x="26" y="66" font-family="Georgia,serif" font-size="11.5" fill="#7a674c" letter-spacing="2.5">TRILOBITA · ARTHROPODA</text>
+      <rect x="26" y="80" width="16" height="16" fill="${p.chip}" stroke="#2b2016" stroke-width="0.6"/>
+      <text x="50" y="93" font-family="Georgia,serif" font-size="14" fill="#2b2016">${P.period}</text>
+      <text x="150" y="93" font-family="Georgia,serif" font-size="13" fill="#4a3c2a">${P.locality}</text>
+      <text x="26" y="113" font-family="Georgia,serif" font-size="11" fill="#8a7860">Specimen No. ${P.seed} — Trilobyte Collection</text>
+      <g transform="translate(300,106)" stroke="#2b2016" stroke-width="1.5"><line x1="0" y1="0" x2="72" y2="0"/><line x1="0" y1="-4" x2="0" y2="4"/><line x1="72" y1="-4" x2="72" y2="4"/></g>
+      <text x="336" y="96" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="#2b2016" stroke="none">10 mm</text>
+    </g>`;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 ${H}">${defs(P,uid)}${slab}${specimen}${label}</svg>`;
+}
+
+/* ---- state + rendering ---- */
+let seed, P, cabinet=false, easeOn=true, anim=null;
+const FIELDS=["segments","taper","elong","glabella","spininess","genal","eyeSize","enroll"];
+
+function fmt(id,v){ if(id==="segments")return v|0; return (+v).toFixed(2); }
+function syncSliders(){
+  FIELDS.forEach(f=>{ $("#"+f).value=P[f]; $("#v_"+f).textContent=fmt(f,P[f]); });
+  document.querySelectorAll("#eyeToggle button").forEach(b=>b.classList.toggle("on",b.dataset.eye===P.eyeType));
+}
+function readControls(){
+  FIELDS.forEach(f=>{ P[f]=(f==="segments")? (+$("#"+f).value|0) : +$("#"+f).value; $("#v_"+f).textContent=fmt(f,P[f]); });
+}
+function updateRollLabel(){ const b=$("#roll"); if(b) b.textContent=(P&&P.enroll>0.5)?"Unroll ⟲":"Roll ⟲"; }
+function diverged(){
+  const g=genDNA(seed);
+  if(P.eyeType!==g.eyeType) return true;
+  return FIELDS.some(f=>Math.abs(P[f]-g[f])>1e-6);
+}
+function updateResetVis(){ const b=$("#reset"); if(b) b.style.display=(!cabinet&&diverged())?"block":"none"; }
+function postState(){ updateRollLabel(); updateResetVis(); }
+
+function render(){
+  const st=$("#stage");
+  document.body.classList.toggle("cab-active",cabinet);
+  if(cabinet){ renderCabinet(); return; }
+  st.classList.remove("cab");
+  st.innerHTML=buildSVG(P,"main",false);
+  postState();
+}
+function renderCabinet(){
+  const st=$("#stage"); st.classList.add("cab");
+  let cells="";
+  for(let i=0;i<9;i++){ const s=(seed+i*7919)>>>0; cells+=`<div class="cell" data-seed="${s}">${buildSVG(genDNA(s),"c"+i,true)}</div>`; }
+  st.innerHTML=`<div class="cabinet">${cells}</div>`;
+  postState();
+}
+/* update only the specimen group — leaves defs + speckled slab untouched so
+   their feTurbulence/feSpecularLighting passes are not re-evaluated per frame */
+function updateSpecimen(){
+  const g=document.getElementById("spec-main");
+  if(!g){ render(); return; }
+  g.outerHTML=specimenGroup(P,"main");
+  postState();
+}
+
+function setSeed(s,updateHash){
+  seed=s>>>0; $("#seed").value=seed; P=genDNA(seed); syncSliders();
+  render();
+  if(updateHash){ try{ const h="#"+seed; if(location.hash!==h) history.replaceState(null,"",h); }catch(e){} }
+}
+
+/* ---- controls wiring ---- */
+FIELDS.forEach(f=>$("#"+f).addEventListener("input",()=>{ readControls(); if(cabinet) return; if(f==="enroll") updateSpecimen(); else render(); }));
+$("#seed").addEventListener("change",e=>{ const v=parseInt(e.target.value,10); if(!isNaN(v)){ cabinet=false; $("#cabinet").classList.remove("on"); setSeed(v,true);} });
+$("#rand").addEventListener("click",()=>{ cabinet=false; $("#cabinet").classList.remove("on"); setSeed(Math.floor(Math.random()*1e9),true); });
+$("#reset").addEventListener("click",()=>{ if(anim){cancelAnimationFrame(anim);anim=null;} cabinet=false; $("#cabinet").classList.remove("on"); setSeed(seed,false); });
+document.querySelectorAll("#eyeToggle button").forEach(b=>b.addEventListener("click",()=>{ P.eyeType=b.dataset.eye; syncSliders(); if(!cabinet) render(); }));
+$("#ease").addEventListener("click",()=>{ easeOn=!easeOn; $("#ease").classList.toggle("on",easeOn); });
+$("#roll").addEventListener("click",()=>{
+  if(cabinet){ cabinet=false; $("#cabinet").classList.remove("on"); render(); }
+  if(anim) cancelAnimationFrame(anim);
+  const start=P.enroll, target=start<0.5?1:0, t0=performance.now(), dur=1500;
+  (function step(now){
+    let u=Math.min(1,(now-t0)/dur);
+    let e=easeOn?(u<0.5?2*u*u:1-Math.pow(-2*u+2,2)/2):u;
+    P.enroll=start+(target-start)*e; $("#enroll").value=P.enroll; $("#v_enroll").textContent=P.enroll.toFixed(2);
+    updateSpecimen(); if(u<1) anim=requestAnimationFrame(step); else anim=null;
+  })(t0);
+});
+$("#cabinet").addEventListener("click",()=>{ cabinet=!cabinet; $("#cabinet").classList.toggle("on",cabinet); render(); });
+$("#stage").addEventListener("click",e=>{ const c=e.target.closest(".cell"); if(c){ cabinet=false; $("#cabinet").classList.remove("on"); const s=+c.dataset.seed; $("#seed").value=s; setSeed(s,true);} });
+
+/* ---- export ---- */
+let toastTimer;
+function toast(msg){
+  let el=$("#toast");
+  if(!el){ el=document.createElement("div"); el.id="toast"; document.body.appendChild(el); }
+  el.textContent=msg; el.classList.add("show");
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove("show"),1900);
+}
+function dl(blob,name){ const u=URL.createObjectURL(blob), a=document.createElement("a"); a.href=u; a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(u),2000); }
+const fname=()=>`${P.genus}_${P.species}_${P.seed}`;
+$("#svg").addEventListener("click",()=>{
+  const svg=buildSVG(P,"exp",false);
+  dl(new Blob([svg],{type:"image/svg+xml"}), fname()+".svg");
+  toast("Saved "+fname()+".svg");
+});
+$("#png").addEventListener("click",()=>{
+  const svg=buildSVG(P,"exp",false), name=fname()+".png";
+  const img=new Image();
+  img.onload=()=>{ const sc=2.5, c=document.createElement("canvas"); c.width=420*sc; c.height=620*sc;
+    const x=c.getContext("2d"); x.scale(sc,sc); x.drawImage(img,0,0,420,620); c.toBlob(b=>{ dl(b,name); toast("Saved "+name); },"image/png"); };
+  img.onerror=()=>toast("PNG export failed — try the SVG export");
+  // UTF-8 data URI (no btoa/unescape); SVG export is the fidelity-safe path
+  img.src="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(svg);
+});
+
+/* ---- boot ---- */
+window.addEventListener("hashchange",()=>{ const v=parseInt(location.hash.slice(1),10); if(!isNaN(v)&&v!==seed){ cabinet=false; $("#cabinet").classList.remove("on"); $("#seed").value=v; setSeed(v,false);} });
+const boot=parseInt(location.hash.slice(1),10);
+const s0=isNaN(boot)?Math.floor(Math.random()*1e9):boot;
+$("#seed").value=s0;
+setSeed(s0,true);
+</script>
+</body>
+</html>

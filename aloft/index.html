@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aloft — siteswap animator</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#151a22; --ink:#e7ecf3; --dim:#8a97a8;
+    --accent:#ff8a3d; --good:#4fd18b; --bad:#ff6b6b; --line:#232c38;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(1200px 700px at 50% -10%,#1a2230,#0e1116 60%);
+    color:var(--ink);font:15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    display:flex;flex-direction:column;min-height:100%;
+  }
+  header{padding:14px 18px 4px;text-align:center}
+  h1{margin:0;font-size:22px;letter-spacing:.5px}
+  h1 b{color:var(--accent)}
+  .tag{color:var(--dim);font-size:13px;margin-top:2px}
+  .hint{color:var(--dim);font-size:12px;margin:5px auto 0;max-width:620px;line-height:1.5;opacity:.85}
+  .hint code{background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:11px;color:var(--ink)}
+  #stage{flex:1;display:flex;flex-direction:column;padding:8px 12px 4px;gap:6px}
+  #main{flex:1;min-height:230px;background:linear-gradient(180deg,#121824,#0d1119);
+    border:1px solid var(--line);border-radius:14px;display:block;width:100%}
+  #ladderWrap{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  #ladderWrap.hidden{display:none}
+  #ladder{display:block;width:100%;height:118px}
+  .ltitle{font-size:11px;color:var(--dim);padding:5px 10px 0;letter-spacing:.4px;text-transform:uppercase}
+  #controls{padding:6px 14px 16px;display:flex;flex-direction:column;gap:10px;align-items:center}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:center;max-width:820px}
+  input#pat{
+    font:600 20px/1 "SFMono-Regular",ui-monospace,Menlo,Consolas,monospace;
+    background:var(--panel);color:var(--ink);border:1px solid var(--line);
+    border-radius:10px;padding:10px 14px;width:180px;text-align:center;letter-spacing:3px;outline:none;
+  }
+  input#pat:focus{border-color:var(--accent)}
+  button{
+    background:var(--panel);color:var(--ink);border:1px solid var(--line);
+    border-radius:20px;padding:8px 14px;cursor:pointer;font-size:13px;transition:.15s;
+  }
+  button:hover{border-color:var(--accent);color:#fff}
+  button.on{background:var(--accent);color:#181818;border-color:var(--accent);font-weight:600}
+  .chip{font-family:ui-monospace,monospace;font-weight:600}
+  .chip span{opacity:.6;font-weight:400;margin-left:4px}
+  #status{font-size:13px;min-height:18px;text-align:center;max-width:760px}
+  #status.ok{color:var(--good)} #status.err{color:var(--bad)}
+  #readout{color:var(--dim);font-size:13px}
+  #readout b{color:var(--ink)}
+  .slider{display:flex;align-items:center;gap:8px;color:var(--dim);font-size:13px}
+  input[type=range]{accent-color:var(--accent);width:150px}
+  .presets{max-width:760px}
+</style>
+</head>
+<body>
+<header>
+  <h1><b>Aloft</b> — siteswap animator</h1>
+  <div class="tag">Type a juggling pattern. Watch it come alive.</div>
+  <div class="hint">Each digit is how many beats a ball stays airborne — bigger means a higher throw. <code>a</code>–<code>f</code> mean 10–15. The average of the digits is how many balls the pattern needs.</div>
+</header>
+
+<div id="stage">
+  <canvas id="main" role="img" aria-label="Animated juggling simulation of the current siteswap pattern"></canvas>
+  <div id="ladderWrap">
+    <div class="ltitle">causal ladder — throws between beats · now ▸</div>
+    <canvas id="ladder" role="img" aria-label="Causal ladder diagram showing throws between the right and left hands over time"></canvas>
+  </div>
+</div>
+
+<div id="controls">
+  <div class="row">
+    <input id="pat" spellcheck="false" autocomplete="off" value="531" aria-label="Siteswap pattern">
+    <button id="rand">🎲 Random valid</button>
+    <button id="playBtn" class="on" aria-pressed="true">⏸ Pause</button>
+    <button id="ladderBtn" class="on">Ladder</button>
+    <button id="copyBtn">🔗 Copy link</button>
+    <div class="slider">Tempo
+      <input id="speed" type="range" min="0.4" max="2.6" step="0.05" value="1">
+      <span id="spVal">1.0×</span>
+    </div>
+  </div>
+  <div id="status" class="ok"></div>
+  <div id="readout"></div>
+  <div class="row presets" id="presets"></div>
+</div>
+
+<script>
+(() => {
+"use strict";
+const PALETTE = ["#ff8a3d","#4fd18b","#5aa9ff","#ffd23d","#ff6b9d","#b78bff","#3de0d0","#ff5c5c"];
+const PRESETS = ["3","441","531","552","423","534","4","5","97531"];
+
+// ---- notation helpers ----
+const charToVal = c => { const n = "0123456789abcdef".indexOf(c); return n < 0 ? null : n; };
+const valToChar = v => "0123456789abcdef"[v] || "?";
+
+function parse(str){
+  const s = str.trim().toLowerCase().replace(/\s+/g,"");
+  if(!s) return {error:"Type a pattern like 531, 441 or 97531."};
+  const vals=[];
+  for(const c of s){ const v=charToVal(c); if(v===null) return {error:`Unknown symbol “${c}”. Use 0–9 or a–f.`}; vals.push(v); }
+  return {vals};
+}
+// vanilla async siteswap validity: {(i+a_i) mod p} must be a permutation of 0..p-1
+function validate(vals){
+  const p=vals.length, seen={}, dest=[];
+  for(let i=0;i<p;i++){ const d=(i+vals[i])%p; dest.push(d);
+    if(seen[d]!==undefined) return {valid:false, reason:`That won't work — two balls would land in the same hand at the same moment. Try changing one number.`};
+    seen[d]=i;
+  }
+  const sum=vals.reduce((a,b)=>a+b,0);
+  return {valid:true, balls:sum/p, period:p, avg:(sum/p).toFixed(2)};
+}
+
+// ---- simulation state ----
+let pattern=[5,3,1], speed=1, showLadder=true;
+let T=0, genBeat=0, flights=[], landBall={}, nextBall=0, last=0;
+// pause by default for users who asked the OS to reduce motion
+let playing = !(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+let patValid = true;
+
+function resetSim(keepAir){
+  if(!keepAir){ flights=[]; landBall={}; nextBall=0; genBeat=Math.floor(T); }
+  else { genBeat=Math.max(genBeat, Math.ceil(T)); }  // let airborne throws finish, re-sync forward
+}
+function gen(upTo){
+  const p=pattern.length; if(!p) return;
+  while(genBeat<upTo){
+    const t=genBeat, v=pattern[((t%p)+p)%p];
+    if(v>0){
+      let ball = (t in landBall) ? landBall[t] : nextBall++;
+      landBall[t+v]=ball;
+      flights.push({ts:t, te:t+v, v, from:t%2, to:(t+v)%2, ball});
+    }
+    genBeat++;
+  }
+  // prune old
+  flights = flights.filter(f=>f.te>T-2.2);
+  for(const k in landBall) if(+k < T-2) delete landBall[k];
+}
+
+// ---- geometry ----
+const main=document.getElementById("main"), mctx=main.getContext("2d");
+const lad=document.getElementById("ladder"), lctx=lad.getContext("2d");
+let W=0,H=0,LW=0,LH=0,dpr=1;
+function fit(cv,ctx){
+  dpr=window.devicePixelRatio||1;
+  const r=cv.getBoundingClientRect();
+  cv.width=Math.max(1,r.width*dpr); cv.height=Math.max(1,r.height*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  return [r.width,r.height];
+}
+function resize(){ [W,H]=fit(main,mctx); [LW,LH]=fit(lad,lctx); }
+window.addEventListener("resize",resize);
+// re-fit whenever the canvases actually reflow (flex changes from toggling the
+// ladder, orientation change, mobile toolbar show/hide) — covers stale/blank bitmaps
+if(window.ResizeObserver){
+  let pending=false;
+  const ro=new ResizeObserver(()=>{ if(pending) return; pending=true;
+    requestAnimationFrame(()=>{ pending=false; resize(); }); });
+  ro.observe(document.getElementById("stage"));
+}
+// re-fit when moving between monitors of different devicePixelRatio (no reliable resize event)
+function armDprWatch(){
+  if(!window.matchMedia) return;
+  try{ window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`)
+    .addEventListener("change",()=>{ resize(); armDprWatch(); },{once:true}); }catch(e){}
+}
+
+const handY=()=>H*0.80;
+const availH=()=>handY()-46;
+const spread=()=>Math.min(W*0.19,150);
+const handX=h=> W/2 + (h===0? spread(): -spread());   // hand 0 = right side
+const apexOf=v=>Math.min(availH(), availH()*(v*v)/81);
+// vertical bob of a hand near its acting beat (throws/catches on beats where t%2===h)
+function handDip(h){
+  const u=(((T-h)%2)+2)%2;                 // 0 at action moment
+  const b=Math.max(0,Math.cos(Math.PI*u)); // peak dip at u=0
+  return b*Math.min(22,availH()*0.06);
+}
+function ballPos(f,t){
+  const tt=(t-f.ts)/f.v;
+  const x=handX(f.from)+(handX(f.to)-handX(f.from))*tt;
+  const y=handY()-4*apexOf(f.v)*tt*(1-tt);
+  return {x,y,tt};
+}
+
+// ---- render main ----
+function drawJuggler(){
+  const cx=W/2, hy=handY();
+  // faint body + head
+  mctx.save();
+  mctx.strokeStyle="rgba(150,170,200,0.16)"; mctx.fillStyle="rgba(150,170,200,0.10)";
+  mctx.lineWidth=2;
+  const headR=Math.min(26,W*0.03), headY=hy-availH()*0.92;
+  mctx.beginPath(); mctx.arc(cx,headY,headR,0,7); mctx.fill(); mctx.stroke();
+  mctx.beginPath();
+  mctx.moveTo(cx-headR*1.5,hy+30); mctx.lineTo(cx-headR*0.8,headY+headR*1.4);
+  mctx.lineTo(cx+headR*0.8,headY+headR*1.4); mctx.lineTo(cx+headR*1.5,hy+30);
+  mctx.closePath(); mctx.fill(); mctx.stroke();
+  mctx.restore();
+  // hands
+  for(let h=0;h<2;h++){
+    const x=handX(h), y=hy+handDip(h);
+    mctx.fillStyle="rgba(210,220,235,0.9)";
+    mctx.beginPath(); mctx.ellipse(x,y,15,9,0,0,7); mctx.fill();
+    mctx.fillStyle="rgba(210,220,235,0.18)";
+    mctx.beginPath(); mctx.moveTo(x,y); mctx.lineTo(x+(h?-1:1)*4,y+34); mctx.lineTo(x+(h?4:-4)*1,y+34);
+    mctx.closePath(); mctx.fill();
+  }
+}
+function drawBalls(){
+  for(const f of flights){
+    if(T<f.ts-0.02 || T>f.te+0.02) continue;
+    const col=PALETTE[f.ball%PALETTE.length];
+    // fading trail
+    for(let k=1;k<=7;k++){
+      const pt=f.ts+ (T-f.ts) - k*0.05;
+      if(pt<f.ts||pt>f.te) continue;
+      const p=ballPos(f,pt), a=(1-k/8)*0.4;
+      mctx.fillStyle=col; mctx.globalAlpha=a;
+      mctx.beginPath(); mctx.arc(p.x,p.y,9-k*0.7,0,7); mctx.fill();
+    }
+    mctx.globalAlpha=1;
+    const p=ballPos(f,T);
+    // squash near release/catch
+    const sd=Math.min(T-f.ts,f.te-T), kk=sd<0.14?(sd/0.14):1;
+    const sx=1+(1-kk)*0.4, sy=1-(1-kk)*0.35;
+    mctx.save(); mctx.translate(p.x,p.y); mctx.scale(sx,sy);
+    const g=mctx.createRadialGradient(-3,-3,1,0,0,12);
+    g.addColorStop(0,"#fff"); g.addColorStop(0.35,col); g.addColorStop(1,col);
+    mctx.fillStyle=g; mctx.shadowColor=col; mctx.shadowBlur=16;
+    mctx.beginPath(); mctx.arc(0,0,10,0,7); mctx.fill();
+    mctx.restore();
+  }
+  mctx.shadowBlur=0;
+}
+// ---- render ladder ----
+function drawLadder(){
+  lctx.clearRect(0,0,LW,LH);
+  const leftBeats=1.6, span=8, beatW=LW/span;
+  const rY=LH*0.34, lY=LH*0.78;
+  const X=b=>(b-T+leftBeats)*beatW;
+  lctx.strokeStyle="rgba(140,155,175,0.28)"; lctx.lineWidth=1.5;
+  for(const y of [rY,lY]){ lctx.beginPath(); lctx.moveTo(0,y); lctx.lineTo(LW,y); lctx.stroke(); }
+  lctx.font="10px sans-serif"; lctx.fillStyle="rgba(140,155,175,0.6)";
+  lctx.fillText("R",4,rY-6); lctx.fillText("L",4,lY-6);
+  // arcs
+  for(const f of flights){
+    const x1=X(f.ts), x2=X(f.te);
+    if(x2<-10||x1>LW+10) continue;
+    const y1=f.from===0?rY:lY, y2=f.to===0?rY:lY;
+    const live=(T>=f.ts&&T<=f.te);
+    const col=PALETTE[f.ball%PALETTE.length];
+    lctx.strokeStyle=col; lctx.globalAlpha=live?0.95:0.32; lctx.lineWidth=live?2.6:1.4;
+    const lift=Math.min(LH*0.5, 8+f.v*7);
+    lctx.beginPath(); lctx.moveTo(x1,y1);
+    lctx.quadraticCurveTo((x1+x2)/2,Math.min(y1,y2)-lift,x2,y2); lctx.stroke();
+    if(f.v>0 && x1>=0 && x1<=LW){ lctx.globalAlpha=1; lctx.fillStyle=col;
+      lctx.beginPath(); lctx.arc(x1,y1,live?3.4:2.4,0,7); lctx.fill(); }
+  }
+  lctx.globalAlpha=1;
+  // now line
+  const nx=leftBeats*beatW;
+  lctx.strokeStyle="rgba(255,138,61,0.8)"; lctx.lineWidth=1.5;
+  lctx.beginPath(); lctx.moveTo(nx,0); lctx.lineTo(nx,LH); lctx.stroke();
+}
+
+// ---- loop ----
+function frame(now){
+  const dt=last?Math.min(0.05,(now-last)/1000):0; last=now;
+  if(playing) T += dt*(2.2*speed);
+  mctx.clearRect(0,0,W,H);
+  if(pattern.length){
+    gen(Math.ceil(T)+12);
+    drawJuggler(); drawBalls();
+    if(showLadder) drawLadder();
+    // input is empty/invalid: fade the last valid pattern so it reads as stale, not live
+    if(!patValid){
+      mctx.fillStyle="rgba(14,17,22,0.66)"; mctx.fillRect(0,0,W,H);
+      mctx.fillStyle="rgba(231,236,243,0.55)"; mctx.textAlign="center";
+      mctx.font="12px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif";
+      mctx.fillText("showing last valid pattern", W/2, H-14);
+      mctx.textAlign="left";
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+// ---- UI ----
+const patEl=document.getElementById("pat"), statusEl=document.getElementById("status"),
+      readEl=document.getElementById("readout"), spEl=document.getElementById("speed"),
+      spVal=document.getElementById("spVal"), ladBtn=document.getElementById("ladderBtn"),
+      ladWrap=document.getElementById("ladderWrap"), presetsEl=document.getElementById("presets"),
+      playBtn=document.getElementById("playBtn"), copyBtn=document.getElementById("copyBtn");
+
+function applyPattern(str,{fromHash=false}={}){
+  patEl.value=str;
+  const r=parse(str);
+  if(r.error){ statusEl.textContent=r.error; statusEl.className="err"; readEl.textContent=""; patValid=false; return; }
+  const v=validate(r.vals);
+  if(!v.valid){ statusEl.textContent=v.reason; statusEl.className="err"; readEl.textContent=""; patValid=false; return; }
+  patValid=true;
+  const morph = pattern.length>0;
+  pattern=r.vals; resetSim(morph);
+  statusEl.textContent = v.balls===0 ? "Valid — but nothing is thrown (all 0s)." :
+    `Valid pattern.`;
+  statusEl.className="ok";
+  readEl.innerHTML=`<b>${v.balls}</b> ball${v.balls===1?"":"s"} · period <b>${v.period}</b> · avg height <b>${v.avg}</b>`;
+  if(!fromHash) writeHash();
+}
+function writeHash(){
+  const h=`p=${patEl.value.trim()}&s=${speed}&l=${showLadder?1:0}`;
+  history.replaceState(null,"","#"+h);
+}
+function readHash(){
+  const h=new URLSearchParams(location.hash.slice(1));
+  if(h.has("s")){ const s=parseFloat(h.get("s")); if(s>=0.4&&s<=2.6){ speed=s; spEl.value=s; } }
+  spVal.textContent=speed.toFixed(1)+"×";
+  if(h.has("l")){ showLadder=h.get("l")==="1"; ladBtn.classList.toggle("on",showLadder); ladWrap.classList.toggle("hidden",!showLadder); resize(); }
+  applyPattern(h.get("p")||"531",{fromHash:true});
+}
+
+// random guaranteed-valid siteswap of given ball count / period
+function randomPattern(){
+  const balls=3+Math.floor(Math.random()*3);      // 3..5
+  const p=3+Math.floor(Math.random()*4);          // 3..6
+  for(let tries=0;tries<400;tries++){
+    // random permutation of landing slots
+    const perm=[...Array(p).keys()];
+    for(let i=p-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [perm[i],perm[j]]=[perm[j],perm[i]]; }
+    const base=perm.map((d,i)=>((d-i)%p+p)%p);      // guarantees permutation landings
+    let w=base.reduce((a,b)=>a+b,0)/p;              // integer ball count of base
+    let extra=balls-w; if(extra<0) continue;
+    const vals=base.slice(); let ok=true;
+    // add whole periods to reach target ball count, keep throws representable (<=15)
+    while(extra>0){ let idx=vals.indexOf(Math.min(...vals)); if(vals[idx]+p>15){ok=false;break;} vals[idx]+=p; extra--; }
+    if(!ok) continue;
+    if(vals.every(x=>x===vals[0]) && p>1) continue; // skip trivial n n n... for variety
+    if(validate(vals).valid) return vals.map(valToChar).join("");
+  }
+  return "531";
+}
+
+function updatePlayBtn(){
+  playBtn.classList.toggle("on",playing);
+  playBtn.textContent = playing ? "⏸ Pause" : "▶ Play";
+  playBtn.setAttribute("aria-pressed", playing?"true":"false");
+}
+function togglePlay(){ playing=!playing; updatePlayBtn(); }
+
+patEl.addEventListener("input",()=>applyPattern(patEl.value));
+document.getElementById("rand").addEventListener("click",()=>applyPattern(randomPattern()));
+spEl.addEventListener("input",()=>{ speed=parseFloat(spEl.value); spVal.textContent=speed.toFixed(1)+"×"; writeHash(); });
+ladBtn.addEventListener("click",()=>{ showLadder=!showLadder; ladBtn.classList.toggle("on",showLadder);
+  ladWrap.classList.toggle("hidden",!showLadder); resize(); writeHash(); });
+playBtn.addEventListener("click",togglePlay);
+copyBtn.addEventListener("click",async()=>{
+  const done=()=>{ const o=copyBtn.textContent; copyBtn.textContent="✓ Copied!"; copyBtn.classList.add("on");
+    setTimeout(()=>{ copyBtn.textContent="🔗 Copy link"; copyBtn.classList.remove("on"); },1300); };
+  try{ await navigator.clipboard.writeText(location.href); done(); }
+  catch(e){ patEl.focus(); patEl.select(); done(); }   // clipboard blocked (e.g. file://): still confirm
+});
+// space toggles play/pause unless typing in the pattern field
+window.addEventListener("keydown",e=>{
+  if(e.code==="Space" && e.target!==patEl && !e.target.matches("input,textarea")){ e.preventDefault(); togglePlay(); }
+});
+window.addEventListener("hashchange",readHash);
+
+PRESETS.forEach(p=>{
+  const v=validate(parse(p).vals);
+  const b=document.createElement("button"); b.className="chip";
+  b.innerHTML=`${p}<span>${v.balls}b</span>`;
+  b.onclick=()=>applyPattern(p);
+  presetsEl.appendChild(b);
+});
+
+resize();
+armDprWatch();
+updatePlayBtn();
+if(location.hash.length>1) readHash(); else applyPattern("531");
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

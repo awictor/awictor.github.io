@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Creaseform — foldable origami tessellation studio</title>
+<style>
+  :root{
+    --ink:#232F3E; --paper:#F5F3EF; --accent:#FF6100; --valley:#7DB4E6;
+    --panel:rgba(18,26,38,.72); --line:rgba(245,243,239,.14);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font:14px/1.45 "Amazon Ember",-apple-system,Segoe UI,Roboto,sans-serif;
+    color:var(--paper);
+    background:
+      radial-gradient(1200px 800px at 30% -10%, #2c3a4d 0%, transparent 60%),
+      radial-gradient(900px 700px at 100% 110%, #3a2410 0%, transparent 55%),
+      linear-gradient(160deg,#161e29 0%,#0e141d 100%);
+    overflow:hidden;
+  }
+  #app{display:flex;height:100vh;width:100vw}
+  #stage{flex:1;position:relative;min-width:0}
+  canvas{display:block;width:100%;height:100%}
+  #brand{position:absolute;top:22px;left:26px;pointer-events:none}
+  #brand h1{font-family:"Amazon Ember Display",sans-serif;font-size:26px;font-weight:700;letter-spacing:.5px}
+  #brand h1 span{color:var(--accent)}
+  #brand p{opacity:.62;font-size:12.5px;margin-top:3px;max-width:360px}
+  #panel{
+    width:298px;flex-shrink:0;background:var(--panel);
+    -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+    border-left:1px solid var(--line);padding:20px 20px 16px;overflow-y:auto;
+    display:flex;flex-direction:column;gap:16px;
+    scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.2) transparent;
+  }
+  #panel::-webkit-scrollbar{width:8px}
+  #panel::-webkit-scrollbar-track{background:transparent}
+  #panel::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:4px}
+  .fam{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px}
+  .fam button{
+    padding:9px 4px;border:1px solid var(--line);border-radius:9px;cursor:pointer;
+    background:rgba(255,255,255,.03);color:var(--paper);font-size:12px;font-weight:600;
+    transition:.15s;line-height:1.2;
+  }
+  .fam button:hover{border-color:var(--accent)}
+  .fam button.on{background:var(--accent);border-color:var(--accent);color:#160c04}
+  .ctl label{display:flex;justify-content:space-between;font-size:11.5px;
+    letter-spacing:.4px;text-transform:uppercase;opacity:.72;margin-bottom:5px}
+  .ctl label b{color:var(--accent);font-weight:700;opacity:1;text-transform:none}
+  input[type=range]{width:100%;-webkit-appearance:none;height:4px;border-radius:4px;
+    background:rgba(255,255,255,.16);outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;
+    border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #160c04}
+  input[type=range]::-moz-range-thumb{width:15px;height:15px;border-radius:50%;
+    background:var(--accent);cursor:pointer;border:2px solid #160c04}
+  input[type=range]:active::-webkit-slider-thumb{transform:scale(1.15)}
+  input[type=range]:active::-moz-range-thumb{transform:scale(1.15)}
+  input[type=range]:focus-visible,.fam button:focus-visible,.row button:focus-visible{
+    outline:2px solid var(--accent);outline-offset:3px}
+  .ctl{display:flex;flex-direction:column}
+  .row{display:flex;gap:8px}
+  .row button{flex:1;padding:9px;border-radius:9px;border:1px solid var(--line);cursor:pointer;
+    background:rgba(255,255,255,.04);color:var(--paper);font-weight:600;font-size:12px;transition:.15s}
+  .row button:hover{border-color:var(--accent);color:var(--accent)}
+  #play.on{background:var(--accent);border-color:var(--accent);color:#160c04}
+  .legend{display:flex;gap:16px;font-size:11px;opacity:.8;flex-wrap:wrap}
+  .legend i{display:inline-block;width:22px;height:0;vertical-align:middle;margin-right:5px}
+  .m i{border-top:2.5px solid var(--accent)}
+  .v i{border-top:2px dashed var(--valley)}
+  .sep{height:1px;background:var(--line);margin:2px 0}
+  .hint{font-size:11px;opacity:.5;line-height:1.5}
+  #toast{position:absolute;bottom:26px;left:50%;transform:translateX(-50%) translateY(20px);
+    background:var(--accent);color:#160c04;padding:9px 18px;border-radius:20px;font-weight:600;
+    font-size:12.5px;opacity:0;transition:.3s;pointer-events:none}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  @media(max-width:760px){#app{flex-direction:column}#panel{width:100%;height:46%;border-left:none;border-top:1px solid var(--line)}}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <canvas id="c"></canvas>
+    <div id="brand"><h1>Crease<span>form</span></h1>
+      <p>Generate flat-foldable origami tessellations, then watch them collapse.</p></div>
+    <div id="toast">Link copied</div>
+  </div>
+  <div id="panel">
+    <div class="fam" id="fam">
+      <button data-f="miura">Miura-ori</button>
+      <button data-f="water">Waterbomb</button>
+      <button data-f="hex">Hex twist</button>
+    </div>
+    <div class="ctl"><label>Fold collapse <b id="vfold">0%</b></label>
+      <input type="range" id="fold" min="0" max="1" step="0.001" value="0.35"></div>
+    <div class="ctl"><label>Grid size <b id="vgrid">6</b></label>
+      <input type="range" id="grid" min="2" max="10" step="1" value="6"></div>
+    <div class="ctl"><label><span id="lsector">Sector angle</span> <b id="vsector">45&deg;</b></label>
+      <input type="range" id="sector" min="15" max="72" step="1" value="45"></div>
+    <div class="ctl"><label><span id="laspect">Cell depth</span> <b id="vaspect">0.80</b></label>
+      <input type="range" id="aspect" min="0.3" max="1.5" step="0.01" value="0.8"></div>
+    <div class="ctl"><label>Light source <b id="vlight">135&deg;</b></label>
+      <input type="range" id="light" min="0" max="360" step="1" value="135"></div>
+    <div class="sep"></div>
+    <div class="row">
+      <button id="play" class="on">&#9679; Breathe</button>
+      <button id="reset">Reset</button>
+    </div>
+    <div class="row">
+      <button id="svg">Export SVG</button>
+      <button id="link">Copy link</button>
+    </div>
+    <div class="legend"><span class="m"><i></i>Mountain</span><span class="v"><i></i>Valley</span></div>
+    <div class="hint" id="hint"></div>
+  </div>
+</div>
+<script>
+"use strict";
+const cv=document.getElementById("c"), ctx=cv.getContext("2d");
+const S={family:"miura",fold:0.35,grid:6,sector:45,aspect:0.8,light:135,play:true};
+const YAW=-0.55, PIT=1.02;
+
+/* per-family discoverability copy for the hint + the two middle slider labels */
+const FAM={
+  miura:{name:"Miura-ori", sector:"Sector angle", aspect:"Cell depth",
+    hint:"Miura-ori folds by an exact, isometric single-DOF collapse — every panel stays rigid."},
+  water:{name:"Waterbomb", sector:"Fold sharpness", aspect:"Pop height",
+    hint:"The waterbomb base collapses its 8-triangle cells, popping centers up and folding edges down."},
+  hex:{name:"Hex twist", sector:"Twist rate", aspect:"Pop height",
+    hint:"Hexagons rotate as the sheet gathers, opening valley pleats between neighboring cells."}
+};
+
+/* ---------- tessellation generators (shared {P,F,C} contract) ---------- */
+// P: points {x,y,z (folded), fx,fy (flat)}  F: faces {v:[idx...],par}  C: creases {a,b,t:'M'|'V'|'C'}
+function buildMiura(N,secDeg,asp){
+  const P=[],F=[],C=[], a=1, b=0.55+0.9*asp, ph=S.fold*Math.PI/2*0.95;
+  const s=a*Math.tan(secDeg*Math.PI/180)*0.6, Nx=2*N, Ny=N;
+  const id=(i,j)=>i*(Ny+1)+j;
+  for(let i=0;i<=Nx;i++)for(let j=0;j<=Ny;j++){
+    const off=(i&1)?s:0;
+    P.push({x:i*a*Math.cos(ph), y:j*b+off, z:(i&1)?a*Math.sin(ph):0, fx:i*a, fy:j*b+off});
+  }
+  for(let i=0;i<Nx;i++)for(let j=0;j<Ny;j++)
+    F.push({v:[id(i,j),id(i+1,j),id(i+1,j+1),id(i,j+1)],par:(i+j)&1});
+  for(let i=0;i<=Nx;i++)for(let j=0;j<Ny;j++)
+    C.push({a:id(i,j),b:id(i,j+1),t:(i===0||i===Nx)?'C':((i&1)?'V':'M')});
+  for(let i=0;i<Nx;i++)for(let j=0;j<=Ny;j++)
+    C.push({a:id(i,j),b:id(i+1,j),t:(j===0||j===Ny)?'C':((j&1)?'M':'V')});
+  return {P,F,C};
+}
+function buildWater(N,secDeg,asp){
+  const P=[],F=[],C=[], ph=S.fold*Math.PI/2*0.9, n=2*N;
+  const pop=0.55*asp, dn=0.30*(secDeg/72+0.25), sc=1-0.34*Math.sin(ph), cx=N/2, cy=N/2;
+  const id=(gx,gy)=>gy*(n+1)+gx;
+  for(let gy=0;gy<=n;gy++)for(let gx=0;gx<=n;gx++){
+    const fx=gx/2, fy=gy/2, ox=gx&1, oy=gy&1;
+    let z=0;
+    if(ox&&oy) z=pop*Math.sin(ph); else if(ox||oy) z=-dn*Math.sin(ph);
+    P.push({x:cx+(fx-cx)*sc, y:cy+(fy-cy)*sc, z, fx, fy});
+  }
+  const ring=[[0,0],[1,0],[2,0],[2,1],[2,2],[1,2],[0,2],[0,1]];
+  for(let cj=0;cj<N;cj++)for(let ci=0;ci<N;ci++){
+    const gx0=2*ci, gy0=2*cj, ctr=id(gx0+1,gy0+1);
+    for(let k=0;k<8;k++)
+      F.push({v:[ctr,id(gx0+ring[k][0],gy0+ring[k][1]),id(gx0+ring[(k+1)%8][0],gy0+ring[(k+1)%8][1])],par:k&1});
+    [[0,0],[2,0],[2,2],[0,2]].forEach(o=>C.push({a:ctr,b:id(gx0+o[0],gy0+o[1]),t:'M'}));
+    [[1,0],[2,1],[1,2],[0,1]].forEach(o=>C.push({a:ctr,b:id(gx0+o[0],gy0+o[1]),t:'V'}));
+    for(let k=0;k<8;k++){
+      const A=[gx0+ring[k][0],gy0+ring[k][1]], B=[gx0+ring[(k+1)%8][0],gy0+ring[(k+1)%8][1]];
+      const out=(A[0]===0&&B[0]===0)||(A[0]===n&&B[0]===n)||(A[1]===0&&B[1]===0)||(A[1]===n&&B[1]===n);
+      C.push({a:id(A[0],A[1]),b:id(B[0],B[1]),t:out?'C':'M'});
+    }
+  }
+  return {P,F,C};
+}
+function buildHex(N,secDeg,asp){
+  const P=[],F=[],C=[], R=0.62, ph=S.fold*Math.PI/2*0.9;
+  const twist=ph*(secDeg/54), lift=0.95*asp, dx=R*Math.sqrt(3), dy=R*1.5, H=[];
+  for(let r=0;r<N;r++)for(let q=0;q<N;q++){
+    const cx=q*dx+(r&1)*dx/2, cy=r*dy, par=(q+r)&1, cz=Math.sin(ph)*lift*(par?1:0.22), base=P.length;
+    for(let k=0;k<6;k++){
+      const a0=Math.PI/6+k*Math.PI/3;
+      P.push({x:cx+R*Math.cos(a0+twist), y:cy+R*Math.sin(a0+twist), z:cz, fx:cx+R*Math.cos(a0), fy:cy+R*Math.sin(a0)});
+    }
+    F.push({v:[base,base+1,base+2,base+3,base+4,base+5],par:0});
+    for(let k=0;k<6;k++) C.push({a:base+k,b:base+(k+1)%6,t:'M'});
+    H.push({cx,cy,base});
+  }
+  const idx=(q,r)=>(q>=0&&q<N&&r>=0&&r<N)?H[r*N+q]:null;
+  const near=(h,tx,ty)=>{const a=[];for(let k=0;k<6;k++){const p=P[h.base+k];a.push([k,(p.fx-tx)**2+(p.fy-ty)**2]);}
+    a.sort((m,n)=>m[1]-n[1]);return [h.base+a[0][0],h.base+a[1][0]];};
+  const pleat=(h,h2)=>{
+    const A=near(h,h2.cx,h2.cy), B=near(h2,h.cx,h.cy), q=[A[0],A[1],B[0],B[1]];
+    const cx=(P[q[0]].fx+P[q[1]].fx+P[q[2]].fx+P[q[3]].fx)/4, cy=(P[q[0]].fy+P[q[1]].fy+P[q[2]].fy+P[q[3]].fy)/4;
+    q.sort((m,n)=>Math.atan2(P[m].fy-cy,P[m].fx-cx)-Math.atan2(P[n].fy-cy,P[n].fx-cx));
+    F.push({v:[q[0],q[1],q[2]],par:1}); F.push({v:[q[0],q[2],q[3]],par:1});
+    C.push({a:q[0],b:q[1],t:'V'}); C.push({a:q[2],b:q[3],t:'V'});
+  };
+  for(let r=0;r<N;r++)for(let q=0;q<N;q++){
+    const h=H[r*N+q];
+    [idx(q+1,r), idx(q+(r&1),r+1), idx(q-1+(r&1),r+1)].forEach(h2=>{ if(h2) pleat(h,h2); });
+  }
+  return {P,F,C};
+}
+const BUILD={miura:buildMiura, water:buildWater, hex:buildHex};
+
+/* ---------- 3D projection + shading ---------- */
+function proj(x,y,z){
+  const cy=Math.cos(YAW),sy=Math.sin(YAW),cp=Math.cos(PIT),sp=Math.sin(PIT);
+  const xr=x*cy-y*sy, yr=x*sy+y*cy;
+  return {sx:xr, sy:-(yr*cp-z*sp), d:yr*sp+z*cp};
+}
+function faceNormal(v,P){
+  const a=P[v[0]],b=P[v[1]],c=P[v[2]];
+  const ux=b.x-a.x,uy=b.y-a.y,uz=b.z-a.z, vx=c.x-a.x,vy=c.y-a.y,vz=c.z-a.z;
+  let nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+  if(nz<0){ nx=-nx; ny=-ny; nz=-nz; }   // orient consistently toward the viewer
+  const L=Math.hypot(nx,ny,nz)||1; return [nx/L,ny/L,nz/L];
+}
+function render(){
+  const dpr=Math.min(devicePixelRatio||1,2), W=cv.clientWidth, Hh=cv.clientHeight;
+  cv.width=W*dpr; cv.height=Hh*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,Hh);
+  const m=BUILD[S.family](S.grid,S.sector,S.aspect), P=m.P;
+  // project (folded) + flat footprint for shadow
+  const pr=P.map(p=>proj(p.x,p.y,p.z)), fl=P.map(p=>proj(p.x,p.y,0));
+  let minX=1e9,maxX=-1e9,minY=1e9,maxY=-1e9;
+  for(const q of pr){ if(q.sx<minX)minX=q.sx; if(q.sx>maxX)maxX=q.sx; if(q.sy<minY)minY=q.sy; if(q.sy>maxY)maxY=q.sy; }
+  const pad=90, sc=Math.min((W-pad)/(maxX-minX||1),(Hh-pad)/(maxY-minY||1));
+  const ox=W/2-(minX+maxX)/2*sc, oy=Hh/2-(minY+maxY)/2*sc;
+  const SX=q=>q.sx*sc+ox, SY=q=>q.sy*sc+oy;
+  // light dir
+  const az=S.light*Math.PI/180, el=0.9, L=[Math.cos(az)*Math.cos(el),Math.sin(az)*Math.cos(el),Math.sin(el)];
+  // soft ground shadow (flattened footprints)
+  const shOff=Math.cos(az)*10;
+  ctx.fillStyle="rgba(0,0,0,0.055)";
+  for(const f of m.F){ ctx.beginPath();
+    f.v.forEach((i,k)=>{ const X=fl[i].sx*sc+ox+shOff, Y=fl[i].sy*sc+oy+14; k?ctx.lineTo(X,Y):ctx.moveTo(X,Y); });
+    ctx.closePath(); ctx.fill(); }
+  // painter's sort (far first)
+  const faces=m.F.map(f=>({f, d:f.v.reduce((s,i)=>s+pr[i].d,0)/f.v.length})).sort((a,b)=>a.d-b.d);
+  for(const {f} of faces){
+    const N=faceNormal(f.v,P), ndl=Math.max(0,N[0]*L[0]+N[1]*L[1]+N[2]*L[2]);
+    const br=0.30+0.70*ndl, tint=f.par?0.94:1;
+    const R=Math.round(240*br*tint), G=Math.round(232*br*tint), B=Math.round(216*br*(f.par?1:0.96));
+    ctx.beginPath();
+    f.v.forEach((i,k)=>{ const X=SX(pr[i]),Y=SY(pr[i]); k?ctx.lineTo(X,Y):ctx.moveTo(X,Y); });
+    ctx.closePath();
+    ctx.fillStyle="rgb("+R+","+G+","+B+")"; ctx.fill();
+    ctx.strokeStyle="rgba(35,47,62,"+(0.10+0.14*ndl)+")"; ctx.lineWidth=0.6; ctx.stroke();
+  }
+  // creases on top
+  ctx.lineCap="round";
+  for(const c of m.C){
+    if(c.t==='C') continue;
+    ctx.beginPath(); ctx.moveTo(SX(pr[c.a]),SY(pr[c.a])); ctx.lineTo(SX(pr[c.b]),SY(pr[c.b]));
+    if(c.t==='M'){ ctx.strokeStyle="rgba(255,97,0,0.92)"; ctx.lineWidth=1.9; ctx.setLineDash([]); }
+    else { ctx.strokeStyle="rgba(125,180,230,0.85)"; ctx.lineWidth=1.5; ctx.setLineDash([5,4]); }
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+}
+
+/* ---------- SVG export (flat, print-ready, layered) ---------- */
+function exportSVG(){
+  const m=BUILD[S.family](S.grid,S.sector,S.aspect), P=m.P;
+  let mnX=1e9,mxX=-1e9,mnY=1e9,mxY=-1e9;
+  for(const p of P){ if(p.fx<mnX)mnX=p.fx; if(p.fx>mxX)mxX=p.fx; if(p.fy<mnY)mnY=p.fy; if(p.fy>mxY)mxY=p.fy; }
+  const SCALE=72, mgn=24, w=(mxX-mnX)*SCALE+2*mgn, h=(mxY-mnY)*SCALE+2*mgn;
+  const X=i=>((P[i].fx-mnX)*SCALE+mgn).toFixed(2), Y=i=>((P[i].fy-mnY)*SCALE+mgn).toFixed(2);
+  const seg=arr=>arr.map(c=>`<line x1="${X(c.a)}" y1="${Y(c.a)}" x2="${X(c.b)}" y2="${Y(c.b)}"/>`).join("");
+  const mo=m.C.filter(c=>c.t==='M'), va=m.C.filter(c=>c.t==='V'), cu=m.C.filter(c=>c.t==='C');
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${w.toFixed(0)}" height="${h.toFixed(0)}" viewBox="0 0 ${w.toFixed(0)} ${h.toFixed(0)}">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<g id="mountain" stroke="#e2231a" stroke-width="1.4" fill="none" stroke-linecap="round">${seg(mo)}</g>
+<g id="valley" stroke="#1a56e2" stroke-width="1.2" fill="none" stroke-dasharray="6 4" stroke-linecap="round">${seg(va)}</g>
+<g id="cut" stroke="#111111" stroke-width="1.8" fill="none">${seg(cu)}</g>
+</svg>`;
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([svg],{type:"image/svg+xml"}));
+  a.download="creaseform-"+S.family+".svg"; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  toast("SVG exported");
+}
+
+/* ---------- URL-hash serialization ---------- */
+function writeHash(){
+  const p="f="+S.family+"&n="+S.grid+"&fold="+S.fold.toFixed(3)+"&s="+S.sector
+    +"&a="+S.aspect+"&l="+S.light+"&p="+(S.play?1:0);
+  history.replaceState(null,"","#"+p);   // no new history entry per slider tick
+}
+// clamp/round a hash value to its slider domain; ignore garbage (NaN)
+function num(h,key,lo,hi,step){
+  if(!h.has(key)) return null;
+  const v=parseFloat(h.get(key)); if(!isFinite(v)) return null;
+  const c=Math.min(hi,Math.max(lo,v)); return step===1?Math.round(c):c;
+}
+function readHash(){
+  const h=new URLSearchParams(location.hash.slice(1));
+  if(h.has("f")&&BUILD[h.get("f")]) S.family=h.get("f");
+  let v;
+  if((v=num(h,"n",2,10,1))!==null) S.grid=v;
+  if((v=num(h,"fold",0,1))!==null) S.fold=v;
+  if((v=num(h,"s",15,72,1))!==null) S.sector=v;
+  if((v=num(h,"a",0.3,1.5))!==null) S.aspect=v;
+  if((v=num(h,"l",0,360,1))!==null) S.light=v;
+  // honor an explicit play flag; otherwise a shared fold pose should stay held
+  if(h.has("p")) S.play=h.get("p")==="1";
+  else if(h.has("fold")) S.play=false;
+}
+function toast(msg){ const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show");
+  clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("show"),1400); }
+
+/* ---------- UI wiring ---------- */
+const el=id=>document.getElementById(id);
+function syncUI(){
+  el("fold").value=S.fold; el("grid").value=S.grid; el("sector").value=S.sector;
+  el("aspect").value=S.aspect; el("light").value=S.light;
+  el("vfold").textContent=Math.round(S.fold*100)+"%";
+  el("vgrid").textContent=S.grid;
+  el("vsector").textContent=S.sector+"°";
+  el("vaspect").textContent=(+S.aspect).toFixed(2);
+  el("vlight").textContent=S.light+"°";
+  document.querySelectorAll("#fam button").forEach(b=>b.classList.toggle("on",b.dataset.f===S.family));
+  el("play").classList.toggle("on",S.play);
+  const fam=FAM[S.family];
+  el("lsector").textContent=fam.sector;
+  el("laspect").textContent=fam.aspect;
+  el("hint").innerHTML=fam.hint+" Drag <b>Fold collapse</b> or leave it breathing. SVG export is the print-ready flat crease pattern.";
+}
+document.querySelectorAll("#fam button").forEach(b=>b.addEventListener("click",()=>{
+  S.family=b.dataset.f; syncUI(); writeHash();
+}));
+el("fold").addEventListener("input",e=>{ S.fold=+e.target.value; S.play=false; syncUI(); writeHash(); });
+el("grid").addEventListener("input",e=>{ S.grid=+e.target.value; syncUI(); writeHash(); });
+el("sector").addEventListener("input",e=>{ S.sector=+e.target.value; syncUI(); writeHash(); });
+el("aspect").addEventListener("input",e=>{ S.aspect=+e.target.value; syncUI(); writeHash(); });
+el("light").addEventListener("input",e=>{ S.light=+e.target.value; syncUI(); writeHash(); });
+el("play").addEventListener("click",()=>{ S.play=!S.play; if(S.play) phase=Math.acos(1-2*S.fold)||0; syncUI(); writeHash(); });
+el("reset").addEventListener("click",()=>{ Object.assign(S,{family:"miura",fold:0.35,grid:6,sector:45,aspect:0.8,light:135,play:true}); phase=Math.acos(1-2*S.fold); syncUI(); writeHash(); toast("Reset"); });
+el("svg").addEventListener("click",exportSVG);
+el("link").addEventListener("click",()=>{ writeHash();
+  (navigator.clipboard?navigator.clipboard.writeText(location.href):Promise.reject())
+    .then(()=>toast("Link copied")).catch(()=>toast("Link in URL bar")); });
+
+/* ---------- animation: breathing auto-play ---------- */
+let phase=0, last=performance.now();
+function loop(now){
+  const dt=Math.min((now-last)/1000,0.05); last=now;
+  if(S.play){ phase+=dt*0.9; S.fold=(1-Math.cos(phase))/2;
+    el("fold").value=S.fold; el("vfold").textContent=Math.round(S.fold*100)+"%"; }
+  render();
+  requestAnimationFrame(loop);
+}
+readHash(); phase=Math.acos(1-2*Math.min(Math.max(S.fold,0),1))||0; syncUI();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

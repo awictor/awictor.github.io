@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Oklch — Hex ⇄ OKLCH Color Converter</title>
+<meta name="description" content="Convert colors between hex/RGB and OKLCH (the modern perceptual CSS color space), with a live swatch and copy-ready oklch() string. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('oklch-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#a21caf;
+    --bg:#faf3fb; --card:#ffffff; --fg:#20161f; --muted:#6a586a; --line:#f0e2f0; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#150c15; --card:#1f141f; --fg:#f5ecf4; --muted:#a88fa8; --line:#2d1f2d; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:640px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#86198f);display:flex;align-items:center;justify-content:center;font-size:20px;color:#fff;font-weight:800}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:640px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  .swatch{height:120px;border-radius:12px;border:1px solid var(--line);margin-bottom:16px}
+  label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  .hexrow{display:grid;grid-template-columns:56px 1fr;gap:12px;align-items:center;margin-bottom:16px}
+  input[type=color]{width:56px;height:44px;padding:0;border:1px solid var(--line);border-radius:8px;background:none;cursor:pointer}
+  input[type=text]{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:1.1rem}
+  .sliders label{display:flex;justify-content:space-between;font-size:.85rem;margin-top:12px}
+  .sliders label b{color:var(--c)}
+  input[type=range]{width:100%;accent-color:var(--c)}
+  .css{margin-top:16px;background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--c);border-radius:8px;padding:12px;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;word-break:break-all}
+  .copy{margin-top:10px;background:var(--c);color:#fff;border:0;border-radius:8px;padding:9px 16px;cursor:pointer;font:inherit}
+  .err{color:#dc2626;font-size:.85rem;margin-top:8px}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:640px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo mono">ok</div>
+    <div><h1>Oklch</h1><div class="sub">Hex ⇄ OKLCH color converter</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="swatch" id="swatch"></div>
+    <div class="hexrow">
+      <input type="color" id="picker" value="#3b82f6">
+      <input type="text" id="hex" class="mono" value="#3b82f6" spellcheck="false">
+    </div>
+    <div class="sliders">
+      <label for="l">Lightness (L) <b id="lv"></b></label><input type="range" id="l" min="0" max="1" step="0.001">
+      <label for="cc">Chroma (C) <b id="cv"></b></label><input type="range" id="cc" min="0" max="0.4" step="0.001">
+      <label for="h">Hue (H) <b id="hv"></b></label><input type="range" id="h" min="0" max="360" step="0.1">
+    </div>
+    <div class="css mono" id="css"></div>
+    <button class="copy" id="copyBtn" type="button">Copy oklch()</button>
+    <div class="err" id="err"></div>
+  </div>
+</main>
+<footer>
+  OKLCH is a perceptually uniform color space — equal steps look equally different, so lightness and hue behave intuitively. Conversion uses Björn Ottosson's OKLab matrices. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/oklch">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic (Ottosson OKLab) ----------
+  function hexToRgb255(hex){
+    let h = String(hex).trim().replace(/^#/, '');
+    if(/^[0-9a-fA-F]{3}$/.test(h)) h = h.split('').map(c => c + c).join('');
+    if(!/^[0-9a-fA-F]{6}$/.test(h)) throw new Error('invalid hex color');
+    return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16) };
+  }
+  function rgb255ToHex(r, g, b){
+    const c = n => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+    return '#' + c(r) + c(g) + c(b);
+  }
+  const srgbToLinear = c => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  const linearToSrgb = c => c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+
+  function linearToOklab(r, g, b){
+    const l = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b;
+    const m = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b;
+    const s = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b;
+    const l_ = Math.cbrt(l), m_ = Math.cbrt(m), s_ = Math.cbrt(s);
+    return {
+      L: 0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
+      a: 1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
+      b: 0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_
+    };
+  }
+  function oklabToLinear(L, a, b){
+    const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+    const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+    const s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+    const l = l_ ** 3, m = m_ ** 3, s = s_ ** 3;
+    return {
+      r: 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+      g: -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+      b: -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
+    };
+  }
+
+  function hexToOklch(hex){
+    const { r, g, b } = hexToRgb255(hex);
+    const lab = linearToOklab(srgbToLinear(r / 255), srgbToLinear(g / 255), srgbToLinear(b / 255));
+    const C = Math.hypot(lab.a, lab.b);
+    let H = Math.atan2(lab.b, lab.a) * 180 / Math.PI;
+    if(H < 0) H += 360;
+    return { L: lab.L, C, H };
+  }
+  function oklchToHex(L, C, H){
+    const hr = Number(H) * Math.PI / 180;
+    const lin = oklabToLinear(Number(L), C * Math.cos(hr), C * Math.sin(hr));
+    return rgb255ToHex(linearToSrgb(lin.r) * 255, linearToSrgb(lin.g) * 255, linearToSrgb(lin.b) * 255);
+  }
+  const formatOklch = (L, C, H) =>
+    `oklch(${(L * 100).toFixed(1)}% ${C.toFixed(4)} ${H.toFixed(2)})`;
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('swatch')){
+    const $ = id => document.getElementById(id);
+
+    function fromHex(){
+      try{
+        const { L, C, H } = hexToOklch($('hex').value);
+        $('l').value = L; $('cc').value = C; $('h').value = H;
+        paint(L, C, H, $('hex').value);
+        $('err').textContent = '';
+      }catch(e){ $('err').textContent = e.message; }
+    }
+    function fromSliders(){
+      const L = +$('l').value, C = +$('cc').value, H = +$('h').value;
+      const hex = oklchToHex(L, C, H);
+      $('hex').value = hex; $('picker').value = hex;
+      paint(L, C, H, hex);
+      $('err').textContent = '';
+    }
+    function paint(L, C, H, hex){
+      $('lv').textContent = (L * 100).toFixed(1) + '%';
+      $('cv').textContent = C.toFixed(4);
+      $('hv').textContent = H.toFixed(1) + '°';
+      $('swatch').style.background = hex;
+      $('css').textContent = formatOklch(L, C, H);
+      if(/^#[0-9a-fA-F]{6}$/.test(hex)) $('picker').value = hex;
+    }
+    $('hex').addEventListener('input', fromHex);
+    $('picker').addEventListener('input', () => { $('hex').value = $('picker').value; fromHex(); });
+    ['l', 'cc', 'h'].forEach(id => $(id).addEventListener('input', fromSliders));
+    $('copyBtn').addEventListener('click', () => {
+      navigator.clipboard?.writeText($('css').textContent);
+      $('copyBtn').textContent = 'Copied!'; setTimeout(() => $('copyBtn').textContent = 'Copy oklch()', 1200);
+    });
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('oklch-theme', cur); }catch(e){}
+    });
+    fromHex();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { hexToRgb255, rgb255ToHex, srgbToLinear, linearToSrgb, hexToOklch, oklchToHex, formatOklch };
+</script>
+</body>
+</html>

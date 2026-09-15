@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Palimpsest — race the ghosts of your past runs</title>
+<style>
+  :root {
+    --bg: #0e0d13;
+    --bg2: #17151f;
+    --ink: #e8e6f0;
+    --dim: #6c6880;
+    --faint: #38343f;
+    --accent: #ff6100;
+    --accent2: #7c5cff;
+    --ok: #55d6a0;
+    --err: #ff5566;
+    --ghost: #7c5cff;
+    --mono: "SFMono-Regular", ui-monospace, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: radial-gradient(1200px 700px at 50% -10%, #1c1926 0%, var(--bg) 60%);
+    color: var(--ink);
+    font-family: var(--mono);
+    -webkit-font-smoothing: antialiased;
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+    overflow-x: hidden;
+  }
+  a { color: var(--accent); }
+  header {
+    display: flex; align-items: baseline; gap: 14px;
+    padding: 18px 24px; border-bottom: 1px solid var(--faint);
+    flex-wrap: wrap;
+  }
+  header h1 {
+    font-size: 20px; margin: 0; letter-spacing: 0.5px;
+    color: var(--accent); font-weight: 700;
+  }
+  header .sub { color: var(--dim); font-size: 12px; }
+  .spacer { flex: 1; }
+  .wrap { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 24px; }
+  .panel { width: 100%; max-width: 900px; }
+
+  /* screens */
+  .screen { display: none; }
+  .screen.active { display: block; }
+
+  /* menu */
+  .menu-grid { display: grid; gap: 18px; }
+  .card {
+    background: linear-gradient(180deg, var(--bg2), #131119);
+    border: 1px solid var(--faint); border-radius: 12px; padding: 18px 20px;
+  }
+  .card h2 { margin: 0 0 12px; font-size: 13px; color: var(--dim); text-transform: uppercase; letter-spacing: 1.5px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  label.field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--dim); }
+  input[type=text], input[type=number] {
+    background: #0b0a10; border: 1px solid var(--faint); color: var(--ink);
+    padding: 9px 11px; border-radius: 8px; font-family: var(--mono); font-size: 14px; min-width: 120px;
+  }
+  input:focus { outline: none; border-color: var(--accent); }
+  .seg { display: inline-flex; border: 1px solid var(--faint); border-radius: 8px; overflow: hidden; }
+  .seg button {
+    background: transparent; color: var(--dim); border: none; padding: 9px 14px;
+    font-family: var(--mono); font-size: 13px; cursor: pointer; transition: background .12s, color .12s;
+  }
+  .seg button.on { background: var(--accent); color: #120a03; font-weight: 700; }
+  .seg button:not(.on):hover { color: var(--ink); background: #201d29; }
+
+  .toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; font-size: 13px; color: var(--dim); }
+  .toggle input { accent-color: var(--accent); width: 16px; height: 16px; }
+
+  .btn {
+    background: var(--accent); color: #120a03; border: none; border-radius: 8px;
+    padding: 11px 20px; font-family: var(--mono); font-size: 14px; font-weight: 700;
+    cursor: pointer; transition: transform .08s, filter .12s;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .btn:active { transform: translateY(1px); }
+  .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--faint); font-weight: 400; }
+  .btn.ghost:hover { border-color: var(--accent); }
+
+  /* race */
+  .stats { display: flex; gap: 26px; flex-wrap: wrap; margin-bottom: 14px; }
+  .stat { display: flex; flex-direction: column; }
+  .stat .v { font-size: 26px; font-weight: 700; line-height: 1; }
+  .stat .k { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
+  .stat .v.ghost { color: var(--ghost); }
+
+  #sparkWrap { position: relative; margin-bottom: 16px; }
+  canvas { display: block; width: 100%; border: 1px solid var(--faint); border-radius: 10px; background: #0b0a10; }
+  #fx { position: absolute; inset: 0; pointer-events: none; border: none; background: transparent; }
+
+  #textBox {
+    position: relative; font-size: 24px; line-height: 1.75; letter-spacing: 0.3px;
+    padding: 24px; border: 1px solid var(--faint); border-radius: 12px; background: var(--bg2);
+    min-height: 160px; user-select: none; cursor: text; overflow: hidden;
+  }
+  #textBox.shake { animation: shake .18s; }
+  @keyframes shake {
+    0%,100% { transform: translate(0,0); }
+    25% { transform: translate(-2px,1px); }
+    50% { transform: translate(2px,-1px); }
+    75% { transform: translate(-1px,1px); }
+  }
+  .ch { position: relative; white-space: pre; transition: color .05s; color: var(--dim); }
+  .ch.done { color: var(--ink); }
+  .ch.wrong { color: var(--err); background: rgba(255,85,102,.15); border-radius: 3px; }
+  .ch.wrong.space { background: rgba(255,85,102,.3); }
+  .caret {
+    position: absolute; width: 2px; height: 1.5em; top: 0.12em;
+    background: var(--accent); border-radius: 2px;
+    box-shadow: 0 0 8px var(--accent);
+    transition: left .06s ease, top .06s ease; will-change: left, top;
+  }
+  .caret.ghost { background: var(--ghost); box-shadow: 0 0 10px var(--ghost); opacity: .65; }
+  #hiddenInput { position: absolute; opacity: 0; pointer-events: none; left: -9999px; }
+
+  .combo { position: absolute; right: 20px; top: 14px; font-size: 13px; color: var(--accent); font-weight: 700; opacity: 0; transition: opacity .2s; }
+  .combo.on { opacity: 1; }
+
+  .hint { color: var(--dim); font-size: 12px; margin-top: 10px; }
+  .flag { display: inline-block; padding: 2px 8px; border: 1px solid var(--faint); border-radius: 6px; font-size: 11px; color: var(--dim); margin-right: 6px; }
+  .flag.ghost { color: var(--ghost); border-color: var(--ghost); }
+  .flag.sd { color: var(--err); border-color: var(--err); }
+
+  /* results */
+  .result-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(120px,1fr)); gap: 14px; margin: 16px 0 20px; }
+  .bignum { font-size: 40px; font-weight: 700; }
+  .bignum.win { color: var(--ok); }
+  .bignum.lose { color: var(--err); }
+  .verdict { font-size: 18px; margin-bottom: 6px; }
+  .best-list { list-style: none; padding: 0; margin: 0; }
+  .best-list li { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--faint); font-size: 13px; }
+  .best-list li.you { color: var(--accent); }
+  #scrubRow { display: flex; gap: 12px; align-items: center; margin: 10px 0; }
+  #scrub { flex: 1; accent-color: var(--accent); }
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--accent); color:#120a03; padding: 10px 18px; border-radius: 8px;
+    font-weight: 700; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none;
+  }
+  .toast.on { opacity: 1; }
+  footer { padding: 14px 24px; color: var(--dim); font-size: 11px; border-top: 1px solid var(--faint); text-align: center; }
+  code.k { background:#0b0a10; border:1px solid var(--faint); border-radius:4px; padding:1px 5px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>PALIMPSEST</h1>
+  <span class="sub">race the translucent ghosts of your own past runs</span>
+  <span class="spacer"></span>
+  <button class="btn ghost" id="menuBtn" style="display:none">← menu</button>
+</header>
+
+<div class="wrap">
+  <div class="panel">
+
+    <!-- ============ MENU ============ -->
+    <section class="screen active" id="menuScreen">
+      <div class="menu-grid">
+        <div class="card">
+          <h2>Difficulty</h2>
+          <div class="row">
+            <div class="seg" id="diffSeg">
+              <button data-diff="easy">Easy</button>
+              <button data-diff="normal" class="on">Normal</button>
+              <button data-diff="hard">Hard</button>
+              <button data-diff="code">Code</button>
+            </div>
+            <label class="toggle"><input type="checkbox" id="sdToggle"> Sudden Death (no backspace)</label>
+          </div>
+          <p class="hint" id="diffHint"></p>
+        </div>
+
+        <div class="card">
+          <h2>Seed &amp; length</h2>
+          <div class="row">
+            <label class="field">Seed
+              <input type="text" id="seedInput" placeholder="e.g. maple-42" autocomplete="off">
+            </label>
+            <label class="field">Words
+              <input type="number" id="lenInput" value="30" min="8" max="120">
+            </label>
+            <button class="btn ghost" id="randSeed">🎲 random</button>
+          </div>
+          <p class="hint">A seed always produces byte-identical text — share the link and a friend races the exact same passage.</p>
+        </div>
+
+        <div class="card" id="ghostCard">
+          <h2>Ghost</h2>
+          <p class="hint" id="ghostStatus">No ghost recorded for this seed + difficulty yet. Your first clean run becomes the ghost.</p>
+        </div>
+
+        <div class="row">
+          <button class="btn" id="startBtn">Start run ▶</button>
+          <button class="btn ghost" id="shareMenuBtn">Copy share link</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ RACE ============ -->
+    <section class="screen" id="raceScreen">
+      <div style="margin-bottom:10px">
+        <span class="flag" id="flagSeed"></span>
+        <span class="flag" id="flagDiff"></span>
+        <span class="flag ghost" id="flagGhost" style="display:none">racing ghost</span>
+        <span class="flag sd" id="flagSD" style="display:none">sudden death</span>
+      </div>
+      <div class="stats">
+        <div class="stat"><span class="v" id="sWpm">0</span><span class="k">wpm</span></div>
+        <div class="stat"><span class="v" id="sAcc">100%</span><span class="k">accuracy</span></div>
+        <div class="stat"><span class="v" id="sProg">0%</span><span class="k">progress</span></div>
+        <div class="stat"><span class="v ghost" id="sGap">—</span><span class="k">vs ghost</span></div>
+      </div>
+      <div id="sparkWrap">
+        <canvas id="spark" height="90"></canvas>
+        <canvas id="fx" height="90"></canvas>
+      </div>
+      <div id="textBox" tabindex="0">
+        <div class="combo" id="comboTag"></div>
+      </div>
+      <textarea id="hiddenInput" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+      <p class="hint">Type the text. <code class="k">Esc</code> or <b>← menu</b> to bail. Purple caret is your past self.</p>
+    </section>
+
+    <!-- ============ RESULTS ============ -->
+    <section class="screen" id="resultScreen">
+      <div class="card">
+        <div class="verdict" id="verdict"></div>
+        <div class="result-grid">
+          <div class="stat"><span class="bignum" id="rWpm">0</span><span class="k">net wpm</span></div>
+          <div class="stat"><span class="v" id="rRaw">0</span><span class="k">raw wpm</span></div>
+          <div class="stat"><span class="v" id="rAcc">0%</span><span class="k">accuracy</span></div>
+          <div class="stat"><span class="v" id="rCons">0%</span><span class="k">consistency</span></div>
+          <div class="stat"><span class="v" id="rTime">0s</span><span class="k">time</span></div>
+        </div>
+        <div id="scrubRow">
+          <button class="btn ghost" id="playBtn">▶ replay</button>
+          <input type="range" id="scrub" min="0" max="1000" value="0">
+          <span class="hint" id="scrubT">0.0s</span>
+        </div>
+        <div id="replayBox" style="position:relative;font-size:18px;line-height:1.7;padding:16px;border:1px solid var(--faint);border-radius:10px;background:var(--bg2);min-height:90px;overflow:hidden;user-select:none"></div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <h2>Best scores — this seed &amp; difficulty</h2>
+        <ul class="best-list" id="bestList"></ul>
+      </div>
+
+      <div class="row" style="margin-top:16px">
+        <button class="btn" id="againBtn">Run again ▶</button>
+        <button class="btn ghost" id="shareResultBtn">Copy share link (with ghost)</button>
+        <button class="btn ghost" id="toMenuBtn">Menu</button>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<footer>Fully offline · zero dependencies · your ghosts &amp; scores live in this browser's localStorage · <span id="verTag"></span></footer>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* ============================================================
+   Palimpsest — single-file typing game with ghost racing.
+   Sections: PRNG · text gen · state · engine · stats ·
+   canvas (sparkline+particles) · ghost record/replay ·
+   storage · share hash · screens/wiring.
+============================================================ */
+
+const FMT = 2; // ghost/share format version. Bump on incompatible changes.
+
+/* ---------- seeded PRNG (mulberry32 over a string hash) ---------- */
+function hashStr(s){ let h=1779033703^s.length; for(let i=0;i<s.length;i++){ h=Math.imul(h^s.charCodeAt(i),3432918353); h=(h<<13)|(h>>>19);} return (h>>>0); }
+function mulberry32(a){ return function(){ a|=0; a=(a+0x6D2B79F5)|0; let t=Math.imul(a^(a>>>15),1|a); t=(t+Math.imul(t^(t>>>7),61|t))^t; return ((t^(t>>>14))>>>0)/4294967296; }; }
+
+/* ---------- word banks + code snippets ---------- */
+const EASY = "the of to and a in is it you that he was for on are as with his they at be this from i have or by one had not but what all were we when your can said there use an each which she do how their if will up other about out many then them these so some her would make like him into time has look two more write go see number no way could people my than first water been call who oil its now find long down day did get come made may part".split(" ");
+const NORMAL = EASY.concat("through system between little world should because different program follow example around important children mountain question remember together language sentence experience government development knowledge information community individual environment particular technology understand available especially themselves throughout beautiful discovered themselves relationship organization".split(" "));
+const HARD_WORDS = NORMAL.concat("quixotic labyrinthine juxtapose obfuscate ephemeral serendipity kaleidoscope idiosyncratic perpendicular acknowledgment bureaucracy conscientious".split(" "));
+const HARD_PUNCT = [",",".",";",":","—","'","\"","!","?","(",")"];
+const CODE_SNIPPETS = [
+  "const sum = arr.reduce((a, b) => a + b, 0);",
+  "for (let i = 0; i < items.length; i++) { render(items[i]); }",
+  "if (user && user.role === 'admin') { grant(user); }",
+  "export function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }",
+  "const map = new Map(); data.forEach(d => map.set(d.id, d));",
+  "async function load(url) { const r = await fetch(url); return r.json(); }",
+  "class Node { constructor(v) { this.value = v; this.next = null; } }",
+  "return list.filter(x => x != null).map(x => x.trim());",
+  "try { risky(); } catch (e) { console.error(e.message); }",
+  "const { name, age = 0, ...rest } = payload;",
+  "let total = 0; while (queue.length) total += queue.pop();",
+  "window.addEventListener('resize', () => layout(), { passive: true });"
+];
+
+const DIFF_HINTS = {
+  easy:  "Common short words, all lowercase, no punctuation. Forgiving.",
+  normal:"Common English words, lowercase. A balanced default.",
+  hard:  "Capitals, punctuation and the occasional rare word. Unforgiving.",
+  code:  "Real code snippets with symbols and casing. Brackets galore."
+};
+
+/* Deterministic text from (seed, difficulty, wordCount). */
+function genText(seed, diff, words){
+  const rnd = mulberry32(hashStr(FMT + "|" + diff + "|" + seed));
+  const pick = arr => arr[Math.floor(rnd()*arr.length)];
+  if (diff === "code"){
+    // stitch snippets until we roughly reach the requested "word" budget
+    const parts=[]; let budget = words;
+    while (budget > 0){ const s = pick(CODE_SNIPPETS); parts.push(s); budget -= s.split(/\s+/).length; }
+    return parts.join("\n");
+  }
+  const bank = diff === "easy" ? EASY : diff === "hard" ? HARD_WORDS : NORMAL;
+  const out = [];
+  for (let i=0;i<words;i++){
+    let w = pick(bank);
+    if (diff === "hard"){
+      if (rnd() < 0.18) w = w[0].toUpperCase() + w.slice(1);
+      if (rnd() < 0.22) w = w + pick(HARD_PUNCT);
+    }
+    out.push(w);
+  }
+  return out.join(" ");
+}
+
+/* ---------- global run config / state ---------- */
+const cfg = { seed: "", diff: "normal", words: 30, suddenDeath: false };
+let text = "";
+let charEls = [];          // per-char span elements
+let typed = [];            // status per index: 0 untyped, 1 correct, 2 wrong
+let pos = 0;               // current caret index
+let started = 0;           // timestamp of first keystroke (0 = not started)
+let finished = false;
+let rafId = 0;
+let combo = 0, maxCombo = 0;
+let keyEvents = [];        // {i: charIndex-after, t: ms} recorder timeline (this run)
+let errorPositions = [];   // indices where an error happened (for sparkline marks)
+let wpmSeries = [];        // {t, wpm} sampled for sparkline
+let playingGhost = null;   // ghost object being raced, or null
+
+/* ---------- DOM refs ---------- */
+const $ = id => document.getElementById(id);
+const screens = { menu: $("menuScreen"), race: $("raceScreen"), result: $("resultScreen") };
+const textBox = $("textBox"), hidden = $("hiddenInput");
+const spark = $("spark"), fx = $("fx");
+const sctx = spark.getContext("2d"), fxctx = fx.getContext("2d");
+$("verTag").textContent = "format v" + FMT;
+
+function show(name){
+  for (const k in screens) screens[k].classList.toggle("active", k===name);
+  $("menuBtn").style.display = name === "menu" ? "none" : "inline-block";
+}
+function toast(msg){ const t=$("toast"); t.textContent=msg; t.classList.add("on"); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("on"),1600); }
+
+/* ---------- storage (best scores + ghosts) ---------- */
+const KEY = "palimpsest.v" + FMT;
+function loadStore(){ try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch(e){ return {}; } }
+function saveStore(s){ try { localStorage.setItem(KEY, JSON.stringify(s)); } catch(e){ /* private mode: skip */ } }
+function slotKey(){ return cfg.seed + "::" + cfg.diff + (cfg.suddenDeath ? "::sd" : ""); }
+
+/* ---------- share hash (seed + diff + optional ghost, RLE+base64) ---------- */
+// Ghost timeline is deltas of ms between correct keystrokes. RLE then base64.
+function encodeGhost(g){
+  // deltas
+  const d = [];
+  let prev = 0;
+  for (const e of g.events){ d.push(Math.min(65535, Math.max(0, Math.round(e.t - prev)))); prev = e.t; }
+  // pack as uint16 LE
+  const buf = new Uint8Array(d.length*2);
+  for (let i=0;i<d.length;i++){ buf[i*2]=d[i]&255; buf[i*2+1]=(d[i]>>8)&255; }
+  return b64enc(buf);
+}
+function decodeGhost(str, textLen){
+  try {
+    const buf = b64dec(str);
+    const n = Math.floor(buf.length/2);
+    const events = []; let t=0;
+    for (let i=0;i<n;i++){ const dv = buf[i*2] | (buf[i*2+1]<<8); t += dv; events.push({ i: i+1, t }); }
+    if (events.length < 1 || events.length > textLen) return null;
+    return { events, wpm: 0, fmt: FMT, fromLink: true };
+  } catch(e){ return null; }
+}
+function b64enc(bytes){ let s=""; for (let i=0;i<bytes.length;i++) s+=String.fromCharCode(bytes[i]); return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
+function b64dec(str){ str=str.replace(/-/g,"+").replace(/_/g,"/"); const bin=atob(str); const b=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)b[i]=bin.charCodeAt(i); return b; }
+
+const MAX_HASH = 2000; // cap; fall back to seed-only if the ghost pushes past this
+function buildShareHash(includeGhost, result){
+  const p = new URLSearchParams();
+  p.set("v", FMT);
+  p.set("s", cfg.seed);
+  p.set("d", cfg.diff);
+  p.set("w", cfg.words);
+  if (cfg.suddenDeath) p.set("sd", "1");
+  if (result) p.set("r", Math.round(result.wpm) + "/" + Math.round(result.acc));
+  if (includeGhost){
+    const g = getGhost();
+    if (g){ const enc = encodeGhost(g); const test = p.toString() + "&g=" + enc; if (test.length <= MAX_HASH) p.set("g", enc); }
+  }
+  return "#" + p.toString();
+}
+function parseShareHash(){
+  const h = location.hash.slice(1);
+  if (!h) return null;
+  const p = new URLSearchParams(h);
+  if (!p.get("s")) return null;
+  return {
+    v: +p.get("v") || 1,
+    seed: p.get("s"),
+    diff: ["easy","normal","hard","code"].includes(p.get("d")) ? p.get("d") : "normal",
+    words: Math.min(120, Math.max(8, +p.get("w") || 30)),
+    sd: p.get("sd") === "1",
+    ghostEnc: p.get("g") || null
+  };
+}
+
+/* ---------- ghost record / replay ---------- */
+function getGhost(){ const s = loadStore(); const slot = s[slotKey()]; return slot && slot.ghost ? slot.ghost : null; }
+let linkGhost = null; // ghost carried by a share link (raced but not overwritten unless you beat it)
+
+// Ghost caret position (char index) at time ms.
+function ghostIndexAt(ghost, ms){
+  const ev = ghost.events;
+  if (!ev.length) return 0;
+  // binary search last event with t <= ms
+  let lo=0, hi=ev.length-1, ans=-1;
+  while (lo<=hi){ const mid=(lo+hi)>>1; if (ev[mid].t <= ms){ ans=mid; lo=mid+1; } else hi=mid-1; }
+  return ans<0 ? 0 : ev[ans].i;
+}
+
+/* ---------- stats ---------- */
+function computeStats(){
+  const now = performance.now();
+  const elapsedMin = started ? (now - started)/60000 : 0;
+  const correct = typed.filter(x=>x===1).length;
+  const keystrokes = typed.filter(x=>x!==0).length;
+  const netWpm = elapsedMin > 0 ? (correct/5)/elapsedMin : 0;
+  const rawWpm = elapsedMin > 0 ? (pos/5)/elapsedMin : 0;
+  const acc = keystrokes > 0 ? (correct/keystrokes)*100 : 100;
+  return { netWpm, rawWpm, acc, correct, elapsedMin };
+}
+// consistency = 100 - normalized stddev of inter-keystroke WPM
+function consistency(events){
+  if (events.length < 3) return 100;
+  const gaps=[]; let prev=0;
+  for (const e of events){ gaps.push(Math.max(1, e.t-prev)); prev=e.t; }
+  const inst = gaps.map(g => 12000/g); // char/min→ish wpm per keystroke (60000/5)
+  const mean = inst.reduce((a,b)=>a+b,0)/inst.length;
+  const varr = inst.reduce((a,b)=>a+(b-mean)*(b-mean),0)/inst.length;
+  const cv = Math.sqrt(varr)/(mean||1);
+  return Math.max(0, Math.min(100, Math.round((1 - cv)*100)));
+}
+
+/* ---------- build text into DOM ---------- */
+function renderText(){
+  textBox.querySelectorAll(".ch, .caret").forEach(n=>n.remove());
+  charEls = [];
+  const frag = document.createDocumentFragment();
+  for (let i=0;i<text.length;i++){
+    const c = text[i];
+    const span = document.createElement("span");
+    span.className = "ch" + (c===" "||c==="\n" ? " space" : "");
+    span.textContent = c === "\n" ? "↵\n" : c;
+    frag.appendChild(span);
+    charEls.push(span);
+  }
+  textBox.appendChild(frag);
+  // carets
+  myCaret = document.createElement("div"); myCaret.className="caret"; textBox.appendChild(myCaret);
+  ghostCaret = document.createElement("div"); ghostCaret.className="caret ghost"; ghostCaret.style.display="none"; textBox.appendChild(ghostCaret);
+  positionCaret(myCaret, 0);
+}
+let myCaret, ghostCaret;
+function positionCaret(caret, idx){
+  if (!caret) return;
+  const el = charEls[idx];
+  if (el){ caret.style.left = el.offsetLeft + "px"; caret.style.top = el.offsetTop + "px"; }
+  else if (charEls.length){ const last=charEls[charEls.length-1]; caret.style.left = (last.offsetLeft+last.offsetWidth)+"px"; caret.style.top = last.offsetTop+"px"; }
+}
+
+/* ---------- start / input engine ---------- */
+function startRace(){
+  text = genText(cfg.seed, cfg.diff, cfg.words);
+  typed = new Array(text.length).fill(0);
+  pos = 0; started = 0; finished = false; combo = 0; maxCombo = 0;
+  keyEvents = []; errorPositions = []; wpmSeries = [];
+  playingGhost = linkGhost || getGhost();
+  linkGhost = null; // consume once
+
+  $("flagSeed").textContent = "seed: " + cfg.seed;
+  $("flagDiff").textContent = cfg.diff;
+  $("flagGhost").style.display = playingGhost ? "inline-block" : "none";
+  $("flagSD").style.display = cfg.suddenDeath ? "inline-block" : "none";
+  $("comboTag").classList.remove("on");
+
+  show("race");
+  renderText();
+  ghostCaret.style.display = playingGhost ? "block" : "none";
+  resizeCanvas();
+  hidden.value = "";
+  hidden.focus();
+  loop();
+}
+
+function handleChar(ch){
+  if (finished) return;
+  if (started === 0) started = performance.now();
+  const expected = text[pos];
+  const correct = ch === expected;
+  typed[pos] = correct ? 1 : 2;
+  charEls[pos].classList.remove("done","wrong");
+  charEls[pos].classList.add(correct ? "done" : "wrong");
+
+  if (correct){
+    combo++; maxCombo = Math.max(maxCombo, combo);
+    keyEvents.push({ i: pos+1, t: performance.now() - started });
+    if (combo >= 8 && combo % 4 === 0){ burst(pos); shakeBox(); }
+    updateCombo();
+  } else {
+    combo = 0; updateCombo();
+    errorPositions.push(pos);
+    shakeBox();
+  }
+  pos++;
+  positionCaret(myCaret, pos);
+  if (pos >= text.length) finish();
+}
+
+function handleBackspace(){
+  if (cfg.suddenDeath || finished || pos === 0) return;
+  pos--;
+  typed[pos] = 0;
+  charEls[pos].classList.remove("done","wrong");
+  positionCaret(myCaret, pos);
+  combo = 0; updateCombo();
+}
+
+function updateCombo(){
+  const tag = $("comboTag");
+  if (combo >= 5){ tag.textContent = combo + "x combo"; tag.classList.add("on"); }
+  else tag.classList.remove("on");
+}
+function shakeBox(){ textBox.classList.remove("shake"); void textBox.offsetWidth; textBox.classList.add("shake"); }
+
+// keyboard
+hidden.addEventListener("keydown", e => {
+  if (e.key === "Escape"){ bail(); return; }
+  if (e.key === "Backspace"){ e.preventDefault(); handleBackspace(); return; }
+  if (e.key === "Enter"){ if (text[pos] === "\n"){ e.preventDefault(); handleChar("\n"); } return; }
+  if (e.key.length === 1){ e.preventDefault(); handleChar(e.key); }
+});
+textBox.addEventListener("mousedown", () => { if (!finished) hidden.focus(); });
+
+function bail(){ cancelAnimationFrame(rafId); finished = true; show("menu"); refreshMenu(); }
+$("menuBtn").onclick = bail;
+
+/* ---------- main animation loop (stats + carets + sparkline) ---------- */
+let lastSample = 0;
+function loop(){
+  rafId = requestAnimationFrame(loop);
+  const now = performance.now();
+  const st = computeStats();
+  $("sWpm").textContent = Math.round(st.netWpm);
+  $("sAcc").textContent = Math.round(st.acc) + "%";
+  $("sProg").textContent = Math.round((pos/text.length)*100) + "%";
+
+  // ghost caret + gap
+  if (playingGhost && started){
+    const gms = now - started;
+    const gi = ghostIndexAt(playingGhost, gms);
+    positionCaret(ghostCaret, Math.min(gi, text.length));
+    const gap = pos - gi;
+    const gapEl = $("sGap");
+    if (gap > 0){ gapEl.textContent = "+" + gap + " ahead"; gapEl.style.color = "var(--ok)"; }
+    else if (gap < 0){ gapEl.textContent = gap + " behind"; gapEl.style.color = "var(--err)"; }
+    else { gapEl.textContent = "even"; gapEl.style.color = "var(--ghost)"; }
+  } else {
+    $("sGap").textContent = "—";
+  }
+
+  // sample wpm ~10hz for the sparkline
+  if (started && now - lastSample > 100){
+    lastSample = now;
+    wpmSeries.push({ t: now - started, wpm: st.netWpm });
+    if (wpmSeries.length > 600) wpmSeries.shift();
+  }
+
+  drawSpark();
+  stepParticles();
+}
+
+/* ---------- canvas: sparkline ---------- */
+function resizeCanvas(){
+  for (const cv of [spark, fx]){
+    const w = cv.parentElement.clientWidth;
+    const dpr = window.devicePixelRatio || 1;
+    cv.width = w*dpr; cv.height = 90*dpr;
+    cv.style.height = "90px";
+    cv.getContext("2d").setTransform(dpr,0,0,dpr,0,0);
+  }
+}
+window.addEventListener("resize", () => { if (screens.race.classList.contains("active")) resizeCanvas(); });
+
+function drawSpark(){
+  const w = spark.width / (window.devicePixelRatio||1);
+  const h = 90;
+  sctx.clearRect(0,0,w,h);
+  // baseline grid
+  sctx.strokeStyle = "#211e2a"; sctx.lineWidth = 1;
+  for (let y=1;y<3;y++){ const yy=(h/3)*y; sctx.beginPath(); sctx.moveTo(0,yy); sctx.lineTo(w,yy); sctx.stroke(); }
+  if (wpmSeries.length < 2) return;
+  const maxWpm = Math.max(60, ...wpmSeries.map(p=>p.wpm)) * 1.1;
+  const maxT = wpmSeries[wpmSeries.length-1].t || 1;
+  const X = t => (t/maxT)*(w-4)+2;
+  const Y = v => h-6 - (v/maxWpm)*(h-14);
+  // fill
+  sctx.beginPath(); sctx.moveTo(X(wpmSeries[0].t), h);
+  for (const p of wpmSeries) sctx.lineTo(X(p.t), Y(p.wpm));
+  sctx.lineTo(X(wpmSeries[wpmSeries.length-1].t), h); sctx.closePath();
+  const grad = sctx.createLinearGradient(0,0,0,h);
+  grad.addColorStop(0,"rgba(255,97,0,.28)"); grad.addColorStop(1,"rgba(255,97,0,0)");
+  sctx.fillStyle = grad; sctx.fill();
+  // line
+  sctx.beginPath(); sctx.strokeStyle = "#ff6100"; sctx.lineWidth = 2;
+  wpmSeries.forEach((p,i)=>{ const x=X(p.t), y=Y(p.wpm); i?sctx.lineTo(x,y):sctx.moveTo(x,y); });
+  sctx.stroke();
+  // error marks along bottom
+  sctx.fillStyle = "#ff5566";
+  const totalKeys = Math.max(1, pos);
+  for (const ei of errorPositions){ const x = (ei/totalKeys)* (w-4)+2; sctx.fillRect(x, h-4, 2, 4); }
+}
+
+/* ---------- canvas: particles ---------- */
+let particles = [];
+function burst(idx){
+  const el = charEls[idx]; if (!el) return;
+  const boxRect = textBox.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  // map to fx canvas (fx overlays sparkWrap, not textbox) — emit from top center as celebratory
+  const cx = fx.clientWidth * (Math.random()*0.6+0.2);
+  const cy = 45;
+  const n = Math.min(14, 6 + Math.floor(combo/4));
+  for (let i=0;i<n && particles.length<160;i++){
+    const a = Math.random()*Math.PI*2, sp = 1+Math.random()*3;
+    particles.push({ x:cx, y:cy, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp-1, life:1, c: Math.random()<0.5?"#ff6100":"#7c5cff" });
+  }
+}
+function stepParticles(){
+  const w = fx.width/(window.devicePixelRatio||1), h=90;
+  fxctx.clearRect(0,0,w,h);
+  if (!particles.length) return;
+  for (const p of particles){ p.x+=p.vx; p.y+=p.vy; p.vy+=0.12; p.life-=0.03; }
+  particles = particles.filter(p=>p.life>0);
+  for (const p of particles){ fxctx.globalAlpha=Math.max(0,p.life); fxctx.fillStyle=p.c; fxctx.beginPath(); fxctx.arc(p.x,p.y,2.2,0,7); fxctx.fill(); }
+  fxctx.globalAlpha=1;
+}
+
+/* ---------- finish + results ---------- */
+let lastResult = null;
+function finish(){
+  finished = true; cancelAnimationFrame(rafId);
+  const st = computeStats();
+  const cons = consistency(keyEvents);
+  const seconds = st.elapsedMin*60;
+  lastResult = { wpm: st.netWpm, raw: st.rawWpm, acc: st.acc, cons, seconds, maxCombo,
+                 events: keyEvents.slice(), errors: errorPositions.slice(), text };
+
+  // save best + ghost
+  const store = loadStore();
+  const slot = store[slotKey()] || { best: [], ghost: null };
+  slot.best.push({ wpm: Math.round(st.netWpm), acc: Math.round(st.acc), when: Date.now() });
+  slot.best.sort((a,b)=> b.wpm - a.wpm);
+  slot.best = slot.best.slice(0,8);
+  // ghost = fastest clean-ish run. Overwrite if faster than stored ghost.
+  const beatGhost = playingGhost ? st.netWpm >= (playingGhost.wpm||0) : true;
+  if (!slot.ghost || st.netWpm > (slot.ghost.wpm||0)){
+    slot.ghost = { events: keyEvents.slice(), wpm: Math.round(st.netWpm), fmt: FMT };
+  }
+  store[slotKey()] = slot;
+  saveStore(store);
+
+  // verdict
+  const v = $("verdict");
+  if (playingGhost){
+    if (beatGhost){ v.innerHTML = "👻 You <b style='color:var(--ok)'>beat the ghost</b> — it fades."; }
+    else { v.innerHTML = "👻 The <b style='color:var(--err)'>ghost wins</b> — it haunts your next run."; }
+  } else {
+    v.innerHTML = "First run on this seed — <b style='color:var(--accent)'>you are now the ghost.</b>";
+  }
+  $("rWpm").textContent = Math.round(st.netWpm);
+  $("rWpm").className = "bignum " + (playingGhost ? (beatGhost?"win":"lose") : "");
+  $("rRaw").textContent = Math.round(st.rawWpm);
+  $("rAcc").textContent = Math.round(st.acc) + "%";
+  $("rCons").textContent = cons + "%";
+  $("rTime").textContent = seconds.toFixed(1) + "s";
+
+  renderBestList(slot.best);
+  setupReplay();
+  show("result");
+}
+
+function renderBestList(best){
+  const ul = $("bestList"); ul.innerHTML="";
+  if (!best.length){ ul.innerHTML="<li>No scores yet.</li>"; return; }
+  const mine = lastResult ? Math.round(lastResult.wpm) : -1;
+  let flagged=false;
+  best.forEach((b,i)=>{
+    const li=document.createElement("li");
+    const isYou = !flagged && b.wpm===mine; if (isYou) flagged=true;
+    if (isYou) li.className="you";
+    li.innerHTML = `<span>#${i+1} &nbsp; <b>${b.wpm}</b> wpm · ${b.acc}%</span><span>${new Date(b.when).toLocaleDateString()}</span>`;
+    ul.appendChild(li);
+  });
+}
+
+/* ---------- replay scrubber (your run + ghost) ---------- */
+let replayEls=[], replayCaret, replayGhostCaret, replayDur=0, replayPlaying=false, replayStart=0;
+function setupReplay(){
+  const box=$("replayBox"); box.innerHTML="";
+  replayEls=[];
+  for (let i=0;i<lastResult.text.length;i++){
+    const s=document.createElement("span"); s.className="ch"; s.style.color="var(--dim)";
+    s.textContent = lastResult.text[i]==="\n" ? "↵\n" : lastResult.text[i];
+    box.appendChild(s); replayEls.push(s);
+  }
+  replayCaret=document.createElement("div"); replayCaret.className="caret"; box.appendChild(replayCaret);
+  const gh = playingGhost;
+  if (gh){ replayGhostCaret=document.createElement("div"); replayGhostCaret.className="caret ghost"; box.appendChild(replayGhostCaret); }
+  else replayGhostCaret=null;
+  replayDur = Math.max(lastResult.events.length?lastResult.events[lastResult.events.length-1].t:0, gh&&gh.events.length?gh.events[gh.events.length-1].t:0) || 1;
+  $("scrub").value=0; renderReplayAt(0);
+}
+function idxAt(events, ms){ let ans=0; for (const e of events){ if (e.t<=ms) ans=e.i; else break; } return ans; }
+function renderReplayAt(ms){
+  const yi = idxAt(lastResult.events, ms);
+  for (let i=0;i<replayEls.length;i++) replayEls[i].style.color = i<yi ? "var(--ink)" : "var(--dim)";
+  posReplayCaret(replayCaret, yi);
+  if (replayGhostCaret && playingGhost){ posReplayCaret(replayGhostCaret, Math.min(idxAt(playingGhost.events, ms), replayEls.length)); }
+  $("scrubT").textContent = (ms/1000).toFixed(1)+"s";
+}
+function posReplayCaret(caret, idx){ const el=replayEls[idx]; if (el){ caret.style.left=el.offsetLeft+"px"; caret.style.top=el.offsetTop+"px"; } else if (replayEls.length){ const l=replayEls[replayEls.length-1]; caret.style.left=(l.offsetLeft+l.offsetWidth)+"px"; caret.style.top=l.offsetTop+"px"; } }
+$("scrub").addEventListener("input", e => { replayPlaying=false; $("playBtn").textContent="▶ replay"; renderReplayAt((e.target.value/1000)*replayDur); });
+$("playBtn").onclick = () => {
+  replayPlaying = !replayPlaying;
+  $("playBtn").textContent = replayPlaying ? "⏸ pause" : "▶ replay";
+  if (replayPlaying){ replayStart = performance.now() - ($("scrub").value/1000)*replayDur; tickReplay(); }
+};
+function tickReplay(){
+  if (!replayPlaying) return;
+  const ms = performance.now()-replayStart;
+  if (ms>=replayDur){ renderReplayAt(replayDur); $("scrub").value=1000; replayPlaying=false; $("playBtn").textContent="▶ replay"; return; }
+  $("scrub").value = (ms/replayDur)*1000; renderReplayAt(ms);
+  requestAnimationFrame(tickReplay);
+}
+
+/* ---------- menu wiring ---------- */
+function refreshMenu(){
+  // diff seg
+  $("diffSeg").querySelectorAll("button").forEach(b=> b.classList.toggle("on", b.dataset.diff===cfg.diff));
+  $("diffHint").textContent = DIFF_HINTS[cfg.diff];
+  $("sdToggle").checked = cfg.suddenDeath;
+  $("seedInput").value = cfg.seed;
+  $("lenInput").value = cfg.words;
+  const g = getGhost();
+  $("ghostStatus").textContent = g
+    ? `Ghost found: ${g.wpm} wpm best on this seed + difficulty. Beat it and it fades.`
+    : (linkGhost ? "A ghost from a share link is loaded — race the sender's shadow." : "No ghost recorded for this seed + difficulty yet. Your first clean run becomes the ghost.");
+}
+$("diffSeg").addEventListener("click", e => { const b=e.target.closest("button"); if (!b) return; cfg.diff=b.dataset.diff; refreshMenu(); });
+$("sdToggle").addEventListener("change", e => { cfg.suddenDeath=e.target.checked; refreshMenu(); });
+$("seedInput").addEventListener("input", e => { cfg.seed=e.target.value.trim(); });
+$("lenInput").addEventListener("input", e => { cfg.words = Math.min(120, Math.max(8, +e.target.value||30)); });
+$("randSeed").onclick = () => { cfg.seed = randomSeed(); $("seedInput").value=cfg.seed; refreshMenu(); };
+function randomSeed(){ const a=["maple","amber","quartz","echo","nova","drift","ember","lumen","vex","onyx","koi","sable"]; const rnd=Math.random; return a[Math.floor(rnd()*a.length)] + "-" + Math.floor(rnd()*1000); }
+
+$("startBtn").onclick = () => { if (!cfg.seed) cfg.seed = randomSeed(); startRace(); };
+$("againBtn").onclick = () => startRace();
+$("toMenuBtn").onclick = () => { show("menu"); refreshMenu(); };
+$("shareMenuBtn").onclick = () => copyShare(false);
+$("shareResultBtn").onclick = () => copyShare(true);
+
+function copyShare(withGhost){
+  if (!cfg.seed) cfg.seed = randomSeed();
+  const hash = buildShareHash(withGhost, lastResult ? { wpm:lastResult.wpm, acc:lastResult.acc } : null);
+  const url = location.origin + location.pathname + hash;
+  const carriedGhost = withGhost && hash.includes("&g=");
+  const done = ok => toast(ok ? (carriedGhost ? "Link + ghost copied!" : "Share link copied!") : "Copy failed — link in address bar");
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).then(()=>done(true)).catch(()=>{ location.hash=hash; done(false); });
+  } else { location.hash=hash; done(false); }
+}
+
+/* ---------- boot: apply share link if present ---------- */
+function boot(){
+  const link = parseShareHash();
+  if (link){
+    cfg.seed = link.seed; cfg.diff = link.diff; cfg.words = link.words; cfg.suddenDeath = link.sd;
+    if (link.ghostEnc){
+      const gtext = genText(cfg.seed, cfg.diff, cfg.words);
+      const g = decodeGhost(link.ghostEnc, gtext.length);
+      if (g){ linkGhost = g; }
+    }
+  } else {
+    cfg.seed = randomSeed();
+  }
+  refreshMenu();
+  show("menu");
+}
+boot();
+</script>
+</body>
+</html>

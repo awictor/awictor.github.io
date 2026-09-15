@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reading Time Estimator — how long to read or say your text</title>
+<meta name="description" content="Estimate reading time and speaking time from your text, with word and character counts and an adjustable reading speed. Offline, no tracking.">
+<style>
+  :root{
+    --c:#b91c1c;
+    --bg:#fdf2f2; --card:#ffffff; --fg:#26100f; --muted:#6e4b4a;
+    --line:#f2dada; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#170808; --card:#210d0c; --fg:#f6e4e3; --muted:#c69b9a;
+    --line:#341615; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:800px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:800px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  textarea{width:100%;min-height:150px;font:inherit;font-size:1rem;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);resize:vertical}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .speed{margin-top:14px;display:flex;align-items:center;gap:10px}
+  .speed input{flex:1}
+  .speed b{font-variant-numeric:tabular-nums}
+  .out{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
+  .res{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:16px;text-align:center}
+  .res .n{font-size:1.9rem;font-weight:800;color:var(--c)}
+  .res .k{font-size:.76rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:3px}
+  .counts{margin-top:14px;color:var(--muted);font-size:.9rem;text-align:center}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">📖</div>
+  <div>
+    <h1>Reading Time Estimator</h1>
+    <p>How long to read — or say — your text</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <label>Paste your text</label>
+    <textarea id="in" spellcheck="false">Paste an article, blog post, or script here to estimate how long it takes to read and to read aloud.</textarea>
+    <div class="speed">
+      <label style="margin:0">Reading speed</label>
+      <input id="wpm" type="range" min="100" max="400" step="10" value="238">
+      <b><span id="wpmVal">238</span> wpm</b>
+    </div>
+    <div class="out">
+      <div class="res"><div class="n" id="read">—</div><div class="k">reading time</div></div>
+      <div class="res"><div class="n" id="speak">—</div><div class="k">speaking time (aloud)</div></div>
+    </div>
+    <div class="counts" id="counts"></div>
+  </div>
+
+  <div class="card">
+    <h2>How it's estimated</h2>
+    <p class="note">Reading time is simply <b>word count ÷ reading speed</b>. Silent reading of ordinary prose averages around <b>238 words per minute</b> (the slider lets you adjust for your audience — slower for technical or ESL readers). <b>Speaking time</b> uses a slower ~<b>130 wpm</b>, the comfortable pace for reading aloud or presenting — handy for timing a speech or video script. These are estimates; dense or unfamiliar material reads slower. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var SPEAK_WPM = 130;
+  // Word count: runs of non-whitespace.
+  function countWords(text){
+    if(typeof text !== 'string') throw new Error('text must be a string');
+    var m = text.trim().match(/\S+/g);
+    return m ? m.length : 0;
+  }
+  // Reading time in minutes (float) for the given words-per-minute.
+  function readingTime(text, wpm){
+    wpm = wpm == null ? 238 : wpm;
+    if(typeof wpm !== 'number' || !isFinite(wpm) || wpm <= 0) throw new Error('wpm must be a positive number');
+    return countWords(text) / wpm;
+  }
+  // Speaking (aloud) time in minutes.
+  function speakingTime(text, wpm){ return readingTime(text, wpm == null ? SPEAK_WPM : wpm); }
+  // Human-readable label for a duration in minutes.
+  function humanize(minutes){
+    if(typeof minutes !== 'number' || !isFinite(minutes) || minutes < 0) throw new Error('minutes must be zero or more');
+    if(minutes === 0) return '0 min';
+    if(minutes < 1){ var s = Math.max(1, Math.round(minutes * 60)); return s + ' sec'; }
+    var mins = Math.floor(minutes), secs = Math.round((minutes - mins) * 60);
+    if(secs === 60){ mins++; secs = 0; }
+    return secs ? mins + ' min ' + secs + ' sec' : mins + ' min';
+  }
+
+  if(typeof module !== 'undefined') module.exports = { SPEAK_WPM:SPEAK_WPM, countWords:countWords, readingTime:readingTime, speakingTime:speakingTime, humanize:humanize };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    function render(){
+      var text = document.getElementById('in').value;
+      var wpm = +document.getElementById('wpm').value;
+      document.getElementById('wpmVal').textContent = wpm;
+      var words = countWords(text);
+      document.getElementById('read').textContent = humanize(readingTime(text, wpm));
+      document.getElementById('speak').textContent = humanize(speakingTime(text));
+      document.getElementById('counts').textContent = words.toLocaleString() + ' words · ' + text.length.toLocaleString() + ' characters';
+    }
+    document.getElementById('in').addEventListener('input', render);
+    document.getElementById('wpm').addEventListener('input', render);
+    render();
+
+    var root=document.documentElement, tb=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); tb.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('readtime-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('readtime-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

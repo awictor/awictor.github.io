@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beaufort — Wind Speed to Beaufort Scale</title>
+<meta name="description" content="Convert a wind speed (mph, km/h, knots, m/s) to its Beaufort force number, name, and description. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('beaufort-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#0891b2;
+    --bg:#f4f7f8; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e2e6e8; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#0d1416; --card:#161f22; --fg:#eef4f5; --muted:#92a1a5; --line:#233033; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:680px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#0e7490);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:680px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  .pair{display:grid;grid-template-columns:2fr 1fr;gap:10px}
+  input,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  .out{text-align:center;margin-top:4px}
+  .force{font-size:3.2rem;font-weight:800;color:var(--c);letter-spacing:-1px}
+  .name{font-size:1.4rem;font-weight:700}
+  .desc{color:var(--muted);margin-top:6px}
+  .conv{color:var(--muted);font-size:.82rem;margin-top:10px}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:680px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🌬️</div>
+    <div><h1>Beaufort</h1><div class="sub">Wind speed → Beaufort force</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="speed">Wind speed</label>
+    <div class="pair">
+      <input type="number" id="speed" value="25" step="any" min="0">
+      <select id="unit"><option value="mph" selected>mph</option><option value="kmh">km/h</option><option value="knots">knots</option><option value="mps">m/s</option></select>
+    </div>
+  </div>
+  <div class="card out">
+    <div class="force" id="force">—</div>
+    <div class="name" id="name"></div>
+    <div class="desc" id="desc"></div>
+    <div class="conv" id="conv"></div>
+  </div>
+</main>
+<footer>
+  Beaufort wind force scale (0–12). 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/beaufort">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  const UNITS = { mps: 1, kmh: 1 / 3.6, mph: 0.44704, knots: 0.514444 };
+
+  function toMs(value, unit){
+    if(!(UNITS[unit])) throw new Error('unknown unit: ' + unit);
+    if(!(value >= 0)) throw new Error('speed must be non-negative');
+    return value * UNITS[unit];
+  }
+
+  // lower bound (m/s) for each Beaufort force
+  const LOWER = [0, 0.5, 1.6, 3.4, 5.5, 8.0, 10.8, 13.9, 17.2, 20.8, 24.5, 28.5, 32.7];
+  const NAMES = ['Calm', 'Light air', 'Light breeze', 'Gentle breeze', 'Moderate breeze', 'Fresh breeze', 'Strong breeze', 'Near gale', 'Gale', 'Strong gale', 'Storm', 'Violent storm', 'Hurricane force'];
+  const DESC = [
+    'Smoke rises vertically; sea like a mirror.',
+    'Smoke drifts; ripples on the water.',
+    'Leaves rustle; small wavelets.',
+    'Leaves and twigs in motion; large wavelets, some whitecaps.',
+    'Dust and loose paper rise; small waves, frequent whitecaps.',
+    'Small trees sway; moderate longer waves, many whitecaps.',
+    'Large branches move; large waves, extensive foam.',
+    'Whole trees in motion; sea heaps up, foam blown in streaks.',
+    'Twigs break off; moderately high waves, edges break into spindrift.',
+    'Slight structural damage; high waves, dense foam, spray affects visibility.',
+    'Trees uprooted; very high waves, sea white with foam.',
+    'Widespread damage; exceptionally high waves.',
+    'Severe devastation; air filled with foam and spray, sea completely white.'
+  ];
+
+  function beaufort(speedMs){
+    if(!(speedMs >= 0)) throw new Error('speed must be non-negative');
+    let force = 0;
+    for(let f = 0; f < LOWER.length; f++) if(speedMs >= LOWER[f]) force = f;
+    return { force, name: NAMES[force], description: DESC[force] };
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('force')){
+    const $ = id => document.getElementById(id);
+    function render(){
+      try{
+        const ms = toMs(+$('speed').value, $('unit').value);
+        const b = beaufort(ms);
+        $('force').textContent = 'Force ' + b.force;
+        $('name').textContent = b.name;
+        $('desc').textContent = b.description;
+        $('conv').textContent = `${ms.toFixed(1)} m/s · ${(ms * 3.6).toFixed(1)} km/h · ${(ms / 0.44704).toFixed(1)} mph · ${(ms / 0.514444).toFixed(1)} kn`;
+      }catch(e){ $('force').textContent = '—'; $('name').textContent = ''; $('desc').textContent = e.message; $('conv').textContent = ''; }
+    }
+    ['speed', 'unit'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('beaufort-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { UNITS, toMs, beaufort };
+</script>
+</body>
+</html>

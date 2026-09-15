@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SchemaGen — JSON to JSON Schema generator</title>
+<meta name="description" content="Free offline JSON Schema generator. Paste a JSON sample and get a draft-07 JSON Schema — recursive type inference, required fields, array item merging. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/json-schema-gen/">
+<style>
+  :root{
+    --c:#0e7490; --bg:#f8f8f9; --fg:#18181b; --muted:#52525b;
+    --card:#ffffff; --border:#e4e4e7; --code:#efeff1; --bad:#dc2626;
+  }
+  [data-theme="dark"]{
+    --bg:#09090b; --fg:#e7e7ea; --muted:#8b8b93; --card:#151518;
+    --border:#27272a; --code:#1c1c20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:900px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#06b6d4);display:grid;place-items:center;color:#fff;font-size:16px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:900px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+  .copy{background:none;border:1px solid var(--border);color:var(--fg);border-radius:8px;padding:5px 10px;cursor:pointer;font-size:.8rem}
+  textarea,pre{width:100%;min-height:340px;padding:12px 14px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:.9rem;line-height:1.55;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  textarea{resize:vertical}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  pre{margin:0;background:var(--code);overflow:auto;white-space:pre;resize:vertical}
+  .err{color:var(--bad);font-size:.84rem;margin-top:8px;min-height:20px;font-family:ui-monospace,monospace}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:900px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+  @media(max-width:640px){.cols{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('jsg.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">{}</div>
+  <div>
+    <h1>SchemaGen</h1>
+    <p class="sub">JSON → JSON Schema generator</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <div class="cols">
+      <div>
+        <label for="in">JSON sample</label>
+        <textarea id="in" spellcheck="false">{
+  "id": 42,
+  "name": "Alex",
+  "active": true,
+  "score": 9.5,
+  "tags": ["a", "b"],
+  "address": { "city": "Seattle", "zip": "98101" },
+  "nickname": null
+}</textarea>
+      </div>
+      <div>
+        <div class="top"><label style="margin:0" for="out">JSON Schema (draft-07)</label>
+          <button class="copy" id="copy">Copy</button></div>
+        <pre id="out"></pre>
+      </div>
+    </div>
+    <div class="err" id="err"></div>
+    <p class="hint">Types are inferred recursively: whole numbers become <code style="font-family:ui-monospace">integer</code>,
+      object keys become <code style="font-family:ui-monospace">properties</code> and are all marked
+      <code style="font-family:ui-monospace">required</code>, and array items are merged (mixed scalar types collapse to a
+      type list, mixed shapes to <code style="font-family:ui-monospace">anyOf</code>). Runs 100% locally.</p>
+  </div>
+</main>
+<footer>
+  SchemaGen is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/json-schema-gen">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function stableStringify(v){
+  if(v === null) return 'null';
+  if(Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
+  if(typeof v === 'object'){
+    var keys = Object.keys(v).sort();
+    return '{' + keys.map(function(k){ return JSON.stringify(k) + ':' + stableStringify(v[k]); }).join(',') + '}';
+  }
+  return JSON.stringify(v);
+}
+
+function inferSchema(value){
+  if(value === null) return { type: 'null' };
+  if(Array.isArray(value)){
+    if(value.length === 0) return { type: 'array', items: {} };
+    return { type: 'array', items: mergeSchemas(value.map(inferSchema)) };
+  }
+  var t = typeof value;
+  if(t === 'boolean') return { type: 'boolean' };
+  if(t === 'number') return { type: Number.isInteger(value) ? 'integer' : 'number' };
+  if(t === 'string') return { type: 'string' };
+  if(t === 'object'){
+    var props = {}, required = [];
+    Object.keys(value).forEach(function(k){ props[k] = inferSchema(value[k]); required.push(k); });
+    return { type: 'object', properties: props, required: required };
+  }
+  return {}; // undefined / function -> permissive
+}
+
+function mergeSchemas(schemas){
+  var uniq = [], seen = {};
+  schemas.forEach(function(s){ var k = stableStringify(s); if(!seen[k]){ seen[k] = 1; uniq.push(s); } });
+  if(uniq.length === 0) return {};
+  if(uniq.length === 1) return uniq[0];
+  var allScalar = uniq.every(function(s){ return Object.keys(s).length === 1 && typeof s.type === 'string'; });
+  if(allScalar){
+    var types = uniq.map(function(s){ return s.type; }).sort();
+    return { type: types };
+  }
+  return { anyOf: uniq };
+}
+
+function jsonToSchema(text){
+  var data = JSON.parse(text);
+  var schema = inferSchema(data);
+  var out = { '$schema': 'http://json-schema.org/draft-07/schema#' };
+  Object.keys(schema).forEach(function(k){ out[k] = schema[k]; });
+  return out;
+}
+
+if(typeof module !== 'undefined') module.exports = { stableStringify, inferSchema, mergeSchemas, jsonToSchema };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var inEl = document.getElementById('in');
+  var outEl = document.getElementById('out');
+  var errEl = document.getElementById('err');
+
+  function render(){
+    var txt = inEl.value;
+    try{
+      var schema = jsonToSchema(txt);
+      outEl.textContent = JSON.stringify(schema, null, 2);
+      errEl.textContent = '';
+    }catch(e){
+      errEl.textContent = 'Invalid JSON: ' + e.message;
+    }
+    try{ localStorage.setItem('jsg.in', txt); }catch(e){}
+  }
+  inEl.addEventListener('input', render);
+  document.getElementById('copy').addEventListener('click', function(){
+    if(navigator.clipboard) navigator.clipboard.writeText(outEl.textContent);
+  });
+  try{ var s = localStorage.getItem('jsg.in'); if(s !== null) inEl.value = s; }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('jsg.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('jsg.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

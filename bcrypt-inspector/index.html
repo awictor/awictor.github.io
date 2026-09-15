@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bcrypt Inspector — parse a bcrypt hash</title>
+<meta name="description" content="Break a bcrypt hash into its parts — variant, cost factor, salt, and hash — and see the work factor (2^cost). Audit password-storage strength. Offline, no tracking.">
+<style>
+  :root{
+    --c:#6d28d9;
+    --bg:#f7f5fc; --card:#ffffff; --fg:#181425; --muted:#68627e;
+    --line:#e8e3f3; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#120f1c; --card:#1c1729; --fg:#eeebf7; --muted:#a39bba;
+    --line:#2f2a44; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:800px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:14px;font-weight:800;color:#fff;flex:0 0 auto;font-family:ui-monospace,monospace}
+  h1{font-size:1.4rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:800px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.82rem;font-weight:600;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+  input[type=text]{width:100%;font:inherit;font-family:ui-monospace,Menlo,Consolas,monospace;padding:12px;
+    border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .viz{font-family:ui-monospace,monospace;word-break:break-all;margin-top:14px;font-size:1.05rem;line-height:1.9}
+  .seg{padding:2px 3px;border-radius:5px}
+  .v-var{background:#ddd6fe;color:#5b21b6} .v-cost{background:#fde68a;color:#92400e}
+  .v-salt{background:#bbf7d0;color:#166534} .v-hash{background:#bfdbfe;color:#1e40af}
+  [data-theme="dark"] .v-var{background:#4c1d95;color:#ddd6fe}
+  [data-theme="dark"] .v-cost{background:#78350f;color:#fde68a}
+  [data-theme="dark"] .v-salt{background:#14532d;color:#bbf7d0}
+  [data-theme="dark"] .v-hash{background:#1e3a8a;color:#bfdbfe}
+  table{width:100%;border-collapse:collapse;margin-top:14px}
+  td{padding:9px 10px;border-bottom:1px solid var(--line);font-size:.92rem}
+  td:first-child{color:var(--muted);width:40%}
+  td.mono{font-family:ui-monospace,monospace;word-break:break-all}
+  .err{color:#dc2626;font-size:.9rem;margin-top:10px;min-height:18px}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">$2b</div>
+  <div>
+    <h1>Bcrypt Inspector</h1>
+    <p>Parse a bcrypt hash &amp; read its work factor</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <label for="in">Bcrypt hash</label>
+    <input type="text" id="in" spellcheck="false" value="$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy">
+    <div class="viz" id="viz"></div>
+    <div class="err" id="err"></div>
+    <table id="tbl" style="display:none">
+      <tbody>
+        <tr><td>Algorithm</td><td class="mono" id="algo"></td></tr>
+        <tr><td>Variant</td><td class="mono" id="variant"></td></tr>
+        <tr><td>Cost factor</td><td class="mono" id="cost"></td></tr>
+        <tr><td>Work factor (2^cost)</td><td class="mono" id="rounds"></td></tr>
+        <tr><td>Salt (22 chars)</td><td class="mono" id="salt"></td></tr>
+        <tr><td>Hash (31 chars)</td><td class="mono" id="hash"></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Reading a bcrypt hash</h2>
+    <p class="note">Format: <code>$2<b>&lt;variant&gt;</b>$<b>&lt;cost&gt;</b>$<b>&lt;22-char salt&gt;&lt;31-char hash&gt;</b></code>. The <b>cost factor</b> sets 2^cost key-expansion rounds — each +1 doubles the work. Cost 10 = 1,024 rounds; a modern recommendation is 12+ (4,096+). Higher cost = slower to crack but slower to verify. Variants (2a/2b/2x/2y) are compatibility tags; 2b is current.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var RE = /^\$(2[abxy])\$(\d{2})\$([.\/A-Za-z0-9]{22})([.\/A-Za-z0-9]{31})$/;
+  function isBcrypt(str){ return RE.test(String(str).trim()); }
+  function parseBcrypt(str){
+    var m = RE.exec(String(str).trim());
+    if(!m) throw new Error('not a valid bcrypt hash');
+    var cost = parseInt(m[2], 10);
+    return {
+      algorithm: 'bcrypt',
+      variant: m[1],
+      cost: cost,
+      rounds: Math.pow(2, cost),
+      salt: m[3],
+      hash: m[4]
+    };
+  }
+
+  if(typeof module !== 'undefined') module.exports = { isBcrypt:isBcrypt, parseBcrypt:parseBcrypt };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var inp=document.getElementById('in'), viz=document.getElementById('viz'), err=document.getElementById('err'), tbl=document.getElementById('tbl');
+    function render(){
+      try{
+        var p = parseBcrypt(inp.value);
+        err.textContent=''; tbl.style.display='';
+        viz.innerHTML = '<span class="seg v-var">$' + p.variant + '</span>$<span class="seg v-cost">' + p.cost
+          + '</span>$<span class="seg v-salt">' + p.salt + '</span><span class="seg v-hash">' + p.hash + '</span>';
+        document.getElementById('algo').textContent = 'bcrypt';
+        document.getElementById('variant').textContent = '$' + p.variant + '$';
+        document.getElementById('cost').textContent = p.cost;
+        document.getElementById('rounds').textContent = p.rounds.toLocaleString() + ' rounds';
+        document.getElementById('salt').textContent = p.salt;
+        document.getElementById('hash').textContent = p.hash;
+      }catch(e){ err.textContent = '✗ ' + e.message; tbl.style.display='none'; viz.innerHTML=''; }
+    }
+    inp.addEventListener('input', render);
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('bcrypt-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('bcrypt-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+
+    render();
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kigo — a poem loom</title>
+<style>
+  :root{
+    --bg:#f2f5ec; --ink:#3a4a3f; --accent:#7fa86a; --sat:1; --bri:1;
+    --paper:#ffffff;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:Georgia,"Iowan Old Style",Palatino,serif;
+    min-height:100vh;
+    display:flex; align-items:center; justify-content:center;
+    padding:32px 20px; line-height:1.7;
+    transition:background .8s ease, color .8s ease;
+    -webkit-font-smoothing:antialiased;
+  }
+  .paper{
+    width:100%; max-width:600px;
+    filter:saturate(var(--sat)) brightness(var(--bri));
+    transition:filter .8s ease;
+  }
+  header{text-align:center; margin-bottom:26px}
+  h1{font-size:15px; letter-spacing:.42em; text-transform:uppercase;
+     font-weight:400; margin:0; opacity:.55}
+  .sub{font-size:12.5px; opacity:.42; margin-top:6px; letter-spacing:.02em; font-style:italic}
+
+  .dial{display:flex; flex-direction:column; gap:8px; align-items:center; margin-bottom:30px}
+  .seg{display:flex; gap:2px; flex-wrap:wrap; justify-content:center; align-items:center}
+  .seg .axis{font-size:10px; letter-spacing:.22em; text-transform:uppercase;
+     opacity:.4; font-family:"Courier New",monospace; margin-right:8px; min-width:52px; text-align:right}
+  .seg button{
+    background:none; border:none; color:inherit; cursor:pointer;
+    font:inherit; font-size:12.5px; letter-spacing:.14em; text-transform:lowercase;
+    padding:5px 11px; border-radius:20px; opacity:.4; transition:.25s;
+  }
+  .seg button:hover{opacity:.75}
+  .seg button.on{opacity:1; background:var(--accent); color:var(--bg); box-shadow:0 1px 6px rgba(0,0,0,.08)}
+
+  .poem{margin:8px 0 22px; min-height:180px}
+  .line{
+    position:relative; font-size:27px; line-height:1.62; letter-spacing:.005em;
+    padding:2px 14px; cursor:pointer; border-left:2px solid transparent;
+    transition:opacity .45s ease, transform .45s ease, border-color .3s, background .3s;
+    border-radius:2px;
+  }
+  .line:hover{background:rgba(0,0,0,.025)}
+  .line.locked{border-left-color:var(--accent); background:rgba(0,0,0,.03)}
+  .line.locked::after{content:"⬖"; position:absolute; left:-2px; top:50%;
+     transform:translate(-140%,-50%); color:var(--accent); font-size:13px; opacity:.9}
+  .line.reweave{opacity:0; transform:translateY(6px)}
+
+  .scan{font-size:11px; opacity:.5; letter-spacing:.06em; padding:0 14px 4px;
+        display:none; align-items:center; gap:5px; font-family:"Courier New",monospace}
+  .scan .dot{width:4px; height:4px; border-radius:50%; background:currentColor; display:inline-block; opacity:.55}
+  .scan .gap{width:6px; display:inline-block}
+  .scan .num{margin-left:7px; opacity:.8}
+  .scan .bad{color:#c0392b; font-weight:700}
+  body.showscan .scan{display:flex}
+
+  .bar{display:flex; flex-wrap:wrap; gap:6px; justify-content:center; margin-top:8px}
+  .bar button{
+    background:none; border:1px solid currentColor; color:inherit; cursor:pointer;
+    font:inherit; font-size:12px; letter-spacing:.1em; text-transform:lowercase;
+    padding:7px 14px; border-radius:22px; opacity:.5; transition:.2s;
+  }
+  .bar button:hover{opacity:1; background:var(--accent); border-color:var(--accent); color:var(--bg)}
+  .bar button.act{opacity:1; border-color:var(--accent); color:var(--accent)}
+
+  .gallery{display:flex; gap:7px; flex-wrap:wrap; justify-content:center; margin-top:24px; min-height:20px}
+  .gallery .chip{
+    font-size:11px; letter-spacing:.03em; padding:5px 10px; border-radius:14px;
+    background:rgba(0,0,0,.05); cursor:pointer; opacity:.65; transition:.2s;
+    max-width:150px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-style:italic;
+  }
+  .gallery .chip:hover{opacity:1; background:var(--accent); color:var(--bg)}
+  .gallery .chip .x{opacity:.5; margin-left:5px; font-style:normal}
+
+  .hint{text-align:center; font-size:11.5px; opacity:.55; margin-top:22px; letter-spacing:.04em;
+        font-family:"Courier New",monospace; line-height:1.9}
+  .seg button:focus-visible, .bar button:focus-visible{
+     outline:2px solid var(--accent); outline-offset:2px; opacity:1}
+  @media (prefers-reduced-motion: reduce){
+    *{transition:none!important}
+    .line.reweave{opacity:1;transform:none}
+  }
+  .glyph{text-align:center; font-size:20px; opacity:.5; margin-bottom:4px}
+  .flash{position:fixed; bottom:22px; left:50%; transform:translateX(-50%);
+    background:var(--ink); color:var(--bg); padding:8px 16px; border-radius:20px;
+    font-size:12px; letter-spacing:.05em; opacity:0; transition:opacity .3s; pointer-events:none}
+  .flash.on{opacity:.92}
+</style>
+</head>
+<body>
+<div class="paper">
+  <header>
+    <div class="glyph" id="glyph">❀</div>
+    <h1>Kigo</h1>
+    <div class="sub">a poem loom — turn the season, lock a line</div>
+  </header>
+
+  <div class="dial">
+    <div class="seg" id="seasons"><span class="axis">season</span></div>
+    <div class="seg" id="moods"><span class="axis">mood</span></div>
+  </div>
+
+  <div class="poem" id="poem"></div>
+
+  <div class="bar">
+    <button id="reroll">↻ reroll</button>
+    <button id="form">form: haiku</button>
+    <button id="scan">scansion</button>
+    <button id="copy">copy</button>
+    <button id="keep">keep ♥</button>
+    <button id="png">↓ png</button>
+  </div>
+
+  <div class="gallery" id="gallery"></div>
+
+  <div class="hint">
+    click a line to lock · space = reroll unlocked · 1–5 lock/unlock<br>
+    ← → season · ↑ ↓ mood · every poem lives in its link
+  </div>
+</div>
+<div class="flash" id="flash"></div>
+
+<script>
+/*CORE-START*/
+// ---- seeded PRNG (mulberry32) ----
+function mulberry32(a){a=a>>>0;return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+// ---- word banks: text|syllables|rhyme|seasons|moods  (season 0=spring 1=summer 2=autumn 3=winter · mood 0=still 1=luminous 2=melancholy 3=wild) ----
+function P(str){return str.split(/\s+/).filter(Boolean).map(t=>{const[w,s,r,se,mo]=t.split('|');return{w,s:+s,r:r||null,se:se||'',mo:mo||''};});}
+const W={
+ DET:P("the|1 a|1 one|1 this|1 that|1 each|1 no|1 some|1"),
+ ADJ:P("pale|1 cold|1||3 warm|1||1 bright|1|||1 still|1|||0 dark|1|||2 deep|1 soft|1|||0 lone|1|||2 grey|1||3|2 white|1||3 damp|1||0 thin|1 wild|1|||3 cool|1||3 blue|1||3|2 ripe|1||1 green|1||0 calm|1|||0 first|1||0 last|1||2|2 \
+frozen|2||3 golden|2||1|1 silent|2|||0 fragrant|2||0 fading|2|||2 tender|2|||0 restless|2|||3 hollow|2|||2 quiet|2|||0 gentle|2||0|0 scarlet|2||2|3 amber|2||2|1 misty|2||3|2 distant|2|||2 fallen|2||2|2 sudden|2|||3 molten|2||1|3 weary|2|||2 tangled|2|||3 drifting|2|||2 humid|2||1 verdant|2||0 \
+luminous|3|||1 delicate|3||0|0 shivering|3||3 wandering|3|||2"),
+ NOUN:P("moon|1|OON||1 snow|1|OW|3 rain|1|AIN|0|2 leaf|1||2 frost|1||3 dusk|1|||2 dawn|1||0|1 pond|1|||0 crow|1|OW|2|2 wind|1|||3 dew|1||0|0 pine|1||3 hill|1 sky|1|||1 stream|1|EAM|0 field|1||1 night|1|ITE||2 light|1|ITE||1 bloom|1||0|1 branch|1||3 stone|1|||2 mist|1||2|2 cloud|1 thaw|1||0 dream|1|EAM||2 gleam|1|EAM||1 storm|1|||3 heat|1||1 shade|1||1|0 brook|1||0 tide|1 flame|1||1|3 ash|1||3|2 \
+blossom|2||0|1 river|2||0 ember|2||2|1 shadow|2|OW||2 petal|2||0|0 willow|2|OW|1 harvest|2||2 garden|2||0 thunder|2||1|3 cricket|2||1 sparrow|2|OW|0 lantern|2|||1 orchard|2||2 twilight|2|ITE||2 autumn|2||2|2 winter|2||3|2 summer|2||1|1 morning|2||0|1 silence|2|||0 water|2||1 mountain|2||3 cinder|2||2|2 maple|2||2 swallow|2|OW|0 meadow|2|OW|1 current|2||0|3 \
+butterfly|3||0|1 marigold|3||1|1 waterfall|3||0|3"),
+ VERB:P("falls|1|||2 sleeps|1|||0 drifts|1|||2 fades|1|||2 breaks|1|||3 blooms|1||0|1 glows|1|||1 waits|1|||0 turns|1 calls|1 mends|1|||0 aches|1|||2 sways|1 gleams|1|||1 sinks|1|||2 rests|1|||0 sings|1||0|1 floats|1|||0 burns|1||1|3 melts|1||3 \
+lingers|2|||2 trembles|2|||3 settles|2|||0 gathers|2 whispers|2|||0 scatters|2|||3 ripens|2||1 darkens|2|||2 hushes|2|||0 softens|2|||0 wanders|2|||2 deepens|2|||2 flickers|2||2|1 unfolds|2||0 returns|2||3 shivers|2||3|2 glistens|2|||1 murmurs|2|||0 crumbles|2|||2 blazes|2||1|3 \
+awakens|3||0|1 disappears|3|||2 remembers|3|||2 unravels|3|||3"),
+ ADV:P("slowly|2 softly|2 still|1 now|1 again|2 alone|2|||2 here|1 low|1 late|1 far|1 gently|2 barely|2 always|2 homeward|2|||2 quietly|3"),
+ PREP:P("in|1 on|1 by|1 through|1 past|1 near|1 above|2 beneath|2 among|2 under|2 beyond|2 within|2 across|2 before|2")
+};
+const ALLTPL=[['DET','ADJ','NOUN','VERB'],['ADJ','NOUN','VERB','ADV'],['DET','NOUN','VERB','PREP','NOUN'],['ADJ','ADJ','NOUN'],['NOUN','PREP','DET','ADJ','NOUN'],['DET','ADJ','NOUN'],['ADV','DET','NOUN','VERB'],['NOUN','VERB','PREP','NOUN'],['DET','NOUN','VERB','ADV'],['ADJ','NOUN','PREP','NOUN']];
+const NOUNTPL=ALLTPL.filter(t=>t[t.length-1]==='NOUN');
+const RGROUPS=['OW','ITE','EAM'];
+const FORMS={haiku:{targets:[5,7,5]},tanka:{targets:[5,7,5,7,7]},couplet:{targets:[7,7],rhyme:true},free:{free:true,n:3}};
+
+function weight(x,d){let w=1;if(x.se)w*=x.se.includes(d.se)?3:0.35;if(x.mo)w*=x.mo.includes(d.mo)?3:0.35;return w;}
+function shuffleW(arr,rng,d){return arr.map(x=>({x,k:-Math.log(rng()+1e-12)/weight(x,d)})).sort((a,b)=>a.k-b.k).map(o=>o.x);}
+
+// recursive backtracking fill to hit an EXACT syllable target
+function fill(slots,i,rem,rng,d,rhyme){
+  if(i===slots.length)return rem===0?[]:null;
+  const last=i===slots.length-1;
+  let cand=W[slots[i]].filter(x=>x.s<=rem);
+  if(last)cand=cand.filter(x=>x.s===rem&&(!rhyme||x.r===rhyme));
+  cand=shuffleW(cand,rng,d);
+  for(const x of cand){const rest=fill(slots,i+1,rem-x.s,rng,d,rhyme);if(rest)return[x,...rest];}
+  return null;
+}
+function composeLine(rng,target,d,rhyme,tpls){
+  for(const t of shuffleW(tpls.map(x=>({v:x})),rng,{se:'',mo:''}).map(o=>o.v)){
+    const r=fill(t,0,target,rng,d,rhyme);if(r)return r;
+  }
+  return null; // banks are sized so this does not happen for defined targets
+}
+function buildPoem(st){
+  const f=FORMS[st.form];
+  let targets=f.free?st.lines.map(l=>3+Math.floor(mulberry32(l.seed^0x9e37)()*4)):f.targets;
+  let group=null;
+  if(f.rhyme){const rr=mulberry32(st.rhymeSeed);group=RGROUPS[Math.floor(rr()*RGROUPS.length)];}
+  const d={se:''+st.season,mo:''+st.mood};
+  return targets.map((tg,i)=>{
+    const words=composeLine(mulberry32(st.lines[i].seed),tg,d,f.rhyme?group:null,f.rhyme?NOUNTPL:ALLTPL)||[];
+    return{words,target:tg,syl:words.reduce((a,w)=>a+w.s,0),locked:st.lines[i].locked};
+  });
+}
+/*CORE-END*/
+
+if(typeof document!=='undefined')boot();
+function boot(){
+  const SEASONS=['spring','summer','autumn','winter'],MOODS=['still','luminous','melancholy','wild'];
+  const GLYPHS=['❀','☀','🍂','❄'];
+  const PAL=[{bg:'#f2f5ec',ink:'#3a4a3f',accent:'#8fae6a'},{bg:'#f7f2e4',ink:'#4a4030',accent:'#d9a441'},{bg:'#f4ece1',ink:'#4a3628',accent:'#b5642f'},{bg:'#eef1f4',ink:'#38424c',accent:'#6b8299'}];
+  const MOODF=[{sat:.9,bri:1},{sat:1.18,bri:1.06},{sat:.68,bri:.97},{sat:1.4,bri:1.02}];
+  const FKEYS=Object.keys(FORMS);
+  const $=id=>document.getElementById(id);
+
+  let st=deser(location.hash.slice(1))||fresh('haiku');
+
+  function fresh(form){
+    const n=FORMS[form].free?FORMS[form].n:FORMS[form].targets.length;
+    return{form,season:0,mood:0,rhymeSeed:rseed(),lines:Array.from({length:n},()=>({seed:rseed(),locked:false}))};
+  }
+  function rseed(){return Math.floor(Math.random()*1e9);}
+
+  function ser(s){
+    const h=FKEYS.indexOf(s.form)+''+s.season+''+s.mood+s.rhymeSeed.toString(36);
+    return h+'~'+s.lines.map(l=>l.seed.toString(36)+(l.locked?'!':'')).join('.');
+  }
+  function deser(h){
+    try{
+      const[head,body]=h.split('~');if(!body)return null;
+      const form=FKEYS[+head[0]];if(!form)return null;
+      const season=+head[1],mood=+head[2],rhymeSeed=parseInt(head.slice(3),36);
+      const lines=body.split('.').map(t=>{const locked=t.endsWith('!');return{seed:parseInt(locked?t.slice(0,-1):t,36),locked};});
+      const want=FORMS[form].free?FORMS[form].n:FORMS[form].targets.length;
+      if(lines.length!==want||lines.some(l=>isNaN(l.seed)))return null;
+      if(!(season>=0&&season<=3)||!(mood>=0&&mood<=3)||isNaN(rhymeSeed))return null;
+      return{form,season,mood,rhymeSeed,lines};
+    }catch(e){return null;}
+  }
+
+  // ---- build dial buttons ----
+  SEASONS.forEach((s,i)=>{const b=document.createElement('button');b.textContent=s;b.onclick=()=>{st.season=i;paint();render();};$('seasons').appendChild(b);});
+  MOODS.forEach((m,i)=>{const b=document.createElement('button');b.textContent=m;b.onclick=()=>{st.mood=i;paint();render();};$('moods').appendChild(b);});
+
+  function paint(){
+    const p=PAL[st.season],f=MOODF[st.mood];
+    const r=document.documentElement.style;
+    r.setProperty('--bg',p.bg);r.setProperty('--ink',p.ink);r.setProperty('--accent',p.accent);
+    r.setProperty('--sat',f.sat);r.setProperty('--bri',f.bri);
+    $('glyph').textContent=GLYPHS[st.season];
+    [...$('seasons').querySelectorAll('button')].forEach((b,i)=>b.classList.toggle('on',i===st.season));
+    [...$('moods').querySelectorAll('button')].forEach((b,i)=>b.classList.toggle('on',i===st.mood));
+    $('form').textContent='form: '+st.form;
+  }
+
+  let poemCache=[];
+  function render(reweave){
+    poemCache=buildPoem(st);
+    const box=$('poem');box.innerHTML='';
+    poemCache.forEach((ln,i)=>{
+      const el=document.createElement('div');
+      el.className='line'+(ln.locked?' locked':'')+(reweave&&!ln.locked?' reweave':'');
+      const txt=ln.words.map(w=>w.w).join(' ');
+      el.textContent=txt.charAt(0).toUpperCase()+txt.slice(1);
+      el.title='click to '+(ln.locked?'unlock':'lock')+' this line';
+      el.onclick=()=>{st.lines[i].locked=!st.lines[i].locked;save();render();};
+      box.appendChild(el);
+      const sc=document.createElement('div');sc.className='scan';
+      ln.words.forEach((w,wi)=>{for(let k=0;k<w.s;k++){const d=document.createElement('span');d.className='dot';sc.appendChild(d);}if(wi<ln.words.length-1){const g=document.createElement('span');g.className='gap';sc.appendChild(g);}});
+      const num=document.createElement('span');num.className='num'+(ln.syl!==ln.target?' bad':'');
+      num.textContent=ln.syl+(ln.syl!==ln.target?'/'+ln.target:'');
+      sc.appendChild(num);
+      box.appendChild(sc);
+    });
+    if(reweave)requestAnimationFrame(()=>box.querySelectorAll('.reweave').forEach(e=>e.classList.remove('reweave')));
+    save();
+  }
+
+  function save(){history.replaceState(null,'','#'+ser(st));}
+
+  function reroll(){
+    const anyLocked=st.lines.some(l=>l.locked);
+    if(!anyLocked&&FORMS[st.form].rhyme)st.rhymeSeed=rseed();
+    st.lines.forEach(l=>{if(!l.locked)l.seed=rseed();});
+    render(true);
+  }
+
+  function cycleForm(){
+    const i=(FKEYS.indexOf(st.form)+1)%FKEYS.length;
+    const nf=FKEYS[i],prev=st.lines;
+    st.form=nf;st.rhymeSeed=rseed();
+    const n=FORMS[nf].free?FORMS[nf].n:FORMS[nf].targets.length;
+    st.lines=Array.from({length:n},(_,k)=>prev[k]?{seed:prev[k].seed,locked:false}:{seed:rseed(),locked:false});
+    paint();render();
+  }
+
+  function flash(m){const f=$('flash');f.textContent=m;f.classList.add('on');clearTimeout(flash.t);flash.t=setTimeout(()=>f.classList.remove('on'),1400);}
+
+  function poemText(){return poemCache.map(l=>{const t=l.words.map(w=>w.w).join(' ');return t.charAt(0).toUpperCase()+t.slice(1);}).join('\n');}
+
+  // ---- kept-poems gallery (localStorage) ----
+  function galleryLoad(){try{return JSON.parse(localStorage.getItem('kigo.kept')||'[]');}catch(e){return[];}}
+  function gallerySave(a){localStorage.setItem('kigo.kept',JSON.stringify(a.slice(-12)));}
+  function renderGallery(){
+    const g=$('gallery');g.innerHTML='';
+    const kept=galleryLoad();
+    if(!kept.length){
+      const ph=document.createElement('div');ph.className='hint';ph.style.margin='0';ph.style.opacity='.32';
+      ph.textContent='kept poems appear here — press keep ♥';
+      g.appendChild(ph);return;
+    }
+    kept.slice().reverse().forEach(item=>{
+      const c=document.createElement('div');c.className='chip';c.title=item.t.replace(/\|/g,' / ');
+      c.textContent=item.t.split('|')[0];
+      const x=document.createElement('span');x.className='x';x.textContent='✕';
+      x.onclick=e=>{e.stopPropagation();gallerySave(galleryLoad().filter(k=>k.h!==item.h));renderGallery();};
+      c.onclick=()=>{const s=deser(item.h);if(s){st=s;paint();render();flash('woven back in');}};
+      c.appendChild(x);g.appendChild(c);
+    });
+  }
+  function keep(){
+    const a=galleryLoad(),h=ser(st);
+    if(a.some(k=>k.h===h)){flash('already kept');return;}
+    a.push({h,t:poemText().split('\n').join('|')});gallerySave(a);renderGallery();flash('kept ♥');
+  }
+
+  // ---- PNG export ----
+  function exportPNG(){
+    const p=PAL[st.season],cv=document.createElement('canvas'),S=2;
+    cv.width=1080*S;cv.height=1350*S;const c=cv.getContext('2d');c.scale(S,S);
+    c.fillStyle=p.bg;c.fillRect(0,0,1080,1350);
+    c.textAlign='center';
+    c.fillStyle=p.accent;c.font='58px Georgia, serif';c.fillText(GLYPHS[st.season],540,250);
+    c.fillStyle=p.ink;
+    const lines=poemText().split('\n');
+    const lh=92,startY=540-((lines.length-1)*lh)/2,MAXW=900;
+    lines.forEach((ln,i)=>{
+      let fs=46;c.font=fs+'px Georgia, serif';
+      while(c.measureText(ln).width>MAXW&&fs>22){fs-=2;c.font=fs+'px Georgia, serif';}
+      c.fillText(ln,540,startY+i*lh);
+    });
+    c.globalAlpha=.5;c.font='italic 22px Georgia, serif';
+    c.fillText('kigo · '+SEASONS[st.season]+' / '+MOODS[st.mood],540,1180);
+    c.font='16px "Courier New", monospace';c.globalAlpha=.38;
+    const link=location.origin+location.pathname+'#'+ser(st);
+    c.fillText(link.length>72?'#'+ser(st):link,540,1230);
+    c.globalAlpha=1;
+    cv.toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='kigo-'+SEASONS[st.season]+'.png';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000);flash('png saved');});
+  }
+
+  // ---- buttons ----
+  $('reroll').onclick=reroll;
+  $('form').onclick=cycleForm;
+  $('scan').onclick=()=>{document.body.classList.toggle('showscan');$('scan').classList.toggle('act',document.body.classList.contains('showscan'));};
+  $('copy').onclick=()=>{
+    const txt=poemText();
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(txt).then(()=>flash('copied'),()=>fallbackCopy(txt));
+    }else fallbackCopy(txt);
+  };
+  function fallbackCopy(txt){
+    try{
+      const ta=document.createElement('textarea');ta.value=txt;
+      ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);
+      ta.select();const ok=document.execCommand('copy');document.body.removeChild(ta);
+      flash(ok?'copied':'copy unavailable — use the link');
+    }catch(e){flash('copy unavailable — use the link');}
+  }
+  $('keep').onclick=keep;
+  $('png').onclick=exportPNG;
+
+  // ---- keyboard flow ----
+  document.addEventListener('keydown',e=>{
+    if(e.target.tagName==='INPUT')return;
+    if(e.code==='Space'){if(e.target.tagName==='BUTTON')return;e.preventDefault();reroll();return;}
+    if(e.key>='1'&&e.key<='9'){const i=+e.key-1;if(i<st.lines.length){st.lines[i].locked=!st.lines[i].locked;render();}return;}
+    if(e.key==='ArrowLeft'){st.season=(st.season+3)%4;paint();render();}
+    else if(e.key==='ArrowRight'){st.season=(st.season+1)%4;paint();render();}
+    else if(e.key==='ArrowUp'){e.preventDefault();st.mood=(st.mood+3)%4;paint();render();}
+    else if(e.key==='ArrowDown'){e.preventDefault();st.mood=(st.mood+1)%4;paint();render();}
+    else if(e.key==='f'||e.key==='F'){cycleForm();}
+  });
+
+  window.addEventListener('hashchange',()=>{const s=deser(location.hash.slice(1));if(s&&ser(s)!==ser(st)){st=s;paint();render();}});
+
+  paint();render();renderGallery();
+}
+</script>
+</body>
+</html>

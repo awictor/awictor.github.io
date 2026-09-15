@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wells Score (DVT) — deep vein thrombosis probability</title>
+<meta name="description" content="Score the Wells clinical decision rule for deep vein thrombosis (DVT) — tick the criteria and get the point total, three-tier risk, and two-tier DVT likely/unlikely. Offline, no tracking.">
+<style>
+  :root{
+    --c:#b91c1c;
+    --bg:#fcf1f1; --card:#ffffff; --fg:#251010; --muted:#755151;
+    --line:#f2d7d7; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#160808; --card:#210f0f; --fg:#f7e6e6; --muted:#c09292;
+    --line:#3a1d1d; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:800px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:800px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .crit{display:flex;align-items:flex-start;gap:12px;padding:11px 0;border-bottom:1px solid var(--line);cursor:pointer}
+  .crit:last-child{border-bottom:0}
+  .crit input{margin-top:3px;width:18px;height:18px;accent-color:var(--c);flex:0 0 auto}
+  .crit .txt{flex:1;font-size:.92rem}
+  .crit .pts{font-weight:700;font-variant-numeric:tabular-nums;color:var(--c)}
+  .result{text-align:center;margin:8px 0}
+  .result .n{font-size:3rem;font-weight:800;color:var(--c);font-variant-numeric:tabular-nums;line-height:1}
+  .result .k{color:var(--muted);font-size:.9rem;margin-top:4px}
+  .tiers{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+  .tier{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+  .tier b{display:block;font-size:1.05rem}
+  .tier span{font-size:.76rem;color:var(--muted)}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🦵</div>
+  <div>
+    <h1>Wells Score — DVT</h1>
+    <p>Deep vein thrombosis clinical probability</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div id="crits"></div>
+  </div>
+  <div class="card">
+    <div class="result">
+      <div class="n" id="score">0</div>
+      <div class="k">Wells points</div>
+    </div>
+    <div class="tiers">
+      <div class="tier"><b id="three">—</b><span>three-tier probability</span></div>
+      <div class="tier"><b id="two">—</b><span>two-tier (modified)</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>About the Wells DVT rule</h2>
+    <p class="note">The Wells score estimates the pre-test probability of deep vein thrombosis. Each clinical feature adds a point; an <b>alternative diagnosis at least as likely</b> subtracts two. <b>Three-tier:</b> ≤0 low, 1–2 moderate, ≥3 high. <b>Two-tier (modified):</b> ≥2 "DVT likely", &lt;2 "DVT unlikely" — commonly paired with a D-dimer to rule out DVT in the unlikely group. A decision aid, not a diagnosis; use clinical judgment and your local pathway. Everything runs locally.</p>
+  </div>
+
+  <p class="foot">100% offline · not medical advice · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var CRITERIA = [
+    { key: 'activeCancer', points: 1, label: 'Active cancer (treatment within 6 months, or palliative)' },
+    { key: 'paralysis', points: 1, label: 'Paralysis, paresis, or recent plaster immobilization of the leg' },
+    { key: 'bedridden', points: 1, label: 'Recently bedridden ≥3 days, or major surgery within 12 weeks' },
+    { key: 'tenderness', points: 1, label: 'Localized tenderness along the deep venous system' },
+    { key: 'legSwollen', points: 1, label: 'Entire leg swollen' },
+    { key: 'calfSwelling', points: 1, label: 'Calf swelling ≥3 cm vs the asymptomatic leg' },
+    { key: 'pittingEdema', points: 1, label: 'Pitting edema confined to the symptomatic leg' },
+    { key: 'collateralVeins', points: 1, label: 'Collateral superficial (non-varicose) veins' },
+    { key: 'previousDvt', points: 1, label: 'Previously documented DVT' },
+    { key: 'altDiagnosis', points: -2, label: 'Alternative diagnosis at least as likely as DVT' }
+  ];
+
+  // Sum the selected criteria's points.
+  function wellsScore(selected){
+    if(selected === null || typeof selected !== 'object') throw new Error('selected must be an object');
+    var total = 0;
+    CRITERIA.forEach(function(c){ if(selected[c.key]) total += c.points; });
+    return total;
+  }
+  // Three-tier probability: <=0 low, 1-2 moderate, >=3 high.
+  function riskThreeTier(score){
+    score = Number(score);
+    if(!isFinite(score)) throw new Error('score must be a number');
+    if(score >= 3) return 'high';
+    if(score >= 1) return 'moderate';
+    return 'low';
+  }
+  // Two-tier (modified Wells): >=2 likely, <2 unlikely.
+  function riskTwoTier(score){
+    score = Number(score);
+    if(!isFinite(score)) throw new Error('score must be a number');
+    return score >= 2 ? 'DVT likely' : 'DVT unlikely';
+  }
+
+  if(typeof module !== 'undefined') module.exports = { CRITERIA:CRITERIA, wellsScore:wellsScore, riskThreeTier:riskThreeTier, riskTwoTier:riskTwoTier };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var host = document.getElementById('crits');
+    host.innerHTML = CRITERIA.map(function(c, i){
+      return '<label class="crit"><input type="checkbox" data-k="' + c.key + '">' +
+        '<span class="txt">' + c.label + '</span><span class="pts">' + (c.points > 0 ? '+' : '') + c.points + '</span></label>';
+    }).join('');
+    var boxes = host.querySelectorAll('input');
+    function render(){
+      var sel = {};
+      boxes.forEach(function(b){ sel[b.getAttribute('data-k')] = b.checked; });
+      var s = wellsScore(sel);
+      document.getElementById('score').textContent = s;
+      var three = riskThreeTier(s), two = riskTwoTier(s);
+      document.getElementById('three').textContent = three.charAt(0).toUpperCase() + three.slice(1);
+      document.getElementById('two').textContent = two;
+      var col = three === 'high' ? '#dc2626' : three === 'moderate' ? '#d97706' : '#16a34a';
+      document.getElementById('score').style.color = col;
+    }
+    boxes.forEach(function(b){ b.addEventListener('change', render); });
+    render();
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('wells-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('wells-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

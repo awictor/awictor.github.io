@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stowaway — Unicode X-ray</title>
+<style>
+  :root{
+    --bg:#0e1117; --panel:#161b22; --panel2:#1c232d; --line:#2b3440;
+    --ink:#e6edf3; --dim:#8b98a5; --accent:#58a6ff; --good:#3fb950;
+    --warn:#d29922; --bad:#f85149; --purple:#bc8cff; --cyan:#39c5cf;
+    --mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  header{padding:18px 22px;border-bottom:1px solid var(--line);
+    display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  h1{margin:0;font-size:20px;letter-spacing:.3px}
+  h1 span{color:var(--accent)}
+  .tag{color:var(--dim);font-size:13px}
+  .wrap{max-width:1100px;margin:0 auto;padding:20px 22px 60px}
+  .modes{display:flex;gap:8px;margin-bottom:14px}
+  .modes button{background:var(--panel);color:var(--dim);border:1px solid var(--line);
+    padding:6px 14px;border-radius:7px;cursor:pointer;font-size:13px}
+  .modes button.on{background:var(--accent);color:#08121f;border-color:var(--accent);font-weight:600}
+  textarea{width:100%;background:var(--panel);color:var(--ink);border:1px solid var(--line);
+    border-radius:9px;padding:11px 13px;font-family:var(--mono);font-size:13px;resize:vertical;min-height:84px}
+  textarea:focus{outline:none;border-color:var(--accent)}
+  label.fld{display:block;color:var(--dim);font-size:12px;margin:0 0 4px 2px;text-transform:uppercase;letter-spacing:.5px}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .bar{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}
+  .chip{background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:5px 12px;font-size:12.5px}
+  .chip b{font-family:var(--mono)}
+  .chip.hot{border-color:var(--bad);color:#ffd7d3}
+  .chip.warn{border-color:var(--warn);color:#f4dfb0}
+  .chip.ok{border-color:var(--good);color:#bbf0c4}
+  .verdict{font-weight:600;padding:5px 14px;border-radius:20px}
+  .verdict.clean{background:rgba(63,185,80,.16);color:var(--good)}
+  .verdict.dirty{background:rgba(248,81,73,.16);color:var(--bad)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:15px 16px;margin-top:14px}
+  .panel h2{margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--dim)}
+  .render{font-family:var(--mono);font-size:14px;line-height:2.1;word-break:break-all;white-space:pre-wrap}
+  .g{cursor:pointer;border-radius:3px}
+  .g:hover{outline:1px solid var(--accent)}
+  .g:focus-visible{outline:1px solid var(--accent);outline-offset:1px}
+  .badge{display:inline-flex;align-items:center;font-family:var(--mono);font-size:10.5px;font-weight:700;
+    padding:1px 5px;border-radius:4px;margin:0 1px;vertical-align:middle;letter-spacing:.3px}
+  .b-inv{background:#3d2b00;color:var(--warn);border:1px solid #6b4c00}
+  .b-bidi{background:#4d1512;color:#ff9d96;border:1px solid #8b201b}
+  .b-cc{background:#3a1147;color:var(--purple);border:1px solid #5e1c73}
+  .b-tag{background:#08303a;color:var(--cyan);border:1px solid #0d5563}
+  .homo{background:rgba(248,81,73,.22);border-bottom:2px solid var(--bad);border-radius:2px}
+  .comb{background:rgba(188,140,255,.18);border-bottom:2px dotted var(--purple)}
+  .empty{color:var(--dim);font-style:italic}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
+  button.act{background:var(--panel2);color:var(--ink);border:1px solid var(--line);
+    padding:8px 14px;border-radius:8px;cursor:pointer;font-size:13px}
+  button.act:hover{border-color:var(--accent)}
+  button.act.primary{background:var(--accent);color:#08121f;border-color:var(--accent);font-weight:600}
+  .gallery{display:flex;flex-wrap:wrap;gap:8px}
+  .gallery button{background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+    padding:6px 12px;border-radius:20px;cursor:pointer;font-size:12.5px}
+  .gallery button:hover{border-color:var(--accent);color:var(--accent)}
+  #insp{position:sticky;top:14px}
+  .kv{display:grid;grid-template-columns:110px 1fr;gap:5px 10px;font-size:12.5px}
+  .kv div:nth-child(odd){color:var(--dim)}
+  .kv code,.mono{font-family:var(--mono);word-break:break-all}
+  .esc{display:grid;grid-template-columns:52px 1fr;gap:4px 8px;margin-top:9px;font-size:12px}
+  .esc div:nth-child(odd){color:var(--cyan)}
+  .cp{font-size:26px;font-family:var(--mono);background:var(--panel2);border:1px solid var(--line);
+    border-radius:8px;padding:6px 0;text-align:center;margin-bottom:10px;min-height:44px;line-height:1.3}
+  pre.out{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:11px;
+    font-family:var(--mono);font-size:12.5px;white-space:pre-wrap;word-break:break-all;margin:8px 0 0;max-height:260px;overflow:auto}
+  .diffchar{padding:1px 0;border-radius:2px}
+  .d-add{background:rgba(63,185,80,.28)}
+  .d-del{background:rgba(248,81,73,.28);text-decoration:line-through}
+  .note{color:var(--dim);font-size:12px;margin-top:8px}
+  .findlist{font-family:var(--mono);font-size:12px;max-height:220px;overflow:auto}
+  .findlist div{padding:2px 0;border-bottom:1px solid var(--line)}
+  @media(max-width:760px){
+    .row2{grid-template-columns:1fr!important}
+    #insp{position:static}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>Stow</span>away</h1>
+  <span class="tag">Find the invisible passengers hiding in your text.</span>
+</header>
+<div class="wrap">
+  <div class="modes">
+    <button id="mScan" class="on">Scan</button>
+    <button id="mDiff">Compare</button>
+  </div>
+
+  <div id="scanIn">
+    <label class="fld">Paste any string — commit message, URL, JSON key, LLM output…</label>
+    <textarea id="inA" spellcheck="false" placeholder="Paste text here to X-ray it."></textarea>
+  </div>
+  <div id="diffIn" style="display:none">
+    <div class="row2">
+      <div><label class="fld">String A</label><textarea id="dA" spellcheck="false" placeholder="Paste the original…"></textarea></div>
+      <div><label class="fld">String B</label><textarea id="dB" spellcheck="false" placeholder="Paste the suspicious lookalike…"></textarea></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Attack gallery — click to load a real threat</h2>
+    <div class="gallery" id="gallery"></div>
+  </div>
+
+  <div class="bar" id="bar"></div>
+
+  <div id="scanBody">
+    <div class="row2" style="grid-template-columns:1fr 320px">
+      <div class="panel">
+        <h2>Reveal — hidden passengers shown inline</h2>
+        <div id="render" class="render"><span class="empty">Nothing to reveal yet.</span></div>
+      </div>
+      <div class="panel" id="insp">
+        <h2>Inspector — click any character</h2>
+        <div id="inspBody"><span class="empty">Click a glyph or badge in the Reveal panel.</span></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Cleaner</h2>
+      <div class="actions">
+        <button class="act primary" id="btnClean">Strip invisibles + NFC normalize</button>
+        <button class="act" id="btnCopyClean">Copy clean output</button>
+        <button class="act" id="btnExport">Copy findings report (JSON)</button>
+      </div>
+      <div id="cleanWrap"></div>
+    </div>
+  </div>
+
+  <div id="diffBody" style="display:none">
+    <div class="panel">
+      <h2>Character-level diff — the culprit behind "look identical but !=="</h2>
+      <div id="diffVerdict"></div>
+      <div class="row2" style="margin-top:10px">
+        <div><label class="fld">A</label><div id="diffA" class="render"></div></div>
+        <div><label class="fld">B</label><div id="diffB" class="render"></div></div>
+      </div>
+      <div id="diffMismatch" class="note"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+
+/* ---- curated label map for dangerous / notable specials ---- */
+const SPECIAL={
+  0x0000:["NUL","control"],0x0007:["BEL","control"],0x0008:["BS","control"],
+  0x0009:["TAB","ws"],0x000A:["LF","ws"],0x000B:["VT","ws"],0x000C:["FF","ws"],0x000D:["CR","ws"],
+  0x001B:["ESC","control"],0x007F:["DEL","control"],
+  0x00A0:["NBSP","inv"],0x00AD:["SHY","inv"],0x034F:["CGJ","inv"],
+  0x061C:["ALM","bidi"],
+  0x115F:["HANGUL FILLER","inv"],0x1160:["HANGUL FILLER","inv"],
+  0x180E:["MVS","inv"],
+  0x2000:["EN QUAD","inv"],0x2001:["EM QUAD","inv"],0x2002:["EN SP","inv"],0x2003:["EM SP","inv"],
+  0x2004:["3/EM SP","inv"],0x2005:["4/EM SP","inv"],0x2006:["6/EM SP","inv"],
+  0x2007:["FIG SP","inv"],0x2008:["PUNC SP","inv"],0x2009:["THIN SP","inv"],0x200A:["HAIR SP","inv"],
+  0x200B:["ZWSP","inv"],0x200C:["ZWNJ","inv"],0x200D:["ZWJ","inv"],
+  0x200E:["LRM","bidi"],0x200F:["RLM","bidi"],
+  0x202A:["LRE","bidi"],0x202B:["RLE","bidi"],0x202C:["PDF","bidi"],0x202D:["LRO","bidi"],0x202E:["RLO","bidi"],
+  0x2028:["LINE SEP","inv"],0x2029:["PARA SEP","inv"],
+  0x202F:["NNBSP","inv"],0x205F:["MMSP","inv"],
+  0x2060:["WORD JOINER","inv"],0x2061:["FN APPLY","inv"],0x2062:["INVIS TIMES","inv"],
+  0x2063:["INVIS SEP","inv"],0x2064:["INVIS PLUS","inv"],
+  0x2066:["LRI","bidi"],0x2067:["RLI","bidi"],0x2068:["FSI","bidi"],0x2069:["PDI","bidi"],
+  0x206A:["INHIBIT SS","inv"],0x206B:["ACTIVATE SS","inv"],0x206C:["INHIBIT AAFS","inv"],
+  0x3000:["IDEO SP","inv"],0x3164:["HANGUL FILLER","inv"],
+  0xFEFF:["BOM / ZWNBSP","inv"],0xFFA0:["HW HANGUL FILLER","inv"],0xFFF9:["IAA","inv"],
+  0xFFFC:["OBJ REPL","inv"],0x1D159:["MUS NULL","inv"]
+};
+const BIDI=new Set([0x061C,0x200E,0x200F,0x202A,0x202B,0x202C,0x202D,0x202E,0x2066,0x2067,0x2068,0x2069]);
+const BIDI_OVERRIDE=new Set([0x202A,0x202B,0x202D,0x202E,0x2066,0x2067,0x2068]);
+
+/* confusable -> latin skeleton (curated common homoglyphs) */
+const SKEL={0x0430:"a",0x0435:"e",0x043E:"o",0x0440:"p",0x0441:"c",0x0445:"x",0x0443:"y",
+  0x0438:"u",0x0456:"i",0x0458:"j",0x04BB:"h",0x051B:"q",0x0455:"s",0x0405:"S",0x0410:"A",
+  0x0412:"B",0x0415:"E",0x041A:"K",0x041C:"M",0x041D:"H",0x041E:"O",0x0420:"P",0x0421:"C",
+  0x0422:"T",0x0425:"X",0x0391:"A",0x0392:"B",0x0395:"E",0x0396:"Z",0x0397:"H",0x0399:"I",
+  0x039A:"K",0x039C:"M",0x039D:"N",0x039F:"O",0x03A1:"P",0x03A4:"T",0x03A5:"Y",0x03A7:"X",
+  0x03BF:"o",0x03B1:"a",0x03B5:"e",0x03B9:"i",0x03BD:"v",0x2010:"-",0x2011:"-",0x2012:"-",
+  0x2013:"-",0x2014:"-",0x2044:"/",0x2215:"/",0xFF41:"a",0xFF45:"e",0xFF4F:"o",0x0501:"d"};
+
+const SCRIPTS=[["Latin",/\p{Script=Latin}/u],["Greek",/\p{Script=Greek}/u],
+  ["Cyrillic",/\p{Script=Cyrillic}/u],["Han",/\p{Script=Han}/u],
+  ["Hiragana",/\p{Script=Hiragana}/u],["Katakana",/\p{Script=Katakana}/u],
+  ["Hangul",/\p{Script=Hangul}/u],["Arabic",/\p{Script=Arabic}/u],["Hebrew",/\p{Script=Hebrew}/u]];
+function scriptOf(ch){for(const[n,re]of SCRIPTS)if(re.test(ch))return n;return null;}
+function catOf(ch){
+  // Specific General Categories first, broad fallbacks last, so the reported
+  // label matches the true Unicode General Category.
+  const t=[["Cc","\\p{Cc}"],["Cf","\\p{Cf}"],["Cs","\\p{Cs}"],["Co","\\p{Co}"],
+    ["Zs","\\p{Zs}"],["Zl","\\p{Zl}"],["Zp","\\p{Zp}"],
+    ["Mn","\\p{Mn}"],["Mc","\\p{Mc}"],["Me","\\p{Me}"],
+    ["Lu","\\p{Lu}"],["Ll","\\p{Ll}"],["Lt","\\p{Lt}"],["Lm","\\p{Lm}"],["Lo","\\p{Lo}"],
+    ["Nd","\\p{Nd}"],["Nl","\\p{Nl}"],["No","\\p{No}"],
+    ["Pc","\\p{Pc}"],["Pd","\\p{Pd}"],["Ps","\\p{Ps}"],["Pe","\\p{Pe}"],
+    ["Pi","\\p{Pi}"],["Pf","\\p{Pf}"],["Po","\\p{Po}"],
+    ["Sm","\\p{Sm}"],["Sc","\\p{Sc}"],["Sk","\\p{Sk}"],["So","\\p{So}"]];
+  for(const[c,p]of t)if(new RegExp(p+"$","u").test(ch))return c;return "?";}
+
+const CAP=20000;
+/* classify a codepoint -> {kind,label,badge?} kinds: normal invisible bidi cc tag combining */
+function classify(cp,ch){
+  if(cp>=0xE0000&&cp<=0xE007F)return{kind:"tag",label:"TAG "+(cp===0xE0001?"LANG":String.fromCodePoint(cp-0xE0000<0x20?0x20:cp-0xE0000)),badge:"b-tag"};
+  if(BIDI.has(cp)){const s=SPECIAL[cp];return{kind:"bidi",label:s?s[0]:"BIDI",badge:"b-bidi"};}
+  const sp=SPECIAL[cp];
+  if(sp){
+    if(sp[1]==="control")return{kind:"cc",label:sp[0],badge:"b-cc"};
+    if(sp[1]==="ws"&&(cp===0x09||cp===0x0A||cp===0x0D))return{kind:"normal"};
+    return{kind:"invisible",label:sp[0],badge:"b-inv"};
+  }
+  const cat=catOf(ch);
+  if(cat==="Cc")return{kind:"cc",label:"U+"+hex(cp),badge:"b-cc"};
+  if(cat==="Cf")return{kind:"invisible",label:"U+"+hex(cp),badge:"b-inv"};
+  if(cat==="Zs")return{kind:"invisible",label:"SPACE U+"+hex(cp),badge:"b-inv"};
+  if(cat==="Mn"||cat==="Me")return{kind:"combining"};
+  return{kind:"normal"};
+}
+const hex=cp=>cp.toString(16).toUpperCase().padStart(4,"0");
+function utf8bytes(ch){return[...new TextEncoder().encode(ch)].map(b=>b.toString(16).toUpperCase().padStart(2,"0")).join(" ");}
+function utf16units(ch){const u=[];for(let i=0;i<ch.length;i++)u.push("U+"+ch.charCodeAt(i).toString(16).toUpperCase().padStart(4,"0"));return u.join(" ");}
+
+/* mixed-script detection over word tokens; returns map index->skeleton for flagged chars */
+function analyzeMixed(chars){
+  const flagged=new Set();let mixedWords=0;
+  let word=[]; // {i,ch}
+  const flush=()=>{
+    if(word.length){
+      const scripts=new Set();
+      for(const w of word){const s=scriptOf(w.ch);if(s)scripts.add(s);}
+      if(scripts.size>=2){mixedWords++;
+        // minority script chars are the likely spoof; on a tie bias toward Latin
+        // as the legitimate/expected script (real-world attack = confusables
+        // injected into an otherwise-Latin token).
+        const counts={};for(const w of word){const s=scriptOf(w.ch);if(s)counts[s]=(counts[s]||0)+1;}
+        let maj;
+        if("Latin"in counts){maj="Latin";}
+        else{maj=Object.keys(counts).sort((a,b)=>counts[b]-counts[a])[0];}
+        for(const w of word){const s=scriptOf(w.ch);if(s&&s!==maj)flagged.add(w.i);}
+      }
+    }
+    word=[];
+  };
+  chars.forEach((ch,i)=>{
+    if(/[\p{L}\p{M}\p{Nd}]/u.test(ch)&&ch!=="_"){word.push({i,ch});}else flush();
+  });
+  flush();
+  return{flagged,mixedWords};
+}
+
+let CHARS=[];         // array of grapheme-ish code point strings (per codepoint)
+let SEL=-1;           // selected index
+let mode="scan";
+
+function toChars(str){return Array.from(str);} // splits by code point
+
+function render(str){
+  const bar=$("bar"),render=$("render");
+  if(!str){render.innerHTML='<span class="empty">Nothing to reveal yet.</span>';
+    bar.innerHTML='';$("cleanWrap").innerHTML='';
+    SEL=-1;$("inspBody").innerHTML='<span class="empty">Click a glyph or badge in the Reveal panel.</span>';return;}
+  let chars=toChars(str),truncated=false;
+  if(chars.length>CAP){chars=chars.slice(0,CAP);truncated=true;}
+  CHARS=chars;
+  const mixed=analyzeMixed(chars);
+  let cInv=0,cBidi=0,cComb=0,cNonAscii=0,cCc=0,cTag=0;
+  const meta=chars.map((ch,i)=>{
+    const cp=ch.codePointAt(0),c=classify(cp,ch);
+    if(cp>127)cNonAscii++;
+    if(c.kind==="invisible")cInv++;
+    else if(c.kind==="bidi")cBidi++;
+    else if(c.kind==="cc")cCc++;
+    else if(c.kind==="tag"){cTag++;}
+    else if(c.kind==="combining")cComb++;
+    return{cp,ch,c,homo:mixed.flagged.has(i)};
+  });
+  // render
+  const frag=[];
+  meta.forEach((m,i)=>{
+    const a11y=`tabindex="0" role="button" aria-label="U+${hex(m.cp)}"`;
+    if(m.c.kind==="invisible"||m.c.kind==="bidi"||m.c.kind==="cc"||m.c.kind==="tag"){
+      frag.push(`<span class="g badge ${m.c.badge}" data-i="${i}" ${a11y}>${esc(m.c.label)}</span>`);
+    }else{
+      let cls="g";if(m.homo)cls+=" homo";else if(m.c.kind==="combining")cls+=" comb";
+      let disp=m.ch;if(m.cp===0x20)disp="&nbsp;";
+      else if(m.c.kind==="combining")disp="\u25CC"+m.ch;
+      else disp=esc(m.ch);
+      frag.push(`<span class="${cls}" data-i="${i}" ${a11y}>${disp}</span>`);
+    }
+  });
+  render.innerHTML=frag.join("");
+  render.querySelectorAll(".g").forEach(el=>{
+    el.onclick=()=>select(+el.dataset.i);
+    el.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();select(+el.dataset.i);}};
+  });
+
+  // threat bar
+  const bidiWarn=meta.some(m=>BIDI_OVERRIDE.has(m.cp));
+  const dirty=cInv+cBidi+cCc+cTag+mixed.mixedWords>0;
+  const chips=[];
+  chips.push(`<span class="verdict ${dirty?'dirty':'clean'}">${dirty?'\u26A0 STOWAWAYS FOUND':'\u2713 CLEAN'}</span>`);
+  chips.push(chip("chars",chars.length));
+  chips.push(chip("invisible",cInv,cInv?"hot":"ok"));
+  chips.push(chip("bidi controls",cBidi,cBidi?"hot":"ok"));
+  chips.push(chip("control",cCc,cCc?"hot":"ok"));
+  if(cTag)chips.push(chip("unicode-tag",cTag,"hot"));
+  chips.push(chip("mixed-script words",mixed.mixedWords,mixed.mixedWords?"hot":"ok"));
+  chips.push(chip("combining marks",cComb,cComb?"warn":"ok"));
+  chips.push(chip("non-ascii",cNonAscii,cNonAscii?"warn":"ok"));
+  if(bidiWarn)chips.push(`<span class="chip hot"><b>Trojan-Source</b> bidi override — visual order \u2260 logical order (CVE-2021-42574)</span>`);
+  if(cTag)chips.push(`<span class="chip hot">Smuggled Unicode-tag payload (possible hidden LLM instruction)</span>`);
+  if(truncated)chips.push(`<span class="chip warn">truncated to ${CAP} chars</span>`);
+  bar.innerHTML=chips.join("");
+  window.__meta=meta;window.__mixed=mixed;
+  $("cleanWrap").innerHTML='';
+  // keep the inspector in sync with the (possibly changed) input
+  if(SEL>=0&&SEL<meta.length){select(SEL);}
+  else{SEL=-1;$("inspBody").innerHTML='<span class="empty">Click a glyph or badge in the Reveal panel.</span>';}
+}
+function chip(k,v,cls){return `<span class="chip ${cls||''}">${k} <b>${v}</b></span>`;}
+function esc(s){return s.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
+
+function select(i){
+  SEL=i;const m=window.__meta[i];const b=$("inspBody");
+  const cp=m.cp,ch=m.ch;
+  const disp=(m.c.kind==="normal"||m.c.kind==="combining")?esc(ch):`<span class="badge ${m.c.badge}">${esc(m.c.label)}</span>`;
+  const sc=scriptOf(ch)||"—";
+  const skel=SKEL[cp];
+  let rows=[
+    ["Codepoint","U+"+hex(cp)],
+    ["Char",disp],
+    ["Label",m.c.kind==="normal"?"(printable)":m.c.label],
+    ["Category",catOf(ch)],
+    ["Script",sc],
+    ["UTF-8",utf8bytes(ch)],
+    ["UTF-16",utf16units(ch)],
+    ["Position","index "+i]
+  ];
+  let spoof="";
+  if(m.homo&&skel)spoof=`<div class="chip hot" style="margin:10px 0 0">Homoglyph: impersonates Latin "<b>${esc(skel)}</b>" (skeleton)</div>`;
+  else if(m.homo)spoof=`<div class="chip hot" style="margin:10px 0 0">Mixed-script homoglyph — off-script character in an otherwise Latin word</div>`;
+  const js=jsEsc(cp),json=jsonEsc(cp,ch);
+  const escBlock=`<div class="esc">
+    <div>JS</div><div class="mono">${esc(js)}</div>
+    <div>JSON</div><div class="mono">${esc(json)}</div>
+    <div>HTML</div><div class="mono">&amp;#${cp};</div>
+    <div>CSS</div><div class="mono">\\${hex(cp).replace(/^0+/,'')||'0'} </div>
+    <div>URL</div><div class="mono">${esc([...new TextEncoder().encode(ch)].map(x=>"%"+x.toString(16).toUpperCase().padStart(2,"0")).join(""))}</div>
+  </div>`;
+  b.innerHTML=`<div class="cp">${(m.c.kind==="normal")?esc(ch):"&nbsp;"}</div>`+
+    spoof+`<div class="kv">`+rows.map(r=>`<div>${r[0]}</div><div class="mono">${r[1]}</div>`).join("")+`</div>`+
+    `<div class="note">Copy-ready escapes</div>`+escBlock;
+}
+function jsEsc(cp){if(cp>0xFFFF)return "\\u{"+hex(cp).replace(/^0+/,'')+"}";return "\\u"+hex(cp);}
+function jsonEsc(cp,ch){if(cp<=0xFFFF)return "\\u"+hex(cp);
+  const arr=[];for(let i=0;i<ch.length;i++)arr.push("\\u"+ch.charCodeAt(i).toString(16).toUpperCase().padStart(4,"0"));return arr.join("");}
+
+/* ---- cleaner ---- */
+function clean(){
+  const src=$("inA").value;const chars=toChars(src);const removed=[];
+  const kept=[];
+  chars.forEach((ch,i)=>{
+    const cp=ch.codePointAt(0),c=classify(cp,ch);
+    if(c.kind==="invisible"||c.kind==="bidi"||c.kind==="cc"||c.kind==="tag"){
+      removed.push({pos:i,cp:"U+"+hex(cp),label:c.label,action:"stripped"});
+    }else kept.push(ch);
+  });
+  let out=kept.join("");
+  const before=out;out=out.normalize("NFC");
+  const normalized=before!==out;
+  window.__clean={output:out,removed,normalized,srcLen:chars.length};
+  const w=$("cleanWrap");
+  w.innerHTML=`<div class="note">Removed <b>${removed.length}</b> hidden/control char(s)${normalized?", then applied NFC normalization":""}. Output is ${toChars(out).length} chars.</div>
+    <pre class="out">${esc(out)||'<span class="empty">(empty)</span>'}</pre>
+    ${removed.length?`<div class="note">Stripped:</div><div class="findlist">`+removed.map(r=>`<div>@${r.pos}  ${r.cp}  ${esc(r.label)}</div>`).join("")+`</div>`:''}`;
+}
+function copy(t){if(!navigator.clipboard||!navigator.clipboard.writeText)return Promise.reject(new Error("no clipboard API"));return navigator.clipboard.writeText(t);}
+function copyWithFeedback(text,btn,okLabel,revertLabel){
+  copy(text)
+    .then(()=>{btn.textContent=okLabel;setTimeout(()=>btn.textContent=revertLabel,1400);})
+    .catch(()=>{btn.textContent="Copy failed — select & Ctrl+C";
+      showManualCopy(text);setTimeout(()=>btn.textContent=revertLabel,3000);});
+}
+/* file:// fallback: drop the text into a visible, pre-selected textarea */
+function showManualCopy(text){
+  let ta=$("manualCopy");
+  if(!ta){
+    const host=(mode==="scan")?$("cleanWrap"):$("diffMismatch");
+    ta=document.createElement("textarea");
+    ta.id="manualCopy";ta.readOnly=true;ta.spellcheck=false;
+    ta.style.marginTop="8px";ta.style.minHeight="64px";
+    (host||document.body).appendChild(ta);
+  }
+  ta.value=text;ta.style.display="";ta.focus();ta.select();
+}
+
+/* ---- diff mode: char-level LCS ---- */
+function diff(){
+  const a=toChars($("dA").value),b=toChars($("dB").value);
+  const n=a.length,m=b.length;
+  if(n===0&&m===0){
+    $("diffA").innerHTML='<span class="empty">(empty)</span>';
+    $("diffB").innerHTML='<span class="empty">(empty)</span>';
+    $("diffVerdict").innerHTML=`<span class="chip">Paste a string into A and B to compare them character by character.</span>`;
+    $("diffMismatch").innerHTML="";return;
+  }
+  // LCS DP (cap to keep it lean)
+  const CAPD=2500;
+  const ax=a.slice(0,CAPD),bx=b.slice(0,CAPD);
+  const N=ax.length,M=bx.length;
+  const dp=Array.from({length:N+1},()=>new Uint32Array(M+1));
+  for(let i=N-1;i>=0;i--)for(let j=M-1;j>=0;j--)
+    dp[i][j]=ax[i]===bx[j]?dp[i+1][j+1]+1:Math.max(dp[i+1][j],dp[i][j+1]);
+  const outA=[],outB=[];let i=0,j=0,firstMismatch=null;
+  while(i<N&&j<M){
+    if(ax[i]===bx[j]){outA.push(seg(ax[i],""));outB.push(seg(bx[j],""));i++;j++;}
+    else if(dp[i+1][j]>=dp[i][j+1]){if(!firstMismatch)firstMismatch=["A",i,ax[i]];outA.push(seg(ax[i],"d-del"));i++;}
+    else{if(!firstMismatch)firstMismatch=["B",j,bx[j]];outB.push(seg(bx[j],"d-add"));j++;}
+  }
+  while(i<N){if(!firstMismatch)firstMismatch=["A",i,ax[i]];outA.push(seg(ax[i],"d-del"));i++;}
+  while(j<M){if(!firstMismatch)firstMismatch=["B",j,bx[j]];outB.push(seg(bx[j],"d-add"));j++;}
+  $("diffA").innerHTML=outA.join("")||'<span class="empty">(empty)</span>';
+  $("diffB").innerHTML=outB.join("")||'<span class="empty">(empty)</span>';
+  const eq=$("dA").value===$("dB").value;
+  const looksSame=a.map(strip).join("")===b.map(strip).join("")&&!eq;
+  $("diffVerdict").innerHTML= eq
+    ? `<span class="verdict clean">\u2713 IDENTICAL — strings are equal</span>`
+    : `<span class="verdict dirty">\u26A0 NOT EQUAL${looksSame?" — but they may look identical":""}</span>`;
+  const capped=n>CAPD||m>CAPD;
+  const capNote=capped?`<div class="note">Compared the first ${CAPD} characters of each side (A is ${n}, B is ${m}). Differences beyond that prefix are not shown.</div>`:"";
+  if(firstMismatch&&!eq){
+    const[side,idx,ch]=firstMismatch;const cp=ch.codePointAt(0),c=classify(cp,ch);
+    const label=c.kind==="normal"?(scriptOf(ch)||"printable")+" '"+ch+"'":c.label;
+    const skel=SKEL[cp];
+    $("diffMismatch").innerHTML=`First difference at index ${idx} (${side}): U+${hex(cp)} — ${esc(label)}`+
+      (skel?` · homoglyph impersonating Latin "<b>${esc(skel)}</b>"`:"")+
+      (c.kind!=="normal"?` · <b>invisible/control culprit</b>`:"")+capNote;
+  }else if(!eq){
+    // NOT EQUAL but no mismatch surfaced in the compared window — the difference
+    // lies beyond the truncated prefix (or is a length difference past the cap).
+    $("diffMismatch").innerHTML=(capped
+      ?`The compared ${CAPD}-character prefixes are identical — the difference lies beyond it.`
+      :`Strings differ but no character-level mismatch was located.`)+capNote;
+  }else $("diffMismatch").innerHTML=capNote;
+}
+function strip(ch){const c=classify(ch.codePointAt(0),ch);return(c.kind==="invisible"||c.kind==="bidi"||c.kind==="cc"||c.kind==="tag")?"":(SKEL[ch.codePointAt(0)]||ch);}
+function seg(ch,cls){
+  const cp=ch.codePointAt(0),c=classify(cp,ch);
+  if(c.kind!=="normal"&&c.kind!=="combining")
+    return `<span class="badge ${c.badge} ${cls}">${esc(c.label)}</span>`;
+  let disp=cp===0x20?"&nbsp;":esc(ch);
+  return `<span class="diffchar ${cls}">${disp}</span>`;
+}
+
+/* ---- attack gallery ---- */
+const Z="\u200B",RLO="\u202E",PDF="\u202C";
+const TAGS=[..."rm -rf ~"].map(c=>String.fromCodePoint(0xE0000+c.codePointAt(0))).join("");
+const GAL=[
+  ["Trojan-Source bidi","access_level = \"user\"; "+RLO+" }"+PDF+" if (isAdmin) // "+RLO+"admin"+PDF+" only"],
+  ["Homoglyph domain","https://\u0430pple.com/login  (Cyrillic \u0430)"],
+  ["Zero-width in URL","https://exa"+Z+"mple.com/reset?token=abc"],
+  ["Smuggled LLM tag payload","Great answer!"+TAGS+" (hidden Unicode-tag instructions)"],
+  ["Non-breaking space","const price =\u00A0100; // NBSP not a real space"],
+  ["Confusable password","p\u0430ssw\u043Frd"],
+  ["Invisible ZWJ + combining","a\u200D\u0301b\u0301  looks fine?"],
+  ["Clean sample","the quick brown fox"]
+];
+function loadGallery(){
+  $("gallery").innerHTML=GAL.map((g,i)=>`<button data-i="${i}">${esc(g[0])}</button>`).join("");
+  $("gallery").querySelectorAll("button").forEach(el=>el.onclick=()=>{
+    const g=GAL[+el.dataset.i];
+    if(mode==="diff"){
+      // for diff, load the threat into A and its "clean lookalike" into B
+      $("dA").value=g[1];
+      $("dB").value=toChars(g[1]).map(strip).join("").normalize("NFC");
+      run();
+    }else{$("inA").value=g[1];run();}
+  });
+}
+
+/* ---- state + wiring ---- */
+function run(){
+  if(mode==="scan"){render($("inA").value);}
+  else diff();
+  saveHash();
+}
+function setMode(m){
+  mode=m;
+  $("mScan").classList.toggle("on",m==="scan");
+  $("mDiff").classList.toggle("on",m==="diff");
+  $("scanIn").style.display=m==="scan"?"":"none";
+  $("diffIn").style.display=m==="diff"?"":"none";
+  $("scanBody").style.display=m==="scan"?"":"none";
+  $("diffBody").style.display=m==="diff"?"":"none";
+  run();
+}
+function saveHash(){
+  try{
+    const st=mode==="scan"?{m:"s",a:$("inA").value}:{m:"d",a:$("dA").value,b:$("dB").value};
+    history.replaceState(null,"","#"+encodeURIComponent(JSON.stringify(st)));
+  }catch(e){}
+}
+function loadHash(){
+  if(!location.hash)return false;
+  try{
+    const st=JSON.parse(decodeURIComponent(location.hash.slice(1)));
+    if(st.m==="d"){$("dA").value=st.a||"";$("dB").value=st.b||"";setMode("diff");}
+    else{$("inA").value=st.a||"";setMode("scan");}
+    return true;
+  }catch(e){return false;}
+}
+
+$("mScan").onclick=()=>setMode("scan");
+$("mDiff").onclick=()=>setMode("diff");
+$("inA").oninput=run;$("dA").oninput=run;$("dB").oninput=run;
+$("btnClean").onclick=clean;
+$("btnCopyClean").onclick=()=>{clean();copyWithFeedback(window.__clean.output,$("btnCopyClean"),"Copied!","Copy clean output");};
+$("btnExport").onclick=()=>{
+  clean();const src=$("inA").value;const chars=toChars(src);
+  const findings=[];
+  const mixed=analyzeMixed(chars);
+  chars.forEach((ch,i)=>{
+    const cp=ch.codePointAt(0),c=classify(cp,ch);
+    if(c.kind!=="normal"&&c.kind!=="combining")
+      findings.push({pos:i,codepoint:"U+"+hex(cp),label:c.label,kind:c.kind});
+    else if(mixed.flagged.has(i))
+      findings.push({pos:i,codepoint:"U+"+hex(cp),label:"homoglyph",kind:"mixed-script",impersonates:SKEL[cp]||null});
+  });
+  const report={tool:"Stowaway",generated:new Date().toISOString(),length:chars.length,
+    findingCount:findings.length,findings,
+    cleaned:{output:window.__clean.output,removed:window.__clean.removed.length,nfcNormalized:window.__clean.normalized}};
+  copyWithFeedback(JSON.stringify(report,null,2),$("btnExport"),"Report copied!","Copy findings report (JSON)");
+};
+
+loadGallery();
+if(!loadHash())setMode("scan");
+</script>
+</body>
+</html>

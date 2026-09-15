@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CssPattern — Pure-CSS Background Pattern Generator</title>
+<meta name="description" content="Generate repeating CSS background patterns — stripes, checkerboard, and polka dots — with adjustable colors and size, a live preview, and copy-ready CSS. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('csspattern-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#db2777;
+    --bg:#fbf4f8; --card:#ffffff; --fg:#201620; --muted:#6b556a; --line:#f0e2ea; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#150b11; --card:#1f131a; --fg:#f5ecf1; --muted:#a88d9b; --line:#2d1e27; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:660px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#9d174d);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:660px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  .preview{height:160px;border-radius:12px;border:1px solid var(--line);margin-bottom:16px}
+  .kinds{display:flex;gap:6px;margin-bottom:14px}
+  .kinds button{flex:1;padding:9px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;cursor:pointer;font:inherit}
+  .kinds button.active{background:var(--c);color:#fff;border-color:var(--c)}
+  .controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px}
+  label{display:block;font-size:.75rem;color:var(--muted);margin-bottom:4px;font-weight:600}
+  input{width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  input[type=color]{height:40px;padding:2px}
+  .css{margin-top:16px;background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--c);border-radius:8px;padding:12px;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:.85rem;white-space:pre-wrap;word-break:break-all}
+  .copy{margin-top:10px;background:var(--c);color:#fff;border:0;border-radius:8px;padding:9px 16px;cursor:pointer;font:inherit}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:660px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🎨</div>
+    <div><h1>CssPattern</h1><div class="sub">Pure-CSS background patterns</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="preview" id="preview"></div>
+    <div class="kinds" id="kinds">
+      <button data-k="stripes" class="active" type="button">Stripes</button>
+      <button data-k="checkerboard" type="button">Checkerboard</button>
+      <button data-k="dots" type="button">Dots</button>
+    </div>
+    <div class="controls">
+      <div><label>Color 1</label><input type="color" id="c1" value="#db2777"></div>
+      <div><label>Color 2</label><input type="color" id="c2" value="#fce7f3"></div>
+      <div><label>Size (px)</label><input type="number" id="size" value="20" min="1" step="1"></div>
+      <div id="angleWrap"><label>Angle (°)</label><input type="number" id="angle" value="45" step="5"></div>
+      <div id="radiusWrap" style="display:none"><label>Dot radius (px)</label><input type="number" id="radius" value="5" min="1" step="1"></div>
+    </div>
+    <div class="css mono" id="css"></div>
+    <button class="copy" id="copyBtn" type="button">Copy CSS</button>
+  </div>
+</main>
+<footer>
+  Patterns are pure CSS gradients — no images, infinitely scalable, tiny. Stripes use a repeating linear gradient, checkerboard a conic gradient, dots a radial gradient. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/css-pattern">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  function chkSize(size){
+    const s = Number(size);
+    if(!Number.isFinite(s) || s <= 0) throw new Error('size must be > 0');
+    return s;
+  }
+
+  // Each generator returns a map of CSS declarations.
+  function stripes({ color1 = '#000000', color2 = '#ffffff', size = 20, angle = 45 } = {}){
+    const s = chkSize(size);
+    if(!Number.isFinite(Number(angle))) throw new Error('angle must be a number');
+    return {
+      background: `repeating-linear-gradient(${Number(angle)}deg, ${color1} 0, ${color1} ${s}px, ${color2} ${s}px, ${color2} ${s * 2}px)`
+    };
+  }
+
+  function checkerboard({ color1 = '#000000', color2 = '#ffffff', size = 20 } = {}){
+    const s = chkSize(size);
+    return {
+      'background-image': `conic-gradient(${color1} 90deg, ${color2} 90deg 180deg, ${color1} 180deg 270deg, ${color2} 270deg)`,
+      'background-size': `${s * 2}px ${s * 2}px`
+    };
+  }
+
+  function dots({ color1 = '#000000', color2 = '#ffffff', size = 20, radius = 5 } = {}){
+    const s = chkSize(size), r = chkSize(radius);
+    return {
+      'background-color': color2,
+      'background-image': `radial-gradient(circle at center, ${color1} ${r}px, transparent ${r}px)`,
+      'background-size': `${s}px ${s}px`
+    };
+  }
+
+  const GENERATORS = { stripes, checkerboard, dots };
+
+  function toCss(decls){
+    return Object.entries(decls).map(([k, v]) => `${k}: ${v};`).join('\n');
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('preview')){
+    const $ = id => document.getElementById(id);
+    let kind = 'stripes';
+
+    function render(){
+      try{
+        const opts = {
+          color1: $('c1').value, color2: $('c2').value,
+          size: +$('size').value, angle: +$('angle').value, radius: +$('radius').value
+        };
+        const decls = GENERATORS[kind](opts);
+        Object.assign($('preview').style, { background: '', backgroundImage: '', backgroundSize: '', backgroundColor: '' });
+        for(const [k, v] of Object.entries(decls)) $('preview').style.setProperty(k, v);
+        $('css').textContent = toCss(decls);
+      }catch(e){ $('css').textContent = e.message; }
+    }
+    $('kinds').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+      kind = b.dataset.k;
+      $('kinds').querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
+      $('angleWrap').style.display = kind === 'stripes' ? '' : 'none';
+      $('radiusWrap').style.display = kind === 'dots' ? '' : 'none';
+      render();
+    }));
+    [...document.querySelectorAll('input')].forEach(el => el.addEventListener('input', render));
+    $('copyBtn').addEventListener('click', () => {
+      navigator.clipboard?.writeText($('css').textContent);
+      $('copyBtn').textContent = 'Copied!'; setTimeout(() => $('copyBtn').textContent = 'Copy CSS', 1200);
+    });
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('csspattern-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { stripes, checkerboard, dots, toCss };
+</script>
+</body>
+</html>

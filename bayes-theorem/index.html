@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bayes' Theorem Calculator — posterior probability &amp; medical testing</title>
+<meta name="description" content="Compute posterior probability with Bayes' theorem, and the true probability of disease given a positive or negative test from prevalence, sensitivity, and specificity. Offline, no tracking.">
+<style>
+  :root{
+    --c:#c026d3;
+    --bg:#f8ecfb; --card:#ffffff; --fg:#1a0a1d; --muted:#664a6b;
+    --line:#f0daf4; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#120616; --card:#1e0f22; --fg:#f2e3f5; --muted:#c096c8;
+    --line:#341a3a; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:20px;color:#fff;flex:0 0 auto;font-weight:700;font-family:ui-monospace,monospace}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  input{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.1rem;font-weight:600;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+  .big{margin-top:18px;text-align:center;font-size:2.8rem;font-weight:800;color:var(--c);min-height:1.1em}
+  .tag{text-align:center;color:var(--muted);font-size:.95rem}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
+  .stat{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:16px;text-align:center}
+  .stat .v{font-size:1.5rem;font-weight:800;color:var(--c)}
+  .stat .k{font-size:.78rem;color:var(--muted);margin-top:4px}
+  .err{color:#dc2626;font-size:.86rem;margin-top:10px;text-align:center;min-height:1em}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">P|E</div>
+  <div>
+    <h1>Bayes' Theorem</h1>
+    <p>posterior probability &amp; test accuracy</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <h2>Medical test</h2>
+    <div class="row">
+      <div><label>Prevalence / prior (%)</label><input id="prev" inputmode="decimal" value="1"></div>
+      <div><label>Sensitivity (%)</label><input id="sens" inputmode="decimal" value="99"></div>
+      <div><label>Specificity (%)</label><input id="spec" inputmode="decimal" value="99"></div>
+    </div>
+    <div class="big" id="big">—</div>
+    <div class="tag">probability you actually have it, given a positive test</div>
+    <div class="grid2">
+      <div class="stat"><div class="v" id="neg">—</div><div class="k">If test is negative (residual risk)</div></div>
+      <div class="stat"><div class="v" id="ppv">—</div><div class="k">Odds after positive</div></div>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>General Bayes update</h2>
+    <div class="row">
+      <div><label>Prior P(H) (%)</label><input id="ph" inputmode="decimal" value="50"></div>
+      <div><label>P(E | H) (%)</label><input id="eh" inputmode="decimal" value="90"></div>
+      <div><label>P(E | ¬H) (%)</label><input id="enh" inputmode="decimal" value="10"></div>
+    </div>
+    <div class="big" id="gbig" style="font-size:2.2rem">—</div>
+    <div class="tag">posterior P(H | E)</div>
+    <div class="err" id="gerr"></div>
+  </div>
+
+  <div class="card">
+    <h2>Why the base rate matters</h2>
+    <p class="note"><b>Bayes' theorem</b> updates a probability with new evidence: <code>P(H|E) = P(E|H)·P(H) / [P(E|H)·P(H) + P(E|¬H)·P(¬H)]</code>. The famous surprise: with a <b>rare</b> disease (say 1% prevalence) and a <b>99%-accurate</b> test, a positive result still only means about a <b>50%</b> chance you're actually sick — because false positives from the huge healthy majority swamp the true positives. That's the base-rate fallacy, and it shows up in spam filters, security alerts, and screening programs alike. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function prob(x, name){ if(typeof x !== 'number' || !isFinite(x) || x < 0 || x > 1) throw new Error((name || 'probability') + ' must be between 0 and 1'); return x; }
+  // General Bayes update. All args are probabilities in [0,1].
+  function bayes(prior, pEgivenH, pEgivenNotH){
+    prob(prior, 'prior'); prob(pEgivenH, 'P(E|H)'); prob(pEgivenNotH, 'P(E|not H)');
+    var num = pEgivenH * prior, den = num + pEgivenNotH * (1 - prior);
+    if(den === 0) throw new Error('evidence has zero probability');
+    return num / den;
+  }
+  // P(disease | positive test) from prevalence, sensitivity, specificity.
+  function posteriorPositive(prevalence, sensitivity, specificity){ prob(specificity, 'specificity'); return bayes(prevalence, sensitivity, 1 - specificity); }
+  // P(disease | negative test).
+  function posteriorNegative(prevalence, sensitivity, specificity){ prob(sensitivity, 'sensitivity'); return bayes(prevalence, 1 - sensitivity, specificity); }
+
+  if(typeof module !== 'undefined') module.exports = { bayes:bayes, posteriorPositive:posteriorPositive, posteriorNegative:posteriorNegative };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var $ = function(id){ return document.getElementById(id); };
+    var pct = function(x){ return (x * 100).toPrecision(4) + '%'; };
+    function renderMed(){
+      $('err').textContent = '';
+      try{
+        var p = Number($('prev').value) / 100, se = Number($('sens').value) / 100, sp = Number($('spec').value) / 100;
+        var post = posteriorPositive(p, se, sp);
+        $('big').textContent = pct(post);
+        $('neg').textContent = pct(posteriorNegative(p, se, sp));
+        $('ppv').textContent = post >= 1 ? '∞' : (post / (1 - post)).toFixed(2) + ' : 1';
+      }catch(e){ ['big','neg','ppv'].forEach(function(id){ $(id).textContent = '—'; }); $('err').textContent = e.message; }
+    }
+    function renderGen(){
+      $('gerr').textContent = '';
+      try{
+        var post = bayes(Number($('ph').value) / 100, Number($('eh').value) / 100, Number($('enh').value) / 100);
+        $('gbig').textContent = pct(post);
+      }catch(e){ $('gbig').textContent = '—'; $('gerr').textContent = e.message; }
+    }
+    ['prev','sens','spec'].forEach(function(id){ $(id).addEventListener('input', renderMed); });
+    ['ph','eh','enh'].forEach(function(id){ $(id).addEventListener('input', renderGen); });
+    renderMed(); renderGen();
+
+    var root = document.documentElement, tb = $('theme');
+    function setTheme(t){ root.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? '☀️' : '🌙'; try{ localStorage.setItem('bayes-theme', t); }catch(e){} }
+    var saved; try{ saved = localStorage.getItem('bayes-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); });
+  }
+</script>
+</body>
+</html>

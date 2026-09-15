@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shearline — a physically honest lockpicking sim</title>
+<style>
+  :root{ --bg:#12161c; --panel:#1b222c; --ink:#e8eef6; --dim:#8fa1b5; --accent:#ffb454; --good:#5fd39a; --bad:#ff6b6b; --brass:#d9a441; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:radial-gradient(1200px 700px at 50% -10%,#1c2530,#0d1116); color:var(--ink);
+    font:14px/1.45 ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace; -webkit-user-select:none; user-select:none; }
+  #wrap{ min-height:100%; display:flex; flex-direction:column; align-items:center; padding:14px 10px 24px; gap:10px; }
+  h1{ margin:2px 0 0; font-size:20px; letter-spacing:.14em; font-weight:700; }
+  h1 b{ color:var(--accent); }
+  .sub{ color:var(--dim); font-size:11.5px; letter-spacing:.04em; margin-top:-2px; text-align:center; }
+  #tiers{ display:flex; gap:6px; flex-wrap:wrap; justify-content:center; }
+  .tier{ background:var(--panel); color:var(--dim); border:1px solid #2b3542; padding:5px 11px; border-radius:20px; cursor:pointer;
+    font-size:12px; letter-spacing:.05em; transition:.15s; }
+  .tier:hover{ color:var(--ink); border-color:#3f4d5e; }
+  .tier.on{ background:var(--accent); color:#20160a; border-color:var(--accent); font-weight:700; }
+  .tier.daily{ border-color:#3a5a7a; color:#9cc7ef; }
+  .tier.daily.on{ background:#5aa0e0; color:#0d1116; border-color:#5aa0e0; }
+  #stage{ position:relative; }
+  canvas{ display:block; background:linear-gradient(180deg,#161d26,#10151b); border:1px solid #2b3542; border-radius:12px;
+    box-shadow:0 18px 50px rgba(0,0,0,.5); touch-action:none; max-width:96vw; height:auto; }
+  #seedbar{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center; font-size:11.5px; color:var(--dim); }
+  #seedbar code{ color:var(--accent); background:#0d1218; padding:2px 8px; border-radius:6px; border:1px solid #263140; }
+  .btn{ background:var(--panel); border:1px solid #2b3542; color:var(--ink); border-radius:8px; padding:5px 12px; cursor:pointer; font:inherit; font-size:12px; }
+  .btn:hover{ border-color:#4a5a6e; }
+  #keys{ color:var(--dim); font-size:11px; max-width:720px; text-align:center; letter-spacing:.02em; }
+  #keys kbd{ background:#0d1218; border:1px solid #2b3542; border-bottom-width:2px; border-radius:4px; padding:0 5px; color:var(--ink); font-size:10.5px; }
+  #overlay{ position:absolute; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; gap:12px;
+    background:rgba(9,12,16,.86); border-radius:12px; -webkit-backdrop-filter:blur(3px); backdrop-filter:blur(3px); text-align:center; padding:20px; }
+  #overlay.show{ display:flex; animation:pop .4s ease; }
+  @keyframes pop{ from{ opacity:0; transform:scale(.94);} to{ opacity:1; transform:scale(1);} }
+  @media (prefers-reduced-motion: reduce){ #overlay.show{ animation:none; } }
+  #overlay h2{ margin:0; font-size:30px; color:var(--good); letter-spacing:.1em; }
+  #overlay .card{ background:linear-gradient(180deg,#1e2732,#151b23); border:1px solid #33414f; border-radius:12px; padding:16px 22px; min-width:260px; }
+  #overlay .big{ font-size:34px; color:var(--accent); font-weight:700; letter-spacing:.05em; }
+  #overlay .row{ display:flex; justify-content:space-between; gap:24px; color:var(--dim); font-size:12px; margin-top:4px; }
+  #overlay .row b{ color:var(--ink); }
+  .par{ font-size:12px; }
+  .par.beat{ color:var(--good); } .par.miss{ color:var(--accent); }
+  #toast{ position:absolute; left:50%; bottom:14px; transform:translateX(-50%); background:rgba(13,18,24,.92); border:1px solid #37475a;
+    color:var(--accent); padding:7px 14px; border-radius:20px; font-size:12px; opacity:0; transition:.3s; pointer-events:none; letter-spacing:.03em; }
+  #toast.show{ opacity:1; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>SHEAR<b>LINE</b></h1>
+  <div class="sub">Apply tension · find the binding pin · set it at the shear line · beat the spools</div>
+  <div id="tiers"></div>
+  <div id="stage">
+    <canvas id="c" width="760" height="440"></canvas>
+    <div id="overlay">
+      <h2>PICKED</h2>
+      <div class="card">
+        <div class="big" id="ov-time">0.00s</div>
+        <div class="row"><span>Tier</span><b id="ov-tier">—</b></div>
+        <div class="row"><span>Pins</span><b id="ov-pins">—</b></div>
+        <div class="row"><span>Oversets</span><b id="ov-over">—</b></div>
+        <div class="par" id="ov-par"></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+        <button class="btn" id="ov-share">Share this lock + time</button>
+        <button class="btn" id="ov-retry">Retry (R)</button>
+        <button class="btn" id="ov-next">New lock (N)</button>
+      </div>
+    </div>
+    <div id="toast"></div>
+  </div>
+  <div id="seedbar">
+    <span>lock <code id="seedlbl">—</code></span>
+    <button class="btn" id="copy">Copy share link</button>
+    <button class="btn" id="xray-btn">X-ray: auto</button>
+    <button class="btn" id="reset">Reset (R)</button>
+  </div>
+  <div id="keys">
+    <kbd>←</kbd><kbd>→</kbd> move pick &nbsp; <kbd>Space</kbd>/<kbd>↑</kbd> hold to push &nbsp; <kbd>↓</kbd> ease tension &nbsp; <kbd>W</kbd> add tension
+    &nbsp; <kbd>X</kbd> x-ray &nbsp; — or use the mouse: hover a pin, hold to push, scroll to set tension.
+  </div>
+</div>
+<script>
+"use strict";
+(function(){
+// ---------- seeded RNG ----------
+function hashStr(s){ let h=2166136261>>>0; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619); } return h>>>0; }
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+// ---------- tiers ----------
+// band = tension sweet spot [lo,hi] on 0..100; spools/serr/tpins scaled by pins.
+const TIERS = {
+  cozy:   { name:"Cozy",   pins:3, spool:0, serr:0, tpin:0, lo:22, hi:80, xray:1.0 },
+  casual: { name:"Casual", pins:4, spool:1, serr:0, tpin:0, lo:28, hi:74, xray:0.7 },
+  tricky: { name:"Tricky", pins:5, spool:2, serr:1, tpin:0, lo:36, hi:66, xray:0.35 },
+  cruel:  { name:"Cruel",  pins:7, spool:2, serr:1, tpin:1, lo:44, hi:62, xray:0.0 },
+};
+const ORDER = ["cozy","casual","tricky","cruel"];
+
+// ---------- geometry / tuning ----------
+const OVERSET = 0.13;          // how far past shear before overset
+const PUSH_SPD = 1.9, FALL_SPD = 5.5, REST_SPD = 6.5; // per second (push units 0..1)
+const TENS_KEY = 70;           // tension change per second when holding keys
+
+// ---------- state ----------
+let tier="cozy", seed="", daily=false, xrayMode="auto"; // auto|on|off
+let pins=[], sel=0, tension=40, band={lo:22,hi:80}, xrayBase=1;
+let pushing=false, tKeyDir=0, startT=0, solved=false, oversets=0, xrayShow=1;
+let parTime=0; // ghost par from shared link
+let audioCtx=null;
+
+const cv=document.getElementById("c"), ctx=cv.getContext("2d");
+const toastEl=document.getElementById("toast");
+
+// ---------- audio ----------
+function ac(){ if(!audioCtx){ try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(audioCtx&&audioCtx.state==="suspended"){ audioCtx.resume(); } return audioCtx; }
+function blip(freq,dur,type,gain,slideTo){
+  const a=ac(); if(!a) return; const o=a.createOscillator(), g=a.createGain(); o.type=type||"square";
+  o.frequency.setValueAtTime(freq,a.currentTime); if(slideTo) o.frequency.exponentialRampToValueAtTime(slideTo,a.currentTime+dur);
+  g.gain.setValueAtTime(gain||0.14,a.currentTime); g.gain.exponentialRampToValueAtTime(0.0001,a.currentTime+dur);
+  o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime+dur+0.02);
+}
+function sfxClick(){ blip(1500,0.05,"square",0.16,900); }        // crisp set
+function sfxFalse(){ blip(760,0.07,"triangle",0.13,520); }        // spool false-set
+function sfxThud(){                                               // overset
+  const a=ac(); if(!a) return; const b=a.createBuffer(1,2200,a.sampleRate), d=b.getChannelData(0);
+  for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/d.length,3);
+  const s=a.createBufferSource(); s.buffer=b; const g=a.createGain(); g.gain.value=0.3;
+  const f=a.createBiquadFilter(); f.type="lowpass"; f.frequency.value=320; s.connect(f); f.connect(g); g.connect(a.destination); s.start();
+}
+function sfxOpen(){ [523,659,784,1047].forEach((f,i)=>setTimeout(()=>blip(f,0.18,"triangle",0.16),i*90)); }
+function rumble(strong,weak,dur){
+  const gp=navigator.getGamepads&&navigator.getGamepads()[0];
+  if(gp&&gp.vibrationActuator){ try{ gp.vibrationActuator.playEffect("dual-rumble",{duration:dur,strongMagnitude:strong,weakMagnitude:weak}); }catch(e){} }
+}
+
+// ---------- lock generation ----------
+function buildLock(){
+  const cfg=TIERS[tier]; const rnd=mulberry32(hashStr(tier+"|"+seed));
+  band={lo:cfg.lo,hi:cfg.hi}; xrayBase=cfg.xray;
+  const n=cfg.pins;
+  // assign security types
+  const types=new Array(n).fill("normal");
+  const idx=[]; for(let i=0;i<n;i++) idx.push(i);
+  for(let i=idx.length-1;i>0;i--){ const j=Math.floor(rnd()*(i+1)); [idx[i],idx[j]]=[idx[j],idx[i]]; }
+  let k=0; const place=(cnt,t)=>{ for(let c=0;c<cnt&&k<idx.length;c++) types[idx[k++]]=t; };
+  place(cfg.spool,"spool"); place(cfg.serr,"serr"); place(cfg.tpin,"tpin");
+  // binding order = random permutation (tolerance stacking, not left-to-right)
+  const rank=idx.slice(); for(let i=rank.length-1;i>0;i--){ const j=Math.floor(rnd()*(i+1)); [rank[i],rank[j]]=[rank[j],rank[i]]; }
+  pins=[];
+  for(let i=0;i<n;i++){
+    const bit=1+Math.floor(rnd()*7);                    // bitting depth 1..7 (visual)
+    const shear=0.50+ (bit/7)*0.22 + rnd()*0.04;        // where the shear gap aligns
+    let ledges=[];
+    if(types[i]==="spool") ledges=[shear*0.55];
+    else if(types[i]==="tpin") ledges=[shear*0.42];
+    else if(types[i]==="serr") ledges=[shear*0.45, shear*0.68];
+    pins.push({ bit, shear, type:types[i], ledges, rank:rank[i],
+      push:0, set:false, overset:false, cleared:0, falseSet:false, wob:0, glow:0 });
+  }
+  sel=0; tension=Math.round((band.lo+band.hi)/2); pushing=false; tKeyDir=0; solved=false; oversets=0;
+  startT=0; xrayShow=xrayBase;
+  document.getElementById("overlay").classList.remove("show");
+  updateSeedLabel();
+}
+function bindingIndex(){ // active pin = lowest-rank unset, non-overset pin, only if tension holds
+  if(tension<band.lo) return -1;
+  let best=-1,br=1e9;
+  for(let i=0;i<pins.length;i++){ const p=pins[i]; if(!p.set&&!p.overset&&p.rank<br){ br=p.rank; best=i; } }
+  return best;
+}
+
+// ---------- sim ----------
+let last=0;
+function step(dt){
+  if(solved) return;
+  // tension from keys
+  if(tKeyDir) tension=Math.max(0,Math.min(100,tension+tKeyDir*TENS_KEY*dt));
+  const bIdx=bindingIndex();
+  const tooTight=tension>band.hi;
+  const backoff=band.lo+(band.hi-band.lo)*0.4; // clear ledges when tension eased into lower part of band
+  // drop set pins if tension collapses
+  if(tension<band.lo){
+    for(const p of pins){ if(p.set){ p.set=false; p.falseSet=false; p.cleared=0; sfxThud(); rumble(0.3,0.2,120); showToast("Tension dropped — pins fell!"); } }
+  }
+  for(let i=0;i<pins.length;i++){
+    const p=pins[i]; if(p.overset){ p.push+=(1.02-p.push)*Math.min(1,dt*4); continue; }
+    if(p.set){ p.push+=(p.shear-p.push)*Math.min(1,dt*8); p.glow=Math.max(0,p.glow-dt*2); p.wob*=0.9; continue; }
+    const isBind=(i===bIdx), driven=pushing&&i===sel;
+    let target=0, spd=REST_SPD;
+    if(driven){
+      if(isBind){
+        // cap depends on ledges + tension
+        let cap;
+        if(p.cleared<p.ledges.length){                       // stalled on a ledge until backed off
+          cap=p.ledges[p.cleared];
+          const nearLedge=p.push>=cap-0.015;
+          if(nearLedge && !p.falseSet){ p.falseSet=true; p.wob=1; sfxFalse(); rumble(0.15,0.5,90);
+            showToast(p.type==="serr"?"Serration caught — ease tension":"False set — back OFF tension"); }
+          if(nearLedge && tension<=backoff){ p.cleared++; p.falseSet=false; p.wob=0.6; } // ledge clears
+        } else {
+          cap = tooTight ? p.shear-0.05 : 1.0;               // too tight can't reach shear
+        }
+        target=cap; spd=PUSH_SPD*(tooTight?0.6:1);
+      } else {
+        target=0.9; spd=PUSH_SPD*2.4;                        // non-binding: springy, moves free, never sets
+      }
+    }
+    // integrate
+    if(p.push<target) p.push=Math.min(target,p.push+spd*dt);
+    else p.push=Math.max(target,p.push-(driven?spd:FALL_SPD)*dt);
+    // set / overset detection (only the binding pin can set)
+    if(isBind && p.cleared>=p.ledges.length && !tooTight){
+      if(!p.set && p.push>=p.shear && p.push<p.shear+OVERSET){ p.set=true; p.glow=1; p.wob=0; sfxClick(); rumble(0.6,0.3,70); }
+      if(p.push>=p.shear+OVERSET){ p.overset=true; oversets++; sfxThud(); rumble(0.9,0.6,160); showToast("Overset! Ease tension to reset that pin"); }
+    }
+    if(p.wob>0) p.wob=Math.max(0,p.wob-dt*3);
+    if(!driven && p.falseSet && p.cleared<p.ledges.length) p.falseSet=false;
+  }
+  // reset oversets when tension eased near zero
+  if(tension<band.lo*0.5){ for(const p of pins) if(p.overset){ p.overset=false; p.push=0; } }
+  // xray fade with progress (crutch fades as you master)
+  const solvedCount=pins.filter(p=>p.set).length;
+  const targetX = xrayMode==="on"?1 : xrayMode==="off"?0 : xrayBase*(1-0.5*solvedCount/pins.length);
+  xrayShow += (targetX-xrayShow)*Math.min(1,dt*3);
+  // win check
+  if(pins.length && pins.every(p=>p.set)){ win(); }
+  if(!startT && pins.some(p=>p.push>0.02)) startT=performance.now();
+}
+
+function win(){
+  solved=true; const t=(performance.now()-startT)/1000;
+  sfxOpen(); rumble(1,1,400);
+  document.getElementById("ov-time").textContent=t.toFixed(2)+"s";
+  document.getElementById("ov-tier").textContent=(daily?"Daily · ":"")+TIERS[tier].name;
+  document.getElementById("ov-pins").textContent=pins.length;
+  document.getElementById("ov-over").textContent=oversets;
+  const par=document.getElementById("ov-par");
+  if(parTime>0){ const beat=t<=parTime; par.className="par "+(beat?"beat":"miss");
+    par.textContent=beat?("Beat the ghost par of "+parTime.toFixed(2)+"s by "+(parTime-t).toFixed(2)+"s!"):("Ghost par was "+parTime.toFixed(2)+"s — "+(t-parTime).toFixed(2)+"s slower."); }
+  else par.textContent="";
+  lastTime=t;
+  document.getElementById("overlay").classList.add("show");
+}
+
+// ---------- render ----------
+let lastTime=0;
+function draw(){
+  const W=cv.width,H=cv.height; ctx.clearRect(0,0,W,H);
+  const n=pins.length;
+  const plugX=90, plugW=W-260, plugY=90, plugH=H-190;
+  const bIdx=bindingIndex();
+  // rotation from real sets (open) minus false-set wobble (counter-rotation)
+  let rot=0; for(const p of pins){ if(p.set) rot+=1; }
+  let ang = -(rot/Math.max(1,n))*0.10 - (solved?0.35:0);
+  let wob=0; for(const p of pins) wob+=p.wob; ang -= Math.min(0.05,wob*0.02);
+
+  // housing (fixed)
+  rr(plugX-26,plugY-40,plugW+52,plugH+120,10,"#0f151c"); ctx.strokeStyle="#2b3542"; ctx.lineWidth=2; ctx.stroke();
+  ctx.fillStyle="#7f8b98"; ctx.font="11px ui-monospace"; ctx.fillText("HOUSING (fixed) — driver pins & springs above the shear line",plugX-18,plugY-48);
+
+  // shear line
+  const shearY=plugY+plugH*0.42;
+  ctx.save(); ctx.setLineDash([7,6]); ctx.strokeStyle="rgba(255,180,84,.55)"; ctx.lineWidth=1.4;
+  ctx.beginPath(); ctx.moveTo(plugX-24,shearY); ctx.lineTo(plugX+plugW+24,shearY); ctx.stroke(); ctx.restore();
+  ctx.fillStyle="rgba(255,180,84,.8)"; ctx.font="10px ui-monospace"; ctx.fillText("shear line",plugX+plugW-40,shearY-5);
+
+  // plug (rotates a hair)
+  ctx.save();
+  const cx=plugX+plugW/2, cy=shearY; ctx.translate(cx,cy); ctx.rotate(ang); ctx.translate(-cx,-cy);
+  rr(plugX,shearY,plugW,plugH*0.58,8,"#151d26"); ctx.strokeStyle="#37454f"; ctx.lineWidth=2; ctx.stroke();
+  // keyway hint
+  ctx.fillStyle="#0d1218"; ctx.beginPath(); ctx.moveTo(plugX+plugW-16,shearY+16); ctx.lineTo(plugX+plugW-30,shearY+plugH*0.29); ctx.lineTo(plugX+plugW-2,shearY+plugH*0.29); ctx.closePath(); ctx.fill();
+
+  const colW=plugW/n, pinW=Math.min(30,colW*0.5);
+  for(let i=0;i<n;i++){
+    const p=pins[i]; const px=plugX+colW*(i+0.5);
+    const topY=plugY-30, botY=shearY+plugH*0.5;
+    // travel: push raises the stack; key pin bottom fixed, both pins rise by push*range
+    const range=plugH*0.5;
+    const rise=p.push*range;
+    // key pin (brass), grows/rises from bottom
+    const keyBottom = botY;
+    const kh = (0.20+p.bit/7*0.12)*plugH;
+    const kyTop = keyBottom - kh - rise;
+    // driver pin sits above key pin separated by a tiny gap
+    const dGap=6;
+    const drvH=(0.22)*plugH;
+    const drvBot = kyTop - dGap;
+    const drvTop = drvBot - drvH;
+    // spring above driver
+    ctx.strokeStyle="#5b6b7a"; ctx.lineWidth=2; ctx.beginPath();
+    let sy=drvTop; ctx.moveTo(px,topY);
+    for(let z=0; z<5; z++){ const yy=topY+(sy-topY)*(z+1)/6; ctx.lineTo(px+(z%2?pinW/2:-pinW/2)*0.7,yy); }
+    ctx.lineTo(px,sy); ctx.stroke();
+    // driver pin (steel) — spool/serr/tpin get shaped bodies
+    ctx.fillStyle = p.set? "#43607a" : "#6d7c8b";
+    drawDriver(px,drvTop,drvBot,pinW,p.type);
+    // key pin (brass) with bitting notch look
+    const grad=ctx.createLinearGradient(px-pinW/2,0,px+pinW/2,0);
+    grad.addColorStop(0,"#a97e2c"); grad.addColorStop(.5, p.set?"#f0c357":"#d9a441"); grad.addColorStop(1,"#8a6420");
+    ctx.fillStyle=grad; rr(px-pinW/2,kyTop,pinW,kh+rise,3); ctx.fill();
+    // pointed tip
+    ctx.beginPath(); ctx.moveTo(px-pinW/2,keyBottom); ctx.lineTo(px,keyBottom+10); ctx.lineTo(px+pinW/2,keyBottom); ctx.fill();
+    // glow on set
+    if(p.glow>0){ ctx.save(); ctx.globalAlpha=p.glow*0.7; ctx.shadowColor="#5fd39a"; ctx.shadowBlur=18; rr(px-pinW/2,kyTop,pinW,kh+rise,3,"rgba(95,211,154,.4)"); ctx.restore(); }
+  }
+  ctx.restore(); // end plug rotation
+
+  // ---- pin annotations (outside rotation for legibility) ----
+  for(let i=0;i<n;i++){
+    const p=pins[i]; const px=plugX+colW*(i+0.5);
+    const labelY=shearY+plugH*0.5+34;
+    // selection marker (pick)
+    if(i===sel){ ctx.fillStyle=var_accent; ctx.beginPath(); ctx.moveTo(px,labelY-14); ctx.lineTo(px-7,labelY-24); ctx.lineTo(px+7,labelY-24); ctx.closePath(); ctx.fill(); }
+    // type tag
+    ctx.textAlign="center"; ctx.font="10px ui-monospace";
+    const tag=p.type==="spool"?"SPOOL":p.type==="serr"?"SERR":p.type==="tpin"?"T-PIN":"pin "+(i+1);
+    ctx.fillStyle=p.type==="normal"?"#7f8b98":"#ffb454"; ctx.fillText(tag,px,labelY);
+    ctx.fillStyle=p.set?"#5fd39a":p.overset?"#ff6b6b":"#66788a";
+    ctx.fillText(p.set?"SET":p.overset?"OVERSET":p.falseSet?"false":"·",px,labelY+13);
+    // x-ray: reveal binding pin + order
+    if(xrayShow>0.02){
+      ctx.globalAlpha=xrayShow;
+      if(i===bIdx){ ctx.strokeStyle="rgba(95,211,154,.9)"; ctx.lineWidth=2; ctx.setLineDash([3,3]);
+        ctx.strokeRect(px-colW/2+3,plugY-34,colW-6,plugH+120); ctx.setLineDash([]);
+        ctx.fillStyle="#5fd39a"; ctx.fillText("◀ BINDING",px,plugY-40); }
+      ctx.fillStyle="rgba(143,161,181,.9)"; ctx.font="9px ui-monospace";
+      ctx.fillText("order "+(p.rank+1),px,labelY+26);
+      ctx.globalAlpha=1;
+    }
+  }
+  ctx.textAlign="left";
+
+  // ---- tension gauge (right) ----
+  const gx=W-120, gy=plugY-20, gw=30, gh=plugH+90;
+  ctx.fillStyle="#7f8b98"; ctx.font="11px ui-monospace"; ctx.textAlign="center";
+  ctx.fillText("TENSION ⇅",gx+gw/2,gy-12);
+  rr(gx,gy,gw,gh,8,"#0d1218"); ctx.strokeStyle="#2b3542"; ctx.lineWidth=1.5; ctx.stroke();
+  // sweet band
+  const yFor=v=>gy+gh-(v/100)*gh;
+  ctx.fillStyle="rgba(95,211,154,.20)"; ctx.fillRect(gx,yFor(band.hi),gw,yFor(band.lo)-yFor(band.hi));
+  ctx.strokeStyle="rgba(95,211,154,.6)"; ctx.strokeRect(gx,yFor(band.hi),gw,yFor(band.lo)-yFor(band.hi));
+  ctx.fillStyle="rgba(95,211,154,.7)"; ctx.font="9px ui-monospace"; ctx.fillText("sweet",gx+gw/2,yFor(band.hi)-3);
+  // fill
+  const inBand=tension>=band.lo&&tension<=band.hi;
+  ctx.fillStyle = tension>band.hi?"#ff6b6b" : tension<band.lo?"#ffb454" : "#5fd39a";
+  ctx.fillRect(gx+3,yFor(tension),gw-6,gy+gh-yFor(tension));
+  // marker
+  ctx.fillStyle="#e8eef6"; ctx.fillRect(gx-4,yFor(tension)-1.5,gw+8,3);
+  ctx.fillStyle="#8fa1b5"; ctx.font="10px ui-monospace";
+  ctx.fillText((tension|0)+"%",gx+gw/2,gy+gh+16);
+  ctx.fillStyle=tension>band.hi?"#ff6b6b":tension<band.lo?"#ffb454":"#5fd39a";
+  ctx.fillText(tension>band.hi?"too tight":tension<band.lo?"too loose":"good",gx+gw/2,gy+gh+30);
+
+  // ---- HUD: timer + progress ----
+  ctx.textAlign="left"; ctx.font="12px ui-monospace"; ctx.fillStyle="#e8eef6";
+  const el=solved?lastTime:(startT?(performance.now()-startT)/1000:0);
+  ctx.fillText("time  "+el.toFixed(2)+"s",20,26);
+  const done=pins.filter(p=>p.set).length;
+  ctx.fillText("pins  "+done+"/"+n,20,44);
+  ctx.fillStyle="#ffb454"; ctx.fillText("oversets  "+oversets,140,44);
+  if(parTime>0){ ctx.fillStyle="#9cc7ef"; ctx.fillText("ghost par  "+parTime.toFixed(2)+"s",140,26); }
+  // coach
+  const bp=pins[bIdx];
+  if(bp && bp.falseSet && !solved){ ctx.fillStyle="#ffb454"; ctx.font="bold 13px ui-monospace";
+    ctx.fillText("↓ False set on a "+(bp.type==="serr"?"serrated":bp.type==="tpin"?"T-":"spool ")+"pin — press ↓ / scroll to EASE tension, then keep pushing",20,H-16); }
+}
+const var_accent="#ffb454";
+function drawDriver(px,top,bot,w,type){
+  const hw=w/2;
+  if(type==="spool"){ // waisted
+    ctx.beginPath(); const mid=(top+bot)/2;
+    ctx.moveTo(px-hw,top); ctx.lineTo(px+hw,top); ctx.lineTo(px+hw,top+(bot-top)*0.25);
+    ctx.lineTo(px+hw*0.4,mid); ctx.lineTo(px+hw,bot-(bot-top)*0.25); ctx.lineTo(px+hw,bot);
+    ctx.lineTo(px-hw,bot); ctx.lineTo(px-hw,bot-(bot-top)*0.25); ctx.lineTo(px-hw*0.4,mid);
+    ctx.lineTo(px-hw,top+(bot-top)*0.25); ctx.closePath(); ctx.fill();
+  } else if(type==="serr"){ // stepped
+    for(let s=0;s<4;s++){ const y0=top+(bot-top)*s/4, y1=top+(bot-top)*(s+1)/4; const ww=hw*(s%2?0.6:1);
+      ctx.fillRect(px-ww,y0,ww*2,y1-y0+0.5); }
+  } else if(type==="tpin"){ // T shape
+    ctx.fillRect(px-hw,top,w,(bot-top)*0.3);
+    ctx.fillRect(px-hw*0.45,top+(bot-top)*0.3,hw*0.9,(bot-top)*0.7);
+  } else { rr(px-hw,top,w,bot-top,3); ctx.fill(); }
+}
+function rr(x,y,w,h,r,fill){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); if(fill){ ctx.fillStyle=fill; ctx.fill(); } }
+
+// ---------- loop ----------
+function frame(t){ if(!last) last=t; const dt=Math.min(0.05,(t-last)/1000); last=t; step(dt); draw(); requestAnimationFrame(frame); }
+
+// ---------- input ----------
+function moveSel(d){ sel=(sel+d+pins.length)%pins.length; }
+addEventListener("keydown",e=>{
+  if(e.repeat && e.key!=="ArrowUp"&&e.key!==" "&&e.key.toLowerCase()!=="w") return;
+  switch(e.key){
+    case "ArrowLeft": moveSel(-1); e.preventDefault(); break;
+    case "ArrowRight": moveSel(1); e.preventDefault(); break;
+    case "ArrowUp": case " ": pushing=true; ac(); e.preventDefault(); break;
+    case "w": case "W": tKeyDir=1; ac(); break;
+    case "ArrowDown": tKeyDir=-1; e.preventDefault(); break;
+    case "x": case "X": cycleXray(); break;
+    case "r": case "R": buildLock(); break;
+    case "n": case "N": newRandom(); break;
+  }
+});
+addEventListener("keyup",e=>{
+  if(e.key==="ArrowUp"||e.key===" ") pushing=false;
+  if(e.key.toLowerCase()==="w"&&tKeyDir>0) tKeyDir=0;
+  if(e.key==="ArrowDown"&&tKeyDir<0) tKeyDir=0;
+});
+// mouse / touch
+let tensionDrag=false;
+function canvasXY(e){ const r=cv.getBoundingClientRect(); return { x:(e.clientX-r.left)*(cv.width/r.width), y:(e.clientY-r.top)*(cv.height/r.height) }; }
+function gaugeRect(){ const plugY=90, plugH=cv.height-190; return { gx:cv.width-120, gy:plugY-20, gw:30, gh:plugH+90 }; }
+function overGauge(x,y){ const g=gaugeRect(); return x>=g.gx-16 && x<=g.gx+g.gw+16 && y>=g.gy-10 && y<=g.gy+g.gh+10; }
+function setTensionFromY(y){ const g=gaugeRect(); tension=Math.max(0,Math.min(100,(g.gy+g.gh-y)/g.gh*100)); }
+function pinAtX(clientX){
+  const r=cv.getBoundingClientRect(); const x=(clientX-r.left)*(cv.width/r.width);
+  const plugX=90, plugW=cv.width-260, colW=plugW/pins.length;
+  if(x<plugX||x>plugX+plugW) return -1;                    // ignore chrome outside the plug span
+  return Math.max(0,Math.min(pins.length-1,Math.floor((x-plugX)/colW)));
+}
+cv.addEventListener("pointermove",e=>{
+  const p=canvasXY(e);
+  if(tensionDrag){ setTensionFromY(p.y); e.preventDefault(); return; }
+  const i=pinAtX(e.clientX); if(i>=0) sel=i;
+  cv.style.cursor = overGauge(p.x,p.y) ? "ns-resize" : (i>=0 ? "pointer" : "default");
+});
+cv.addEventListener("pointerdown",e=>{
+  ac(); const p=canvasXY(e);
+  if(overGauge(p.x,p.y)){ tensionDrag=true; setTensionFromY(p.y); cv.setPointerCapture(e.pointerId); e.preventDefault(); return; }
+  const i=pinAtX(e.clientX); if(i>=0){ sel=i; pushing=true; cv.setPointerCapture(e.pointerId); }
+  e.preventDefault();
+});
+addEventListener("pointerup",()=>{ pushing=false; tensionDrag=false; });
+cv.addEventListener("wheel",e=>{ tension=Math.max(0,Math.min(100,tension - Math.sign(e.deltaY)*4)); e.preventDefault(); },{passive:false});
+
+// ---------- ui / hash ----------
+function randSeed(){ return Math.floor(Math.random()*0x100000).toString(36); }
+function updateSeedLabel(){ document.getElementById("seedlbl").textContent=(daily?"daily-":"")+tier+"-"+seed; }
+function shareHash(withTime){ let h="#"+tier+"-"+seed; if(daily) h="#daily-"+tier+"-"+seed; if(withTime&&lastTime) h+="-t"+lastTime.toFixed(2); return h; }
+function setTierUI(){ document.querySelectorAll(".tier").forEach(b=>b.classList.toggle("on", b.dataset.k===(daily?"daily":tier))); }
+function cycleXray(){ xrayMode = xrayMode==="auto"?"on":xrayMode==="on"?"off":"auto";
+  document.getElementById("xray-btn").textContent="X-ray: "+xrayMode; }
+function dailySeed(){ const d=new Date(); return "d"+(d.getFullYear()*372+ (d.getMonth()*31)+d.getDate()).toString(36); }
+function newRandom(){ daily=false; seed=randSeed(); parTime=0; lastTime=0; location.hash=shareHash(false); buildLock(); setTierUI(); }
+function selectTier(k){ if(k==="daily"){ daily=true; tier=dailyTier(); seed=dailySeed(); }
+  else { daily=false; tier=k; seed=randSeed(); } parTime=0; lastTime=0; location.hash=shareHash(false); buildLock(); setTierUI(); }
+function dailyTier(){ const d=new Date(); return ORDER[(d.getFullYear()+d.getMonth()+d.getDate())%ORDER.length]; }
+
+function loadHash(){
+  const h=location.hash.replace(/^#/,""); if(!h) return false;
+  const parts=h.split("-"); parTime=0;
+  if(parts[0]==="daily"){ daily=true; if(TIERS[parts[1]]){ tier=parts[1]; } else tier=dailyTier();
+    seed=parts[2]||dailySeed(); }
+  else { daily=false; if(TIERS[parts[0]]){ tier=parts[0]; seed=parts[1]||randSeed(); } else return false; }
+  // the ghost-par time token is only ever the trailing part (appended by shareHash);
+  // scanning every part would misread a base36 seed like "t5" as a par time.
+  const base=daily?3:2;
+  if(parts.length>base){ const lp=parts[parts.length-1]; if(/^t[\d.]+$/.test(lp)) parTime=parseFloat(lp.slice(1)); }
+  return true;
+}
+
+// build tier buttons
+const tiersEl=document.getElementById("tiers");
+ORDER.forEach(k=>{ const b=document.createElement("button"); b.className="tier"; b.dataset.k=k;
+  b.textContent=TIERS[k].name; b.onclick=()=>selectTier(k); tiersEl.appendChild(b); });
+const db=document.createElement("button"); db.className="tier daily"; db.dataset.k="daily"; db.textContent="Lock of the Day";
+db.onclick=()=>selectTier("daily"); tiersEl.appendChild(db);
+
+function showToast(msg){ toastEl.textContent=msg; toastEl.classList.add("show"); clearTimeout(showToast._t);
+  showToast._t=setTimeout(()=>toastEl.classList.remove("show"),1800); }
+
+function copyLink(withTime){ const url=location.href.split("#")[0]+shareHash(withTime); // href base works for file:// (origin is "null")
+  const done=()=>showToast("Share link copied!");
+  if(navigator.clipboard) navigator.clipboard.writeText(url).then(done,()=>{prompt("Copy:",url);}); else prompt("Copy:",url); }
+
+document.getElementById("copy").onclick=()=>copyLink(false);
+document.getElementById("reset").onclick=()=>buildLock();
+document.getElementById("xray-btn").onclick=cycleXray;
+document.getElementById("ov-share").onclick=()=>copyLink(true); // build URL directly; do NOT mutate location.hash (would fire hashchange → rebuild and dismiss the win card)
+document.getElementById("ov-retry").onclick=()=>buildLock();
+document.getElementById("ov-next").onclick=()=>newRandom();
+addEventListener("hashchange",()=>{ if(loadHash()){ buildLock(); setTierUI(); } });
+
+// ---------- boot ----------
+if(!loadHash()){ tier="cozy"; seed=randSeed(); location.hash=shareHash(false); }
+buildLock(); setTierUI();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

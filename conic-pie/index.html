@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ConicPie — CSS Pie Chart / Conic-Gradient Generator</title>
+<meta name="description" content="Turn labeled segment values into a hard-stop CSS conic-gradient for pie charts, with a live circular preview and copy-ready code. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('conic-pie-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#f43f5e;
+    --bg:#f8f5f6; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#ece2e4; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#16111300; --bg:#161113; --card:#20181a; --fg:#f2eaec; --muted:#a5969a; --line:#332830; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:880px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:conic-gradient(#f43f5e 0 120deg,#fb923c 120deg 200deg,#22c55e 200deg 300deg,#3b82f6 300deg 360deg);display:flex;align-items:center;justify-content:center}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:880px;margin:0 auto;padding:12px 20px 60px;display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:720px){main{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow)}
+  .seg{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;margin-bottom:8px}
+  .seg input[type=color]{width:44px;height:38px;border:1px solid var(--line);border-radius:8px;background:var(--bg);cursor:pointer}
+  .seg input[type=number]{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  .seg button{border:1px solid var(--line);background:var(--bg);color:var(--muted);border-radius:8px;padding:8px 11px;cursor:pointer}
+  .add{background:var(--c);color:#fff;border:0;border-radius:8px;padding:9px 14px;cursor:pointer;font:inherit;font-weight:600;margin-top:6px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin:14px 0 6px;font-weight:600}
+  input[type=range]{width:100%;accent-color:var(--c)}
+  .stage{display:flex;align-items:center;justify-content:center;min-height:260px}
+  .pie{width:220px;height:220px;border-radius:50%;box-shadow:0 4px 20px rgba(0,0,0,.15)}
+  pre{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px;overflow:auto;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.8rem;margin:14px 0 0;white-space:pre-wrap;word-break:break-all}
+  button.act{background:var(--c);color:#fff;border:0;border-radius:8px;padding:10px 16px;cursor:pointer;font:inherit;font-weight:600;margin-top:12px}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:880px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo"></div>
+    <div><h1>ConicPie</h1><div class="sub">CSS pie chart via conic-gradient</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div id="segs"></div>
+    <button class="add" id="add" type="button">+ Add segment</button>
+    <label class="row" for="from">Start angle</label>
+    <input type="range" id="from" min="0" max="360" value="0"><span id="fromV" style="color:var(--muted);font-size:.8rem">0°</span>
+  </div>
+  <div class="card">
+    <div class="stage"><div class="pie" id="pie"></div></div>
+    <pre id="out"></pre>
+    <button class="act" id="copy" type="button">Copy CSS</button>
+  </div>
+</main>
+<footer>
+  100% offline. Nothing leaves your browser. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/conic-pie">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  function isHex(c){ return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(c); }
+  function round2(x){ return Math.round(x * 100) / 100; }
+
+  // segments: [{color, value}] → hard-stop conic-gradient
+  function conicPie(segments, opts = {}){
+    if(!Array.isArray(segments) || segments.length < 1) throw new Error('need at least one segment');
+    const from = opts.from == null ? 0 : opts.from;
+    let total = 0;
+    for(const s of segments){
+      const v = Number(s.value);
+      if(!(v >= 0)) throw new Error('value must be non-negative');
+      if(!isHex(s.color)) throw new Error('invalid hex color: ' + s.color);
+      total += v;
+    }
+    if(!(total > 0)) throw new Error('total must be positive');
+    let acc = 0;
+    const parts = segments.map(s => {
+      const start = acc / total * 360;
+      acc += Number(s.value);
+      const end = acc / total * 360;
+      return `${s.color} ${round2(start)}deg ${round2(end)}deg`;
+    });
+    return `conic-gradient(from ${from}deg, ${parts.join(', ')})`;
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('segs')){
+    const $ = id => document.getElementById(id);
+    let segs = [{ color: '#f43f5e', value: 30 }, { color: '#fb923c', value: 20 }, { color: '#22c55e', value: 25 }, { color: '#3b82f6', value: 25 }];
+
+    function build(){
+      $('segs').innerHTML = '';
+      segs.forEach((s, i) => {
+        const row = document.createElement('div');
+        row.className = 'seg';
+        row.innerHTML = `<input type="color" value="${s.color}"><input type="number" min="0" step="any" value="${s.value}">` + (segs.length > 1 ? `<button type="button">✕</button>` : '<span></span>');
+        const [cIn, vIn] = row.querySelectorAll('input');
+        cIn.addEventListener('input', () => { segs[i].color = cIn.value; render(); });
+        vIn.addEventListener('input', () => { segs[i].value = +vIn.value; render(); });
+        const rm = row.querySelector('button');
+        if(rm) rm.addEventListener('click', () => { segs.splice(i, 1); build(); render(); });
+        $('segs').appendChild(row);
+      });
+    }
+
+    function render(){
+      const from = +$('from').value;
+      $('fromV').textContent = from + '°';
+      let css;
+      try{ css = conicPie(segs, { from }); }catch(e){ $('out').textContent = e.message; return; }
+      $('out').textContent = 'background: ' + css + ';';
+      $('pie').style.background = css;
+    }
+
+    $('add').addEventListener('click', () => { if(segs.length < 10){ segs.push({ color: '#a855f7', value: 10 }); build(); render(); } });
+    $('from').addEventListener('input', render);
+    $('copy').addEventListener('click', async () => {
+      try{ await navigator.clipboard.writeText($('out').textContent); $('copy').textContent = 'Copied!'; setTimeout(() => $('copy').textContent = 'Copy CSS', 1200); }catch(e){}
+    });
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('conic-pie-theme', cur); }catch(e){}
+    });
+    build(); render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { isHex, conicPie };
+</script>
+</body>
+</html>

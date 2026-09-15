@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Osculant — a garden of Ford circles</title>
+<style>
+  :root{ --ink:#e9e6f5; --dim:#9a93c0; --accent:#ffb648; }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{ height:100%; overflow:hidden; background:#0a0713; }
+  body{ font:13px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; color:var(--ink);
+        -webkit-user-select:none; user-select:none; }
+  #stage{ position:fixed; inset:0; }
+  canvas{ display:block; width:100%; height:100%; cursor:grab; touch-action:none; }
+  canvas.drag{ cursor:grabbing; }
+  .panel{ position:fixed; z-index:4; background:rgba(18,13,32,.82);
+    -webkit-backdrop-filter:blur(9px); backdrop-filter:blur(9px);
+    border:1px solid rgba(255,182,72,.22); border-radius:12px; padding:12px 14px;
+    box-shadow:0 10px 40px rgba(0,0,0,.55); }
+  #controls{ top:14px; left:14px; width:262px; }
+  h1{ font-size:15px; font-weight:700; letter-spacing:.4px; color:var(--accent); margin-bottom:2px; }
+  .sub{ color:var(--dim); font-size:11px; margin-bottom:11px; }
+  .row{ display:flex; align-items:center; gap:8px; margin:9px 0; }
+  .row label{ color:var(--dim); flex:0 0 auto; min-width:64px; }
+  input[type=range]{ flex:1; accent-color:var(--accent); }
+  .val{ font-variant-numeric:tabular-nums; color:var(--ink); min-width:34px; text-align:right; }
+  input[type=text]{ flex:1; background:rgba(255,255,255,.06); border:1px solid rgba(255,182,72,.25);
+    color:var(--ink); border-radius:7px; padding:5px 8px; font:inherit; min-width:0; }
+  button{ background:rgba(255,182,72,.14); color:var(--accent); border:1px solid rgba(255,182,72,.35);
+    border-radius:7px; padding:5px 9px; font:inherit; font-weight:600; cursor:pointer; white-space:nowrap; }
+  button:hover{ background:rgba(255,182,72,.26); }
+  button.sm{ padding:4px 7px; font-size:11px; }
+  .presets{ display:flex; gap:5px; margin-top:7px; flex-wrap:wrap; }
+  .presets button{ flex:1; }
+  #inspect{ top:14px; right:14px; width:250px; display:none; }
+  #inspect .frac{ font-size:26px; font-weight:700; color:var(--accent); font-variant-numeric:tabular-nums; }
+  #inspect .k{ color:var(--dim); }
+  #inspect .mono{ font-family:ui-monospace,"SF Mono",Consolas,monospace; word-break:break-word; }
+  #inspect div{ margin:5px 0; }
+  .kiss{ color:var(--accent); font-weight:600; }
+  #minimap{ bottom:14px; right:14px; width:186px; height:150px; padding:8px 10px; }
+  #minimap .cap{ color:var(--dim); font-size:10px; margin-bottom:2px; letter-spacing:.5px; }
+  #note{ position:fixed; z-index:20; bottom:16px; left:50%; transform:translateX(-50%);
+    background:rgba(18,13,32,.9); border:1px solid rgba(255,182,72,.4); color:var(--accent);
+    padding:8px 18px; border-radius:20px; font-weight:600; opacity:0; transition:opacity .4s;
+    pointer-events:none; max-width:80vw; text-align:center; }
+  #note.show{ opacity:1; }
+  #hint{ position:fixed; bottom:12px; left:14px; color:var(--dim); font-size:11px; opacity:.8; }
+  a{ color:var(--accent); }
+  @media (max-width:560px){
+    #controls{ left:10px; right:10px; width:auto; }
+    #inspect{ top:auto; bottom:10px; left:10px; right:10px; width:auto; }
+    #minimap{ display:none; }
+    #hint{ display:none; }
+  }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="cv"></canvas></div>
+
+<div class="panel" id="controls">
+  <h1>Osculant</h1>
+  <div class="sub">Ford circles — every fraction kisses its Farey neighbors.</div>
+  <div class="row"><label>Detail</label><input type="range" id="den" min="20" max="4000" value="400" step="10"><span class="val" id="denV">400</span></div>
+  <div class="row"><label>Color</label>
+    <button class="sm" id="mode">by denominator</button>
+    <button class="sm" id="auto">auto-LOD ✓</button></div>
+  <div class="row"><input type="text" id="target" placeholder="fly to a real: pi, e, sqrt2, phi, 0.318…"><button id="go">Fly</button></div>
+  <div class="presets">
+    <button class="sm" data-t="pi">π</button>
+    <button class="sm" data-t="e">e</button>
+    <button class="sm" data-t="sqrt2">√2</button>
+    <button class="sm" data-t="phi">φ</button>
+  </div>
+  <div class="row" style="margin-top:11px">
+    <button class="sm" id="png">Export PNG</button>
+    <button class="sm" id="share">Copy link</button>
+    <button class="sm" id="reset">Reset</button>
+  </div>
+</div>
+
+<div class="panel" id="inspect">
+  <div class="frac" id="iFrac">0/1</div>
+  <div><span class="k">decimal</span> <span class="mono" id="iDec"></span></div>
+  <div><span class="k">continued fraction</span><br><span class="mono" id="iCf"></span></div>
+  <div><span class="k">Farey neighbors (mediant parents)</span><br><span class="mono" id="iNb"></span></div>
+  <div class="kiss" id="iKiss"></div>
+  <div><span class="k">Stern-Brocot depth</span> <span class="mono" id="iDepth"></span></div>
+</div>
+
+<div class="panel" id="minimap">
+  <div class="cap">STERN-BROCOT PATH</div>
+  <canvas id="mm" width="332" height="238" style="width:166px;height:119px"></canvas>
+  <div class="mono" id="mmPath" style="color:var(--dim);font-size:10px;margin-top:3px;text-align:center"></div>
+</div>
+
+<div id="note"></div>
+<div id="hint">drag to pan · wheel to zoom · hover a bubble · click empty space to fly there</div>
+
+<script>
+"use strict";
+(function(){
+  var cv=document.getElementById("cv"), ctx=cv.getContext("2d");
+  var W=0,H=0,DPR=Math.min(window.devicePixelRatio||1,2), yAxis=0;
+
+  // ---- camera & state ----
+  var st={ center:0.5, scale:600, maxDen:400, mode:0, autoLOD:true, pin:null };
+  var view={ center:0.5, scale:600 };            // eased render values
+  var hover=null, pinPulse=0;
+  var flight=null;
+  var MINR=0.45, FADER=2.2;                        // pixel radii: cull / fade-in
+
+  // ---- number theory ----
+  function gcd(a,b){ a=Math.abs(a); b=Math.abs(b); while(b){ var t=a%b; a=b; b=t; } return a; }
+  function cf(p,q){ var a=[]; if(q<0){p=-p;q=-q;} var g=0; while(q!==0 && g++<48){ var f=Math.floor(p/q); a.push(f); var t=p-f*q; p=q; q=t; } return a; }
+  function cfStr(a){ return "["+a[0]+(a.length>1?"; "+a.slice(1).join(", "):"")+"]"; }
+  function cfReal(x,n){ var a=[],c=x; for(var i=0;i<n;i++){ var fl=Math.floor(c); a.push(fl); var fr=c-fl; if(fr<1e-13) break; c=1/fr; } return a; }
+  function convergents(a){ var out=[],hm1=1,hm2=0,km1=0,km2=1; for(var i=0;i<a.length;i++){ var h=a[i]*hm1+hm2, k=a[i]*km1+km2; out.push([h,k]); hm2=hm1; hm1=h; km2=km1; km1=k; } return out; }
+
+  // Stern-Brocot descent: parents (two Farey neighbors) + L/R path, for any real value p/q.
+  function descend(p,q){
+    var sign=1; if(p<0){ sign=-1; p=-p; }               // work on |value| in [0,∞)
+    // Boundary node: 0/q is a seed of the tree, never generated as an interior mediant.
+    // Its Ford circle at 0 kisses 1/0 (the ∞ tangent line) and 1/1 — both true Farey neighbors (det 1).
+    if(p===0) return { A:[1,0], B:[1,1], path:"" };
+    var L=[0,1], R=[1,0], path="", g=0, GMAX=200000;
+    while(g++<GMAX){
+      var m=[L[0]+R[0], L[1]+R[1]];
+      var cmp = p*m[1] - m[0]*q;                          // sign of p/q - m
+      if(cmp===0) break;
+      // Interior mediant denominators stay ≤ q until the exact hit; overshoot means unreachable/boundary.
+      if(m[1] > q) break;
+      if(cmp<0){ path+="L"; R=m; } else { path+="R"; L=m; }
+    }
+    if(sign<0){                                           // mirror for negatives
+      var a=[-R[0],R[1]], b=[-L[0],L[1]]; L=a; R=b;
+      path=path.replace(/L/g,"x").replace(/R/g,"L").replace(/x/g,"R");
+    }
+    return { A:L, B:R, path:path };                       // A<value<B
+  }
+
+  // ---- circle generation for current view (bounded, LOD-culled) ----
+  var circles=[];
+  function build(){
+    circles.length=0;
+    var half=(W/2)/view.scale;
+    var x0=view.center-half-0.02, x1=view.center+half+0.02;
+    var qCap=st.maxDen;
+    if(st.autoLOD){ qCap=Math.min(qCap, Math.floor(Math.sqrt(view.scale/(2*MINR)))); }
+    qCap=Math.max(1,qCap);
+    var count=0, CAPN=4200;
+    for(var q=1;q<=qCap && count<CAPN;q++){
+      var pr=view.scale/(2*q*q);                          // pixel radius for this denom
+      if(pr<MINR) break;
+      var pmin=Math.ceil(x0*q), pmax=Math.floor(x1*q);
+      for(var p=pmin;p<=pmax;p++){
+        if(gcd(p,q)!==1) continue;
+        circles.push({p:p,q:q,pr:pr});
+        if(++count>=CAPN) break;
+      }
+    }
+  }
+
+  // ---- transforms ----
+  function sx(x){ return (x-view.center)*view.scale + W/2; }
+
+  function circleGeom(c){
+    var r=c.pr;                                            // pixel radius = scale/(2q^2)
+    return { x:sx(c.p/c.q), y:yAxis-r, r:r };
+  }
+
+  function colorOf(c,alpha){
+    var hue;
+    if(st.mode===0){ hue=(c.q*137.508)%360; }
+    else{ var d=cf(c.p,c.q).reduce(function(s,v){return s+v;},0); hue=(d*47+200)%360; }
+    return "hsla("+hue.toFixed(0)+",78%,64%,"+alpha+")";
+  }
+
+  // ---- rendering ----
+  function frame(ts){
+    // ease camera toward state
+    var eC=st.center-view.center, eS=Math.log(st.scale)-Math.log(view.scale);
+    view.center += eC*0.18;
+    view.scale = Math.exp(Math.log(view.scale)+eS*0.18);
+    if(Math.abs(eC)<1e-12*Math.abs(st.scale)&&Math.abs(eS)<1e-4){ view.center=st.center; view.scale=st.scale; }
+
+    stepFlight(ts);
+    build();
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  function draw(){
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    ctx.clearRect(0,0,W,H);
+    // velvet backdrop
+    var bg=ctx.createRadialGradient(W*0.5,yAxis-H*0.12,40, W*0.5,yAxis,Math.max(W,H));
+    bg.addColorStop(0,"#181031"); bg.addColorStop(1,"#080511");
+    ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+    // axis
+    ctx.strokeStyle="rgba(255,182,72,.28)"; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(0,yAxis+.5); ctx.lineTo(W,yAxis+.5); ctx.stroke();
+    axisTicks();
+
+    var pinC=st.pin, hovC=hover;
+    // circles
+    for(var i=0;i<circles.length;i++){
+      var c=circles[i], g=circleGeom(c);
+      var alpha=Math.min(1,(c.pr-MINR)/(FADER-MINR)); if(alpha<=0) continue;
+      var isHi = (hovC&&hovC.p===c.p&&hovC.q===c.q) || (pinC&&pinC.p===c.p&&pinC.q===c.q);
+      ctx.beginPath(); ctx.arc(g.x,g.y,g.r,0,6.2832);
+      var col=colorOf(c, isHi?0.9:0.55*alpha);
+      if(g.r>2){ var rg=ctx.createRadialGradient(g.x,g.y,g.r*0.2,g.x,g.y,g.r);
+        rg.addColorStop(0,colorOf(c,(isHi?0.34:0.14)*alpha)); rg.addColorStop(1,colorOf(c,0));
+        ctx.fillStyle=rg; ctx.fill(); }
+      ctx.lineWidth=isHi?2:1; ctx.strokeStyle=col; ctx.stroke();
+    }
+    // highlight overlay (kissing points + mediant growth + neighbors)
+    var focus = hovC || pinC;
+    if(focus) drawFocus(focus);
+    pinPulse=Math.min(1,pinPulse+0.06);
+  }
+
+  function axisTicks(){
+    ctx.fillStyle="rgba(233,230,245,.55)"; ctx.font="11px ui-monospace,monospace";
+    ctx.textAlign="center";
+    var half=(W/2)/view.scale, x0=view.center-half, x1=view.center+half, span=x1-x0;
+    var step=Math.pow(10,Math.floor(Math.log10(span)))/ (span/Math.pow(10,Math.floor(Math.log10(span)))<2?2:1);
+    if(step<=0||!isFinite(step)) return;
+    var start=Math.ceil(x0/step)*step;
+    for(var x=start;x<=x1;x+=step){
+      var px=sx(x); if(px<0||px>W) continue;
+      ctx.fillStyle="rgba(255,182,72,.5)";
+      ctx.fillRect(px-.5,yAxis+1,1,6);
+      ctx.fillStyle="rgba(233,230,245,.5)";
+      ctx.fillText((+x.toPrecision(12)).toString(),px,yAxis+20);
+    }
+  }
+
+  function tangency(c1,c2){                                // world-space tangency point of two Ford circles
+    var r1=1/(2*c1.q*c1.q), r2=1/(2*c2.q*c2.q);
+    var x1=c1.p/c1.q, x2=c2.p/c2.q, t=r1/(r1+r2);
+    return { x:x1+(x2-x1)*t, y:r1+(r2-r1)*t };
+  }
+  function toScreen(wp){ return { x:sx(wp.x), y:yAxis-wp.y*view.scale }; }
+
+  function drawFocus(c){
+    var d=descend(c.p,c.q), A=d.A, B=d.B;
+    var neigh=[A,B].filter(function(n){ return n[1]>0; });
+    ctx.setLineDash([5,4]); ctx.lineWidth=1.4;
+    neigh.forEach(function(n){
+      var nc={p:n[0],q:n[1]};
+      var g={ x:sx(nc.p/nc.q), y:yAxis-view.scale/(2*nc.q*nc.q), r:view.scale/(2*nc.q*nc.q) };
+      if(g.r<1) return;
+      ctx.beginPath(); ctx.arc(g.x,g.y,g.r,0,6.2832);
+      ctx.strokeStyle="rgba(255,182,72,.75)"; ctx.stroke();
+      // spark the kissing point
+      var tp=toScreen(tangency(c,nc));
+      var sp=ctx.createRadialGradient(tp.x,tp.y,0,tp.x,tp.y,9);
+      sp.addColorStop(0,"#fff"); sp.addColorStop(.4,"#ffe6ad"); sp.addColorStop(1,"rgba(255,182,72,0)");
+      ctx.fillStyle=sp; ctx.beginPath(); ctx.arc(tp.x,tp.y,9,0,6.2832); ctx.fill();
+    });
+    ctx.setLineDash([]);
+    // mediant child "growing up" pulse on the focus circle itself
+    var gc={ x:sx(c.p/c.q), y:yAxis-view.scale/(2*c.q*c.q), r:view.scale/(2*c.q*c.q) };
+    var e=1-Math.pow(1-pinPulse,3);
+    ctx.beginPath(); ctx.arc(gc.x, yAxis-gc.r*e, gc.r*e, 0, 6.2832);
+    ctx.strokeStyle="rgba(255,255,255,"+(0.55*(1-e*0.4))+")"; ctx.lineWidth=2; ctx.stroke();
+  }
+
+  // ---- hit testing ----
+  function hitTest(mx,my){
+    var best=null;
+    for(var i=0;i<circles.length;i++){
+      var c=circles[i]; if(c.pr<1.2) continue;
+      var g=circleGeom(c), dx=mx-g.x, dy=my-g.y;
+      if(dx*dx+dy*dy<=g.r*g.r){ if(!best||c.pr<best.pr) best=c; }   // Ford circles don't overlap; smallest wins
+    }
+    return best;
+  }
+
+  // ---- inspect panel + minimap ----
+  var iP=document.getElementById("inspect");
+  function updateInspect(c){
+    if(!c){ iP.style.display="none"; drawMinimap(null); return; }
+    iP.style.display="block";
+    document.getElementById("iFrac").textContent=c.p+"/"+c.q;
+    document.getElementById("iDec").textContent=(+(c.p/c.q).toPrecision(14)).toString();
+    document.getElementById("iCf").textContent=cfStr(cf(c.p,c.q));
+    var d=descend(c.p,c.q), A=d.A, B=d.B;
+    function fr(n){ return n[1]===0?"∞":(n[0]+"/"+n[1]); }
+    document.getElementById("iNb").textContent=fr(A)+"  ·  "+fr(B)+"   → mediant = "+c.p+"/"+c.q;
+    // |ps - qr| = 1 shown against a finite neighbor — prefer whichever genuinely has det 1
+    function det1(n){ return n[1]>0 && Math.abs(c.p*n[1]-c.q*n[0])===1; }
+    var nb = det1(B)?B : det1(A)?A : (B[1]>0?B:A);
+    var det=Math.abs(c.p*nb[1]-c.q*nb[0]);
+    document.getElementById("iKiss").textContent="|p·s − q·r| = |"+c.p+"·"+nb[1]+" − "+c.q+"·"+nb[0]+"| = "+det+"  ⇒ they kiss";
+    document.getElementById("iDepth").textContent=d.path.length+"  ("+(d.path||"root")+")";
+    drawMinimap(c,d.path);
+  }
+
+  var mm=document.getElementById("mm"), mc=mm.getContext("2d");
+  function drawMinimap(c,path){
+    mc.clearRect(0,0,mm.width,mm.height);
+    if(!c){ document.getElementById("mmPath").textContent=""; return; }
+    var w=mm.width, y=18, x=w/2, dx=w/4, steps=path.slice(0,10);
+    mc.strokeStyle="rgba(255,182,72,.35)"; mc.fillStyle="#ffb648";
+    mc.beginPath(); mc.arc(x,y,4,0,6.2832); mc.fill();
+    var stepY=(mm.height-30)/Math.max(1,steps.length);
+    for(var i=0;i<steps.length;i++){
+      var nx = x + (steps[i]==="L"? -dx : dx), ny=y+stepY;
+      mc.strokeStyle="rgba(255,182,72,.55)"; mc.lineWidth=2;
+      mc.beginPath(); mc.moveTo(x,y); mc.lineTo(nx,ny); mc.stroke();
+      x=nx; y=ny; dx*=0.56;
+      var last=(i===steps.length-1);
+      mc.fillStyle=last?"#fff":"rgba(255,182,72,.8)";
+      mc.beginPath(); mc.arc(x,y,last?5:3,0,6.2832); mc.fill();
+    }
+    document.getElementById("mmPath").textContent=(path.length>10?path.slice(0,10)+"…":path)||"root";
+  }
+
+  // ---- irrational flight ----
+  var PRE={ pi:Math.PI, e:Math.E, sqrt2:Math.SQRT2, phi:(1+Math.sqrt(5))/2, "√2":Math.SQRT2, "π":Math.PI, "φ":(1+Math.sqrt(5))/2 };
+  function startFlight(alpha,label){
+    var a=cfReal(alpha,22), conv=convergents(a).filter(function(c){return c[1]>0;});
+    // keep convergents that stay within a reasonable denominator budget
+    conv=conv.filter(function(c){ return c[1]<=200000; });
+    flight={ conv:conv, idx:-1, next:0, alpha:alpha, label:label,
+             golden:Math.abs(alpha-PRE.phi)<1e-6 };
+    st.maxDen=Math.min(4000, Math.max(st.maxDen, conv.length?conv[Math.min(conv.length-1,10)][1]*2:400));
+    document.getElementById("den").value=st.maxDen; document.getElementById("denV").textContent=st.maxDen;
+    if(flight.golden) note("φ — the worst-approximable number: continued fraction [1;1,1,1,…], convergents crawl.");
+    else note("Flying to "+(label||alpha.toPrecision(8))+" via its convergents…");
+  }
+  function stepFlight(ts){
+    if(!flight) return;
+    if(ts>flight.next){
+      flight.idx++;
+      if(flight.idx>=flight.conv.length){ flight=null; return; }
+      var c=flight.conv[flight.idx];
+      st.pin={p:c[0],q:c[1]}; pinPulse=0;
+      st.center=flight.alpha;
+      st.scale=Math.min(6e12, Math.max(300, 70*2*c[1]*c[1]));  // frame this convergent circle
+      if(c[1]>st.maxDen){ st.maxDen=Math.min(4000,c[1]+2); document.getElementById("den").value=st.maxDen; document.getElementById("denV").textContent=st.maxDen; }
+      updateInspect(st.pin);
+      flight.next=ts+(flight.golden?1100:850);
+    }
+  }
+
+  // ---- UI note ----
+  var noteEl=document.getElementById("note"), noteT;
+  function note(msg){ noteEl.textContent=msg; noteEl.classList.add("show"); clearTimeout(noteT);
+    noteT=setTimeout(function(){ noteEl.classList.remove("show"); },3600); }
+
+  // ---- input handlers (Pointer Events: unify mouse / pen / touch + two-finger pinch) ----
+  var drag=null;
+  var pointers=new Map();     // active pointerId -> {x,y} in client coords
+  var pinch=null;             // {d0, scale0, wx} while two fingers are down
+  function applyAutoLOD(){
+    if(st.autoLOD){ var want=Math.min(4000,Math.max(60,Math.floor(Math.sqrt(view.scale/(2*MINR)))));
+      st.maxDen=want; document.getElementById("den").value=Math.min(4000,want); document.getElementById("denV").textContent=st.maxDen; }
+  }
+  function zoomAbout(newScale, midMx, wx){       // keep world point wx pinned under screen x=midMx
+    st.scale=Math.max(120,Math.min(6e12,newScale)); view.scale=st.scale;
+    st.center=wx-(midMx-W/2)/view.scale; view.center=st.center;
+    applyAutoLOD(); syncHash();
+  }
+  function beginPinch(){
+    var pts=[]; pointers.forEach(function(v){ pts.push(v); });
+    var d=Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
+    var r=cv.getBoundingClientRect(), midMx=((pts[0].x+pts[1].x)/2)-r.left;
+    pinch={ d0:Math.max(1,d), scale0:view.scale, wx:view.center+(midMx-W/2)/view.scale };
+  }
+  cv.addEventListener("pointerdown",function(e){
+    try{ cv.setPointerCapture(e.pointerId); }catch(_){}
+    pointers.set(e.pointerId,{x:e.clientX,y:e.clientY}); flight=null;
+    if(pointers.size===1){ drag={x:e.clientX, c:st.center, moved:false}; cv.classList.add("drag"); cv.style.cursor="grabbing"; }
+    else if(pointers.size===2){ drag=null; cv.classList.remove("drag"); beginPinch(); }
+  });
+  window.addEventListener("pointermove",function(e){
+    if(pointers.has(e.pointerId)) pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    if(pinch && pointers.size>=2){                          // two-finger pinch → zoom about midpoint
+      var pts=[]; pointers.forEach(function(v){ pts.push(v); });
+      var d=Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
+      var r=cv.getBoundingClientRect(), midMx=((pts[0].x+pts[1].x)/2)-r.left;
+      zoomAbout(pinch.scale0*(d/pinch.d0), midMx, pinch.wx);
+      return;
+    }
+    var r=cv.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
+    if(drag){ var dxp=e.clientX-drag.x; if(Math.abs(dxp)>2) drag.moved=true;
+      st.center=drag.c-dxp/view.scale; view.center=st.center; syncHash(); return; }
+    var c=hitTest(mx,my);
+    cv.style.cursor = c ? "pointer" : "grab";               // affordance over interactive bubbles
+    if((c&&(!hover||c.p!==hover.p||c.q!==hover.q))||(!c&&hover)){ hover=c; if(c) pinPulse=0; updateInspect(c||st.pin); }
+  });
+  function endPointer(e){
+    pointers.delete(e.pointerId);
+    try{ cv.releasePointerCapture(e.pointerId); }catch(_){}
+    if(pointers.size<2) pinch=null;
+    if(pointers.size===1){                                  // dropped to one finger → resume pan from it
+      var rem=null; pointers.forEach(function(v){ rem=v; });
+      drag={x:rem.x, c:st.center, moved:true};
+    } else if(pointers.size===0){
+      if(drag&&!drag.moved){                                // tap/click: pin a bubble, or fly to empty space above axis
+        var r=cv.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top, hit=hitTest(mx,my);
+        if(hit){ st.pin={p:hit.p,q:hit.q}; pinPulse=0; updateInspect(st.pin); syncHash(); }
+        else if(my<yAxis+4){ var wx=view.center+(mx-W/2)/view.scale; startFlight(wx, wx.toPrecision(6)); }
+      }
+      drag=null; cv.classList.remove("drag"); cv.style.cursor = hover ? "pointer" : "grab";
+    }
+  }
+  cv.addEventListener("pointerup",endPointer);
+  cv.addEventListener("pointercancel",endPointer);
+  cv.addEventListener("wheel",function(e){
+    e.preventDefault(); flight=null;
+    var r=cv.getBoundingClientRect(), mx=e.clientX-r.left;
+    var wx=view.center+(mx-W/2)/view.scale;
+    var dy=e.deltaY; if(e.deltaMode===1) dy*=16; else if(e.deltaMode===2) dy*=H;  // normalize line/page deltas (Firefox)
+    zoomAbout(view.scale*Math.exp(-dy*0.0016), mx, wx);
+  },{passive:false});
+
+  document.getElementById("den").addEventListener("input",function(e){ st.maxDen=+e.target.value; document.getElementById("denV").textContent=st.maxDen; st.autoLOD=false; setAuto(); syncHash(); });
+  function setAuto(){ document.getElementById("auto").textContent="auto-LOD "+(st.autoLOD?"✓":"✗"); }
+  document.getElementById("auto").addEventListener("click",function(){ st.autoLOD=!st.autoLOD; setAuto(); });
+  document.getElementById("mode").addEventListener("click",function(){ st.mode^=1; this.textContent=st.mode?"by depth":"by denominator"; syncHash(); });
+  function fireFly(v){ if(v==null) return; var s=(""+v).trim().toLowerCase(); var a=PRE[s]!==undefined?PRE[s]:parseFloat(s);
+    if(isFinite(a)) startFlight(a, PRE[s]!==undefined?s:null); else note("Enter a number or π, e, √2, φ."); }
+  document.getElementById("go").addEventListener("click",function(){ fireFly(document.getElementById("target").value); });
+  document.getElementById("target").addEventListener("keydown",function(e){ if(e.key==="Enter") fireFly(this.value); });
+  Array.prototype.forEach.call(document.querySelectorAll(".presets button"),function(b){ b.addEventListener("click",function(){ fireFly(b.dataset.t); }); });
+  document.getElementById("reset").addEventListener("click",function(){ st.center=0.5; st.scale=W*0.6; view.center=0.5; view.scale=st.scale; st.pin=null; flight=null; updateInspect(null); syncHash(); });
+  document.getElementById("png").addEventListener("click",exportPNG);
+  document.getElementById("share").addEventListener("click",function(){ syncHash(); var u=location.href;
+    if(navigator.clipboard){ navigator.clipboard.writeText(u).then(function(){note("Shareable link copied.");},function(){note(u);}); } else note(u); });
+
+  function exportPNG(){
+    var s=2, o=document.createElement("canvas"); o.width=W*s; o.height=H*s;
+    var octx=o.getContext("2d");
+    // true high-res render: point the draw routines at the offscreen canvas at 2× device scale
+    var savedCtx=ctx, savedDPR=DPR;
+    ctx=octx; DPR=s;
+    build(); draw();
+    ctx=savedCtx; DPR=savedDPR;
+    octx.setTransform(s,0,0,s,0,0);                          // draw() already left this transform; keep coords in CSS px
+    octx.fillStyle="rgba(255,182,72,.85)"; octx.font="13px ui-sans-serif"; octx.textAlign="left";
+    octx.fillText("Osculant · Ford circles · center "+(+st.center.toPrecision(8))+"  zoom "+st.scale.toPrecision(4), 14, H-14);
+    o.toBlob(function(b){ var a=document.createElement("a"); a.href=URL.createObjectURL(b);
+      a.download="osculant.png"; a.click(); setTimeout(function(){URL.revokeObjectURL(a.href);},2000); });
+    build();                                                 // rebuild for the live view scale
+    note("PNG exported (2× resolution).");
+  }
+
+  // ---- URL hash ----
+  var hashT;
+  function syncHash(){ clearTimeout(hashT); hashT=setTimeout(function(){
+    var p="c="+st.center+"&s="+st.scale+"&d="+st.maxDen+"&m="+st.mode+(st.autoLOD?"&a=1":"");
+    if(st.pin) p+="&p="+st.pin.p+"&q="+st.pin.q;
+    history.replaceState(null,"","#"+p);
+  },120); }
+  function loadHash(){
+    var h=location.hash.replace(/^#/,""); if(!h) return false;
+    var o={}; h.split("&").forEach(function(kv){ var x=kv.split("="); o[x[0]]=x[1]; });
+    if(o.c!==undefined) st.center=+o.c;
+    if(o.s!==undefined) st.scale=Math.max(120,Math.min(6e12,+o.s));
+    if(o.d!==undefined){ st.maxDen=+o.d; document.getElementById("den").value=Math.min(4000,st.maxDen); document.getElementById("denV").textContent=st.maxDen; }
+    if(o.m!==undefined){ st.mode=+o.m; document.getElementById("mode").textContent=st.mode?"by depth":"by denominator"; }
+    st.autoLOD = o.a==="1"; setAuto();
+    if(o.p!==undefined&&o.q!==undefined){ st.pin={p:+o.p,q:+o.q}; updateInspect(st.pin); }
+    view.center=st.center; view.scale=st.scale;
+    return true;
+  }
+
+  // ---- resize / boot ----
+  function resize(){
+    W=cv.clientWidth; H=cv.clientHeight; yAxis=Math.round(H*0.72);
+    cv.width=W*DPR; cv.height=H*DPR;
+  }
+  window.addEventListener("resize",resize);
+  resize();
+  if(!loadHash()){                                          // fresh load: frame [0,1] and pin 1/2 so inspect + minimap show live
+    st.scale=W*0.6; view.scale=st.scale;
+    st.pin={p:1,q:2}; updateInspect(st.pin);
+  }
+  setAuto();
+  document.getElementById("mode").textContent=st.mode?"by depth":"by denominator";
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

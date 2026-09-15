@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sillage — curl-noise flow-field painter</title>
+<style>
+  :root{ --ink:#e8e4dc; --dim:#9a958c; --line:rgba(255,255,255,.08); }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{ height:100%; overflow:hidden; background:#0a0a0d; }
+  body{ font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; color:var(--ink); }
+  #stage{ position:fixed; inset:0; touch-action:none; }
+  canvas#c{ position:absolute; inset:0; width:100%; height:100%; display:block; }
+  /* paper grain overlay */
+  #grain{ position:absolute; inset:0; pointer-events:none; opacity:.05; mix-blend-mode:overlay; background-size:180px 180px; }
+
+  /* floating glass panel */
+  #panel{
+    position:fixed; top:16px; left:16px; width:262px; z-index:10;
+    background:rgba(18,18,24,.62); backdrop-filter:blur(16px) saturate(1.2);
+    -webkit-backdrop-filter:blur(16px) saturate(1.2);
+    border:1px solid var(--line); border-radius:14px; padding:14px 15px 12px;
+    box-shadow:0 12px 40px rgba(0,0,0,.5); user-select:none;
+    transition:transform .35s cubic-bezier(.2,.8,.2,1), opacity .35s;
+  }
+  #panel.hidden{ transform:translateX(-300px); opacity:0; }
+  .brand{ display:flex; align-items:baseline; gap:8px; margin-bottom:2px; }
+  .brand h1{ font-size:17px; font-weight:600; letter-spacing:.4px; }
+  .brand span{ font-size:10px; color:var(--dim); letter-spacing:.5px; }
+  .sub{ font-size:10.5px; color:var(--dim); margin-bottom:12px; line-height:1.5; }
+  .row{ margin:9px 0; }
+  .row label{ display:flex; justify-content:space-between; font-size:11px; color:var(--dim); margin-bottom:4px; letter-spacing:.3px; }
+  .row label b{ color:var(--ink); font-weight:500; font-variant-numeric:tabular-nums; }
+  input[type=range]{ -webkit-appearance:none; width:100%; height:3px; border-radius:3px; background:rgba(255,255,255,.14); outline:none; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:13px; height:13px; border-radius:50%; background:var(--ink); cursor:pointer; box-shadow:0 0 0 3px rgba(0,0,0,.25); transition:transform .1s; }
+  input[type=range]::-webkit-slider-thumb:active{ transform:scale(1.25); }
+  input[type=range]::-moz-range-thumb{ width:13px; height:13px; border:none; border-radius:50%; background:var(--ink); cursor:pointer; }
+  .selrow{ display:flex; gap:8px; margin:11px 0 4px; }
+  select{ flex:1; background:rgba(255,255,255,.06); color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:6px 8px; font-size:12px; outline:none; cursor:pointer; }
+  .toggles{ display:flex; gap:14px; margin:10px 0 4px; font-size:11px; color:var(--dim); }
+  .toggles label{ display:flex; align-items:center; gap:5px; cursor:pointer; }
+  .btns{ display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:11px; }
+  button{ background:rgba(255,255,255,.07); color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:7px 6px; font-size:11.5px; cursor:pointer; letter-spacing:.2px; transition:background .15s,transform .05s; }
+  button:hover{ background:rgba(255,255,255,.14); }
+  button:active{ transform:translateY(1px); }
+  button.primary{ background:rgba(255,150,60,.16); border-color:rgba(255,150,60,.35); color:#ffcaa0; }
+  button.primary:hover{ background:rgba(255,150,60,.26); }
+  .seedrow{ display:flex; gap:7px; align-items:center; margin-top:10px; }
+  .seedrow .sval{ flex:1; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:var(--dim); background:rgba(255,255,255,.05); border:1px solid var(--line); border-radius:7px; padding:6px 8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  /* variation gallery */
+  #strip{ position:fixed; bottom:16px; left:16px; z-index:10; display:flex; gap:8px; padding:9px; border-radius:12px;
+    background:rgba(18,18,24,.6); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border:1px solid var(--line); box-shadow:0 8px 30px rgba(0,0,0,.45);
+    transition:opacity .3s, transform .3s; }
+  #strip.hidden{ opacity:0; transform:translateY(24px); pointer-events:none; }
+  #strip::before{ content:"variations · click to promote"; position:absolute; top:-18px; left:2px; font-size:9.5px; letter-spacing:.4px; color:var(--dim); white-space:nowrap; }
+  #strip .thumb{ position:relative; cursor:pointer; border-radius:7px; overflow:hidden; border:1px solid rgba(255,255,255,.1); transition:transform .12s, box-shadow .12s; }
+  #strip .thumb:hover{ transform:translateY(-3px); box-shadow:0 8px 18px rgba(0,0,0,.5); }
+  #strip .thumb canvas{ display:block; width:112px; height:74px; }
+  #strip .thumb i{ position:absolute; bottom:3px; right:5px; font-style:normal; font-size:9px; color:rgba(255,255,255,.75); text-shadow:0 1px 2px #000; font-family:ui-monospace,monospace; }
+
+  #hint{ position:fixed; bottom:16px; right:16px; z-index:10; font-size:10.5px; color:var(--dim); text-align:right; line-height:1.7; pointer-events:none; }
+  #hint b{ color:var(--ink); font-weight:500; }
+  #toast{ position:fixed; top:16px; left:50%; transform:translateX(-50%) translateY(-60px); z-index:20; background:rgba(18,18,24,.9); border:1px solid var(--line); color:var(--ink); padding:8px 16px; border-radius:20px; font-size:12px; transition:transform .3s cubic-bezier(.2,.8,.2,1); }
+  #toast.show{ transform:translateX(-50%) translateY(0); }
+  @media (max-width:640px){ #strip{ display:none; } #panel{ width:calc(100vw - 32px); } }
+
+  /* keyboard focus ring — restores visible focus without cluttering mouse use */
+  button:focus-visible, select:focus-visible, input[type=range]:focus-visible{
+    box-shadow:0 0 0 2px rgba(255,150,60,.55); border-color:rgba(255,150,60,.55);
+  }
+  input[type=range]:focus-visible::-webkit-slider-thumb{ box-shadow:0 0 0 3px rgba(255,150,60,.55); }
+  input[type=range]:focus-visible::-moz-range-thumb{ box-shadow:0 0 0 3px rgba(255,150,60,.55); }
+
+  /* respect reduced-motion: kill UI transitions (animation still user-controllable via Pause) */
+  @media (prefers-reduced-motion: reduce){
+    #panel,#strip,#toast,#strip .thumb,button,input[type=range]::-webkit-slider-thumb{ transition:none !important; }
+  }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c"></canvas></div>
+<div id="grain"></div>
+
+<div id="panel">
+  <div class="brand"><h1>Sillage</h1><span>flow-field painter</span></div>
+  <div class="sub">Thousands of particles drift through a divergence-free curl-noise field, leaving fading ink-wakes that marble into flowing art.</div>
+
+  <div class="row"><label>Field scale <b id="v-scale"></b></label><input id="s-scale" type="range" min="4" max="40" step="1"></div>
+  <div class="row"><label>Curl strength <b id="v-curl"></b></label><input id="s-curl" type="range" min="20" max="320" step="1"></div>
+  <div class="row"><label>Domain warp <b id="v-warp"></b></label><input id="s-warp" type="range" min="0" max="200" step="1"></div>
+  <div class="row"><label>Particles <b id="v-count"></b></label><input id="s-count" type="range" min="1500" max="20000" step="100"></div>
+  <div class="row"><label>Trail fade <b id="v-fade"></b></label><input id="s-fade" type="range" min="2" max="120" step="1"></div>
+  <div class="row"><label>Step / pace <b id="v-step"></b></label><input id="s-step" type="range" min="6" max="60" step="1"></div>
+
+  <div class="selrow">
+    <select id="s-pal"></select>
+  </div>
+  <div class="toggles">
+    <label><input id="t-warp" type="checkbox"> evolve</label>
+    <label><input id="t-bloom" type="checkbox"> bloom</label>
+    <label><input id="t-grain" type="checkbox"> grain</label>
+  </div>
+
+  <div class="seedrow"><div class="sval" id="seedval">seed</div><button id="b-reroll" style="flex:0 0 auto">re-roll</button></div>
+
+  <div class="btns">
+    <button id="b-clear">Clear</button>
+    <button id="b-pause">Pause</button>
+    <button id="b-share">Copy link</button>
+    <button id="b-png" class="primary">Save PNG</button>
+  </div>
+</div>
+
+<div id="strip"></div>
+<div id="hint"><b>Space</b> pause · <b>C</b> clear · <b>H</b> hide UI · <b>R</b> re-roll · <b>S</b> save PNG</div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+(function(){
+  //--- seeded PRNG ------------------------------------------------------------
+  function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+  function hashStr(s){ let h=2166136261>>>0; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619); } return h>>>0; }
+
+  //--- improved Perlin noise (3D), permutation seeded by PRNG -----------------
+  function makeNoise(seed){
+    const perm=new Uint8Array(512), src=new Uint8Array(256);
+    for(let i=0;i<256;i++) src[i]=i;
+    const r=mulberry32(seed>>>0);
+    for(let i=255;i>0;i--){ const j=(r()*(i+1))|0; const t=src[i]; src[i]=src[j]; src[j]=t; }
+    for(let i=0;i<512;i++) perm[i]=src[i&255];
+    const fade=t=>t*t*t*(t*(t*6-15)+10);
+    const lerp=(a,b,t)=>a+t*(b-a);
+    function grad(h,x,y,z){ h&=15; const u=h<8?x:y, v=h<4?y:(h===12||h===14?x:z); return ((h&1)?-u:u)+((h&2)?-v:v); }
+    return function(x,y,z){
+      const X=Math.floor(x)&255, Y=Math.floor(y)&255, Z=Math.floor(z)&255;
+      x-=Math.floor(x); y-=Math.floor(y); z-=Math.floor(z);
+      const u=fade(x), v=fade(y), w=fade(z);
+      const A=perm[X]+Y, AA=perm[A]+Z, AB=perm[A+1]+Z, B=perm[X+1]+Y, BA=perm[B]+Z, BB=perm[B+1]+Z;
+      return lerp(
+        lerp(lerp(grad(perm[AA],x,y,z),   grad(perm[BA],x-1,y,z),   u),
+             lerp(grad(perm[AB],x,y-1,z), grad(perm[BB],x-1,y-1,z), u), v),
+        lerp(lerp(grad(perm[AA+1],x,y,z-1),   grad(perm[BA+1],x-1,y,z-1),   u),
+             lerp(grad(perm[AB+1],x,y-1,z-1), grad(perm[BB+1],x-1,y-1,z-1), u), v), w);
+    };
+  }
+
+  //--- palettes (stops sampled to a gradient; bg = paper) ---------------------
+  const PALETTES={
+    ink:      { name:"ink on rice paper", bg:"#efe9dd", light:true, stops:["#1a1526","#2a2140","#153e5c","#0b5563","#8a6d3b"] },
+    aurora:   { name:"aurora",            bg:"#04070e", light:false, stops:["#0d3b66","#128a7d","#2ee6a6","#7af9c8","#d4fff0"] },
+    ember:    { name:"ember",             bg:"#0a0402", light:false, stops:["#3a0a05","#8a1c07","#e0510f","#ffab3d","#ffe9b0"] },
+    cyanotype:{ name:"cyanotype",         bg:"#e7eef3", light:true,  stops:["#04263f","#0a4d68","#1c7a9c","#5fb6cf","#bfe8f2"] },
+    mono:     { name:"monochrome",        bg:"#0b0b0d", light:false, stops:["#2a2a2e","#5a5a62","#9a9aa4","#cfcfd6","#ffffff"] },
+    magma:    { name:"magma bloom",       bg:"#080409", light:false, stops:["#1a0b2e","#5c1a7a","#b5309c","#ff5c7a","#ffd08a"] }
+  };
+  const PAL_KEYS=Object.keys(PALETTES);
+  const GN=48; // gradient resolution
+  function buildGradient(pal){
+    const s=pal.stops.map(hexRGB), g=new Array(GN);
+    for(let i=0;i<GN;i++){ const t=i/(GN-1)*(s.length-1); const a=Math.floor(t), b=Math.min(s.length-1,a+1), f=t-a;
+      g[i]=[ (s[a][0]+(s[b][0]-s[a][0])*f)|0, (s[a][1]+(s[b][1]-s[a][1])*f)|0, (s[a][2]+(s[b][2]-s[a][2])*f)|0 ]; }
+    return g;
+  }
+  function hexRGB(h){ h=h.replace("#",""); return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)]; }
+
+  //--- parameters + URL hash serialization ------------------------------------
+  const DEF={ scale:16, curl:140, warp:70, count:6500, fade:26, step:26, pal:"ink", seed:(Math.random()*1e9)|0, evolve:1, bloom:1, grain:1 };
+  const P=Object.assign({},DEF);
+  const KEYMAP=[["scale","sc"],["curl","cu"],["warp","wa"],["count","ct"],["fade","fa"],["step","st"],["pal","pl"],["seed","sd"],["evolve","ev"],["bloom","bl"],["grain","gr"]];
+  // safe numeric bounds — must match the slider min/max so shared links can't OOM/hang the tab
+  const RANGES={ scale:[4,40], curl:[20,320], warp:[0,200], count:[1500,20000], fade:[2,120], step:[6,60],
+                 seed:[0,4294967295], evolve:[0,1], bloom:[0,1], grain:[0,1] };
+  function clampParam(k,v){ const r=RANGES[k]; if(!r) return v; const n=+v; if(!isFinite(n)) return DEF[k]; return Math.max(r[0],Math.min(r[1],n)); }
+  function serialize(){ return KEYMAP.map(([k,a])=>a+"="+P[k]).join("&"); }
+  function deserialize(h){
+    h=h.replace(/^#/,""); if(!h) return;
+    const m={}; h.split("&").forEach(kv=>{ const i=kv.indexOf("="); if(i>0) m[kv.slice(0,i)]=kv.slice(i+1); });
+    KEYMAP.forEach(([k,a])=>{ if(a in m){ const v=m[a]; P[k]= (k==="pal")? (PALETTES[v]?v:P.pal) : clampParam(k,v); } });
+  }
+  function syncHash(){ history.replaceState(null,"","#"+serialize()); }
+
+  //--- canvas / DPR -----------------------------------------------------------
+  const cvs=document.getElementById("c"), ctx=cvs.getContext("2d",{alpha:false});
+  let W=0,H=0,DPR=1;
+  function resize(reset){
+    const oldW=W, oldH=H;
+    // snapshot the current painting so a resize/DPR change doesn't destroy it
+    let snap=null;
+    if(oldW>0 && oldH>0 && pal){
+      snap=document.createElement("canvas"); snap.width=oldW; snap.height=oldH;
+      snap.getContext("2d").drawImage(cvs,0,0);
+    }
+    DPR=Math.min(2,window.devicePixelRatio||1);
+    W=Math.round(innerWidth*DPR); H=Math.round(innerHeight*DPR);
+    cvs.width=W; cvs.height=H; // assigning width/height ALWAYS clears the canvas
+    if(pal){
+      paintBg(); // fill with palette bg first so a light palette never flashes black
+      if(snap) ctx.drawImage(snap,0,0,snap.width,snap.height,0,0,W,H); // restore old art, scaled
+    } else if(reset!==false){
+      paintBg();
+    }
+  }
+  let resizeT;
+  window.addEventListener("resize",()=>{ clearTimeout(resizeT); resizeT=setTimeout(resize,140); }); // debounced, preserves painting
+
+  //--- state ------------------------------------------------------------------
+  let noise, grad, pal, parts=null, zoff=0, running=true, frame=0, grainCanvas=null;
+  function fbm(x,y,z){ let v=0,a=.5,f=1; for(let o=0;o<4;o++){ v+=a*noise(x*f,y*f,z*f); f*=2; a*=.5; } return v; }
+  // 2D curl of a scalar potential = divergence-free field; domain-warped input
+  const EPS=0.012;
+  function curl(x,y,z,out){
+    const wS=P.warp/100;
+    let X=x,Y=y;
+    if(wS>0){ X=x+wS*fbm(x+5.2,y+1.3,z); Y=y+wS*fbm(x+9.1,y+4.7,z); }
+    const n1=fbm(X,Y+EPS,z), n2=fbm(X,Y-EPS,z), n3=fbm(X+EPS,Y,z), n4=fbm(X-EPS,Y,z);
+    out[0]=(n1-n2)/(2*EPS); out[1]=-(n3-n4)/(2*EPS);
+  }
+
+  function reseed(){
+    noise=makeNoise(hashStr("sillage:"+P.seed));
+    zoff=(hashStr("z:"+P.seed)%10000)/97.0;
+  }
+  function setPalette(){ pal=PALETTES[P.pal]; grad=buildGradient(pal); }
+
+  function spawn(p){ // seeded scatter uses a per-particle rng seeded by seed+index would be ideal; use Math for liveliness
+    p.x=Math.random()*W; p.y=Math.random()*H; p.px=p.x; p.py=p.y;
+    p.age=0; p.life=140+((Math.random()*260)|0);
+  }
+  function buildParts(){
+    const n=P.count|0; parts=new Array(n);
+    const sr=mulberry32(hashStr("scatter:"+P.seed));
+    for(let i=0;i<n;i++){ const x=sr()*W, y=sr()*H; parts[i]={x,y,px:x,py:y,age:(sr()*100)|0,life:140+((sr()*260)|0)}; }
+  }
+
+  function paintBg(){ ctx.globalCompositeOperation="source-over"; ctx.globalAlpha=1; ctx.fillStyle=pal.bg; ctx.fillRect(0,0,W,H); }
+
+  //--- render one frame -------------------------------------------------------
+  const _c=[0,0]; const buckets=new Map();
+  function step(){
+    frame++;
+    if(P.evolve) zoff+=0.0016;
+    // trail fade wash
+    ctx.globalCompositeOperation="source-over";
+    ctx.globalAlpha=Math.min(1,P.fade/1000);
+    ctx.fillStyle=pal.bg; ctx.fillRect(0,0,W,H);
+
+    const sc=P.scale/10000, curlK=(P.curl/100)*DPR, pace=P.step/10, maxJump=9*DPR;
+    buckets.clear();
+    const n=parts.length;
+    for(let i=0;i<n;i++){
+      const p=parts[i];
+      curl(p.x*sc,p.y*sc,zoff,_c);
+      let vx=_c[0]*curlK*pace, vy=_c[1]*curlK*pace;
+      let sp=Math.hypot(vx,vy);
+      if(sp>maxJump){ const k=maxJump/sp; vx*=k; vy*=k; sp=maxJump; }
+      p.px=p.x; p.py=p.y; p.x+=vx; p.y+=vy; p.age++;
+      // respawn on exit or stall or old age
+      if(p.x<-4||p.x>W+4||p.y<-4||p.y>H+4||p.age>p.life||sp<0.05*DPR){ spawn(p); continue; }
+      // speed(0..1) & age(0..1) drive color / width / alpha
+      const sN=Math.min(1,sp/maxJump), aN=p.age/p.life;
+      const t=Math.min(GN-1,(0.15+sN*0.7+aN*0.15)*GN|0);
+      // fast+young -> thin bright highlight ; slow+old -> wide soft wash
+      const width=(0.5+(1-sN)*2.0+aN*0.6)*DPR;
+      const alpha=(0.05+sN*0.22)*(1-aN*0.55);
+      const gi=t, wi=Math.min(6,(width/DPR)|0), ai=Math.min(9,(alpha*30)|0);
+      const key=gi*70+wi*10+ai;
+      let b=buckets.get(key);
+      if(!b){ const rgb=grad[gi]; b={ w:(wi+0.5)*DPR, s:"rgba("+rgb[0]+","+rgb[1]+","+rgb[2]+","+((ai+0.5)/30).toFixed(3)+")", seg:[] }; buckets.set(key,b); }
+      const s=b.seg; s.push(p.px,p.py,p.x,p.y);
+    }
+    // batched additive strokes
+    ctx.globalCompositeOperation="lighter";
+    ctx.lineCap="round";
+    buckets.forEach(b=>{
+      ctx.lineWidth=b.w; ctx.strokeStyle=b.s; ctx.beginPath();
+      const s=b.seg;
+      for(let i=0;i<s.length;i+=4){ ctx.moveTo(s[i],s[i+1]); ctx.lineTo(s[i+2],s[i+3]); }
+      ctx.stroke();
+    });
+    // subtle live bloom (additive blurred self)
+    if(P.bloom && ctx.filter!==undefined){
+      ctx.globalAlpha=0.045; ctx.filter="blur("+(3.5*DPR)+"px)";
+      ctx.drawImage(cvs,0,0); ctx.filter="none"; ctx.globalAlpha=1;
+    }
+    ctx.globalCompositeOperation="source-over";
+  }
+
+  function loop(){ if(running){ step(); } requestAnimationFrame(loop); }
+
+  //--- thumbnails / variation gallery -----------------------------------------
+  function renderThumb(canvas,seed){
+    const w=canvas.width, h=canvas.height, tc=canvas.getContext("2d");
+    const nz=makeNoise(hashStr("sillage:"+seed)), pg=grad, bg=pal.bg;
+    let z=(hashStr("z:"+seed)%10000)/97.0;
+    const fb=(x,y,zz)=>{ let v=0,a=.5,f=1; for(let o=0;o<4;o++){ v+=a*nz(x*f,y*f,zz); f*=2; a*=.5; } return v; };
+    const cr=(x,y,zz,o)=>{ const wS=P.warp/100; let X=x,Y=y; if(wS>0){ X=x+wS*fb(x+5.2,y+1.3,zz); Y=y+wS*fb(x+9.1,y+4.7,zz);} const n1=fb(X,Y+EPS,zz),n2=fb(X,Y-EPS,zz),n3=fb(X+EPS,Y,zz),n4=fb(X-EPS,Y,zz); o[0]=(n1-n2)/(2*EPS); o[1]=-(n3-n4)/(2*EPS); };
+    tc.fillStyle=bg; tc.fillRect(0,0,w,h);
+    const N=420, sr=mulberry32(hashStr("scatter:"+seed)), pts=[];
+    for(let i=0;i<N;i++) pts.push({x:sr()*w,y:sr()*h,px:0,py:0,age:(sr()*80)|0,life:120});
+    const sc=P.scale/10000*(W/w), curlK=P.curl/100, pace=P.step/10, o=[0,0];
+    tc.globalCompositeOperation="lighter"; tc.lineCap="round";
+    for(let f=0;f<130;f++){ for(let i=0;i<N;i++){ const p=pts[i];
+        cr(p.x*sc,p.y*sc,z,o); let vx=o[0]*curlK*pace, vy=o[1]*curlK*pace; const sp=Math.hypot(vx,vy);
+        p.px=p.x;p.py=p.y;p.x+=vx;p.y+=vy;p.age++;
+        if(p.x<0||p.x>w||p.y<0||p.y>h||p.age>p.life){ p.x=sr()*w;p.y=sr()*h;p.px=p.x;p.py=p.y;p.age=0; continue; }
+        const sN=Math.min(1,sp/6), gi=Math.min(GN-1,(0.2+sN*0.75)*GN|0), c=pg[gi];
+        tc.strokeStyle="rgba("+c[0]+","+c[1]+","+c[2]+","+(0.05+sN*0.13).toFixed(3)+")"; tc.lineWidth=0.6+(1-sN)*1.2;
+        tc.beginPath(); tc.moveTo(p.px,p.py); tc.lineTo(p.x,p.y); tc.stroke();
+      } if(P.evolve) z+=0.0016; }
+  }
+  const mqSmall=window.matchMedia("(max-width:640px)");
+  function buildStrip(){
+    if(mqSmall.matches) return; // strip is display:none under 640px — don't burn CPU rendering unseen thumbnails
+    const strip=document.getElementById("strip"); strip.innerHTML="";
+    const base=hashStr("g:"+P.seed);
+    for(let i=0;i<5;i++){
+      const seed=((base+ i*2654435761)>>>0) % 1000000000;
+      const d=document.createElement("div"); d.className="thumb";
+      const tc=document.createElement("canvas"); tc.width=224; tc.height=148; d.appendChild(tc);
+      const tag=document.createElement("i"); tag.textContent="#"+(seed%100000); d.appendChild(tag);
+      d.title="promote seed "+seed;
+      d.addEventListener("click",()=>{ P.seed=seed; applyAll(true); });
+      strip.appendChild(d);
+      renderThumb(tc,seed);
+    }
+  }
+  // rebuild the gallery if the viewport grows back above the breakpoint (it was skipped while small)
+  mqSmall.addEventListener("change",e=>{ if(!e.matches) buildStrip(); });
+
+  //--- UI wiring --------------------------------------------------------------
+  const $=id=>document.getElementById(id);
+  const CTRLS=[["scale","s-scale","v-scale",v=>v],["curl","s-curl","v-curl",v=>v],["warp","s-warp","v-warp",v=>v+"%"],
+    ["count","s-count","v-count",v=>(v>=1000?(v/1000).toFixed(1)+"k":v)],["fade","s-fade","v-fade",v=>v],["step","s-step","v-step",v=>(v/10).toFixed(1)]];
+  function refreshUI(){
+    CTRLS.forEach(([k,sid,vid,fmt])=>{ $(sid).value=P[k]; $(vid).textContent=fmt(P[k]); });
+    $("s-pal").value=P.pal; $("seedval").textContent="seed "+P.seed;
+    $("t-warp").checked=!!P.evolve; $("t-bloom").checked=!!P.bloom; $("t-grain").checked=!!P.grain;
+    document.getElementById("grain").style.display=P.grain?"block":"none";
+    $("b-pause").textContent=running?"Pause":"Resume";
+  }
+  // apply visual state; hard=rebuild particles+field(seed/count) and repaint
+  function applyAll(hard){
+    setPalette();
+    if(hard){ reseed(); buildParts(); paintBg(); buildStrip(); }
+    refreshUI(); syncHash();
+  }
+
+  // populate palette select
+  (function(){ const sel=$("s-pal"); PAL_KEYS.forEach(k=>{ const o=document.createElement("option"); o.value=k; o.textContent=PALETTES[k].name; sel.appendChild(o); }); })();
+
+  // sliders — hot-applied without restarting the painting
+  CTRLS.forEach(([k,sid,vid,fmt])=>{
+    $(sid).addEventListener("input",e=>{
+      P[k]=+e.target.value; $(vid).textContent=fmt(P[k]);
+      if(k==="count"){ buildParts(); buildStrip(); }
+      syncHash();
+    });
+  });
+  $("s-pal").addEventListener("change",e=>{ P.pal=e.target.value; setPalette(); paintBg(); buildStrip(); syncHash(); });
+  $("t-warp").addEventListener("change",e=>{ P.evolve=e.target.checked?1:0; syncHash(); });
+  $("t-bloom").addEventListener("change",e=>{ P.bloom=e.target.checked?1:0; syncHash(); });
+  $("t-grain").addEventListener("change",e=>{ P.grain=e.target.checked?1:0; document.getElementById("grain").style.display=P.grain?"block":"none"; syncHash(); });
+
+  $("b-reroll").addEventListener("click",()=>{ P.seed=(Math.random()*1e9)|0; applyAll(true); });
+  $("b-clear").addEventListener("click",()=>{ paintBg(); });
+  $("b-pause").addEventListener("click",()=>{ running=!running; refreshUI(); });
+  function fallbackCopy(){
+    try{
+      const ta=document.createElement("textarea"); ta.value=location.href;
+      ta.style.position="fixed"; ta.style.top="-9999px"; ta.style.opacity="0";
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      const done=document.execCommand&&document.execCommand("copy");
+      document.body.removeChild(ta);
+      toast(done?"Link copied — shareable painting":"Copy failed — link is in the address bar");
+    }catch(e){ toast("Copy failed — link is in the address bar"); }
+  }
+  $("b-share").addEventListener("click",()=>{
+    syncHash();
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(location.href)
+        .then(()=>toast("Link copied — shareable painting"))
+        .catch(fallbackCopy);
+    } else { fallbackCopy(); }
+  });
+  $("b-png").addEventListener("click",exportPNG);
+
+  function exportPNG(){
+    let out=cvs;
+    // when grain is on, composite the paper texture the same way the CSS overlay does,
+    // so the saved PNG matches what's on screen (overlay blend, .05 opacity)
+    if(P.grain && grainCanvas){
+      const ex=document.createElement("canvas"); ex.width=W; ex.height=H;
+      const ectx=ex.getContext("2d",{alpha:false});
+      ectx.drawImage(cvs,0,0);
+      const pat=ectx.createPattern(grainCanvas,"repeat");
+      if(pat){ ectx.globalCompositeOperation="overlay"; ectx.globalAlpha=0.05; ectx.fillStyle=pat; ectx.fillRect(0,0,W,H); }
+      ectx.globalCompositeOperation="source-over"; ectx.globalAlpha=1;
+      out=ex;
+    }
+    const url=out.toDataURL("image/png");
+    const a=document.createElement("a"); a.href=url; a.download="sillage-"+P.pal+"-"+P.seed+".png"; a.click();
+    toast("Saved high-res PNG");
+  }
+
+  let toastT;
+  function toast(msg){ const t=$("toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),1800); }
+
+  // keyboard
+  addEventListener("keydown",e=>{
+    if(e.target.tagName==="INPUT"||e.target.tagName==="SELECT") return;
+    const k=e.key.toLowerCase();
+    if(k===" "||e.code==="Space"){ e.preventDefault(); running=!running; refreshUI(); }
+    else if(k==="c"){ paintBg(); }
+    else if(k==="r"){ P.seed=(Math.random()*1e9)|0; applyAll(true); }
+    else if(k==="h"){ $("panel").classList.toggle("hidden"); $("strip").classList.toggle("hidden"); }
+    else if(k==="s"){ exportPNG(); }
+  });
+
+  // paper grain texture (generated once)
+  (function(){
+    const g=document.createElement("canvas"); g.width=g.height=180; const gx=g.getContext("2d");
+    const id=gx.createImageData(180,180), d=id.data, r=mulberry32(97);
+    for(let i=0;i<d.length;i+=4){ const v=(r()*255)|0; d[i]=d[i+1]=d[i+2]=v; d[i+3]=255; }
+    gx.putImageData(id,0,0);
+    grainCanvas=g; // keep the tile so exportPNG can bake grain into the saved image
+    document.getElementById("grain").style.backgroundImage="url("+g.toDataURL()+")";
+  })();
+
+  //--- boot -------------------------------------------------------------------
+  deserialize(location.hash);
+  resize(false);
+  setPalette(); reseed(); buildParts(); paintBg(); refreshUI(); buildStrip(); syncHash();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

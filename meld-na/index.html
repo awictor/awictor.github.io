@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MELD-Na Calculator — end-stage liver disease score</title>
+<meta name="description" content="Calculate the MELD and MELD-Na scores from bilirubin, INR, creatinine and sodium — the model used for liver transplant priority. Offline, no tracking.">
+<style>
+  :root{
+    --c:#0e7490;
+    --bg:#eef7f9; --card:#ffffff; --fg:#0b1e23; --muted:#516a71;
+    --line:#d3e7ec; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#07161a; --card:#0f1f24; --fg:#e5f2f5; --muted:#87a2aa;
+    --line:#1d323a; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:800px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:800px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:560px){.grid{grid-template-columns:1fr}}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  .unit{font-weight:400;text-transform:none}
+  input[type=number]{width:100%;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .chk{display:flex;gap:8px;align-items:center;margin-top:12px;font-size:.9rem}
+  .result{text-align:center;margin:22px 0 4px}
+  .result .n{font-size:3.2rem;font-weight:800;color:var(--c);font-variant-numeric:tabular-nums;line-height:1}
+  .result .k{color:var(--muted);font-size:.9rem;margin-top:4px}
+  .breakdown{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+  .bd{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+  .bd b{display:block;font-size:1.3rem;font-variant-numeric:tabular-nums}
+  .bd span{font-size:.76rem;color:var(--muted)}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+  .err{color:#dc2626;font-size:.85rem;margin-top:8px;min-height:1em;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🩺</div>
+  <div>
+    <h1>MELD-Na Calculator</h1>
+    <p>End-stage liver disease score</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div><label>Bilirubin <span class="unit">(mg/dL)</span></label><input type="number" id="bili" value="2" min="0" step="any"></div>
+      <div><label>INR</label><input type="number" id="inr" value="1.5" min="0" step="any"></div>
+      <div><label>Creatinine <span class="unit">(mg/dL)</span></label><input type="number" id="cr" value="1.5" min="0" step="any"></div>
+      <div><label>Sodium <span class="unit">(mEq/L)</span></label><input type="number" id="na" value="130" min="0" step="any"></div>
+    </div>
+    <label class="chk"><input type="checkbox" id="dialysis"> Dialysis ≥ 2× in the past week (sets creatinine to 4.0)</label>
+    <div class="result">
+      <div class="n" id="meldna">—</div>
+      <div class="k">MELD-Na score</div>
+    </div>
+    <div class="breakdown">
+      <div class="bd"><b id="meld">—</b><span>base MELD</span></div>
+      <div class="bd"><b id="mortality">—</b><span>severity band</span></div>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>About MELD-Na</h2>
+    <p class="note">MELD (Model for End-Stage Liver Disease) predicts 3-month mortality in liver disease and drives transplant priority. <b>MELD = 3.78·ln(bilirubin) + 11.2·ln(INR) + 9.57·ln(creatinine) + 6.43</b>; lab values below 1.0 are set to 1.0, creatinine is capped at 4.0 (or set to 4.0 with recent dialysis). When MELD &gt; 11, the sodium correction is applied: <b>MELD-Na = MELD + 1.32·(137 − Na) − 0.033·MELD·(137 − Na)</b>, with sodium bounded to 125–137. The final score is bounded 6–40. Education only, not medical advice. Everything runs locally.</p>
+  </div>
+
+  <p class="foot">100% offline · not medical advice · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function toNum(x){ var n = Number(x); if(!isFinite(n)) throw new Error('inputs must be numbers'); return n; }
+  function clampLab(x){ x = toNum(x); if(x <= 0) throw new Error('lab values must be positive'); return Math.max(1, x); }
+  // Base MELD score (rounded).
+  function meld(bilirubin, inr, creatinine, dialysis){
+    var bili = clampLab(bilirubin), i = clampLab(inr), cr = clampLab(creatinine);
+    if(dialysis) cr = 4;
+    cr = Math.min(cr, 4);
+    var m = 3.78 * Math.log(bili) + 11.2 * Math.log(i) + 9.57 * Math.log(cr) + 6.43;
+    return Math.round(m);
+  }
+  // MELD-Na score with sodium correction, bounded 6..40.
+  function meldNa(bilirubin, inr, creatinine, sodium, dialysis){
+    var m = meld(bilirubin, inr, creatinine, dialysis);
+    var na = Math.min(137, Math.max(125, toNum(sodium)));
+    var result = m;
+    if(m > 11) result = m + 1.32 * (137 - na) - 0.033 * m * (137 - na);
+    result = Math.round(result);
+    return Math.min(40, Math.max(6, result));
+  }
+  // Rough severity band from a MELD-Na score.
+  function severity(score){
+    score = Number(score);
+    if(!isFinite(score)) throw new Error('score must be a number');
+    if(score >= 30) return 'very high';
+    if(score >= 20) return 'high';
+    if(score >= 10) return 'moderate';
+    return 'low';
+  }
+
+  if(typeof module !== 'undefined') module.exports = { meld:meld, meldNa:meldNa, severity:severity };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var COLORS = { low: '#16a34a', moderate: '#d97706', high: '#ea580c', 'very high': '#dc2626' };
+    function val(id){ return document.getElementById(id).value; }
+    function render(){
+      document.getElementById('err').textContent = '';
+      try{
+        var dial = document.getElementById('dialysis').checked;
+        var m = meld(val('bili'), val('inr'), val('cr'), dial);
+        var mn = meldNa(val('bili'), val('inr'), val('cr'), val('na'), dial);
+        var band = severity(mn);
+        document.getElementById('meldna').textContent = mn;
+        document.getElementById('meldna').style.color = COLORS[band];
+        document.getElementById('meld').textContent = m;
+        var mo = document.getElementById('mortality');
+        mo.textContent = band.charAt(0).toUpperCase() + band.slice(1);
+        mo.style.color = COLORS[band];
+      }catch(e){
+        document.getElementById('meldna').textContent = '—';
+        document.getElementById('meld').textContent = '—';
+        document.getElementById('mortality').textContent = '—';
+        document.getElementById('err').textContent = e.message;
+      }
+    }
+    ['bili','inr','cr','na','dialysis'].forEach(function(id){ document.getElementById(id).addEventListener('input', render); });
+    document.getElementById('dialysis').addEventListener('change', render);
+    render();
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('meld-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('meld-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Verglas — diffusion-limited frost</title>
+<style>
+  :root { --ink:#dfe9f5; --dim:#94a3bd; --line:rgba(150,190,240,.14); --bg:#05070d; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:
+      radial-gradient(120% 120% at 50% -10%, #0b1120 0%, #05070d 60%, #020306 100%);
+      color:var(--ink); font:13px/1.5 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif; overflow:hidden; }
+  #stage { position:fixed; inset:0; display:grid; place-items:center; }
+  #wrap { position:relative; line-height:0; border-radius:14px; overflow:hidden;
+      box-shadow:0 30px 90px rgba(0,0,0,.6), 0 0 0 1px rgba(150,190,240,.08); }
+  #wrap::after { content:""; position:absolute; inset:0; pointer-events:none;
+      box-shadow: inset 0 0 120px 20px rgba(0,0,0,.55), inset 0 0 40px rgba(4,8,20,.4);
+      border-radius:14px; }
+  canvas { display:block; background:var(--bg); touch-action:none; }
+  .glass { position:absolute; -webkit-backdrop-filter:blur(14px) saturate(1.2); backdrop-filter:blur(14px) saturate(1.2);
+      background:linear-gradient(180deg, rgba(20,30,52,.72), rgba(10,16,30,.66));
+      border:1px solid var(--line); border-radius:14px; padding:14px 16px;
+      box-shadow:0 12px 40px rgba(0,0,0,.45); }
+  #panel { top:18px; left:18px; width:238px; }
+  #stats { top:18px; right:18px; width:172px; text-align:left; }
+  h1 { margin:0 0 2px; font-size:15px; letter-spacing:.14em; font-weight:600;
+      background:linear-gradient(90deg,#bfe3ff,#e9f4ff,#9fd0ff); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .sub { margin:0 0 12px; font-size:10.5px; color:var(--dim); letter-spacing:.02em; }
+  .grp { margin:11px 0; }
+  .lab { display:flex; justify-content:space-between; font-size:10.5px; text-transform:uppercase;
+      letter-spacing:.09em; color:var(--dim); margin-bottom:5px; }
+  .lab b { color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums; }
+  input[type=range] { width:100%; height:3px; -webkit-appearance:none; appearance:none;
+      background:rgba(150,190,240,.18); border-radius:3px; outline:none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:14px; height:14px; border-radius:50%;
+      background:#bfe3ff; box-shadow:0 0 10px #6fb8ff, 0 1px 3px rgba(0,0,0,.5); cursor:pointer; }
+  input[type=range]::-moz-range-thumb { width:14px; height:14px; border:0; border-radius:50%;
+      background:#bfe3ff; box-shadow:0 0 10px #6fb8ff; cursor:pointer; }
+  .row { display:flex; gap:6px; }
+  button { flex:1; font:inherit; font-size:11px; color:var(--ink); cursor:pointer;
+      background:rgba(150,190,240,.08); border:1px solid var(--line); border-radius:8px; padding:7px 4px;
+      transition:.15s; letter-spacing:.02em; }
+  button:hover { background:rgba(150,190,240,.18); border-color:rgba(150,190,240,.3); }
+  button.on { background:rgba(120,190,255,.28); border-color:#7fbfff; color:#eaf5ff; box-shadow:0 0 12px rgba(90,170,255,.3) inset; }
+  button:disabled { opacity:.4; cursor:default; }
+  button:disabled:hover { background:rgba(150,190,240,.08); border-color:var(--line); }
+  .swatches { display:flex; gap:6px; }
+  .sw { flex:1; height:22px; border-radius:7px; cursor:pointer; border:2px solid transparent; transition:.15s; }
+  .sw.on { border-color:#eaf5ff; box-shadow:0 0 10px rgba(180,220,255,.5); }
+  .stat { display:flex; justify-content:space-between; padding:3px 0; border-bottom:1px solid rgba(150,190,240,.07); }
+  .stat:last-child { border:0; }
+  .stat span { color:var(--dim); font-size:11px; }
+  .stat b { font-variant-numeric:tabular-nums; font-size:13px; }
+  #dval { color:#bfe3ff; }
+  .hint { font-size:11.5px; color:var(--dim); margin-top:9px; line-height:1.45; }
+  #chip { font-size:11.5px; color:var(--dim); margin-top:8px; word-break:break-all; cursor:pointer; user-select:none; }
+  #chip:hover { color:var(--ink); }
+  a.dl { color:#8fc4ff; text-decoration:none; }
+
+  @media (max-width:700px), (max-height:560px) {
+    #panel, #stats { max-height:calc(100vh - 36px); overflow-y:auto; }
+    #panel { width:min(238px, calc(100vw - 36px)); }
+    #stats { width:150px; }
+  }
+  @media (max-width:480px) {
+    #stats { position:static; margin:0 auto 10px; width:min(238px, calc(100vw - 36px)); }
+    #panel { position:static; margin:10px auto; }
+    #stage { display:block; overflow-y:auto; padding:8px 0; }
+    html,body { overflow:auto; }
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="wrap"><canvas id="cv"></canvas></div>
+</div>
+
+<div id="panel" class="glass">
+  <h1>VERGLAS</h1>
+  <p class="sub">frost grown one wandering particle at a time</p>
+
+  <div class="grp">
+    <div class="lab">Seed geometry</div>
+    <div class="row" id="modes">
+      <button data-mode="center" class="on">Point</button>
+      <button data-mode="line">Pane</button>
+      <button data-mode="custom">Click</button>
+    </div>
+  </div>
+
+  <div class="grp">
+    <div class="lab">Palette</div>
+    <div class="swatches" id="pals"></div>
+  </div>
+
+  <div class="grp">
+    <div class="lab">Symmetry arms <b id="karm">6</b></div>
+    <input id="arms" type="range" min="1" max="12" step="1" value="6">
+  </div>
+  <div class="grp">
+    <div class="lab">Stickiness <b id="kstk">0.85</b></div>
+    <input id="stk" type="range" min="0.05" max="1" step="0.01" value="0.85">
+  </div>
+  <div class="grp">
+    <div class="lab">Growth speed <b id="kspd">3</b></div>
+    <input id="spd" type="range" min="1" max="6" step="1" value="3">
+  </div>
+
+  <div class="grp row">
+    <button id="mir">Mirror: off</button>
+    <button id="pause">Pause</button>
+  </div>
+  <div class="grp row">
+    <button id="rnd">Randomize</button>
+    <button id="clr">Reset</button>
+    <button id="png">PNG</button>
+  </div>
+  <div class="hint" id="modehint"></div>
+  <div id="chip"></div>
+</div>
+
+<div id="stats" class="glass">
+  <div class="stat"><span>Fractal&nbsp;D</span><b id="dval">—</b></div>
+  <div class="stat"><span>Particles</span><b id="pval">0</b></div>
+  <div class="stat"><span>Branch tips</span><b id="tval">0</b></div>
+  <div class="hint" id="dhint">D slides from ~1.9 (compact, high stickiness) toward ~1.6 (wispy fractal ferns) as walkers explore before freezing.</div>
+</div>
+
+<script>
+"use strict";
+const TAU = Math.PI * 2;
+const CYCLE = 620;                 // ticks per color cycle (growth-history rings)
+const N = 224;                     // grid cells per side
+const cell = 3;                    // px per cell
+const S = N * cell;                // canvas size
+const BG = "#05070d";
+const cx = N >> 1, cy = N >> 1;
+const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+
+// ---- canvas ----
+const cv = document.getElementById("cv");
+cv.width = S; cv.height = S;
+const ctx = cv.getContext("2d");
+function fitCanvas(){
+  const m = Math.min(window.innerWidth - 40, window.innerHeight - 40, S);
+  cv.style.width = cv.style.height = m + "px";
+}
+addEventListener("resize", fitCanvas); fitCanvas();
+
+// ---- palettes (cyclic: last stop == first) ----
+const PALS = [
+  { name:"frost",  stops:[[0,[10,20,50]],[.4,[30,120,200]],[.7,[120,220,255]],[.9,[240,250,255]],[1,[10,20,50]]] },
+  { name:"ember",  stops:[[0,[20,5,5]],[.4,[150,30,10]],[.7,[240,140,20]],[.9,[255,240,180]],[1,[20,5,5]]] },
+  { name:"aurora", stops:[[0,[8,20,25]],[.35,[20,180,140]],[.6,[80,240,180]],[.8,[180,120,240]],[1,[8,20,25]]] },
+  { name:"copper", stops:[[0,[25,12,8]],[.4,[130,70,35]],[.7,[210,140,80]],[.9,[250,220,180]],[1,[25,12,8]]] },
+];
+function grad(stops, t){
+  for (let i=1;i<stops.length;i++){
+    if (t <= stops[i][0]){
+      const a=stops[i-1], b=stops[i], f=(t-a[0])/((b[0]-a[0])||1);
+      return [a[1][0]+(b[1][0]-a[1][0])*f, a[1][1]+(b[1][1]-a[1][1])*f, a[1][2]+(b[1][2]-a[1][2])*f];
+    }
+  }
+  return stops[stops.length-1][1];
+}
+let colLUT = [], glowLUT = [];
+function buildLUT(){
+  const s = PALS[palIdx].stops; colLUT = []; glowLUT = [];
+  for (let i=0;i<256;i++){
+    const [r,g,b] = grad(s, i/255);
+    colLUT[i]  = `rgb(${r|0},${g|0},${b|0})`;
+    glowLUT[i] = `rgb(${Math.min(255,r*1.5+50)|0},${Math.min(255,g*1.5+50)|0},${Math.min(255,b*1.5+50)|0})`;
+  }
+}
+
+// ---- state ----
+let occ = new Uint8Array(N*N);
+let arr = new Uint32Array(N*N);    // arrival tick per cell
+let walkers = [], tips = [];
+let tick, particles, maxR, growthTop;
+let done = false, reseedTimer = null;
+
+// params (also serialized to URL hash)
+let seed = 12345, mode = "center", arms = 6, mirror = false, stick = 0.85, palIdx = 0, speed = 3;
+let paused = false;
+let customPts = [];
+let rng = mulberry32(seed);
+
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+// ---- hash ----
+function writeHash(){
+  const h = `s=${seed}&m=${mode}&k=${arms}&r=${mirror?1:0}&t=${stick.toFixed(2)}&p=${palIdx}`;
+  history.replaceState(null, "", "#"+h);
+  document.getElementById("chip").innerHTML = "seed <b style='color:#bfe3ff'>"+seed+"</b> · click to copy link";
+}
+function readHash(){
+  const q = new URLSearchParams(location.hash.slice(1));
+  if (q.has("s")) seed   = parseInt(q.get("s"))||seed;
+  if (q.has("m")) mode   = ["center","line","custom"].includes(q.get("m")) ? q.get("m") : mode;
+  if (q.has("k")) arms   = Math.max(1, Math.min(12, parseInt(q.get("k"))||arms));
+  if (q.has("r")) mirror = q.get("r")==="1";
+  if (q.has("t")) stick  = Math.max(.05, Math.min(1, parseFloat(q.get("t"))||stick));
+  if (q.has("p")) palIdx = Math.max(0, Math.min(PALS.length-1, parseInt(q.get("p"))||0));
+}
+
+// ---- drawing ----
+function drawCell(x, y, t){
+  ctx.fillStyle = colLUT[((t%CYCLE)/CYCLE*255)|0];
+  ctx.fillRect(x*cell, y*cell, cell, cell);
+}
+function place(fx, fy, t){
+  const x = Math.round(fx), y = Math.round(fy);
+  if (x<1 || y<1 || x>=N-1 || y>=N-1) return;
+  const i = y*N + x;
+  if (occ[i]) return;
+  occ[i] = 1; arr[i] = t;
+  drawCell(x, y, t);
+  tips.push({ x, y, l:1, c: glowLUT[((t%CYCLE)/CYCLE*255)|0] });
+  const dx = x-cx, dy = y-cy, r = Math.sqrt(dx*dx+dy*dy);
+  if (r > maxR) maxR = r;
+  if (y < growthTop) growthTop = y;
+}
+// freeze a contact point, replicated through the active symmetry group
+function freeze(gx, gy, t){
+  const eA = (mode==="line") ? 1 : arms;
+  const eM = (mode==="line") ? false : mirror;
+  const rx = gx-cx, ry = gy-cy;
+  for (let k=0;k<eA;k++){
+    const a = k*TAU/eA, ca = Math.cos(a), sa = Math.sin(a);
+    place(cx + rx*ca - ry*sa, cy + rx*sa + ry*ca, t);
+    if (eM) place(cx + rx*ca + ry*sa, cy + rx*sa - ry*ca, t);
+  }
+}
+function repaintAll(){
+  ctx.fillStyle = BG; ctx.fillRect(0,0,S,S);
+  for (let y=0;y<N;y++) for (let x=0;x<N;x++){ const i=y*N+x; if (occ[i]) drawCell(x,y,arr[i]); }
+}
+
+// ---- walkers ----
+function occNear(x, y){
+  for (let d=0;d<8;d++){ const nx=x+dirs[d][0], ny=y+dirs[d][1];
+    if (nx>=0 && ny>=0 && nx<N && ny<N && occ[ny*N+nx]) return true; }
+  return false;
+}
+function spawnRadius(){ return Math.min(maxR + 5, N/2 - 4); }
+function killR2(){ const k = Math.min(maxR*1.8 + 30, N/2 - 1); return k*k; }
+function respawn(w){
+  w.steps = 0;
+  if (mode === "line"){ w.x = (rng()*N)|0; w.y = Math.max(2, (growthTop|0) - 3); }
+  else { const a = rng()*TAU, r = spawnRadius(); w.x = Math.round(cx + Math.cos(a)*r); w.y = Math.round(cy + Math.sin(a)*r); }
+}
+function step(w){
+  if (occNear(w.x, w.y) && rng() < stick){
+    freeze(w.x, w.y, tick); tick++; particles++; respawn(w); return;
+  }
+  const d = dirs[(rng()*8)|0]; w.x += d[0]; w.y += d[1]; w.steps++;
+  if (mode === "line"){
+    if (w.x < 0) w.x += N; else if (w.x >= N) w.x -= N;
+    if (w.y < 1 || w.y >= N-1 || w.steps > 9*N) respawn(w);
+  } else {
+    const dx = w.x-cx, dy = w.y-cy;
+    if (dx*dx+dy*dy > killR2() || w.steps > 11*N) respawn(w);
+  }
+}
+
+// ---- science readout: box-counting D + tip count ----
+function computeStats(){
+  const eps = [2,3,5,8,13], counts = eps.map(()=>new Set());
+  let tipN = 0;
+  for (let y=1;y<N-1;y++) for (let x=1;x<N-1;x++){
+    if (!occ[y*N+x]) continue;
+    let nb = 0;
+    for (let d=0;d<8;d++){ const nx=x+dirs[d][0], ny=y+dirs[d][1]; if (occ[ny*N+nx]) nb++; }
+    if (nb === 1) tipN++;
+    for (let e=0;e<eps.length;e++) counts[e].add(((x/eps[e])|0) + "," + ((y/eps[e])|0));
+  }
+  // regression of ln N(eps) vs ln(1/eps)
+  let n=0, sx=0, sy=0, sxx=0, sxy=0;
+  for (let e=0;e<eps.length;e++){
+    const cnt = counts[e].size; if (cnt < 2) continue;
+    const X = -Math.log(eps[e]), Y = Math.log(cnt);
+    n++; sx+=X; sy+=Y; sxx+=X*X; sxy+=X*Y;
+  }
+  const D = (n>=2) ? (n*sxy - sx*sy)/((n*sxx - sx*sx)||1) : 0;
+  document.getElementById("dval").textContent = particles>40 ? D.toFixed(2) : "—";
+  document.getElementById("pval").textContent = particles.toLocaleString();
+  document.getElementById("tval").textContent = tipN.toLocaleString();
+}
+
+// ---- lifecycle ----
+function seedGeometry(){
+  if (mode === "line"){
+    for (let x=0;x<N;x++){ place(x, N-2, 0); place(x, N-3, 0); }
+    growthTop = N-3;
+  } else if (mode === "custom"){
+    // start from a blank canvas; nuclei appear where you click
+    for (const p of customPts) freeze(p.x, p.y, 0);
+  } else {
+    freeze(cx, cy, 0);
+  }
+}
+function init(){
+  clearTimeout(reseedTimer); reseedTimer = null; done = false;
+  occ.fill(0); arr.fill(0); tips = [];
+  tick = 1; particles = 0; maxR = 0; growthTop = N-1;
+  rng = mulberry32(seed);
+  ctx.fillStyle = BG; ctx.fillRect(0,0,S,S);
+  buildLUT();
+  seedGeometry();
+  walkers = [];
+  for (let i=0;i<8;i++){ const w = {x:0,y:0,steps:0}; respawn(w); walkers.push(w); }
+  computeStats();
+}
+function finished(){
+  return (mode === "line") ? (growthTop <= N*0.12) : (maxR >= N/2 - 5);
+}
+// auto grow -> reseed loop keeps the landing state alive
+function scheduleReseed(){
+  if (reseedTimer) return;
+  done = true;   // freeze growth while the reseed timer runs
+  reseedTimer = setTimeout(()=>{ seed = (Math.random()*1e9)|0; writeHash(); init(); }, 1400);
+}
+
+// ---- render driver ----
+let fc = 0;
+function frame(){
+  if (!paused && !done){
+    const budget = 700 * speed;
+    for (let s=0;s<budget;s++) step(walkers[s & 7]);
+    // additive glow bloom on the growing frontier
+    ctx.globalCompositeOperation = "lighter";
+    for (let i=tips.length-1;i>=0;i--){
+      const t = tips[i];
+      ctx.globalAlpha = t.l*0.45; ctx.fillStyle = t.c;
+      ctx.fillRect((t.x-0.5)*cell, (t.y-0.5)*cell, cell*2, cell*2);
+      t.l -= 0.06; if (t.l <= 0) tips.splice(i,1);
+    }
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+    if (++fc % 15 === 0) computeStats();
+    if (finished()) scheduleReseed();
+  }
+  requestAnimationFrame(frame);
+}
+
+// ---- UI wiring ----
+const $ = id => document.getElementById(id);
+function refreshLabels(){
+  $("karm").textContent = arms;
+  $("kstk").textContent = stick.toFixed(2);
+  $("kspd").textContent = speed;
+  $("arms").value = arms; $("stk").value = stick; $("spd").value = speed;
+  $("mir").textContent = "Mirror: " + (mirror ? "on" : "off");
+  $("mir").classList.toggle("on", mirror);
+  document.querySelectorAll("#modes button").forEach(b => b.classList.toggle("on", b.dataset.mode === mode));
+  const hints = {
+    center:"Radial coral / dendrite from a single core.",
+    line:"Hoarfrost creeping up a windowpane (symmetry off).",
+    custom:"Click the canvas to drop nuclei — mirrored into every arm."
+  };
+  $("modehint").textContent = hints[mode];
+  $("arms").disabled = (mode === "line");
+  $("mir").disabled = (mode === "line");   // mirror has no effect on line mode
+}
+document.querySelectorAll("#modes button").forEach(b => b.onclick = () => {
+  mode = b.dataset.mode; if (mode === "custom") customPts = [];
+  refreshLabels(); writeHash(); init();
+});
+$("arms").oninput = e => { arms = +e.target.value; $("karm").textContent = arms; };
+$("arms").onchange = () => { writeHash(); init(); };
+$("stk").oninput = e => { stick = +e.target.value; $("kstk").textContent = stick.toFixed(2); writeHash(); };
+$("spd").oninput = e => { speed = +e.target.value; $("kspd").textContent = speed; };
+$("mir").onclick = () => { mirror = !mirror; refreshLabels(); writeHash(); init(); };
+$("pause").onclick = () => { paused = !paused; $("pause").textContent = paused ? "Resume" : "Pause"; $("pause").classList.toggle("on", paused); };
+$("rnd").onclick = () => { seed = (Math.random()*1e9)|0; if (mode === "custom") customPts = []; writeHash(); init(); };
+$("clr").onclick = () => { if (mode === "custom") customPts = []; init(); };
+$("png").onclick = () => {
+  const a = document.createElement("a");
+  a.download = "verglas-" + seed + ".png"; a.href = cv.toDataURL("image/png"); a.click();
+};
+// palette swatches
+const palsEl = $("pals");
+PALS.forEach((p, i) => {
+  const d = document.createElement("div");
+  d.className = "sw" + (i===palIdx ? " on" : ""); d.title = p.name;
+  d.style.background = `linear-gradient(90deg, rgb(${p.stops[1][1].join(",")}), rgb(${p.stops[2][1].join(",")}), rgb(${p.stops[3][1].join(",")}))`;
+  d.onclick = () => { palIdx = i; buildLUT(); repaintAll(); writeHash();
+    document.querySelectorAll(".sw").forEach((s,j)=>s.classList.toggle("on", j===i)); };
+  palsEl.appendChild(d);
+});
+// copy shareable link
+$("chip").onclick = () => {
+  const done = () => {
+    const el = $("chip");
+    el.innerHTML = "<b style='color:#bfe3ff'>copied!</b> " + location.href.replace(/^https?:\/\//,"");
+    clearTimeout($("chip")._t);
+    $("chip")._t = setTimeout(writeHash, 1600);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(location.href).then(done, done);
+  } else {
+    done();
+  }
+};
+// click-to-place nuclei
+cv.addEventListener("pointerdown", e => {
+  if (mode !== "custom") return;
+  const rect = cv.getBoundingClientRect();
+  const gx = Math.round((e.clientX-rect.left)/rect.width*N);
+  const gy = Math.round((e.clientY-rect.top)/rect.height*N);
+  if (gx<1||gy<1||gx>=N-1||gy>=N-1) return;
+  customPts.push({x:gx, y:gy});
+  freeze(gx, gy, tick); tick++; particles++;
+});
+
+// ---- boot ----
+readHash();
+refreshLabels();
+writeHash();
+init();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

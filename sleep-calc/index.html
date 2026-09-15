@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SleepCalc — sleep cycle bedtime calculator</title>
+<meta name="description" content="Free offline sleep calculator. Find the best bedtimes to wake up refreshed (or wake times for a given bedtime) using 90-minute sleep cycles. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/sleep-calc/">
+<style>
+  :root{
+    --c:#083344; --bg:#f5fafb; --fg:#0c1c22; --muted:#4f6b73;
+    --card:#ffffff; --border:#d6e7ea; --code:#e6f2f4;
+  }
+  [data-theme="dark"]{
+    --bg:#081418; --fg:#e3eef1; --muted:#82a0a8; --card:#0f2228;
+    --border:#1f3a41; --code:#152c31;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:700px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#0891b2);display:grid;place-items:center;color:#fff;font-size:20px}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:700px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  .seg{display:inline-flex;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px}
+  .seg button{background:var(--bg);border:none;color:var(--fg);padding:9px 16px;cursor:pointer;
+    font-size:.86rem;border-right:1px solid var(--border);font-weight:600}
+  .seg button:last-child{border-right:none}
+  .seg button.on{background:var(--c);color:#fff}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  input{width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:1.05rem;font-family:ui-monospace,monospace}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .err{color:#dc2626;font-size:.86rem;margin:12px 0 0;min-height:1.1em}
+  .list{margin-top:16px;display:flex;flex-direction:column;gap:8px}
+  .item{display:flex;align-items:center;gap:12px;padding:13px 16px;border-radius:12px;background:var(--code)}
+  .item .t{font-family:ui-monospace,monospace;font-size:1.4rem;font-weight:700;color:var(--c)}
+  .item .m{color:var(--muted);font-size:.85rem;margin-left:auto;text-align:right}
+  .item.best{outline:2px solid var(--c)}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:700px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('slp.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">🌙</div>
+  <div>
+    <h1>SleepCalc</h1>
+    <p class="sub">Sleep cycle calculator</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <div class="seg" id="mode">
+      <button data-m="wake" class="on">I want to wake at…</button>
+      <button data-m="bed">I'll go to bed at…</button>
+    </div>
+    <label for="time" id="tlabel">Wake-up time</label>
+    <input id="time" value="7:00 AM" spellcheck="false" placeholder="7:00 AM">
+    <p class="err" id="err"></p>
+    <div class="list" id="list"></div>
+    <p class="hint">A sleep cycle is ~90 minutes; you feel most refreshed waking at the end of one.
+      A ~14-minute buffer to fall asleep is included. 5–6 cycles (7.5–9 h) is the usual target. Runs locally.</p>
+  </div>
+</main>
+<footer>
+  SleepCalc is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/sleep-calc">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function parseTime(str){
+  var s = String(str).trim().toLowerCase().replace(/\s+/g, '');
+  if(s === '') return null;
+  var ampm = null;
+  if(s.slice(-2) === 'am'){ ampm = 'am'; s = s.slice(0, -2); }
+  else if(s.slice(-2) === 'pm'){ ampm = 'pm'; s = s.slice(0, -2); }
+  var h, m;
+  if(s.indexOf(':') !== -1){ var p = s.split(':'); if(p.length !== 2) return null; h = p[0]; m = p[1]; }
+  else { h = s; m = '0'; }
+  if(!/^\d{1,2}$/.test(h) || !/^\d{1,2}$/.test(m)) return null;
+  h = Number(h); m = Number(m);
+  if(m > 59) return null;
+  if(ampm){ if(h < 1 || h > 12) return null; h = (ampm === 'am') ? (h === 12 ? 0 : h) : (h === 12 ? 12 : h + 12); }
+  else if(h > 23) return null;
+  return h * 60 + m;
+}
+function mod1440(m){ return ((m % 1440) + 1440) % 1440; }
+function formatTime(min){
+  min = mod1440(Math.round(min));
+  var h = Math.floor(min / 60), m = min % 60;
+  var ampm = h < 12 ? 'AM' : 'PM';
+  var h12 = h % 12; if(h12 === 0) h12 = 12;
+  return h12 + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm;
+}
+function bedtimes(wakeMin, opts){
+  opts = opts || {};
+  var fall = opts.fallAsleep == null ? 14 : opts.fallAsleep;
+  var cyc = opts.cycle || 90;
+  var list = opts.cycles || [6, 5, 4, 3];
+  return list.map(function(n){
+    return { cycles: n, hours: n * cyc / 60, time: mod1440(wakeMin - (n * cyc + fall)) };
+  });
+}
+function waketimes(bedMin, opts){
+  opts = opts || {};
+  var fall = opts.fallAsleep == null ? 14 : opts.fallAsleep;
+  var cyc = opts.cycle || 90;
+  var list = opts.cycles || [6, 5, 4, 3];
+  return list.map(function(n){
+    return { cycles: n, hours: n * cyc / 60, time: mod1440(bedMin + fall + n * cyc) };
+  });
+}
+
+if(typeof module !== 'undefined') module.exports = { parseTime, mod1440, formatTime, bedtimes, waketimes };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var modeEl = document.getElementById('mode');
+  var timeEl = document.getElementById('time');
+  var errEl = document.getElementById('err');
+  var listEl = document.getElementById('list');
+  var mode = 'wake';
+
+  function render(){
+    document.getElementById('tlabel').textContent = mode === 'wake' ? 'Wake-up time' : 'Bedtime';
+    var min = parseTime(timeEl.value);
+    if(min === null){
+      errEl.textContent = 'Enter a valid time, e.g. 7:00 AM or 23:00.';
+      listEl.innerHTML = '';
+      return;
+    }
+    errEl.textContent = '';
+    var results = (mode === 'wake') ? bedtimes(min) : waketimes(min);
+    var label = mode === 'wake' ? 'Go to bed at' : 'Wake at';
+    listEl.innerHTML = results.map(function(r, i){
+      var best = (r.cycles === 6 || r.cycles === 5);
+      return '<div class="item' + (best ? ' best' : '') + '">' +
+        '<div class="t">' + formatTime(r.time) + '</div>' +
+        '<div class="m">' + r.cycles + ' cycles · ' + r.hours + ' h' + (best ? ' · ideal' : '') + '</div></div>';
+    }).join('');
+    try{ localStorage.setItem('slp.time', timeEl.value); localStorage.setItem('slp.mode', mode); }catch(e){}
+  }
+  modeEl.addEventListener('click', function(e){
+    var b = e.target.closest ? e.target.closest('button') : null;
+    if(!b) return;
+    mode = b.getAttribute('data-m');
+    [].forEach.call(modeEl.querySelectorAll('button'), function(x){ x.className = (x === b) ? 'on' : ''; });
+    render();
+  });
+  timeEl.addEventListener('input', render);
+  try{
+    var st = localStorage.getItem('slp.time'); if(st !== null) timeEl.value = st;
+    var sm = localStorage.getItem('slp.mode');
+    if(sm){ mode = sm; [].forEach.call(modeEl.querySelectorAll('button'), function(x){
+      x.className = (x.getAttribute('data-m') === sm) ? 'on' : ''; }); }
+  }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('slp.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('slp.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

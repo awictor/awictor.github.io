@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MimeType — MIME Type & File Extension Lookup</title>
+<meta name="description" content="Look up the MIME (Content-Type) for any file extension and the extensions for any MIME type. Searchable table of common types. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('mime-type-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#0d9488;
+    --bg:#f4f7f6; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e2e6e5; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#0f1514; --card:#18201e; --fg:#eef4f2; --muted:#93a29e; --line:#26302e; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:760px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#0f766e);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:760px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  input[type=search]{width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem}
+  .banner{margin-top:14px;padding:14px;border-radius:10px;background:color-mix(in srgb, var(--c) 12%, var(--bg));border:1px solid var(--c);display:none}
+  .banner.on{display:block}
+  .banner .ext{font-weight:700}
+  .banner .type{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:1.1rem;color:var(--c)}
+  table{width:100%;border-collapse:collapse;font-size:.9rem}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.05em}
+  td.ext{font-family:"SF Mono",Menlo,Consolas,monospace;font-weight:700;white-space:nowrap}
+  td.type{font-family:"SF Mono",Menlo,Consolas,monospace;color:var(--muted)}
+  .count{color:var(--muted);font-size:.82rem;margin:2px 0 10px}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:760px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">📄</div>
+    <div><h1>MimeType</h1><div class="sub">Extension ⇄ MIME (Content-Type) lookup</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <input type="search" id="q" placeholder="Search a filename, extension, or MIME type…" spellcheck="false" autocapitalize="off">
+    <div class="banner" id="banner"><span class="ext" id="bExt"></span> → <span class="type" id="bType"></span></div>
+  </div>
+  <div class="card">
+    <div class="count" id="count"></div>
+    <table><thead><tr><th>Extension</th><th>MIME type</th></tr></thead><tbody id="rows"></tbody></table>
+  </div>
+</main>
+<footer>
+  100% offline. Nothing leaves your browser. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/mime-type">Source</a>.
+</footer>
+
+<script>
+  // ---- data ----
+  const MIME = {
+    // images
+    png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', gif:'image/gif', webp:'image/webp',
+    svg:'image/svg+xml', bmp:'image/bmp', ico:'image/x-icon', tif:'image/tiff', tiff:'image/tiff',
+    avif:'image/avif', heic:'image/heic',
+    // documents
+    pdf:'application/pdf', doc:'application/msword',
+    docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls:'application/vnd.ms-excel',
+    xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ppt:'application/vnd.ms-powerpoint',
+    pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    odt:'application/vnd.oasis.opendocument.text', rtf:'application/rtf',
+    csv:'text/csv', txt:'text/plain', md:'text/markdown',
+    // web & code
+    html:'text/html', htm:'text/html', css:'text/css', js:'text/javascript', mjs:'text/javascript',
+    json:'application/json', xml:'application/xml', wasm:'application/wasm',
+    yaml:'application/yaml', yml:'application/yaml', toml:'application/toml',
+    // archives
+    zip:'application/zip', gz:'application/gzip', tar:'application/x-tar', rar:'application/vnd.rar',
+    '7z':'application/x-7z-compressed', bz2:'application/x-bzip2', xz:'application/x-xz',
+    // audio
+    mp3:'audio/mpeg', wav:'audio/wav', ogg:'audio/ogg', flac:'audio/flac', aac:'audio/aac',
+    m4a:'audio/mp4', weba:'audio/webm', mid:'audio/midi',
+    // video
+    mp4:'video/mp4', webm:'video/webm', mov:'video/quicktime', avi:'video/x-msvideo',
+    mkv:'video/x-matroska', wmv:'video/x-ms-wmv', flv:'video/x-flv', mpeg:'video/mpeg',
+    // fonts
+    woff:'font/woff', woff2:'font/woff2', ttf:'font/ttf', otf:'font/otf', eot:'application/vnd.ms-fontobject',
+    // other
+    bin:'application/octet-stream', ics:'text/calendar', vcf:'text/vcard',
+    apk:'application/vnd.android.package-archive', jar:'application/java-archive',
+    sh:'application/x-sh', py:'text/x-python', epub:'application/epub+zip'
+  };
+
+  // ---- pure logic ----
+  function extractExt(name){
+    const s = String(name).toLowerCase().trim();
+    const i = s.lastIndexOf('.');
+    return i >= 0 ? s.slice(i + 1) : s;
+  }
+
+  function byExtension(input){
+    const ext = extractExt(input).replace(/^\.+/, '');
+    return Object.prototype.hasOwnProperty.call(MIME, ext) ? MIME[ext] : null;
+  }
+
+  function byMime(type){
+    const t = String(type).toLowerCase().trim();
+    return Object.keys(MIME).filter(ext => MIME[ext] === t).sort();
+  }
+
+  function search(query){
+    const s = String(query).toLowerCase().trim();
+    const all = Object.keys(MIME).sort();
+    const keys = s ? all.filter(ext => ext.includes(s) || MIME[ext].toLowerCase().includes(s)) : all;
+    return keys.map(ext => ({ ext, type: MIME[ext] }));
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('rows')){
+    const $ = id => document.getElementById(id);
+
+    function render(){
+      const q = $('q').value;
+      const hit = byExtension(q);
+      const b = $('banner');
+      if(hit && q.trim()){
+        b.classList.add('on');
+        $('bExt').textContent = '.' + extractExt(q).replace(/^\.+/, '');
+        $('bType').textContent = hit;
+      }else b.classList.remove('on');
+
+      const rows = search(q);
+      $('count').textContent = `${rows.length} of ${Object.keys(MIME).length} types`;
+      $('rows').innerHTML = rows.map(r => `<tr><td class="ext">.${r.ext}</td><td class="type">${r.type}</td></tr>`).join('');
+    }
+
+    $('q').addEventListener('input', render);
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('mime-type-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { MIME, extractExt, byExtension, byMime, search };
+</script>
+</body>
+</html>

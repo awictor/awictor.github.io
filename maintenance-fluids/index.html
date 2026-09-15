@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MaintenanceFluids — IV Fluid Rate (Holliday-Segar / 4-2-1)</title>
+<meta name="description" content="Calculate maintenance IV fluid requirements by weight — daily volume (Holliday-Segar) and hourly rate (the 4-2-1 rule). 100% offline, informational only.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('mfluid-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#0284c7;
+    --bg:#f1f6fb; --card:#ffffff; --fg:#111a26; --muted:#556173; --line:#dde6f0; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#070f1a; --card:#0f1826; --fg:#e7eef8; --muted:#8496a8; --line:#1a2636; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:620px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#0369a1);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:620px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.2rem;text-align:center}
+  .res{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:4px}
+  .box{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:16px;text-align:center}
+  .box .v{font-size:2rem;font-weight:800;color:var(--c);line-height:1}
+  .box .k{color:var(--muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;margin-top:6px}
+  .break{margin-top:14px;color:var(--muted);font-size:.9rem;text-align:center}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:620px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.8rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">💧</div>
+    <div><h1>MaintenanceFluids</h1><div class="sub">Holliday-Segar &amp; 4-2-1</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="weight">Body weight (kg)</label>
+    <input type="number" id="weight" value="20" min="0.5" step="0.5">
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card">
+    <div class="res">
+      <div class="box"><div class="v" id="hourly">—</div><div class="k">mL/hr (4-2-1)</div></div>
+      <div class="box"><div class="v" id="daily">—</div><div class="k">mL/day (Holliday-Segar)</div></div>
+    </div>
+    <div class="break" id="break"></div>
+  </div>
+</main>
+<footer>
+  Holliday-Segar: 100 mL/kg/day for the first 10 kg, 50 for the next 10, 20 for each kg beyond 20. The 4-2-1 rule (4/2/1 mL/kg/hr) is the hourly shortcut. Maintenance only — deficits and ongoing losses are separate. Informational only, <strong>not medical advice</strong>. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/maintenance-fluids">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  function chk(weight){
+    const w = Number(weight);
+    if(!Number.isFinite(w) || w <= 0) throw new Error('weight must be > 0');
+    return w;
+  }
+
+  // Holliday-Segar daily maintenance volume (mL/day).
+  function dailyMl(weight){
+    const w = chk(weight);
+    if(w <= 10) return w * 100;
+    if(w <= 20) return 1000 + (w - 10) * 50;
+    return 1500 + (w - 20) * 20;
+  }
+
+  // 4-2-1 rule hourly rate (mL/hr).
+  function hourlyMl(weight){
+    const w = chk(weight);
+    if(w <= 10) return w * 4;
+    if(w <= 20) return 40 + (w - 10) * 2;
+    return 60 + (w - 20) * 1;
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('hourly')){
+    const $ = id => document.getElementById(id);
+    const r = n => Math.round(n * 10) / 10;
+
+    function render(){
+      try{
+        const w = $('weight').value;
+        $('hourly').textContent = r(hourlyMl(w));
+        $('daily').textContent = Math.round(dailyMl(w));
+        $('break').textContent = `≈ ${r(hourlyMl(w))} mL/hr keeps up with normal losses at ${w} kg.`;
+        $('err').textContent = '';
+      }catch(e){ $('hourly').textContent = '—'; $('daily').textContent = '—'; $('break').textContent = ''; $('err').textContent = e.message; }
+    }
+    $('weight').addEventListener('input', render);
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('mfluid-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { dailyMl, hourlyMl };
+</script>
+</body>
+</html>

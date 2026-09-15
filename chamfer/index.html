@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chamfer — inequality Latin-square puzzle</title>
+<script>var _t=localStorage.getItem('chamfer.theme');if(_t)document.documentElement.setAttribute('data-theme',_t);</script>
+<style>
+  :root{
+    --cs:56px; --gs:26px;
+    --bg:#f5f3ef; --panel:#fffdf9; --cell:#ffffff; --line:#232f3e;
+    --ink:#232f3e; --muted:#6b7480; --accent:#ff6100; --given:#232f3e;
+    --entry:#c24a00; --ok:#1f9d55; --bad:#e23b3b;
+  }
+  [data-theme="dark"]{
+    --bg:#161b22; --panel:#1e252e; --cell:#232f3e; --line:#4a586b;
+    --ink:#eef1f4; --muted:#93a0af; --accent:#ff8a3d; --given:#eef1f4;
+    --entry:#ffb27a; --ok:#3ddc84; --bad:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:"Amazon Ember","Segoe UI",system-ui,sans-serif;
+    display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:18px;gap:14px}
+  h1{margin:0;font-size:26px;letter-spacing:.5px;color:var(--accent);font-weight:800}
+  h1 span{color:var(--ink);font-weight:400;font-size:14px;display:block;letter-spacing:0}
+  .bar{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;align-items:center;
+    background:var(--panel);padding:10px 14px;border-radius:12px;box-shadow:0 1px 4px #0002}
+  select,button{font:inherit;color:var(--ink);background:var(--cell);border:1px solid var(--line);
+    border-radius:8px;padding:6px 11px;cursor:pointer;transition:.15s}
+  button:hover,select:hover{border-color:var(--accent)}
+  button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .stat{font-variant-numeric:tabular-nums;color:var(--muted);font-size:14px;min-width:52px;text-align:center}
+  .stat b{color:var(--ink)}
+  #wrap{background:var(--panel);padding:22px;border-radius:16px;box-shadow:0 4px 22px #0003}
+  #grid{display:grid;gap:0;justify-content:center}
+  .cell{width:var(--cs);height:var(--cs);display:flex;align-items:center;justify-content:center;
+    background:var(--cell);border:2px solid var(--line);font-size:26px;font-weight:600;
+    position:relative;cursor:pointer;user-select:none;color:var(--entry)}
+  .cell.given{color:var(--given);font-weight:800;background:#e7e4dd;background:color-mix(in srgb,var(--cell) 88%,var(--line))}
+  .cell.sel{outline:3px solid var(--accent);outline-offset:-3px;z-index:2}
+  .cell.same{background:#ffd9c2;background:color-mix(in srgb,var(--accent) 22%,var(--cell))}
+  .cell.hint{animation:hint 1s ease-in-out 2}
+  .cell.bad{animation:bad .4s ease-in-out}
+  @keyframes hint{0%,100%{box-shadow:inset 0 0 0 0 var(--accent)}50%{box-shadow:inset 0 0 0 5px var(--accent)}}
+  @keyframes bad{0%,100%{background:var(--cell)}50%{background:#f3b0b0;background:color-mix(in srgb,var(--bad) 55%,var(--cell))}}
+  .pencil{position:absolute;inset:3px;display:grid;font-size:10px;color:var(--muted);
+    font-weight:500;pointer-events:none}
+  .pencil span{display:flex;align-items:center;justify-content:center}
+  .chev{display:flex;align-items:center;justify-content:center;color:var(--accent);
+    font-weight:900;font-size:20px;line-height:1}
+  .chev.pulse{animation:pulse .5s ease-out}
+  @keyframes pulse{0%{transform:scale(1)}40%{transform:scale(1.9);color:var(--ok)}100%{transform:scale(1)}}
+  #msg{min-height:20px;font-size:14px;color:var(--muted);text-align:center;max-width:460px}
+  #msg.win{color:var(--ok);font-weight:700;font-size:17px}
+  #keys{display:grid;grid-auto-flow:column;gap:6px}
+  #keys button{width:40px;padding:8px 0;font-size:17px}
+  footer{color:var(--muted);font-size:12px;text-align:center}
+  .win #grid{animation:celebrate .8s ease}
+  @keyframes celebrate{0%,100%{transform:scale(1)}25%{transform:scale(1.03) rotate(-.4deg)}75%{transform:scale(1.03) rotate(.4deg)}}
+  @media (max-width:520px){body{padding:10px;gap:10px}#wrap{padding:12px}.bar{padding:8px 10px}h1{font-size:22px}}
+</style>
+</head>
+<body>
+<h1>CHAMFER<span>fill the grid so every chevron points true</span></h1>
+<div class="bar">
+  <select id="size" title="Grid size"></select>
+  <select id="diff" title="Difficulty">
+    <option value="Easy">Easy</option>
+    <option value="Medium" selected>Medium</option>
+    <option value="Hard">Hard</option>
+  </select>
+  <button id="new">New</button>
+  <span class="stat">⏱ <b id="timer">0:00</b></span>
+  <span class="stat" title="Best time this tier">★ <b id="best">—</b></span>
+  <span class="stat" title="Solve streak">🔥 <b id="streak">0</b></span>
+</div>
+<div id="wrap"><div id="grid"></div></div>
+<div id="keys"></div>
+<div class="bar">
+  <button id="pencil" aria-pressed="false">Pencil</button>
+  <button id="auto" class="on" aria-pressed="true">Auto‑marks</button>
+  <button id="hint">Hint</button>
+  <button id="check">Check</button>
+  <button id="solve">Solve</button>
+  <button id="share">Share</button>
+  <button id="theme">◐ Theme</button>
+</div>
+<div id="msg" role="status" aria-live="polite">Fill each row &amp; column with 1..n. Open side of every chevron faces the larger value.</div>
+<footer>Every board is generator‑proven to have exactly one solution. Keyboard: arrows move · digits fill · backspace clears · space toggles pencil.</footer>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+// ---------- seeded RNG ----------
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function shuffle(arr,rng){for(let i=arr.length-1;i>0;i--){const j=(rng()*(i+1))|0;[arr[i],arr[j]]=[arr[j],arr[i]];}return arr;}
+// ---------- Latin square ----------
+function latin(n,rng){
+  const base=shuffle([...Array(n).keys()],rng);
+  const rows=shuffle([...Array(n).keys()],rng);
+  const cols=shuffle([...Array(n).keys()],rng);
+  const sym=shuffle([...Array(n).keys()],rng);
+  const g=new Array(n*n);
+  for(let r=0;r<n;r++)for(let c=0;c<n;c++){
+    const v=base[(rows[r]+cols[c])%n];
+    g[r*n+c]=sym[v]+1;
+  }
+  return g;
+}
+// ---------- constraint helpers (cons: [i,j] means val[i] < val[j]) ----------
+function buildCC(n,cons){const cc=Array.from({length:n*n},()=>[]);for(const[i,j]of cons){cc[i].push([j,'gt']);cc[j].push([i,'lt']);}return cc;}
+function bounds(n,cons){
+  const N=n*n,pred=Array.from({length:N},()=>[]),succ=Array.from({length:N},()=>[]);
+  for(const[i,j]of cons){pred[j].push(i);succ[i].push(j);}
+  const up=new Array(N).fill(0),dn=new Array(N).fill(0);
+  const gmin=c=>{if(up[c])return up[c];let m=1;for(const p of pred[c])m=Math.max(m,gmin(p)+1);return up[c]=m;};
+  const gmax=c=>{if(dn[c])return dn[c];let m=n;for(const s of succ[c])m=Math.min(m,gmax(s)-1);return dn[c]=m;};
+  const mn=[],mx=[];for(let c=0;c<N;c++){mn[c]=gmin(c);mx[c]=gmax(c);}
+  return{mn,mx};
+}
+// count solutions up to cap (uniqueness engine)
+function countSolutions(n,given,cons,cap){
+  const N=n*n,{mn,mx}=bounds(n,cons),cc=buildCC(n,cons);
+  const grid=given.slice(),ru=new Array(n).fill(0),cu=new Array(n).fill(0);
+  for(let c=0;c<N;c++)if(grid[c]){const b=1<<grid[c];ru[(c/n)|0]|=b;cu[c%n]|=b;}
+  let count=0;
+  const cand=c=>{const r=(c/n)|0,cl=c%n,res=[];
+    for(let v=mn[c];v<=mx[c];v++){const b=1<<v;if((ru[r]&b)||(cu[cl]&b))continue;
+      let ok=true;for(const[o,rel]of cc[c]){const ov=grid[o];if(!ov)continue;
+        if(rel==='gt'&&!(ov>v)){ok=false;break;}if(rel==='lt'&&!(ov<v)){ok=false;break;}}
+      if(ok)res.push(v);}return res;};
+  function bt(){
+    if(count>=cap)return;
+    let best=-1,bc=null;
+    for(let c=0;c<N;c++)if(!grid[c]){const cs=cand(c);if(!cs.length)return;
+      if(best<0||cs.length<bc.length){best=c;bc=cs;if(cs.length===1)break;}}
+    if(best<0){count++;return;}
+    const r=(best/n)|0,cl=best%n;
+    for(const v of bc){const b=1<<v;grid[best]=v;ru[r]|=b;cu[cl]|=b;bt();ru[r]&=~b;cu[cl]&=~b;grid[best]=0;if(count>=cap)return;}
+  }
+  bt();return count;
+}
+// ---------- difficulty by solve depth ----------
+function rate(n,given,cons){
+  const N=n*n,{mn,mx}=bounds(n,cons),cc=buildCC(n,cons),g=given.slice();
+  let hidden=false;
+  const cand=c=>{if(g[c])return[g[c]];const r=(c/n)|0,cl=c%n,res=[];
+    for(let v=mn[c];v<=mx[c];v++){let used=false;
+      for(let k=0;k<n;k++){if(g[r*n+k]===v||g[k*n+cl]===v){used=true;break;}}
+      if(used)continue;let ok=true;
+      for(const[o,rel]of cc[c]){const ov=g[o];if(!ov)continue;
+        if(rel==='gt'&&!(ov>v)){ok=false;break;}if(rel==='lt'&&!(ov<v)){ok=false;break;}}
+      if(ok)res.push(v);}return res;};
+  let prog=true;
+  while(prog){prog=false;
+    for(let c=0;c<N;c++){if(g[c])continue;const cs=cand(c);if(!cs.length)return'Hard';if(cs.length===1){g[c]=cs[0];prog=true;}}
+    if(prog)continue;
+    for(let unit=0;unit<2*n&&!prog;unit++){
+      const cells=[];for(let k=0;k<n;k++)cells.push(unit<n?unit*n+k:(unit-n)+k*n);
+      for(let v=1;v<=n&&!prog;v++){if(cells.some(c=>g[c]===v))continue;
+        const spots=cells.filter(c=>!g[c]&&cand(c).includes(v));
+        if(spots.length===1){g[spots[0]]=v;hidden=true;prog=true;}}
+    }
+  }
+  return g.every(x=>x>0)?(hidden?'Medium':'Easy'):'Hard';
+}
+// ---------- generator: unique-solution reduction ----------
+function genFromSeed(seed,n){
+  const rng=mulberry32(seed>>>0);
+  const sol=latin(n,rng);
+  const consAll=[];
+  for(let r=0;r<n;r++)for(let c=0;c<n;c++){
+    const i=r*n+c;
+    if(c<n-1){const j=i+1;consAll.push(sol[i]<sol[j]?[i,j]:[j,i]);}
+    if(r<n-1){const j=i+n;consAll.push(sol[i]<sol[j]?[i,j]:[j,i]);}
+  }
+  const g=sol.slice(),kept=consAll.map(()=>true);
+  const clues=[];
+  for(let c=0;c<n*n;c++)clues.push({t:'g',c});
+  for(let k=0;k<consAll.length;k++)clues.push({t:'i',k});
+  shuffle(clues,rng);
+  const active=()=>consAll.filter((_,k)=>kept[k]);
+  for(const cl of clues){
+    if(cl.t==='g'){const old=g[cl.c];if(!old)continue;g[cl.c]=0;
+      if(countSolutions(n,g,active(),2)!==1)g[cl.c]=old;}
+    else{if(!kept[cl.k])continue;kept[cl.k]=false;
+      if(countSolutions(n,g,active(),2)!==1)kept[cl.k]=true;}
+  }
+  const cons=active();
+  return{sol,given:g,cons,tier:rate(n,g,cons)};
+}
+function newPuzzle(n,want){
+  const base=(Math.random()*1e9)>>>0;
+  let last=null;
+  for(let a=0;a<26;a++){const seed=(base+a*2654435761)>>>0;const p=genFromSeed(seed,n);last={seed,...p};
+    if(p.tier===want)return last;}
+  return last;
+}
+// ---------- state ----------
+let S=null,tick=null;
+const consKey=cons=>{const s=new Set();for(const[i,j]of cons)s.add(i+','+j);return s;};
+function load(seed,n,beat){
+  const p=genFromSeed(seed,n);
+  S={seed,n,sol:p.sol,given:p.given,cons:p.cons,cset:consKey(p.cons),tier:p.tier,
+     entries:new Array(n*n).fill(0),pencil:Array.from({length:n*n},()=>new Set()),
+     sel:0,pencilMode:false,auto:$('auto').classList.contains('on'),
+     bnd:bounds(n,p.cons),cc:buildCC(n,p.cons),start:Date.now(),solved:false,beat:beat};
+  $('diff').value=p.tier;$('size').value=n;
+  location.hash='s='+seed+'&n='+n;
+  buildGrid();updateBest();render();startTimer();
+  $('msg').className='';$('msg').textContent=beat!=null?
+    ('Challenge link: beat '+fmt(beat)+' on this '+p.tier+' '+n+'×'+n+' board.'):
+    (p.tier+' · '+n+'×'+n+' — one unique solution awaits.');
+}
+// ---------- grid DOM ----------
+const cellEls=[],hGap={},vGap={};
+function buildGrid(){
+  const n=S.n,grid=$('grid');grid.innerHTML='';cellEls.length=0;
+  const avail=Math.min((window.innerWidth||480)-80,480);
+  const cs=Math.max(30,Math.min(60,Math.floor(avail/(1.46*n-0.46))));
+  document.documentElement.style.setProperty('--cs',cs+'px');
+  document.documentElement.style.setProperty('--gs',Math.round(cs*0.46)+'px');
+  const track=Array.from({length:2*n-1},(_,i)=>i%2?'var(--gs)':'var(--cs)').join(' ');
+  grid.style.gridTemplateColumns=track;grid.style.gridTemplateRows=track;
+  for(let gr=0;gr<2*n-1;gr++)for(let gc=0;gc<2*n-1;gc++){
+    const er=gr%2===0,ec=gc%2===0;let el;
+    if(er&&ec){const r=gr/2,c=gc/2,i=r*n+c;el=document.createElement('div');el.className='cell';
+      el.onclick=()=>{S.sel=i;render();};cellEls[i]=el;}
+    else if(er&&!ec){el=document.createElement('div');el.className='chev';hGap[(gr/2)*n+(gc-1)/2]=el;}
+    else if(!er&&ec){el=document.createElement('div');el.className='chev';vGap[((gr-1)/2)*n+gc/2]=el;}
+    else{el=document.createElement('div');}
+    grid.appendChild(el);
+  }
+  const keys=$('keys');keys.innerHTML='';
+  for(let v=1;v<=n;v++){const b=document.createElement('button');b.textContent=v;b.onclick=()=>press(String(v));keys.appendChild(b);}
+  const del=document.createElement('button');del.textContent='⌫';del.onclick=()=>press('Backspace');keys.appendChild(del);
+}
+const val=c=>S.given[c]||S.entries[c];
+function computeCandidates(c){
+  const n=S.n,{mn,mx}=S.bnd,r=(c/n)|0,cl=c%n,res=[];
+  for(let v=mn[c];v<=mx[c];v++){let used=false;
+    for(let k=0;k<n;k++){if(k!==cl&&val(r*n+k)===v){used=true;break;}if(k!==r&&val(k*n+cl)===v){used=true;break;}}
+    if(used)continue;let ok=true;
+    for(const[o,rel]of S.cc[c]){const ov=val(o);if(!ov)continue;
+      if(rel==='gt'&&!(ov>v)){ok=false;break;}if(rel==='lt'&&!(ov<v)){ok=false;break;}}
+    if(ok)res.push(v);}return res;
+}
+function conflicts(){
+  const n=S.n,bad=new Set();
+  for(let r=0;r<n;r++){const seen={};for(let c=0;c<n;c++){const v=val(r*n+c);if(!v)continue;(seen[v]=seen[v]||[]).push(r*n+c);}
+    for(const k in seen)if(seen[k].length>1)seen[k].forEach(x=>bad.add(x));}
+  for(let c=0;c<n;c++){const seen={};for(let r=0;r<n;r++){const v=val(r*n+c);if(!v)continue;(seen[v]=seen[v]||[]).push(r*n+c);}
+    for(const k in seen)if(seen[k].length>1)seen[k].forEach(x=>bad.add(x));}
+  for(const[i,j]of S.cons){const a=val(i),b=val(j);if(a&&b&&!(a<b)){bad.add(i);bad.add(j);}}
+  return bad;
+}
+// ---------- render ----------
+let lastEdit=-1,hintCells=[];
+function render(){
+  const n=S.n,bad=conflicts(),selV=val(S.sel);
+  for(let c=0;c<n*n;c++){
+    const el=cellEls[c],v=val(c);
+    el.className='cell'+(S.given[c]?' given':'')+(c===S.sel?' sel':'')
+      +(selV&&v===selV?' same':'')+(bad.has(c)?' bad':'')+(hintCells.includes(c)?' hint':'');
+    el.setAttribute('aria-label','R'+(((c/n)|0)+1)+'C'+((c%n)+1)+', '+(v?v:'empty')+(S.given[c]?' (given)':''));
+    el.textContent=v||'';
+    const p=el.querySelector('.pencil');if(p)p.remove();
+    if(!v){const marks=S.auto?computeCandidates(c):[...S.pencil[c]].sort();
+      if(marks.length){const d=document.createElement('div');d.className='pencil';
+        const side=Math.ceil(Math.sqrt(n));d.style.gridTemplateColumns='repeat('+side+',1fr)';
+        for(let m=1;m<=n;m++){const s=document.createElement('span');s.textContent=marks.includes(m)?m:'';d.appendChild(s);}
+        el.appendChild(d);}}
+  }
+  // chevrons
+  for(let r=0;r<n;r++)for(let c=0;c<n-1;c++){const i=r*n+c,j=i+1,g=hGap[r*n+c];
+    g.textContent=S.cset.has(i+','+j)?'‹':'›';g.classList.remove('pulse');
+    const a=val(i),b=val(j),sat=a&&b&&(S.cset.has(i+','+j)?a<b:b<a);
+    if(sat&&(i===lastEdit||j===lastEdit))g.classList.add('pulse');}
+  for(let r=0;r<n-1;r++)for(let c=0;c<n;c++){const i=r*n+c,j=i+n,g=vGap[r*n+c];
+    g.textContent=S.cset.has(i+','+j)?'∧':'∨';g.classList.remove('pulse');
+    const a=val(i),b=val(j),sat=a&&b&&(S.cset.has(i+','+j)?a<b:b<a);
+    if(sat&&(i===lastEdit||j===lastEdit))g.classList.add('pulse');}
+  lastEdit=-1;
+}
+// ---------- editing ----------
+function setCell(c,v){
+  if(S.given[c])return;
+  S.entries[c]=v;lastEdit=c;hintCells=[];
+  if(v&&S.auto===false){S.pencil[c].clear();
+    const r=(c/S.n)|0,cl=c%S.n;
+    for(let k=0;k<S.n;k++){S.pencil[r*S.n+k].delete(v);S.pencil[k*S.n+cl].delete(v);}}
+  render();checkWin();
+}
+function press(k){
+  const c=S.sel;
+  if(k==='Backspace'||k==='Delete'||k==='0'){if(!S.given[c]){S.entries[c]=0;S.pencil[c].clear();lastEdit=c;render();}return;}
+  const v=+k;if(v>=1&&v<=S.n){
+    if(S.pencilMode&&!S.auto){if(!val(c)){S.pencil[c].has(v)?S.pencil[c].delete(v):S.pencil[c].add(v);render();}}
+    else setCell(c,v);
+  }
+}
+document.addEventListener('keydown',e=>{
+  if(!S)return;
+  if(e.ctrlKey||e.metaKey||e.altKey)return;
+  const tg=e.target;if(tg&&/^(SELECT|BUTTON|INPUT|TEXTAREA)$/.test(tg.tagName))return;
+  const n=S.n,r=(S.sel/n)|0,c=S.sel%n;
+  if(e.key==='ArrowUp'){S.sel=((r+n-1)%n)*n+c;render();e.preventDefault();}
+  else if(e.key==='ArrowDown'){S.sel=((r+1)%n)*n+c;render();e.preventDefault();}
+  else if(e.key==='ArrowLeft'){S.sel=r*n+(c+n-1)%n;render();e.preventDefault();}
+  else if(e.key==='ArrowRight'){S.sel=r*n+(c+1)%n;render();e.preventDefault();}
+  else if(e.key===' '){$('pencil').click();e.preventDefault();}
+  else press(e.key);
+});
+let rsz=null;
+window.addEventListener('resize',()=>{clearTimeout(rsz);rsz=setTimeout(()=>{if(S){buildGrid();render();}},120);});
+// ---------- win / timer / storage ----------
+function fmt(s){const m=(s/60)|0;return m+':'+String(s%60).padStart(2,'0');}
+function startTimer(){clearInterval(tick);tick=setInterval(()=>{
+  if(S.solved)return;$('timer').textContent=fmt(((Date.now()-S.start)/1000)|0);},250);}
+function updateBest(){const b=localStorage.getItem('chamfer.best.'+S.tier);
+  $('best').textContent=b?fmt(+b):'—';
+  $('streak').textContent=localStorage.getItem('chamfer.streak')||'0';}
+function checkWin(){
+  for(let c=0;c<S.n*S.n;c++)if(!val(c))return;
+  if(conflicts().size)return;
+  S.solved=true;clearInterval(tick);
+  const t=((Date.now()-S.start)/1000)|0;$('timer').textContent=fmt(t);
+  const bk='chamfer.best.'+S.tier,prev=+localStorage.getItem(bk)||1e9;
+  if(t<prev)localStorage.setItem(bk,t);
+  const st=(+localStorage.getItem('chamfer.streak')||0)+1;localStorage.setItem('chamfer.streak',st);
+  updateBest();
+  document.body.classList.add('win');setTimeout(()=>document.body.classList.remove('win'),900);
+  let m='Solved in '+fmt(t)+'! ';
+  if(S.beat!=null)m+=t<=S.beat?('You beat '+fmt(S.beat)+' 🏆'):('The challenge was '+fmt(S.beat)+' — so close.');
+  else m+=(t<prev?'New best for '+S.tier+'! ':'')+'Streak '+st+' 🔥';
+  $('msg').className='win';$('msg').textContent=m;
+}
+// ---------- hint engine ----------
+function findHint(){
+  const n=S.n;
+  const noineq=c=>{const r=(c/n)|0,cl=c%n,res=[];for(let v=1;v<=n;v++){let u=false;
+    for(let k=0;k<n;k++){if(k!==cl&&val(r*n+k)===v){u=true;break;}if(k!==r&&val(k*n+cl)===v){u=true;break;}}
+    if(!u)res.push(v);}return res;};
+  // 1: last empty in row / column
+  for(let r=0;r<n;r++){let empt=[],have=new Set();for(let c=0;c<n;c++){const v=val(r*n+c);v?have.add(v):empt.push(r*n+c);}
+    if(empt.length===1){for(let v=1;v<=n;v++)if(!have.has(v))return{cells:[empt[0]],value:v,reason:'R'+(r+1)+' has one empty square — it must be '+v+'.'};}}
+  for(let c=0;c<n;c++){let empt=[],have=new Set();for(let r=0;r<n;r++){const v=val(r*n+c);v?have.add(v):empt.push(r*n+c);}
+    if(empt.length===1){for(let v=1;v<=n;v++)if(!have.has(v))return{cells:[empt[0]],value:v,reason:'C'+(c+1)+' has one empty square — it must be '+v+'.'};}}
+  // 2: naked single
+  for(let c=0;c<n*n;c++){if(val(c))continue;const cs=computeCandidates(c);
+    if(cs.length===1){const rc='R'+(((c/n)|0)+1)+'C'+((c%n)+1);
+      const reason=noineq(c).length>1?('Chevron bounds pin '+rc+' to '+cs[0]+'.'):('Only '+cs[0]+' fits '+rc+' by row/column.');
+      return{cells:[c],value:cs[0],reason};}}
+  // 3: hidden single
+  for(let unit=0;unit<2*n;unit++){const cells=[];for(let k=0;k<n;k++)cells.push(unit<n?unit*n+k:(unit-n)+k*n);
+    for(let v=1;v<=n;v++){if(cells.some(c=>val(c)===v))continue;
+      const spots=cells.filter(c=>!val(c)&&computeCandidates(c).includes(v));
+      if(spots.length===1){const nm=unit<n?'R'+(unit+1):'C'+(unit-n+1);
+        return{cells:[spots[0]],value:v,reason:v+' can only sit in one spot of '+nm+'.'};}}}
+  return null;
+}
+// ---------- buttons ----------
+$('size').innerHTML=[4,5,6,7].map(v=>'<option'+(v===5?' selected':'')+'>'+v+'</option>').join('');
+const boardTouched=()=>S&&!S.solved&&S.entries.some(x=>x>0);
+$('new').onclick=()=>{
+  if(boardTouched()&&!confirm('Start a new puzzle? Your current progress will be lost.'))return;
+  const n=+$('size').value,want=$('diff').value;
+  if(S){$('msg').className='';$('msg').textContent='Carving a fresh board…';}
+  $('new').disabled=true;$('new').blur();
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    const p=newPuzzle(n,want);$('new').disabled=false;load(p.seed,n,null);}));};
+$('pencil').onclick=()=>{S.pencilMode=!S.pencilMode;$('pencil').classList.toggle('on',S.pencilMode);
+  $('pencil').setAttribute('aria-pressed',String(S.pencilMode));
+  if(S.pencilMode&&S.auto){S.auto=false;$('auto').classList.remove('on');$('auto').setAttribute('aria-pressed','false');render();}};
+$('auto').onclick=()=>{S.auto=!S.auto;$('auto').classList.toggle('on',S.auto);$('auto').setAttribute('aria-pressed',String(S.auto));
+  if(S.auto&&S.pencilMode){S.pencilMode=false;$('pencil').classList.remove('on');$('pencil').setAttribute('aria-pressed','false');}
+  render();};
+$('hint').onclick=()=>{const h=findHint();hintCells=[];
+  if(!h){$('msg').className='';$('msg').textContent='No forced move right now — time to try a candidate.';return;}
+  setCell(h.cells[0],h.value);hintCells=h.cells;render();
+  $('msg').className='';$('msg').textContent='Hint · '+h.reason;};
+$('check').onclick=()=>{const bad=conflicts();render();$('msg').className='';
+  let empt=0;for(let c=0;c<S.n*S.n;c++)if(!val(c))empt++;
+  $('msg').textContent=bad.size?(bad.size+' cell(s) violate a rule — see the flashes.'):
+    empt?('No conflicts. '+empt+' square(s) left.'):'Looks complete!';};
+$('solve').onclick=()=>{
+  if(boardTouched()&&!confirm('Reveal the full solution? This ends the puzzle.'))return;
+  for(let c=0;c<S.n*S.n;c++)if(!S.given[c])S.entries[c]=S.sol[c];
+  S.solved=true;clearInterval(tick);render();$('msg').className='';$('msg').textContent='Solution revealed.';};
+$('share').onclick=()=>{const t=S.solved?(((Date.now()-S.start)/1000)|0):null;
+  const u=location.origin+location.pathname+'#s='+S.seed+'&n='+S.n+(t!=null?'&t='+t:'');
+  const ok=()=>{$('msg').className='';
+    $('msg').textContent=t!=null?'Copied a "beat my '+fmt(t)+'" challenge link!':'Puzzle link copied — same board, fresh start.';};
+  if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(u).then(ok,()=>prompt('Copy link:',u));}
+  else prompt('Copy link:',u);};
+function themeLabel(){$('theme').textContent=document.documentElement.getAttribute('data-theme')==='dark'?'☀ Light':'☾ Dark';}
+$('theme').onclick=()=>{const d=document.documentElement;
+  const t=d.getAttribute('data-theme')==='dark'?'light':'dark';d.setAttribute('data-theme',t);
+  localStorage.setItem('chamfer.theme',t);themeLabel();};
+// ---------- boot ----------
+(function(){
+  themeLabel();
+  const p=new URLSearchParams(location.hash.slice(1));
+  if(p.has('s'))load(+p.get('s'),+p.get('n')||5,p.has('t')?+p.get('t'):null);
+  else{const g=newPuzzle(5,'Medium');load(g.seed,5,null);}
+})();
+</script>
+</body>
+</html>

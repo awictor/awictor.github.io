@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SecretID — Detect Leaked API Keys & Token Types</title>
+<meta name="description" content="Paste a secret or a text blob and identify the credential type — AWS, GitHub, GitLab, Stripe, OpenAI, Slack, Google, JWT, PEM keys and more. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('secret-id-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#b91c1c;
+    --bg:#f7f5f5; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e6e2e2; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#161212; --card:#211b1b; --fg:#f0eaea; --muted:#a09696; --line:#352b2b; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:780px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#7f1d1d);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:780px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  .warn{background:color-mix(in srgb, var(--c) 12%, var(--bg));border:1px solid var(--c);border-radius:10px;padding:10px 14px;font-size:.85rem;margin-bottom:14px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  textarea{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.85rem;min-height:120px;resize:vertical}
+  .hit{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-top:1px solid var(--line)}
+  .hit:first-child{border-top:0}
+  .hit .name{font-weight:700}
+  .hit .m{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.82rem;color:var(--muted);word-break:break-all}
+  .badge{margin-left:auto;background:var(--c);color:#fff;border-radius:6px;padding:2px 9px;font-size:.72rem;font-weight:700;white-space:nowrap}
+  .none{color:var(--muted);text-align:center;padding:10px}
+  .btns{display:flex;gap:10px;margin-top:12px}
+  button.ghost{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:9px 15px;cursor:pointer;font:inherit}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:780px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🔑</div>
+    <div><h1>SecretID</h1><div class="sub">Identify leaked API keys &amp; token types</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="warn">🔒 Runs entirely in your browser — nothing is uploaded. Still, rotate any real secret you paste here.</div>
+    <label for="input">Paste a secret, token, or a chunk of text/logs</label>
+    <textarea id="input" spellcheck="false"></textarea>
+    <div class="btns"><button class="ghost" id="ex" type="button">Load examples</button></div>
+  </div>
+  <div class="card">
+    <div id="results"></div>
+  </div>
+</main>
+<footer>
+  Pattern-based detection — a match is a strong hint, not proof. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/secret-id">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  // Order matters: most specific first so classify() picks the best label.
+  const PATTERNS = [
+    { name: 'AWS Access Key ID', re: /\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|AIPA)[0-9A-Z]{16}\b/ },
+    { name: 'GitHub Token', re: /\b(?:ghp|gho|ghu|ghs|ghr)_[0-9A-Za-z]{36}\b/ },
+    { name: 'GitHub Fine-grained PAT', re: /\bgithub_pat_[0-9A-Za-z_]{40,}\b/ },
+    { name: 'GitLab PAT', re: /\bglpat-[0-9A-Za-z_-]{20}\b/ },
+    { name: 'Stripe Key', re: /\b[sprk]k_(?:live|test)_[0-9A-Za-z]{10,}\b/ },
+    { name: 'OpenAI API Key', re: /\bsk-[A-Za-z0-9]{20,}\b/ },
+    { name: 'Slack Token', re: /\bxox[baprs]-[0-9A-Za-z-]{10,}\b/ },
+    { name: 'Google API Key', re: /\bAIza[0-9A-Za-z_\-]{35}\b/ },
+    { name: 'npm Token', re: /\bnpm_[0-9A-Za-z]{36}\b/ },
+    { name: 'SendGrid API Key', re: /\bSG\.[\w-]{16,}\.[\w-]{16,}\b/ },
+    { name: 'Twilio API Key', re: /\bSK[0-9a-fA-F]{32}\b/ },
+    { name: 'JSON Web Token (JWT)', re: /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/ },
+    { name: 'PEM Private Key', re: /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/ },
+    { name: 'UUID', re: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i },
+    { name: 'Hex digest (MD5/SHA)', re: /\b(?:[0-9a-f]{32}|[0-9a-f]{40}|[0-9a-f]{64})\b/i }
+  ];
+
+  function identify(input){
+    const s = String(input);
+    const out = [];
+    for(const p of PATTERNS){
+      const m = s.match(p.re);
+      if(m) out.push({ name: p.name, match: m[0] });
+    }
+    return out;
+  }
+
+  function classify(input){
+    const list = identify(input);
+    return list.length ? list[0].name : 'Unknown';
+  }
+
+  // ---- UI ----
+  // Built by concatenation so no full credential literal ever appears in source.
+  const EXAMPLES = [
+    'AKIA' + 'IOSFODNN7EXAMPLE',
+    'ghp_' + 'x'.repeat(36),
+    'sk_live_' + '0123456789abcdefghij',
+    'eyJhbGciOiJIUzI1NiJ9.' + 'eyJzdWIiOiIxMjMifQ.' + 'abc123def456'
+  ].join('\n');
+
+  if(typeof document !== 'undefined' && document.getElementById('results')){
+    const $ = id => document.getElementById(id);
+
+    function render(){
+      const hits = identify($('input').value);
+      if(!$('input').value.trim()){ $('results').innerHTML = '<div class="none">Paste something to scan.</div>'; return; }
+      if(!hits.length){ $('results').innerHTML = '<div class="none">No known secret formats detected.</div>'; return; }
+      $('results').innerHTML = hits.map(h =>
+        `<div class="hit"><div><div class="name">${h.name}</div><div class="m">${h.match.replace(/</g, '&lt;')}</div></div><span class="badge">match</span></div>`
+      ).join('');
+    }
+
+    $('input').addEventListener('input', render);
+    $('ex').addEventListener('click', () => { $('input').value = EXAMPLES; render(); });
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('secret-id-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { PATTERNS, identify, classify };
+</script>
+</body>
+</html>

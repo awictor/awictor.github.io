@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emblazon — a procedural coat-of-arms generator that writes its own heraldry</title>
+<style>
+  :root{
+    --ink:#2b2317; --parch:#efe6d0; --parch2:#e3d5b3; --line:#b9a578;
+    --accent:#7a1f1f; --gold:#a9820f; --panel:#f6efdc;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    color:var(--ink);
+    background:
+      radial-gradient(120% 120% at 50% 0%, #f4ecd6 0%, #e8dcbd 55%, #ddcda6 100%);
+    min-height:100vh; padding:22px 16px 40px;
+  }
+  h1{font-size:30px; margin:0; letter-spacing:.5px; color:var(--accent);
+     font-variant:small-caps; text-shadow:0 1px 0 #fff8}
+  .sub{margin:4px 0 18px; font-style:italic; color:#6a5b3c; font-size:14px}
+  .wrap{max-width:1020px; margin:0 auto}
+  .cols{display:flex; gap:22px; align-items:flex-start; flex-wrap:wrap}
+  .stage{flex:0 0 auto}
+  canvas#shield{
+    width:440px; max-width:100%; height:auto; aspect-ratio:11/14;
+    background:radial-gradient(80% 70% at 50% 30%, #fbf6e6, #ece0c2);
+    border:2px solid var(--line); border-radius:6px;
+    box-shadow:0 6px 22px #0003, inset 0 0 40px #00000012;
+  }
+  .side{flex:1 1 340px; min-width:300px}
+  .panel{
+    background:var(--panel); border:1px solid var(--line);
+    border-radius:8px; padding:14px 16px; margin-bottom:16px;
+    box-shadow:0 2px 8px #0000001a;
+  }
+  .panel h2{margin:0 0 8px; font-size:14px; text-transform:uppercase;
+    letter-spacing:1.5px; color:var(--gold); border-bottom:1px solid var(--line);
+    padding-bottom:6px; font-variant:normal}
+  #house{font-size:22px; margin:0 0 2px; color:var(--accent); font-variant:small-caps}
+  #motto{font-style:italic; color:#6a5b3c; margin:0 0 12px}
+  #blazon{
+    font-size:16px; line-height:1.5; background:#fffdf4; border:1px dashed var(--line);
+    border-radius:6px; padding:10px 12px; min-height:44px;
+  }
+  .row{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px}
+  button, .fauxbtn{
+    font-family:inherit; font-size:13px; cursor:pointer; color:#fff;
+    background:linear-gradient(#8a2727,#6f1c1c); border:1px solid #571414;
+    padding:7px 12px; border-radius:5px; box-shadow:0 1px 2px #0003;
+  }
+  button.ghost{background:linear-gradient(#f3ead2,#e3d3ab); color:var(--ink); border-color:var(--line)}
+  button:hover{filter:brightness(1.08)}
+  button:active{transform:translateY(1px)}
+  button:focus-visible, input:focus-visible, textarea:focus-visible, .gallery canvas:focus-visible{
+    outline:2px solid var(--accent); outline-offset:2px;
+  }
+  label.field{font-size:13px; display:flex; align-items:center; gap:8px; color:#5c4e30}
+  input[type=range]{accent-color:var(--accent); width:150px}
+  input[type=range]:disabled{opacity:.45; cursor:not-allowed}
+  .seedline{font-size:12px; color:#7a6a48; margin-top:8px; font-family:"Courier New",monospace}
+  textarea{
+    width:100%; font-family:inherit; font-size:14px; padding:8px 10px; resize:vertical;
+    border:1px solid var(--line); border-radius:6px; background:#fffdf4; color:var(--ink);
+  }
+  #parseMsg{font-size:12px; margin-top:6px; min-height:14px}
+  #parseMsg.err{color:#a11}
+  #parseMsg.ok{color:#2c6b2c}
+  .gallery{display:grid; grid-template-columns:repeat(4,1fr); gap:8px}
+  .gallery canvas{width:100%; height:auto; cursor:pointer; border:1px solid var(--line);
+    border-radius:5px; background:#f2e7ca; transition:transform .1s, box-shadow .1s}
+  .gallery canvas:hover{transform:translateY(-2px); box-shadow:0 4px 10px #0004; border-color:var(--accent)}
+  .hint{font-size:11px; color:#8a7a56; margin-top:6px}
+  a.dl{text-decoration:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Emblazon</h1>
+  <p class="sub">A procedural coat-of-arms generator that also writes the heraldry — obeying the medieval rule of tincture.</p>
+
+  <div class="cols">
+    <div class="stage">
+      <canvas id="shield" width="880" height="1120"></canvas>
+      <div class="row">
+        <button id="reseed">New House</button>
+        <button id="shapeBtn" class="ghost">Shape: Heater</button>
+        <button id="crestBtn" class="ghost">Crest: On</button>
+        <a class="dl" id="dl"><span class="fauxbtn">Export PNG</span></a>
+      </div>
+      <label class="field" style="margin-top:12px">Complexity
+        <input type="range" id="cx" min="0" max="100" value="55">
+        <span id="cxv">55</span>
+      </label>
+      <div class="hint" id="cxHint"></div>
+      <div class="seedline" id="seedline"></div>
+    </div>
+
+    <div class="side">
+      <div class="panel">
+        <h2>Achievement</h2>
+        <p id="house">—</p>
+        <p id="motto">—</p>
+        <div id="blazon"></div>
+        <div class="row">
+          <button id="copy" class="ghost">Copy blazon</button>
+          <button id="copyurl" class="ghost">Copy link</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Reverse: blazon → arms</h2>
+        <textarea id="blazonIn" rows="2" placeholder="Azure, three mullets Or, on a chief Argent three roundels Gules"></textarea>
+        <div class="row"><button id="parseBtn">Render this blazon</button></div>
+        <div id="parseMsg"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Nearby Houses</h2>
+        <div class="gallery" id="gallery"></div>
+        <div class="hint">Click a shield to adopt that seed.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ---------- PRNG ---------- */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+const pick=(rng,arr)=>arr[Math.floor(rng()*arr.length)];
+
+/* ---------- Tinctures ---------- */
+const T={
+  or:{name:"Or",cls:"metal",hex:"#d8a621"},
+  argent:{name:"Argent",cls:"metal",hex:"#e9e6da"},
+  gules:{name:"Gules",cls:"colour",hex:"#b0232a"},
+  azure:{name:"Azure",cls:"colour",hex:"#20489c"},
+  sable:{name:"Sable",cls:"colour",hex:"#1e1c1c"},
+  vert:{name:"Vert",cls:"colour",hex:"#237a3a"},
+  purpure:{name:"Purpure",cls:"colour",hex:"#6d2a7a"},
+  ermine:{name:"Ermine",cls:"fur"},ermines:{name:"Ermines",cls:"fur"},
+  vair:{name:"Vair",cls:"fur"},countervair:{name:"Counter-vair",cls:"fur"}
+};
+const COLOURS=["gules","azure","sable","vert","purpure"],METALS=["or","argent"],FURS=["ermine","ermines","vair","countervair"];
+const clsOf=k=>T[k].cls;
+function pickTincture(rng){const r=rng();return r<0.58?pick(rng,COLOURS):r<0.9?pick(rng,METALS):pick(rng,FURS);}
+/* rule of tincture: metal-on-colour / colour-on-metal only; furs are neutral (never dead-ends) */
+function pickContrast(rng,base){
+  const c=clsOf(base);
+  if(c==="fur")return rng()<0.5?pick(rng,COLOURS):pick(rng,METALS);
+  if(rng()<0.12)return pick(rng,FURS);
+  return pick(rng, c==="metal"?COLOURS:METALS);
+}
+
+/* ---------- Charge vocabulary ---------- */
+const CHARGES=["mullet","roundel","lozenge","crescent","crosspatte","fleurdelis","tower"];
+function chargeName(k,pl){
+  const s={mullet:"mullet",roundel:"roundel",lozenge:"lozenge",crescent:"crescent",crosspatte:"cross patté",fleurdelis:"fleur-de-lis",tower:"tower"};
+  const p={mullet:"mullets",roundel:"roundels",lozenge:"lozenges",crescent:"crescents",crosspatte:"crosses patté",fleurdelis:"fleurs-de-lis",tower:"towers"};
+  return pl?p[k]:s[k];
+}
+const ORDS=["chief","fess","pale","bend","chevron","cross","saltire","bordure"];
+const DIVS=["per pale","per fess","per bend","per chevron","per saltire","quarterly","gyronny"];
+const NUMWORD={1:"a",2:"two",3:"three"};
+
+/* ---------- Model generation ---------- */
+function genModel(seed,complexity){
+  const rng=mulberry32(seed>>>0), cxr=complexity/100;
+  const division=rng()<cxr*0.7?pick(rng,DIVS):"plain";
+  const t0=pickTincture(rng);
+  const field={division,t0,t1:division==="plain"?null:pickContrast(rng,t0)};
+  let ordinary=null;
+  if(rng()<0.35+cxr*0.4){
+    const type=pick(rng,ORDS), tinc=pickContrast(rng,field.t0);
+    ordinary={type,tinc,sub:null};
+    if((type==="chief"||type==="fess")&&rng()<0.5)
+      ordinary.sub={charge:pick(rng,CHARGES),count:pick(rng,[3,3,2,1]),tinc:pickContrast(rng,tinc)};
+  }
+  let charges=null;
+  const centre=ordinary&&["fess","pale","bend","chevron","cross","saltire"].includes(ordinary.type);
+  if(!centre&&rng()<0.6-(ordinary?0.15:0)+cxr*0.2){
+    const r=rng(),count=r<0.4?1:r<0.85?3:"semy";
+    charges={charge:pick(rng,CHARGES),count,
+      arrangement:count===3&&rng()<0.3?"bend":"default",tinc:pickContrast(rng,field.t0)};
+  }
+  return {field,ordinary,charges,house:genHouse(rng),motto:genMotto(rng)};
+}
+const HP=["Aldric","Bran","Cael","Dorn","Eth","Fael","Gorm","Hald","Ivar","Jor","Kael","Lorn","Mor","Norr","Oswin","Perc","Rath","Sever","Thane","Ulric","Vane","Wyn"];
+const HS=["march","wick","holt","mere","fell","crag","ford","gard","helm","stone","vale","moor","reach","watch","shaw"];
+const genHouse=rng=>"House "+pick(rng,HP)+pick(rng,HS);
+const MW=["Fortis","Fidelis","Virtus","Honor","Lux","Vincit","Semper","Audax","Nunquam","Regnat","Spes","Ferrum","Astra","Veritas","Gloria","Pax","Ignis","Corvus","Non","Cedo"];
+function genMotto(rng){const a=pick(rng,MW),b=pick(rng,MW),r=rng();return r<0.4?a+" et "+b:r<0.8?a+" "+b:a+" "+b+" "+pick(rng,MW);}
+
+/* ---------- Blazon composer ---------- */
+const cap=s=>s.charAt(0).toUpperCase()+s.slice(1);
+const tn=k=>T[k].name;
+function chargeClause(c){
+  if(c.count==="semy")return "semé of "+chargeName(c.charge,true)+" "+tn(c.tinc);
+  const n=NUMWORD[c.count]||String(c.count);
+  return n+" "+chargeName(c.charge,c.count>1)+" "+tn(c.tinc)+(c.arrangement==="bend"?" in bend":"");
+}
+function blazon(m){
+  const parts=[];
+  const f=m.field;
+  parts.push(f.division==="plain"?tn(f.t0):cap(f.division)+" "+tn(f.t0)+" and "+tn(f.t1));
+  if(m.charges)parts.push(chargeClause(m.charges));
+  if(m.ordinary){
+    const o=m.ordinary, base="a "+o.type;
+    parts.push(o.sub?"on "+base+" "+tn(o.tinc)+" "+chargeClause(o.sub):base+" "+tn(o.tinc));
+  }
+  return parts.join(", ");
+}
+
+/* ---------- Blazon parser (reverse mode) ---------- */
+const norm=s=>(typeof s==="string"?s:"").toLowerCase().replace(/[éè]/g,"e").replace(/[^a-z-]/g,"");
+function parseTinc(w){const n=norm(w);for(const k in T)if(norm(T[k].name)===n)return k;throw"Unknown tincture: “"+w+"”";}
+function isOrd(w){return ORDS.includes(norm(w));}
+function parseOrd(w){const n=norm(w);if(ORDS.includes(n))return n;throw"Unknown ordinary: “"+w+"”";}
+const CHMAP={mullet:"mullet",mullets:"mullet",roundel:"roundel",roundels:"roundel",lozenge:"lozenge",lozenges:"lozenge",
+  crescent:"crescent",crescents:"crescent",crosspatte:"crosspatte","fleur-de-lis":"fleurdelis","fleurs-de-lis":"fleurdelis",
+  fleurdelis:"fleurdelis",tower:"tower",towers:"tower"};
+function parseCharge(w){const n=norm(w);if(CHMAP[n])return CHMAP[n];throw"Unknown charge: “"+w+"”";}
+function parseChargeTokens(toks){
+  const bend=/\bin bend\b/.test(toks.join(" ").toLowerCase());
+  toks=toks.filter(t=>!/^(in|bend)$/i.test(t));
+  let count,ci;
+  const w0=norm(toks[0]);
+  if(w0==="seme"||w0==="semy"){count="semy";ci=norm(toks[1])==="of"?2:1;}
+  else{const nw={a:1,an:1,one:1,two:2,three:3}[w0];if(!nw)throw"Expected a number, got “"+(toks[0]||"")+"”";count=nw;ci=1;}
+  if(toks[ci]===undefined||toks[ci+1]===undefined)
+    throw"Expected a charge and its tincture (e.g. “three mullets Or”)";
+  return {charge:parseCharge(toks[ci]),count,arrangement:bend?"bend":"default",tinc:parseTinc(toks[ci+1])};
+}
+function parseClauseAfterField(raw){
+  let clause=raw.replace(/cross(es)? patt[ée]/ig,"crosspatte");
+  const low=clause.toLowerCase();
+  if(low.startsWith("on ")){
+    const rest=clause.replace(/^on an? /i,"").trim().split(/\s+/);
+    const type=parseOrd(rest.shift()), tinc=parseTinc(rest.shift());
+    return {kind:"ord",type,tinc,sub:parseChargeTokens(rest)};
+  }
+  const toks=clause.split(/\s+/);
+  if(/^an?$/i.test(toks[0])&&isOrd(toks[1]))
+    return {kind:"ord",type:parseOrd(toks[1]),tinc:parseTinc(toks[2]),sub:null};
+  return Object.assign({kind:"charge"},parseChargeTokens(toks));
+}
+function parseBlazon(text){
+  const clauses=text.trim().replace(/\.\s*$/,"").split(",").map(s=>s.trim()).filter(Boolean);
+  if(!clauses.length)throw"Empty blazon";
+  const fc=clauses[0].replace(/cross(es)? patt[ée]/ig,"crosspatte");
+  let field;
+  const divHit=DIVS.find(d=>fc.toLowerCase().startsWith(d));
+  if(divHit){
+    const ab=fc.slice(divHit.length).trim().split(/\s+and\s+/i);
+    if(ab.length!==2)throw"Division needs two tinctures";
+    field={division:divHit,t0:parseTinc(ab[0]),t1:parseTinc(ab[1])};
+  }else field={division:"plain",t0:parseTinc(fc),t1:null};
+  const m={field,ordinary:null,charges:null};
+  for(let i=1;i<clauses.length;i++){
+    const p=parseClauseAfterField(clauses[i]);
+    if(p.kind==="ord"){
+      if(m.ordinary)throw"Only one ordinary is supported (a second was found: “"+clauses[i]+"”)";
+      m.ordinary={type:p.type,tinc:p.tinc,sub:p.sub};
+    }else{
+      if(m.charges)throw"Only one charge group is supported (a second was found: “"+clauses[i]+"”)";
+      m.charges={charge:p.charge,count:p.count,arrangement:p.arrangement,tinc:p.tinc};
+    }
+  }
+  let h=2166136261;for(let i=0;i<text.length;i++){h^=text.charCodeAt(i);h=Math.imul(h,16777619);}
+  const rng=mulberry32(h>>>0);m.house=genHouse(rng);m.motto=genMotto(rng);
+  return m;
+}
+
+/* ---------- Fills (metallic sheen + fur patterns) ---------- */
+const furCache={};
+function furPattern(ctx,key){
+  if(furCache[key])return ctx.createPattern(furCache[key],"repeat");
+  const c=document.createElement("canvas"),g=c.getContext("2d");
+  if(key==="ermine"||key==="ermines"){
+    c.width=c.height=34;const bg=key==="ermine"?"#efe9da":"#20211f",fg=key==="ermine"?"#1c1a18":"#efe9da";
+    g.fillStyle=bg;g.fillRect(0,0,34,34);spot(g,17,17,fg);spot(g,0,0,fg);spot(g,34,0,fg);spot(g,0,34,fg);spot(g,34,34,fg);
+  }else{
+    c.width=40;c.height=40;const bell=(x,y,up)=>{g.save();g.translate(x,y);if(up)g.scale(1,-1);g.fillStyle=T.azure.hex;
+      g.beginPath();g.moveTo(0,0);g.lineTo(20,0);g.lineTo(20,9);g.quadraticCurveTo(20,20,10,20);g.quadraticCurveTo(0,20,0,9);g.closePath();g.fill();g.restore();};
+    g.fillStyle="#f2ecda";g.fillRect(0,0,40,40);
+    if(key==="vair"){bell(0,0,0);bell(20,0,0);bell(-10,20,1);bell(10,20,1);bell(30,20,1);}
+    else{bell(0,0,0);bell(20,0,0);bell(10,20,0);bell(-10,20,0);bell(30,20,0);}
+  }
+  furCache[key]=c;return ctx.createPattern(c,"repeat");
+}
+function spot(g,x,y,col){g.fillStyle=col;g.beginPath();
+  g.moveTo(x,y-4);g.quadraticCurveTo(x+3,y+1,x,y+5);g.quadraticCurveTo(x-3,y+1,x,y-4);g.fill();
+  for(const[dx,dy]of[[-3,-4],[3,-4],[0,-6.5]]){g.beginPath();g.arc(x+dx,y+dy,0.9,0,7);g.fill();}}
+function fillFor(ctx,geom,key){
+  const t=T[key];
+  if(t.cls==="colour")return t.hex;
+  if(t.cls==="fur")return furPattern(ctx,key);
+  const g=ctx.createLinearGradient(geom.l,geom.t,geom.r,geom.b);
+  if(key==="or"){g.addColorStop(0,"#f7e58f");g.addColorStop(.4,"#d8a621");g.addColorStop(.55,"#f0c94a");g.addColorStop(1,"#a5790c");}
+  else{g.addColorStop(0,"#ffffff");g.addColorStop(.45,"#e2ddcf");g.addColorStop(.56,"#f5f2e9");g.addColorStop(1,"#cbc6b7");}
+  return g;
+}
+
+/* ---------- Charge drawing ---------- */
+function drawCharge(ctx,k,cx,cy,s,fill){
+  ctx.save();ctx.fillStyle=fill;ctx.strokeStyle="rgba(0,0,0,.28)";ctx.lineWidth=Math.max(.6,s*0.05);
+  ctx.beginPath();
+  if(k==="roundel"){ctx.arc(cx,cy,s*0.92,0,7);ctx.fill();ctx.stroke();}
+  else if(k==="mullet"){for(let i=0;i<10;i++){const a=-Math.PI/2+i*Math.PI/5,r=i%2?s*0.42:s;const x=cx+Math.cos(a)*r,y=cy+Math.sin(a)*r;i?ctx.lineTo(x,y):ctx.moveTo(x,y);}ctx.closePath();ctx.fill();ctx.stroke();}
+  else if(k==="lozenge"){ctx.moveTo(cx,cy-s);ctx.lineTo(cx+s*0.72,cy);ctx.lineTo(cx,cy+s);ctx.lineTo(cx-s*0.72,cy);ctx.closePath();ctx.fill();ctx.stroke();}
+  else if(k==="crescent"){ctx.arc(cx,cy,s,0,7);ctx.arc(cx,cy-s*0.42,s*0.86,0,7,true);ctx.fill("evenodd");ctx.stroke();}
+  else if(k==="crosspatte"){const R=s*0.98,W=s*0.2,F=s*0.5;const p=[[-F,-R],[F,-R],[W,-W],[R,-F],[R,F],[W,W],[F,R],[-F,R],[-W,W],[-R,F],[-R,-F],[-W,-W]];
+    p.forEach((q,i)=>i?ctx.lineTo(cx+q[0],cy+q[1]):ctx.moveTo(cx+q[0],cy+q[1]));ctx.closePath();ctx.fill();ctx.stroke();}
+  else if(k==="fleurdelis")drawFleur(ctx,cx,cy,s);
+  else if(k==="tower")drawTower(ctx,cx,cy,s);
+  ctx.restore();
+}
+function drawFleur(ctx,cx,cy,s){
+  const fp=p=>{ctx.beginPath();p();ctx.closePath();ctx.fill();ctx.stroke();};
+  fp(()=>{ctx.moveTo(cx,cy-s);ctx.quadraticCurveTo(cx+0.30*s,cy-0.5*s,cx+0.06*s,cy-0.08*s);ctx.quadraticCurveTo(cx,cy,cx-0.06*s,cy-0.08*s);ctx.quadraticCurveTo(cx-0.30*s,cy-0.5*s,cx,cy-s);});
+  fp(()=>{ctx.moveTo(cx-0.05*s,cy-0.12*s);ctx.quadraticCurveTo(cx-0.78*s,cy-0.32*s,cx-0.5*s,cy+0.3*s);ctx.quadraticCurveTo(cx-0.34*s,cy+0.42*s,cx-0.04*s,cy+0.02*s);});
+  fp(()=>{ctx.moveTo(cx+0.05*s,cy-0.12*s);ctx.quadraticCurveTo(cx+0.78*s,cy-0.32*s,cx+0.5*s,cy+0.3*s);ctx.quadraticCurveTo(cx+0.34*s,cy+0.42*s,cx+0.04*s,cy+0.02*s);});
+  ctx.fillRect(cx-0.5*s,cy+0.04*s,s,0.15*s);ctx.strokeRect(cx-0.5*s,cy+0.04*s,s,0.15*s);
+  fp(()=>{ctx.moveTo(cx-0.17*s,cy+0.19*s);ctx.lineTo(cx+0.17*s,cy+0.19*s);ctx.lineTo(cx,cy+s);});
+}
+function drawTower(ctx,cx,cy,s){
+  const w=1.15*s,h=1.3*s,x=cx-w/2,y=cy-h/2;
+  ctx.beginPath();ctx.rect(x,y+h*0.18,w,h*0.82);ctx.fill();ctx.stroke();
+  for(let i=0;i<3;i++){const bw=w/3;ctx.beginPath();ctx.rect(x+i*bw+bw*0.1,y,bw*0.8,h*0.22);ctx.fill();ctx.stroke();}
+  ctx.save();ctx.fillStyle="rgba(0,0,0,.42)";
+  ctx.beginPath();ctx.moveTo(cx-w*0.16,cy+h*0.5);ctx.lineTo(cx-w*0.16,cy+h*0.05);ctx.quadraticCurveTo(cx,cy-h*0.12,cx+w*0.16,cy+h*0.05);ctx.lineTo(cx+w*0.16,cy+h*0.5);ctx.fill();
+  ctx.restore();
+}
+
+/* ---------- Shield + achievement drawing ---------- */
+function shieldPath(shape,l,r,t,b){
+  const p=new Path2D(),cx=(l+r)/2,h=b-t;
+  if(shape==="rounded"){p.moveTo(l,t);p.lineTo(r,t);p.lineTo(r,t+h*0.5);p.quadraticCurveTo(r,b,cx,b);p.quadraticCurveTo(l,b,l,t+h*0.5);p.lineTo(l,t);}
+  else if(shape==="pointed"){p.moveTo(l,t);p.lineTo(r,t);p.lineTo(r,t+h*0.4);p.lineTo(cx,b);p.lineTo(l,t+h*0.4);p.lineTo(l,t);}
+  else{p.moveTo(l,t);p.lineTo(r,t);p.lineTo(r,t+h*0.45);p.quadraticCurveTo(r,t+h*0.9,cx,b);p.quadraticCurveTo(l,t+h*0.9,l,t+h*0.45);p.lineTo(l,t);}
+  p.closePath();return p;
+}
+function positions(count,arr,box){
+  const{cx,cy,w,h}=box;
+  if(count===1)return[{x:cx,y:cy,s:w*0.22}];
+  if(count===2)return[{x:cx-w*0.2,y:cy,s:w*0.16},{x:cx+w*0.2,y:cy,s:w*0.16}];
+  if(count==="semy"){const out=[];for(let ri=0;ri<4;ri++)for(let ci=0;ci<3;ci++)out.push({x:cx-w*0.5+w*((ci+(ri%2?0.5:0)))/3+w/6,y:cy-h*0.42+h*(ri+0.5)/4,s:w*0.075});return out;}
+  if(arr==="bend")return[{x:cx-w*0.24,y:cy-h*0.22,s:w*0.15},{x:cx,y:cy,s:w*0.15},{x:cx+w*0.24,y:cy+h*0.22,s:w*0.15}];
+  return[{x:cx-w*0.22,y:cy-h*0.2,s:w*0.15},{x:cx+w*0.22,y:cy-h*0.2,s:w*0.15},{x:cx,y:cy+h*0.22,s:w*0.15}];
+}
+function drawArms(ctx,W,H,m,opts){
+  opts=opts||{};ctx.clearRect(0,0,W,H);
+  // parchment backdrop so PNG exports match the on-screen stage
+  const bg=ctx.createRadialGradient(W*0.5,H*0.3,0,W*0.5,H*0.3,Math.max(W,H)*0.85);
+  bg.addColorStop(0,"#fbf6e6");bg.addColorStop(1,"#ece0c2");
+  ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+  const st=opts.crest?H*0.20:H*0.08, sb=opts.motto?H*0.80:H*0.92, sh=sb-st, sw=sh/1.17, sl=(W-sw)/2, sr=sl+sw;
+  const cx=(sl+sr)/2, cy=(st+sb)/2, geom={l:sl,r:sr,t:st,b:sb};
+  const sp=shieldPath(opts.shape||"heater",sl,sr,st,sb);
+  if(opts.crest)drawCrest(ctx,cx,st,sw);
+  ctx.save();ctx.clip(sp);
+  // field
+  const f=m.field;
+  ctx.fillStyle=fillFor(ctx,geom,f.t0);ctx.fillRect(0,0,W,H);
+  if(f.division!=="plain")drawDivision(ctx,W,H,geom,f);
+  // field charges
+  if(m.charges){
+    const box={cx,cy:m.ordinary&&m.ordinary.type==="chief"?st+sh*0.56:cy,w:sw,h:sh};
+    for(const pz of positions(m.charges.count,m.charges.arrangement,box))
+      drawCharge(ctx,m.charges.charge,pz.x,pz.y,pz.s,fillFor(ctx,geom,m.charges.tinc));
+  }
+  // ordinary
+  if(m.ordinary)drawOrdinary(ctx,W,H,geom,sh,sw,m.ordinary,sp);
+  ctx.restore();
+  ctx.save();ctx.lineWidth=Math.max(2,sw*0.02);ctx.strokeStyle="#2b2317";ctx.stroke(sp);ctx.restore();
+  if(opts.motto)drawScroll(ctx,cx,sb+H*0.05,sw*1.05,m.motto);
+}
+function drawDivision(ctx,W,H,g,f){
+  const fill=fillFor(ctx,g,f.t1),cx=(g.l+g.r)/2,cy=(g.t+g.b)/2;ctx.fillStyle=fill;
+  const tri=pts=>{ctx.beginPath();pts.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.closePath();ctx.fill();};
+  switch(f.division){
+    case"per pale":ctx.fillRect(cx,0,W,H);break;
+    case"per fess":ctx.fillRect(0,cy,W,H);break;
+    case"per bend":tri([[0,0],[W,0],[W,H]]);break;
+    case"per chevron":tri([[cx,cy-H*0.02],[W,H],[0,H]]);break;
+    case"per saltire":tri([[cx,cy],[W,0],[W,H]]);tri([[cx,cy],[0,H],[W,H]]);break;
+    case"quarterly":ctx.fillRect(0,0,cx,cy);ctx.fillRect(cx,cy,W,H);break;
+    case"gyronny":for(let i=0;i<8;i+=2){const a0=i*Math.PI/4-Math.PI/2,a1=(i+1)*Math.PI/4-Math.PI/2,R=W+H;tri([[cx,cy],[cx+Math.cos(a0)*R,cy+Math.sin(a0)*R],[cx+Math.cos(a1)*R,cy+Math.sin(a1)*R]]);}break;
+  }
+}
+function drawOrdinary(ctx,W,H,g,sh,sw,o,sp){
+  const fill=fillFor(ctx,g,o.tinc),cx=(g.l+g.r)/2,cy=(g.t+g.b)/2;
+  ctx.save();ctx.fillStyle=fill;ctx.strokeStyle="rgba(0,0,0,.28)";ctx.lineWidth=Math.max(1,sw*0.015);
+  const band=(pts,lw)=>{ctx.lineWidth=lw;ctx.strokeStyle=fill;ctx.lineJoin="round";ctx.lineCap="butt";ctx.beginPath();pts.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.stroke();};
+  let chief=null;
+  if(o.type==="chief"){ctx.fillRect(0,g.t,W,sh*0.23);ctx.strokeRect(g.l,g.t,g.r-g.l,sh*0.23);chief={y:g.t+sh*0.115};}
+  else if(o.type==="fess"){ctx.fillRect(0,cy-sh*0.12,W,sh*0.24);ctx.strokeRect(g.l,cy-sh*0.12,g.r-g.l,sh*0.24);chief={y:cy};}
+  else if(o.type==="pale"){ctx.fillRect(cx-sw*0.14,0,sw*0.28,H);ctx.strokeRect(cx-sw*0.14,g.t,sw*0.28,g.b-g.t);}
+  else if(o.type==="cross"){ctx.fillRect(cx-sw*0.13,0,sw*0.26,H);ctx.fillRect(0,cy-sw*0.13,W,sw*0.26);}
+  else if(o.type==="bend")band([[g.l,g.t],[g.r,g.b]],sw*0.24);
+  else if(o.type==="saltire"){band([[g.l,g.t],[g.r,g.b]],sw*0.17);band([[g.r,g.t],[g.l,g.b]],sw*0.17);}
+  else if(o.type==="chevron")band([[g.l,g.b-sh*0.06],[cx,cy-sh*0.02],[g.r,g.b-sh*0.06]],sw*0.2);
+  else if(o.type==="bordure"){ctx.lineWidth=sw*0.11;ctx.strokeStyle=fill;ctx.stroke(sp);}
+  if(chief&&o.sub){const n=o.sub.count==="semy"?3:o.sub.count,cf=fillFor(ctx,g,o.sub.tinc);
+    for(let i=0;i<n;i++)drawCharge(ctx,o.sub.charge,g.l+(g.r-g.l)*(i+1)/(n+1),chief.y,sh*0.075,cf);}
+  ctx.restore();
+}
+function drawCrest(ctx,cx,st,sw){
+  ctx.save();ctx.translate(cx,st);
+  ctx.fillStyle="#4a4a52";ctx.strokeStyle="#2b2317";ctx.lineWidth=sw*0.012;
+  ctx.beginPath();ctx.moveTo(-sw*0.16,-sw*0.02);ctx.quadraticCurveTo(-sw*0.22,-sw*0.22,0,-sw*0.24);ctx.quadraticCurveTo(sw*0.22,-sw*0.22,sw*0.16,-sw*0.02);ctx.closePath();ctx.fill();ctx.stroke();
+  ctx.fillStyle="#c7b06a";ctx.fillRect(-sw*0.15,-sw*0.05,sw*0.30,sw*0.05);ctx.strokeRect(-sw*0.15,-sw*0.05,sw*0.30,sw*0.05);
+  ctx.fillStyle="#7a1f1f";
+  for(const s of[-1,1]){ctx.beginPath();ctx.moveTo(s*sw*0.14,-sw*0.04);
+    ctx.quadraticCurveTo(s*sw*0.34,sw*0.02,s*sw*0.24,sw*0.20);ctx.quadraticCurveTo(s*sw*0.18,sw*0.10,s*sw*0.10,sw*0.02);ctx.closePath();ctx.fill();ctx.stroke();}
+  ctx.restore();
+}
+function drawScroll(ctx,cx,y,w,text){
+  ctx.save();ctx.translate(cx,y);
+  ctx.fillStyle="#e7d29a";ctx.strokeStyle="#8a6a2f";ctx.lineWidth=w*0.006;
+  ctx.beginPath();ctx.moveTo(-w*0.5,0);ctx.quadraticCurveTo(0,-w*0.05,w*0.5,0);ctx.quadraticCurveTo(w*0.46,w*0.05,w*0.5,w*0.1);ctx.quadraticCurveTo(0,w*0.05,-w*0.5,w*0.1);ctx.quadraticCurveTo(-w*0.46,w*0.05,-w*0.5,0);ctx.closePath();ctx.fill();ctx.stroke();
+  ctx.fillStyle="#5a2a1a";ctx.textAlign="center";ctx.textBaseline="middle";
+  ctx.font="italic "+Math.max(10,w*0.055)+"px 'Iowan Old Style',Palatino,Georgia,serif";
+  ctx.fillText(text,0,w*0.05);ctx.restore();
+}
+
+/* ---------- App wiring ---------- */
+const $=id=>document.getElementById(id);
+const SHAPES=["heater","rounded","pointed"],SHAPELBL={heater:"Heater",rounded:"Rounded",pointed:"Pointed"};
+const state={seed:1,complexity:55,shape:"heater",crest:true,mode:"seed",model:null};
+const DPR=Math.max(1,Math.min(3,window.devicePixelRatio||1));
+const mainCv=$("shield"),mainCtx=mainCv.getContext("2d");
+mainCv.width=Math.round(440*DPR);mainCv.height=Math.round(560*DPR);
+function drawMain(){mainCtx.setTransform(DPR,0,0,DPR,0,0);drawArms(mainCtx,440,560,state.model,{shape:state.shape,crest:state.crest,motto:true});}
+function setMode(m){
+  state.mode=m;
+  const blz=m==="blazon";
+  $("cx").disabled=blz;
+  $("cxHint").textContent=blz?"Complexity applies to generated houses — pick a seed to use it.":"";
+}
+function updateText(){
+  $("house").textContent=state.model.house;
+  $("motto").textContent="“"+state.model.motto+"”";
+  $("blazon").textContent=blazon(state.model)+".";
+  $("seedline").textContent=state.mode==="blazon"?"rendered from pasted blazon":"seed #"+state.seed+"  ·  "+SHAPELBL[state.shape]+" shield";
+  $("dl").setAttribute("download",(state.model.house.replace(/\s+/g,"_"))+".png");
+  $("dl").href=mainCv.toDataURL("image/png");
+}
+function render(){drawMain();updateText();}
+function regen(){state.model=genModel(state.seed,state.complexity);}
+function syncHash(){
+  location.hash = state.mode==="blazon"
+    ? "b="+encodeURIComponent(blazon(state.model))
+    : "seed="+state.seed+"&c="+state.complexity+"&s="+SHAPES.indexOf(state.shape);
+}
+function buildGallery(){
+  const gal=$("gallery");gal.innerHTML="";
+  for(let i=1;i<=8;i++){
+    const seed=(state.seed+Math.imul(i,0x9E3779B1))>>>0;
+    const c=document.createElement("canvas");c.width=Math.round(100*DPR);c.height=Math.round(118*DPR);
+    const cctx=c.getContext("2d");cctx.setTransform(DPR,0,0,DPR,0,0);
+    drawArms(cctx,100,118,genModel(seed,state.complexity),{shape:state.shape,crest:false,motto:false});
+    c.title="seed #"+seed;c.tabIndex=0;c.setAttribute("role","button");c.setAttribute("aria-label","Adopt seed #"+seed);
+    const go=()=>setSeed(seed);
+    c.onclick=go;
+    c.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();go();}};
+    gal.appendChild(c);
+  }
+}
+function setSeed(seed){state.seed=seed>>>0;setMode("seed");regen();render();buildGallery();syncHash();}
+/* controls */
+$("reseed").onclick=()=>setSeed((Math.random()*0xFFFFFFFF)>>>0);
+$("shapeBtn").onclick=()=>{state.shape=SHAPES[(SHAPES.indexOf(state.shape)+1)%3];$("shapeBtn").textContent="Shape: "+SHAPELBL[state.shape];render();buildGallery();syncHash();};
+$("crestBtn").onclick=()=>{state.crest=!state.crest;$("crestBtn").textContent="Crest: "+(state.crest?"On":"Off");render();};
+$("cx").oninput=e=>{state.complexity=+e.target.value;$("cxv").textContent=state.complexity;if(state.mode==="seed"){regen();render();buildGallery();syncHash();}};
+function flashCopy(btn,label,text){
+  const settle=ok=>{btn.textContent=ok?"Copied!":"Press Ctrl+C";setTimeout(()=>btn.textContent=label,1400);};
+  if(navigator.clipboard&&navigator.clipboard.writeText)
+    navigator.clipboard.writeText(text).then(()=>settle(true)).catch(()=>settle(false));
+  else settle(false);
+}
+$("copy").onclick=()=>flashCopy($("copy"),"Copy blazon",blazon(state.model)+".");
+$("copyurl").onclick=()=>{syncHash();flashCopy($("copyurl"),"Copy link",location.href);};
+$("parseBtn").onclick=()=>{
+  const msg=$("parseMsg");
+  try{const m=parseBlazon($("blazonIn").value);state.model=m;setMode("blazon");render();syncHash();
+    msg.className="ok";msg.textContent="Rendered · canonical: "+blazon(m)+".";}
+  catch(err){msg.className="err";msg.textContent="Parse error: "+err;}
+};
+/* init from hash */
+(function init(){
+  const h=new URLSearchParams(location.hash.slice(1));
+  if(h.has("b")){
+    try{
+      const txt=decodeURIComponent(h.get("b"));
+      $("blazonIn").value=txt;
+      state.model=parseBlazon(txt);setMode("blazon");
+      $("cx").value=state.complexity;$("cxv").textContent=state.complexity;
+      $("shapeBtn").textContent="Shape: "+SHAPELBL[state.shape];
+      render();buildGallery();
+      const msg=$("parseMsg");msg.className="ok";msg.textContent="Rendered from shared link · "+blazon(state.model)+".";
+      return;
+    }catch(err){const msg=$("parseMsg");msg.className="err";msg.textContent="Link parse error: "+err;}
+  }
+  if(h.has("seed")){state.seed=(+h.get("seed"))>>>0;
+    if(h.has("c")){state.complexity=Math.max(0,Math.min(100,+h.get("c")||0));}
+    if(h.has("s")){const si=+h.get("s");if(SHAPES[si])state.shape=SHAPES[si];}}
+  else state.seed=(Math.random()*0xFFFFFFFF)>>>0;
+  $("cx").value=state.complexity;$("cxv").textContent=state.complexity;
+  $("shapeBtn").textContent="Shape: "+SHAPELBL[state.shape];
+  setMode("seed");
+  regen();render();buildGallery();syncHash();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CookConvert — Cooking Measurement Converter</title>
+<meta name="description" content="Convert cooking measurements between cups, tablespoons, teaspoons, ml, grams and ounces using real ingredient densities. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('cook-convert-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#b45309;
+    --bg:#f8f6f2; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e8e2d8; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#16130d; --card:#201b13; --fg:#f2ede4; --muted:#a39a89; --line:#332b1e; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#92400e);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:720px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .ing{margin-top:14px}
+  .out{text-align:center;margin-top:4px}
+  .big{font-size:2.6rem;font-weight:800;color:var(--c);letter-spacing:-1px}
+  .line{color:var(--muted);font-size:.9rem}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🥣</div>
+    <div><h1>CookConvert</h1><div class="sub">Cups ⇄ grams ⇄ tablespoons, by ingredient</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div><label for="amount">Amount</label><input type="number" id="amount" value="1" step="any"></div>
+      <div><label for="ingredient">Ingredient</label><select id="ingredient"></select></div>
+    </div>
+    <div class="grid ing">
+      <div><label for="from">From</label><select id="from"></select></div>
+      <div><label for="to">To</label><select id="to"></select></div>
+    </div>
+  </div>
+  <div class="card out">
+    <div class="big" id="result">—</div>
+    <div class="line" id="detail"></div>
+  </div>
+</main>
+<footer>
+  Densities are typical averages — pack and grind vary. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/cook-convert">Source</a>.
+</footer>
+
+<script>
+  // ---- data ----
+  const VOL = { cup: 236.588, tbsp: 14.7868, tsp: 4.92892, floz: 29.5735, ml: 1, l: 1000 };
+  const WT = { g: 1, kg: 1000, oz: 28.3495, lb: 453.592 };
+  // grams per millilitre
+  const DENSITY = {
+    water: 1.0, milk: 1.03,
+    'flour (all-purpose)': 0.53, 'sugar (granulated)': 0.85, 'sugar (brown, packed)': 0.80,
+    'sugar (powdered)': 0.56, butter: 0.911, 'oil (vegetable)': 0.92, honey: 1.42,
+    'maple syrup': 1.37, 'salt (table)': 1.22, 'rice (uncooked)': 0.85, 'cocoa powder': 0.53,
+    'rolled oats': 0.38, cornstarch: 0.54
+  };
+  const UNIT_LABEL = { cup: 'cups', tbsp: 'tbsp', tsp: 'tsp', floz: 'fl oz', ml: 'ml', l: 'litres', g: 'grams', kg: 'kg', oz: 'ounces', lb: 'pounds' };
+
+  // ---- pure logic ----
+  function toGrams(amount, unit, density){
+    if(Object.prototype.hasOwnProperty.call(VOL, unit)) return amount * VOL[unit] * density;
+    if(Object.prototype.hasOwnProperty.call(WT, unit)) return amount * WT[unit];
+    throw new Error('unknown unit: ' + unit);
+  }
+
+  function fromGrams(grams, unit, density){
+    if(Object.prototype.hasOwnProperty.call(WT, unit)) return grams / WT[unit];
+    if(Object.prototype.hasOwnProperty.call(VOL, unit)) return (grams / density) / VOL[unit];
+    throw new Error('unknown unit: ' + unit);
+  }
+
+  function convert(opts){
+    const { amount, from, to } = opts;
+    const ingredient = opts.ingredient || 'water';
+    if(!Object.prototype.hasOwnProperty.call(DENSITY, ingredient)) throw new Error('unknown ingredient: ' + ingredient);
+    if(!(Number(amount) >= 0)) throw new Error('amount must be non-negative');
+    const density = DENSITY[ingredient];
+    return fromGrams(toGrams(Number(amount), from, density), to, density);
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('ingredient')){
+    const $ = id => document.getElementById(id);
+
+    function fillUnits(sel, def){
+      const optGroup = (label, keys) => `<optgroup label="${label}">` + keys.map(k => `<option value="${k}"${k === def ? ' selected' : ''}>${UNIT_LABEL[k]}</option>`).join('') + '</optgroup>';
+      sel.innerHTML = optGroup('Volume', Object.keys(VOL)) + optGroup('Weight', Object.keys(WT));
+    }
+
+    Object.keys(DENSITY).forEach(ing => {
+      const o = document.createElement('option'); o.value = ing; o.textContent = ing; $('ingredient').appendChild(o);
+    });
+    fillUnits($('from'), 'cup');
+    fillUnits($('to'), 'g');
+
+    function render(){
+      let val;
+      try{ val = convert({ amount: $('amount').value, from: $('from').value, to: $('to').value, ingredient: $('ingredient').value }); }
+      catch(e){ $('result').textContent = '—'; $('detail').textContent = e.message; return; }
+      const rounded = Math.round(val * 1000) / 1000;
+      $('result').textContent = rounded.toLocaleString(undefined, { maximumFractionDigits: 3 }) + ' ' + UNIT_LABEL[$('to').value];
+      $('detail').textContent = `${$('amount').value} ${UNIT_LABEL[$('from').value]} of ${$('ingredient').value}`;
+    }
+
+    ['amount', 'from', 'to', 'ingredient'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('cook-convert-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { VOL, WT, DENSITY, toGrams, fromGrams, convert };
+</script>
+</body>
+</html>

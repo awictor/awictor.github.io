@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ictus — interactive scansion</title>
+<style>
+  :root{
+    --paper:#f4efe6; --ink:#2b2723; --dim:#6b6152; --line:#ddd2bf;
+    --ictus:#c0392b; --breve:#3b6ea5; --footA:#efe7d8; --footB:#e6dcc8;
+    --dev:#e0913a; --accent:#c0392b;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--paper);color:var(--ink);
+    font:16px/1.5 "Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:900px;margin:0 auto;padding:26px 20px 60px}
+  header h1{font-size:34px;margin:0;letter-spacing:.5px}
+  header h1 .mk{color:var(--ictus)}
+  .tag{color:var(--dim);margin:.2em 0 1.1em;font-style:italic}
+  .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+  select,button,textarea{font-family:inherit;color:var(--ink)}
+  select,button{background:#fff8ec;border:1px solid var(--line);border-radius:7px;
+    padding:7px 11px;font-size:14px;cursor:pointer;transition:.15s}
+  button:hover,select:hover{border-color:var(--accent)}
+  button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  textarea{width:100%;min-height:84px;resize:vertical;background:#fffdf7;
+    border:1px solid var(--line);border-radius:9px;padding:12px 14px;font-size:17px;line-height:1.55}
+  textarea:focus{outline:none;border-color:var(--accent)}
+  .summary{margin:14px 0 4px;color:var(--dim);font-size:14px;min-height:1.2em}
+  .summary b{color:var(--ink)}
+  .line{margin:20px 0;padding-bottom:6px}
+  .meta{display:flex;flex-wrap:wrap;gap:9px;align-items:baseline;margin-bottom:9px;font-size:14px}
+  .meter{font-weight:600;font-size:16px}
+  .badge{font-size:12px;padding:2px 8px;border-radius:20px;background:#fff;border:1px solid var(--line);color:var(--dim)}
+  .rh{font-size:12px;color:var(--ictus);border:1px solid var(--ictus);border-radius:20px;padding:1px 8px;opacity:.8}
+  .verse{font-size:26px;line-height:2.7;padding-top:14px}
+  .word{white-space:nowrap;margin-right:.42em;display:inline-block}
+  .punct{color:var(--dim);margin-right:.3em}
+  .chip{position:relative;display:inline-block;padding:2px 3px 1px;border-radius:5px;cursor:pointer;
+    transition:.12s;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none}
+  .chip:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  button:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .chip.fe{background:var(--footA)} .chip.fo{background:var(--footB)}
+  .chip:hover{outline:2px solid var(--accent);outline-offset:-1px}
+  .chip .mk{position:absolute;top:-.82em;left:0;right:0;text-align:center;font-size:.62em;line-height:1;
+    color:var(--breve);font-weight:700;pointer-events:none}
+  .chip.st .mk{color:var(--ictus)}
+  .chip.st .sy{font-weight:700}
+  .chip.dev{box-shadow:inset 0 -3px 0 var(--dev)}
+  .chip.dev .mk::after{content:"▾";color:var(--dev);font-size:.9em;margin-left:2px}
+  .chip.pulse{transform:translateY(-3px)}
+  .chip.beat{transform:translateY(-8px) scale(1.06);background:#f7dcae}
+  .seam{display:inline-block;width:6px;cursor:col-resize;position:relative;vertical-align:middle}
+  .seam::before{content:"";position:absolute;top:-.5em;bottom:-.5em;left:2px;width:2px;background:transparent;border-radius:2px}
+  .seam:hover::before{background:var(--accent)}
+  @media (pointer:coarse){
+    .seam{width:14px}
+    .seam::before{left:6px;background:var(--line)}
+    .seam:hover::before{background:var(--accent)}
+  }
+  .empty{color:var(--dim);font-style:italic;text-align:center;border:1px dashed var(--line);
+    border-radius:10px;padding:34px 20px;margin-top:16px;font-size:15px}
+  .hint{color:var(--dim);font-size:12.5px;margin-top:26px;border-top:1px dashed var(--line);padding-top:12px}
+  .hint code{background:#fff;padding:1px 5px;border-radius:4px;border:1px solid var(--line)}
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);
+    padding:9px 16px;border-radius:8px;font-size:14px;opacity:0;transition:.25s;pointer-events:none}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Ictus<span class="mk"> · </span><span style="font-size:18px;color:var(--dim)">scansion workbench</span></h1>
+    <div class="tag">Type verse, watch the meter reveal itself, tap a syllable to fix the beat.</div>
+  </header>
+
+  <div class="bar">
+    <select id="preset" title="Load a famous example"><option value="">Load an example…</option></select>
+    <button id="play" title="Animate the te-TUM pulse">▶ Rhythm</button>
+    <button id="metro" title="Audible metronome (te-TUM)">♪ Tick: off</button>
+    <button id="copy" title="Copy the line with prosody marks">⧉ Copy scanned</button>
+    <button id="share" title="Copy a shareable link of this exact scansion">🔗 Share</button>
+  </div>
+
+  <textarea id="input" spellcheck="false" placeholder="Type or paste a line of verse…"></textarea>
+
+  <div class="summary" id="summary"></div>
+  <div id="out"></div>
+
+  <div class="hint">
+    <b>How to use:</b> Every syllable is a chip; the mark above is the machine's guess
+    (<span style="color:var(--breve);font-weight:700">˘</span> unstressed,
+    <span style="color:var(--ictus);font-weight:700">´</span> stressed). It's only a proposal.
+    <b>Click</b> (or focus and press <code>Enter</code>) a chip to flip its stress ·
+    <b>double-click</b> a chip to split it · click the <b>seam</b> between two chips of a word to merge them
+    (split/merge work best with a mouse; on touch, tap the divider between syllables to merge). Feet alternate shading; an
+    <span style="color:var(--dev)">amber underline ▾</span> flags a foot that deviates from the named meter (hover it).
+    Everything round-trips through the URL — <code>Share</code> hands a friend your exact scansion.
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+const $=s=>document.querySelector(s);
+const VOW="aeiouy";
+const FUNC=new Set(("a an the of to in on at by for and or but nor so yet as if is am are was were be been being "+
+ "he she it we they you i me my your his her its our their him us them this that these those with from into "+
+ "not no do does did will would shall should can could may might must up out off o'er ere thy thee thou").split(" "));
+const PREFIX=/^(a|be|de|re|in|un|em|en|ex|con|com|pre|pro|per|sur|dis)/;
+const PRESETS={
+ "Shakespeare — iambic pentameter":"Shall I compare thee to a summer's day?\nThou art more lovely and more temperate:\nRough winds do shake the darling buds of May,\nAnd summer's lease hath all too short a date.",
+ "Longfellow — trochaic tetrameter":"By the shores of Gitche Gumee,\nBy the shining Big-Sea-Water,\nStood the wigwam of Nokomis,\nDaughter of the Moon, Nokomis.",
+ "A limerick — anapestic":"There was an Old Man with a beard,\nWho said, It is just as I feared!\nTwo Owls and a Hen,\nFour Larks and a Wren,\nHave all built their nests in my beard.",
+ "Dickinson — ballad meter":"Because I could not stop for Death,\nHe kindly stopped for me;\nThe Carriage held but just Ourselves,\nAnd Immortality."
+};
+const NUMS=["","monometer","dimeter","trimeter","tetrameter","pentameter","hexameter","heptameter","octameter"];
+const FOOT={"01":"iamb","10":"trochee","11":"spondee","00":"pyrrhic","001":"anapest","100":"dactyl","010":"amphibrach","110":"bacchius","101":"cretic","011":"tribrach"};
+const IDEAL={iambic:"iamb",trochaic:"trochee",anapestic:"anapest",dactylic:"dactyl"};
+
+let STATE={text:"",so:{},bo:{}};
+
+/* ---------- syllabifier ---------- */
+function vgroups(s){const g=[];let i=0;while(i<s.length){if(VOW.includes(s[i])){let j=i;while(j<s.length&&VOW.includes(s[j]))j++;g.push([i,j]);i=j;}else i++;}return g;}
+function syllabify(raw){
+  const letters=[];for(let i=0;i<raw.length;i++){const c=raw[i].toLowerCase();if(c>="a"&&c<="z")letters.push({i,c});}
+  if(letters.length<=1)return [raw];
+  const s=letters.map(l=>l.c).join("");
+  const g=vgroups(s);if(!g.length)return [raw];
+  const nuc=g.map(x=>({s:x[0],e:x[1],live:true}));
+  const L=nuc[nuc.length-1];
+  if(nuc.length>1&&s.endsWith("e")&&L.e===s.length&&L.e-L.s===1){
+    const b=s[L.s-1],b2=s[L.s-2]||"";
+    if(!(b==="l"&&!VOW.includes(b2)))L.live=false;              // silent final e (but keep -le)
+  }
+  if(nuc.length>1&&s.endsWith("ed")&&L.s===s.length-2&&L.e-L.s===1){
+    const b=s[L.s-1];if(b!=="t"&&b!=="d")L.live=false;          // silent -ed except after t/d
+  }
+  let live=nuc.filter(n=>n.live);if(!live.length)live=[nuc[0]];
+  const cuts=[0];
+  for(let k=0;k<live.length-1;k++){const gs=live[k].e,ge=live[k+1].s,cons=ge-gs;cuts.push(gs+Math.floor(cons/2));}
+  cuts.push(s.length);
+  const out=[];
+  for(let k=0;k<cuts.length-1;k++){
+    const cs=cuts[k],ce=cuts[k+1];
+    const rs=k===0?0:letters[cs].i;
+    const re=k===cuts.length-2?raw.length:letters[ce].i;
+    out.push(raw.slice(rs,re));
+  }
+  return out;
+}
+/* ---------- stress guesser ---------- */
+function guessStress(word,syls){
+  const clean=word.toLowerCase().replace(/[^a-z]/g,"");
+  const n=syls.length;
+  if(n<=1)return [FUNC.has(clean)?0:1];
+  const st=new Array(n).fill(0);
+  st[n===2?(PREFIX.test(clean)?1:0):n-2]=1;                     // 2-syl: prefix→iamb else trochee; else penultimate
+  return st;
+}
+/* ---------- meter classifier ---------- */
+function classify(stress){
+  const n=stress.length;if(!n)return null;
+  const cands=[{pat:[0,1],adj:"iambic"},{pat:[1,0],adj:"trochaic"},{pat:[0,0,1],adj:"anapestic"},{pat:[1,0,0],adj:"dactylic"}];
+  let best=null;
+  for(const c of cands){let m=0;for(let i=0;i<n;i++)if(stress[i]===c.pat[i%c.pat.length])m++;const score=m/n;if(!best||score>best.score)best={pat:c.pat,adj:c.adj,len:c.pat.length,score};}
+  const feet=Math.max(1,Math.round(n/best.len));
+  return {adj:best.adj,len:best.len,pat:best.pat,feet,conf:best.score,name:best.adj+" "+(NUMS[feet]||feet+"-foot")};
+}
+function footize(stress,base){
+  const feet=[],len=base.len;
+  for(let i=0;i<stress.length;i+=len){
+    const chunk=stress.slice(i,i+len),key=chunk.join(""),ideal=base.pat.slice(0,chunk.length).join("");
+    const fem=chunk.length<len&&key.indexOf("1")<0;
+    let name=fem?"feminine ending":(FOOT[key]||chunk.map(x=>x?"´":"˘").join(""));
+    feet.push({start:i,size:chunk.length,name,dev:fem||key!==ideal});
+  }
+  return feet;
+}
+/* ---------- rhyme ---------- */
+function rhymeKey(line){
+  const toks=line.trim().split(/\s+/).filter(t=>/[a-z]/i.test(t));if(!toks.length)return null;
+  let w=toks[toks.length-1].toLowerCase().replace(/[^a-z]/g,"");if(!w)return null;
+  if(w.length>2&&w.endsWith("e")&&!VOW.includes(w[w.length-2]))w=w.slice(0,-1);
+  const g=vgroups(w);if(!g.length)return w.slice(-2);
+  return w.slice(g[g.length-1][0]);
+}
+function rhymeLabel(n){                                   // 0→A … 25→Z, 26→AA, 27→AB …
+  let s="";n++;while(n>0){n--;s=String.fromCharCode(65+n%26)+s;n=Math.floor(n/26);}return s;
+}
+function schemeOf(lines){
+  const map={},letters=[];let next=0;
+  for(const ln of lines){const k=rhymeKey(ln);if(k==null){letters.push("");continue;}
+    if(!(k in map))map[k]=rhymeLabel(next++);letters.push(map[k]);}
+  return letters;
+}
+function formName(L){
+  const s=L.filter(x=>x).length;
+  if(s===14)return "sonnet";
+  if(s===5&&L[0]===L[1]&&L[2]===L[3]&&L[4]===L[0]&&L[0]!==L[2])return "limerick";
+  if(s===4&&L[3]===L[1]&&L[0]!==L[1])return "ballad / quatrain";
+  return "";
+}
+/* ---------- state helpers ---------- */
+const wkey=(l,w)=>l+":"+w;
+function tokens(line){return line.split(" ");}
+function getToken(l,w){return tokens(STATE.text.split("\n")[l])[w];}
+function curSyls(l,w,tok){return STATE.bo[wkey(l,w)]||syllabify(tok);}
+function clearWordStress(l,w){const p=l+":"+w+":";for(const k of Object.keys(STATE.so))if(k.indexOf(p)===0)delete STATE.so[k];}
+function stressFor(l,w,tok,syls){
+  const base=guessStress(tok,syls);
+  for(let i=0;i<syls.length;i++){const o=STATE.so[l+":"+w+":"+i];if(o!==undefined)base[i]=o;}
+  return base;
+}
+/* ---------- render ---------- */
+function render(){
+  const out=$("#out");out.innerHTML="";
+  const lines=STATE.text.split("\n");
+  if(!STATE.text.trim()){
+    $("#summary").innerHTML="";
+    out.innerHTML="<div class='empty'>Type a line above, or pick an example from the dropdown ↑</div>";
+    updateHash();return;
+  }
+  const letters=schemeOf(lines);
+  const scheme=letters.join("");
+  const form=formName(letters);
+  const rhymingLines=letters.filter(x=>x).length;
+  $("#summary").innerHTML = rhymingLines>1
+    ? ("Rhyme scheme <b>"+(scheme||"—")+"</b>"+(form?" · likely a <b>"+form+"</b>":""))
+    : "One line — add more for rhyme detection.";
+  lines.forEach((line,li)=>{
+    if(line.trim()===""){const sp=document.createElement("div");sp.style.height="10px";out.appendChild(sp);return;}
+    const toks=tokens(line);
+    const cells=[];                       // {li,wi,i,syl,st, g}
+    toks.forEach((tok,wi)=>{
+      if(!/[a-z]/i.test(tok))return;
+      const syls=curSyls(li,wi,tok),st=stressFor(li,wi,tok,syls);
+      syls.forEach((sy,i)=>cells.push({wi,i,syl:sy,st:st[i]}));
+    });
+    const stress=cells.map(c=>c.st);
+    const meter=classify(stress);
+    const feet=meter?footize(stress,meter):[];
+    const gmeta=[];                       // per cell: {foot,dev,label}
+    feet.forEach((f,fi)=>{for(let k=0;k<f.size;k++)gmeta[f.start+k]={foot:fi,dev:f.dev,label:f.name,ideal:IDEAL[meter.adj]||meter.adj};});
+
+    const div=document.createElement("div");div.className="line";
+    const meta=document.createElement("div");meta.className="meta";
+    if(meter){
+      const devN=feet.filter(f=>f.dev).length;
+      meta.innerHTML="<span class='meter'>"+meter.name+"</span>"+
+        "<span class='badge'>"+Math.round(meter.conf*100)+"% match"+(devN?" · "+devN+" sub"+(devN>1?"s":""):"")+"</span>"+
+        (letters[li]?"<span class='rh'>rhyme "+letters[li]+"</span>":"");
+    }
+    div.appendChild(meta);
+    const verse=document.createElement("div");verse.className="verse";
+    let gi=0;
+    toks.forEach((tok,wi)=>{
+      if(!/[a-z]/i.test(tok)){const p=document.createElement("span");p.className="punct";p.textContent=tok+" ";verse.appendChild(p);return;}
+      const syls=curSyls(li,wi,tok),st=stressFor(li,wi,tok,syls);
+      const word=document.createElement("span");word.className="word";
+      syls.forEach((sy,i)=>{
+        const m=gmeta[gi]||{};
+        const chip=document.createElement("span");
+        chip.className="chip "+(m.foot%2?"fo":"fe")+(st[i]?" st":"")+(m.dev?" dev":"");
+        chip.dataset.l=li;chip.dataset.w=wi;chip.dataset.i=i;
+        chip.tabIndex=0;chip.setAttribute("role","button");
+        chip.setAttribute("aria-label",sy+" — "+(st[i]?"stressed":"unstressed")+", Enter to flip");
+        if(m.dev)chip.title="Foot: "+m.label+" — a substitution for the expected "+m.ideal;
+        chip.innerHTML="<b class='mk'>"+(st[i]?"´":"˘")+"</b><span class='sy'>"+sy.replace(/</g,"&lt;")+"</span>";
+        word.appendChild(chip);
+        if(i<syls.length-1){const seam=document.createElement("span");seam.className="seam";seam.dataset.l=li;seam.dataset.w=wi;seam.dataset.i=i;seam.title="Merge these two syllables";word.appendChild(seam);}
+        gi++;
+      });
+      verse.appendChild(word);verse.appendChild(document.createTextNode(" "));
+    });
+    div.appendChild(verse);out.appendChild(div);
+  });
+  updateHash();
+}
+/* ---------- interactions ---------- */
+$("#out").addEventListener("click",e=>{
+  const chip=e.target.closest(".chip"),seam=e.target.closest(".seam");
+  if(seam){const l=+seam.dataset.l,w=+seam.dataset.w,i=+seam.dataset.i,tok=getToken(l,w);
+    const syls=curSyls(l,w,tok).slice();syls.splice(i,2,syls[i]+syls[i+1]);
+    STATE.bo[wkey(l,w)]=syls;clearWordStress(l,w);render();return;}
+  if(chip){const l=+chip.dataset.l,w=+chip.dataset.w,i=+chip.dataset.i;
+    const tok=getToken(l,w),syls=curSyls(l,w,tok),cur=stressFor(l,w,tok,syls)[i];
+    STATE.so[l+":"+w+":"+i]=cur?0:1;render();}
+});
+$("#out").addEventListener("keydown",e=>{
+  if(e.key!=="Enter"&&e.key!==" ")return;
+  const chip=e.target.closest&&e.target.closest(".chip");if(!chip)return;
+  e.preventDefault();
+  const l=+chip.dataset.l,w=+chip.dataset.w,i=+chip.dataset.i;
+  const tok=getToken(l,w),syls=curSyls(l,w,tok),cur=stressFor(l,w,tok,syls)[i];
+  STATE.so[l+":"+w+":"+i]=cur?0:1;render();
+  const sel="[data-l='"+l+"'][data-w='"+w+"'][data-i='"+i+"'].chip";const next=document.querySelector(sel);if(next)next.focus();
+});
+$("#out").addEventListener("dblclick",e=>{
+  const chip=e.target.closest(".chip");if(!chip)return;
+  const l=+chip.dataset.l,w=+chip.dataset.w,i=+chip.dataset.i,tok=getToken(l,w);
+  const syls=curSyls(l,w,tok).slice(),s=syls[i];
+  const cut=Math.ceil(s.replace(/[^a-z]/gi,"").length/2);
+  if(s.replace(/[^a-z]/gi,"").length<2)return;
+  let seen=0,pos=0;for(;pos<s.length;pos++){if(/[a-z]/i.test(s[pos])){seen++;if(seen>=cut){pos++;break;}}}
+  syls.splice(i,1,s.slice(0,pos),s.slice(pos));
+  STATE.bo[wkey(l,w)]=syls;clearWordStress(l,w);render();
+});
+$("#input").addEventListener("input",()=>{STATE.text=$("#input").value;STATE.so={};STATE.bo={};stopPlay();render();});
+$("#preset").addEventListener("change",e=>{const v=e.target.value;if(!v)return;STATE={text:PRESETS[v],so:{},bo:{}};$("#input").value=PRESETS[v];e.target.value="";stopPlay();render();});
+/* ---------- hash codec ---------- */
+function updateHash(){
+  try{
+    const o={t:STATE.text};
+    if(Object.keys(STATE.so).length)o.s=STATE.so;
+    if(Object.keys(STATE.bo).length)o.b=STATE.bo;
+    history.replaceState(null,"","#"+encodeURIComponent(JSON.stringify(o)));
+  }catch(_){}
+}
+function loadHash(){
+  try{const h=decodeURIComponent(location.hash.slice(1));if(!h)return false;
+    const o=JSON.parse(h);if(typeof o.t!=="string")return false;
+    STATE={text:o.t,so:o.s||{},bo:o.b||{}};$("#input").value=o.t;return true;}
+  catch(_){return false;}
+}
+/* ---------- export ---------- */
+function scannedText(){
+  return STATE.text.split("\n").map((line,li)=>{
+    return tokens(line).map((tok,wi)=>{
+      if(!/[a-z]/i.test(tok))return tok;
+      const syls=curSyls(li,wi,tok),st=stressFor(li,wi,tok,syls);
+      return syls.map((sy,i)=>{
+        const mark=st[i]?"̄":"̆";                     // combining macron / breve over first vowel
+        const m=sy.match(/[aeiouyAEIOUY]/);
+        return m?sy.slice(0,m.index+1)+mark+sy.slice(m.index+1):sy+mark;
+      }).join("");
+    }).join(" ");
+  }).join("\n");
+}
+$("#copy").addEventListener("click",()=>copy(scannedText(),"Scanned text copied"));
+$("#share").addEventListener("click",()=>{updateHash();copy(location.href,"Shareable link copied");});
+function copy(t,msg){
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(()=>toast(msg),()=>legacyCopy(t,msg));return;}
+  legacyCopy(t,msg);
+}
+function legacyCopy(t,msg){
+  try{const ta=document.createElement("textarea");ta.value=t;ta.style.position="fixed";ta.style.opacity="0";
+    document.body.appendChild(ta);ta.focus();ta.select();
+    const ok=document.execCommand("copy");ta.remove();
+    toast(ok?msg:"Copy unavailable — serve over http://");}
+  catch(_){toast("Copy failed — serve over http://");}
+}
+function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove("show"),1600);}
+/* ---------- rhythm strip + metronome ---------- */
+let timer=null,idx=0,audioOn=false,actx=null;
+function tick(){
+  const chips=[...document.querySelectorAll(".chip")];
+  if(!chips.length){stopPlay();return;}
+  chips.forEach(c=>c.classList.remove("pulse","beat"));
+  const c=chips[idx%chips.length];
+  const stressed=c.classList.contains("st");
+  c.classList.add("pulse");if(stressed)c.classList.add("beat");
+  if(audioOn)beep(stressed);
+  idx++;
+}
+function beep(hi){
+  try{actx=actx||new (window.AudioContext||window.webkitAudioContext)();
+    const o=actx.createOscillator(),g=actx.createGain();o.connect(g);g.connect(actx.destination);
+    o.frequency.value=hi?660:392;o.type="sine";
+    const t=actx.currentTime;g.gain.setValueAtTime(hi?.22:.12,t);g.gain.exponentialRampToValueAtTime(.001,t+.14);
+    o.start(t);o.stop(t+.15);}catch(_){}
+}
+function startPlay(){if(timer)return;idx=0;$("#play").classList.add("on");$("#play").textContent="⏸ Rhythm";tick();timer=setInterval(tick,480);}
+function stopPlay(){if(timer){clearInterval(timer);timer=null;}$("#play").classList.remove("on");$("#play").textContent="▶ Rhythm";document.querySelectorAll(".chip.pulse,.chip.beat").forEach(c=>c.classList.remove("pulse","beat"));}
+$("#play").addEventListener("click",()=>timer?stopPlay():startPlay());
+$("#metro").addEventListener("click",()=>{audioOn=!audioOn;const b=$("#metro");b.classList.toggle("on",audioOn);b.textContent="♪ Tick: "+(audioOn?"on":"off");
+  if(audioOn){try{actx=actx||new (window.AudioContext||window.webkitAudioContext)();if(actx.state==="suspended")actx.resume();}catch(_){}if(!timer)startPlay();}});
+/* ---------- boot ---------- */
+Object.keys(PRESETS).forEach(k=>{const o=document.createElement("option");o.value=k;o.textContent=k;$("#preset").appendChild(o);});
+if(!loadHash()){STATE.text=PRESETS["Shakespeare — iambic pentameter"];$("#input").value=STATE.text;}
+render();
+</script>
+</body>
+</html>

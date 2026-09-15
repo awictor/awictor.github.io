@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Keyring — consistent hashing, live</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c2330; --line:#2a3342;
+    --ink:#e6edf3; --dim:#8b98a9; --accent:#f97316; --good:#34d399; --bad:#fb7185;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(1200px 600px at 30% -10%,#182031,var(--bg));
+    color:var(--ink); font:14px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    display:flex; min-height:100%;
+  }
+  .stage{flex:1; display:flex; align-items:center; justify-content:center; padding:24px; min-width:0}
+  canvas{width:min(72vh,640px); height:min(72vh,640px); max-width:100%; touch-action:none}
+  .side{width:360px; flex:none; background:linear-gradient(180deg,var(--panel),#12161d);
+    border-left:1px solid var(--line); padding:20px 20px 28px; overflow:auto}
+  h1{font-size:20px; margin:0 0 2px; letter-spacing:.3px}
+  h1 span{color:var(--accent)}
+  .tag{color:var(--dim); font-size:12.5px; margin:0 0 16px}
+  .card{background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:12px 13px; margin-bottom:12px}
+  .card h2{font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--dim); margin:0 0 9px; font-weight:600}
+  label.row{display:flex; align-items:center; justify-content:space-between; gap:10px; margin:9px 0}
+  label.row b{font-variant-numeric:tabular-nums; color:var(--accent); min-width:34px; text-align:right}
+  input[type=range]{flex:1; accent-color:var(--accent); cursor:pointer}
+  .btns{display:flex; flex-wrap:wrap; gap:7px}
+  button{background:#232c3a; color:var(--ink); border:1px solid var(--line); border-radius:7px;
+    padding:7px 11px; font-size:12.5px; cursor:pointer; transition:.12s}
+  button:hover{background:#2c3849; border-color:#3a4658}
+  button.p{background:linear-gradient(180deg,#f97316,#ea6a0d); border-color:#c8570a; color:#1b1206; font-weight:600}
+  button.p:hover{filter:brightness(1.08)}
+  button:disabled{opacity:.4; cursor:not-allowed; filter:none; background:#232c3a; border-color:var(--line)}
+  button:focus-visible, input[type=range]:focus-visible, .toggle input:focus-visible{
+    outline:2px solid var(--accent); outline-offset:2px}
+  .toggle{display:flex; align-items:center; gap:8px; margin-top:4px; color:var(--dim); font-size:12.5px; cursor:pointer}
+  .toggle input{accent-color:var(--accent)}
+  .caption{min-height:34px; font-size:12.5px; color:#cbd5e1; background:#111722;
+    border:1px dashed var(--line); border-radius:8px; padding:8px 10px; margin-bottom:12px}
+  .caption b{color:var(--accent)}
+  .stat{display:flex; justify-content:space-between; align-items:baseline; margin:5px 0; font-variant-numeric:tabular-nums}
+  .stat .v{font-weight:700; font-size:15px}
+  .bars{display:flex; flex-direction:column; gap:4px; margin-top:4px}
+  .bar{display:flex; align-items:center; gap:7px; font-size:11.5px; color:var(--dim)}
+  .bar .track{flex:1; height:9px; background:#0d1219; border-radius:5px; overflow:hidden}
+  .bar .fill{height:100%; border-radius:5px; transition:width .3s}
+  .score{display:flex; gap:10px}
+  .score .box{flex:1; text-align:center; border-radius:9px; padding:9px 4px; border:1px solid var(--line)}
+  .score .box .n{font-size:20px; font-weight:800; font-variant-numeric:tabular-nums}
+  .score .lbl{font-size:10.5px; text-transform:uppercase; letter-spacing:.6px; color:var(--dim)}
+  .verdict{text-align:center; margin-top:9px; font-size:12.5px; color:#cbd5e1}
+  .verdict b{color:var(--good)}
+  .foot{color:var(--dim); font-size:11px; margin-top:6px}
+  a{color:var(--accent)}
+  @media (max-width:720px){
+    body{flex-direction:column}
+    .stage{padding:12px}
+    canvas{width:min(88vw,520px); height:min(88vw,520px)}
+    .side{width:100%; border-left:none; border-top:1px solid var(--line)}
+  }
+</style>
+</head>
+<body>
+  <div class="stage"><canvas id="ring"></canvas></div>
+  <aside class="side">
+    <h1>Key<span>ring</span></h1>
+    <p class="tag">Consistent hashing — watch keys stay put when nodes come and go.</p>
+
+    <div class="caption" id="caption">Add or kill a node and only <b>~1/N</b> of keys move. Try the presets below.</div>
+
+    <div class="card">
+      <h2>Guided scenarios</h2>
+      <div class="btns">
+        <button class="p" data-act="add">+ Add node</button>
+        <button data-act="fail">Node fails</button>
+        <button data-act="hot">Hot shard / rebalance</button>
+        <button data-act="reseed">Reshuffle seed</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Topology</h2>
+      <label class="row">Nodes <input id="sNodes" type="range" min="1" max="10" step="1"><b id="vNodes">4</b></label>
+      <label class="row">Virtual nodes <input id="sV" type="range" min="1" max="40" step="1"><b id="vV">3</b></label>
+      <label class="row">Keys <input id="sKeys" type="range" min="4" max="60" step="1"><b id="vKeys">24</b></label>
+      <div class="btns" style="margin-top:8px">
+        <button data-act="flood">Run 2,500 keys</button>
+      </div>
+      <label class="toggle"><input type="checkbox" id="cOverlay"> Show virtual-node replicas on ring</label>
+    </div>
+
+    <div class="card">
+      <h2>Last topology change</h2>
+      <div class="stat"><span>Keys remapped (consistent)</span><span class="v" id="pctC" style="color:var(--good)">0%</span></div>
+      <div class="stat"><span>Keys remapped (naive modulo)</span><span class="v" id="pctM" style="color:var(--bad)">0%</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Load balance · imbalance (CoV) = <span id="cov" style="color:var(--accent)">0%</span></h2>
+      <div class="bars" id="bars"></div>
+    </div>
+
+    <div class="card">
+      <h2>Cumulative churn this session</h2>
+      <div class="score">
+        <div class="box" style="border-color:#1f5d47"><div class="n" id="totC" style="color:var(--good)">0</div><div class="lbl">Consistent</div></div>
+        <div class="box" style="border-color:#6d2740"><div class="n" id="totM" style="color:var(--bad)">0</div><div class="lbl">Modulo</div></div>
+      </div>
+      <div class="verdict" id="verdict">Perform changes to compound the difference.</div>
+    </div>
+
+    <div class="btns" style="margin-top:2px">
+      <button class="p" data-act="copy">Copy share link</button>
+      <button data-act="reset">Reset</button>
+    </div>
+    <p class="foot">Seeded FNV-1a hashing. Full state lives in the URL — copy the link to share this exact demo.</p>
+  </aside>
+
+<script>
+"use strict";
+const TWO_PI = Math.PI * 2;
+const PALETTE = ['#f97316','#22d3ee','#a3e635','#f472b6','#818cf8','#fbbf24','#34d399','#fb7185','#c084fc','#38bdf8'];
+const colorOf = id => PALETTE[id % PALETTE.length];
+const angleOf = h => (h / 4294967296) * TWO_PI;
+const cw = (a, b) => (((b - a) % TWO_PI) + TWO_PI) % TWO_PI;
+
+// 32-bit seeded FNV-1a + mix
+function hash32(str, seed){
+  let h = (2166136261 ^ (seed >>> 0)) >>> 0;
+  for (let i = 0; i < str.length; i++){ h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  h ^= h >>> 15; h = Math.imul(h, 2246822507) >>> 0; h ^= h >>> 13;
+  return h >>> 0;
+}
+
+// ---- state ----
+const state = { seed: 1337, nodes: [0,1,2,3], nextId: 4, vnodes: 3, keyCount: 24 };
+let ring = [], keyHashes = [], owners = [];
+let totC = 0, totM = 0, lastC = 0, lastM = 0;
+let anim = null, raf = null;
+
+function buildRing(){
+  ring = [];
+  for (const id of state.nodes)
+    for (let r = 0; r < state.vnodes; r++)
+      ring.push({ pos: hash32(state.seed + ':n' + id + '#' + r, state.seed), id, primary: r === 0 });
+  ring.sort((a, b) => a.pos - b.pos);
+}
+function rebuildKeys(){
+  keyHashes = [];
+  for (let i = 0; i < state.keyCount; i++) keyHashes.push(hash32(state.seed + ':k' + i, state.seed));
+}
+function ownerEntry(h){
+  let lo = 0, hi = ring.length;
+  while (lo < hi){ const m = (lo + hi) >> 1; if (ring[m].pos < h) lo = m + 1; else hi = m; }
+  return ring[lo === ring.length ? 0 : lo];
+}
+const computeOwners = () => keyHashes.map(ownerEntry);
+
+// ---- canvas ----
+const cv = document.getElementById('ring'), ctx = cv.getContext('2d');
+let cx, cy, R, Rk;
+function fit(){
+  const dpr = window.devicePixelRatio || 1, css = cv.getBoundingClientRect();
+  cv.width = css.width * dpr; cv.height = css.height * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  cx = css.width / 2; cy = css.height / 2; R = Math.min(cx, cy) - 46; Rk = R * 0.9;
+  render();
+}
+const px = (a, r) => [cx + r * Math.sin(a), cy - r * Math.cos(a)];
+
+function render(){
+  const e = anim ? Math.min(1, (performance.now() - anim.t0) / anim.dur) : 1;
+  const ease = e < 0.5 ? 2 * e * e : 1 - Math.pow(-2 * e + 2, 2) / 2;
+  ctx.clearRect(0, 0, cv.width, cv.height);
+
+  // ring band
+  ctx.strokeStyle = '#243040'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, TWO_PI); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,.03)'; ctx.lineWidth = R * 0.2;
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, TWO_PI); ctx.stroke();
+
+  // vnode replica ticks (overlay)
+  if (overlay.checked){
+    for (const v of ring){ if (v.primary) continue;
+      const a = angleOf(v.pos), [x1,y1] = px(a, R - 6), [x2,y2] = px(a, R + 7);
+      ctx.strokeStyle = colorOf(v.id) + '55'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    }
+  }
+
+  // keys — static dots + arcs for small counts
+  const migrating = anim ? anim.set : null;
+  const drawArcs = state.keyCount <= 40;
+  for (let i = 0; i < keyHashes.length; i++){
+    if (migrating && migrating.has(i)) continue;
+    const h = keyHashes[i], a = angleOf(h), o = owners[i], col = colorOf(o.id);
+    if (drawArcs){
+      const ownA = a + cw(a, angleOf(o.pos));
+      ctx.strokeStyle = col + '3a'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(cx, cy, Rk, a - Math.PI/2, ownA - Math.PI/2, false); ctx.stroke();
+    }
+    const [kx,ky] = px(a, Rk);
+    ctx.fillStyle = col; ctx.beginPath(); ctx.arc(kx, ky, drawArcs ? 3.2 : 1.8, 0, TWO_PI); ctx.fill();
+  }
+
+  // migrating keys — eased walk to new successor
+  if (migrating){
+    for (const m of anim.list){
+      const a = angleOf(m.h);
+      const dFrom = cw(a, angleOf(m.from)), dTo = cw(a, angleOf(m.to));
+      const ownA = a + dFrom + (dTo - dFrom) * ease;
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, cy, Rk, a - Math.PI/2, ownA - Math.PI/2, false); ctx.stroke();
+      const [hx,hy] = px(ownA, Rk);
+      ctx.fillStyle = m.col; ctx.beginPath(); ctx.arc(hx, hy, 4, 0, TWO_PI); ctx.fill();
+      const [kx,ky] = px(a, Rk);
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(kx, ky, 3.4, 0, TWO_PI); ctx.fill();
+    }
+  }
+
+  // physical node markers
+  for (const v of ring){ if (!v.primary) continue;
+    const a = angleOf(v.pos), col = colorOf(v.id);
+    const [x1,y1] = px(a, R - 9), [x2,y2] = px(a, R + 11);
+    ctx.strokeStyle = col; ctx.lineWidth = 4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    const [lx,ly] = px(a, R + 27);
+    ctx.fillStyle = col; ctx.beginPath(); ctx.arc(lx, ly, 11, 0, TWO_PI); ctx.fill();
+    ctx.fillStyle = '#0e1116'; ctx.font = '700 12px ui-sans-serif,system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(v.id, lx, ly);
+  }
+
+  if (anim){ if (e < 1) raf = requestAnimationFrame(render); else { anim = null; raf = null; render(); } }
+}
+
+// ---- stats ----
+function updateStats(){
+  const N = state.nodes.length, counts = {};
+  state.nodes.forEach(id => counts[id] = 0);
+  owners.forEach(o => counts[o.id]++);
+  const vals = state.nodes.map(id => counts[id]), mean = state.keyCount / N;
+  const varc = vals.reduce((s, c) => s + (c - mean) ** 2, 0) / N;
+  const cov = mean > 0 ? Math.sqrt(varc) / mean : 0;
+  document.getElementById('cov').textContent = (cov * 100).toFixed(0) + '%';
+  const max = Math.max(1, ...vals);
+  document.getElementById('bars').innerHTML = state.nodes.map(id =>
+    `<div class="bar"><span style="color:${colorOf(id)};width:26px">n${id}</span>
+     <div class="track"><div class="fill" style="width:${counts[id]/max*100}%;background:${colorOf(id)}"></div></div>
+     <span style="width:32px;text-align:right;color:#e6edf3">${counts[id]}</span></div>`).join('');
+  document.getElementById('pctC').textContent = lastC.toFixed(1) + '%';
+  document.getElementById('pctM').textContent = lastM.toFixed(1) + '%';
+  document.getElementById('totC').textContent = totC.toLocaleString();
+  document.getElementById('totM').textContent = totM.toLocaleString();
+  const v = document.getElementById('verdict');
+  v.innerHTML = totC > 0
+    ? `Naive modulo moved <b style="color:var(--bad)">${(totM/totC).toFixed(1)}×</b> more keys than consistent hashing.`
+    : 'Perform changes to compound the difference.';
+  document.getElementById('vNodes').textContent = state.nodes.length;
+  document.getElementById('vV').textContent = state.vnodes;
+  document.getElementById('vKeys').textContent = state.keyCount;
+}
+
+// keep the slider knobs + action buttons in sync with real state so controls never drift
+function syncControls(){
+  sKeys.max = Math.max(60, state.keyCount);
+  sNodes.value = Math.min(+sNodes.max, state.nodes.length);
+  sV.value = state.vnodes;
+  sKeys.value = state.keyCount;
+  document.querySelector('[data-act="add"]').disabled = state.nodes.length >= +sNodes.max;
+  document.querySelector('[data-act="fail"]').disabled = state.nodes.length <= 1;
+}
+
+// ---- change engine ----
+function applyChange(mutator, caption){
+  const oldOwners = owners, oldNodes = state.nodes.slice();
+  mutator();
+  buildRing(); rebuildKeys();
+  owners = computeOwners();
+  let mc = 0, mm = 0;
+  const list = [], set = new Set();
+  for (let i = 0; i < owners.length; i++){
+    const prev = oldOwners[i];
+    if (prev && owners[i].id !== prev.id){
+      mc++; set.add(i);
+      list.push({ h: keyHashes[i], from: prev.pos, to: owners[i].pos, col: colorOf(owners[i].id) });
+    }
+    const om = oldNodes[keyHashes[i] % oldNodes.length];
+    const nm = state.nodes[keyHashes[i] % state.nodes.length];
+    if (om !== nm) mm++;
+  }
+  const K = keyHashes.length || 1;
+  lastC = 100 * mc / K; lastM = 100 * mm / K;
+  totC += mc; totM += mm;
+  document.getElementById('caption').innerHTML = caption;
+  anim = { list, set, t0: performance.now(), dur: 900 };
+  if (raf) cancelAnimationFrame(raf);
+  render(); updateStats(); syncControls(); writeURL();
+}
+function refresh(caption){ // no churn accounting (key-count / seed rebuilds)
+  buildRing(); rebuildKeys(); owners = computeOwners();
+  if (caption) document.getElementById('caption').innerHTML = caption;
+  render(); updateStats(); syncControls(); writeURL();
+}
+
+// ---- actions ----
+function addNode(){
+  if (state.nodes.length >= +sNodes.max) return;
+  const id = state.nextId++; // kept outside so the caption can name it, but push runs in the mutator
+  applyChange(() => state.nodes.push(id),
+    `<b>Node n${id} joined.</b> Only the keys between its predecessor and n${id} migrate — everyone else stays put.`); }
+function failNode(){
+  if (state.nodes.length <= 1) return;
+  const idx = Math.floor(Math.random() * state.nodes.length), id = state.nodes[idx];
+  applyChange(() => state.nodes.splice(idx, 1),
+    `<b>Node n${id} failed.</b> Its keys walk clockwise to the next node; the rest of the ring is untouched.`);
+}
+function hotShard(){
+  const nv = Math.min(40, state.vnodes + 8), old = state.vnodes;
+  applyChange(() => state.vnodes = nv,
+    `<b>Rebalanced ${old} → ${nv} virtual nodes.</b> Replicas spread each node around the ring, smoothing the lumpy load — watch imbalance drop.`);
+}
+function reseed(){ state.seed = (Math.random() * 4294967296) >>> 0;
+  refresh(`<b>Reshuffled hash seed.</b> Same algorithm, brand-new ring layout — fully reproducible from the URL.`); }
+function flood(){ state.keyCount = 2500;
+  refresh(`<b>Dropped 2,500 keys.</b> The bars show the steady-state load distribution across nodes.`); }
+function resetAll(){
+  state.seed = 1337; state.nodes = [0,1,2,3]; state.nextId = 4; state.vnodes = 3; state.keyCount = 24;
+  overlay.checked = false; totC = 0; totM = 0; lastC = 0; lastM = 0;
+  sKeys.max = 60;
+  history.replaceState(null, '', location.pathname + location.search);
+  refresh(`<b>Reset to defaults.</b> Seed 1337, 4 nodes, 24 keys.`);
+}
+async function copyLink(btn){
+  flushURL();
+  try { await navigator.clipboard.writeText(location.href); } catch(_){}
+  const orig = btn.textContent; btn.textContent = 'Copied ✓';
+  setTimeout(() => { btn.textContent = orig; }, 1200);
+}
+
+document.querySelectorAll('[data-act]').forEach(b => b.onclick = () => {
+  if (b.dataset.act === 'copy') return copyLink(b);
+  ({ add: addNode, fail: failNode, hot: hotShard, reseed, flood, reset: resetAll })[b.dataset.act]();
+});
+
+const overlay = document.getElementById('cOverlay');
+overlay.onchange = () => { render(); writeURL(); };
+
+// sliders
+const sNodes = document.getElementById('sNodes'), sV = document.getElementById('sV'), sKeys = document.getElementById('sKeys');
+sNodes.oninput = () => { const n = +sNodes.value;
+  while (state.nodes.length < n) state.nodes.push(state.nextId++);
+  while (state.nodes.length > n) state.nodes.pop();
+  refresh(`<b>${n} node${n>1?'s':''} on the ring.</b>`); };
+sV.oninput = () => { state.vnodes = +sV.value;
+  refresh(`Virtual nodes: <b>${state.vnodes}</b> per node — imbalance updates live as you drag.`); };
+sKeys.oninput = () => { state.keyCount = +sKeys.value; refresh(); };
+
+// ---- URL state ----
+// Coalesce rapid slider drags into ~1 write per 150ms, and never let a Safari/file://
+// SecurityError (>100 replaceState per 30s, or restricted protocols) throw uncaught.
+let urlTimer = null;
+function serializeURL(){
+  const p = new URLSearchParams();
+  p.set('s', state.seed >>> 0); p.set('n', state.nodes.join('.')); p.set('x', state.nextId);
+  p.set('v', state.vnodes); p.set('k', state.keyCount); p.set('o', overlay.checked ? 1 : 0);
+  return '#' + p.toString();
+}
+function flushURL(){
+  clearTimeout(urlTimer); urlTimer = null;
+  try { history.replaceState(null, '', serializeURL()); } catch(_){}
+}
+function writeURL(){ if (!urlTimer) urlTimer = setTimeout(flushURL, 150); }
+function readURL(){
+  const p = new URLSearchParams(location.hash.slice(1));
+  if (!p.has('s')) return;
+  const sN = Number(p.get('s')); state.seed = Number.isFinite(sN) ? sN >>> 0 : 1337;
+  state.nodes = (p.get('n') || '0.1.2.3').split('.').map(Number).filter(x => !isNaN(x));
+  if (!state.nodes.length) state.nodes = [0];
+  const xN = Number(p.get('x')); state.nextId = Number.isFinite(xN) ? xN : (Math.max(...state.nodes) + 1);
+  state.vnodes = Math.min(40, Math.max(1, +p.get('v') || 3));
+  state.keyCount = Math.max(1, +p.get('k') || 24);
+  overlay.checked = p.get('o') === '1';
+}
+
+// ---- init ----
+readURL();
+buildRing(); rebuildKeys(); owners = computeOwners();
+syncControls();
+fit(); updateStats(); writeURL();
+window.addEventListener('resize', fit);
+</script>
+</body>
+</html>

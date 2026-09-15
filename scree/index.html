@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scree — a gravity-fed music box</title>
+<style>
+  :root{ --bg:#0b0e14; --panel:#131826cc; --ink:#e8ecf4; --dim:#8b93a7; --acc:#5ad1c9; --acc2:#c98bff; --line:#232c40; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:radial-gradient(1200px 700px at 50% -10%,#1a2136,#080a11 70%);color:var(--ink);
+    font:13px/1.4 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
+  #wrap{display:flex;flex-direction:column;height:100%;padding:10px;gap:10px}
+  header{display:flex;align-items:baseline;gap:12px;flex:0 0 auto}
+  header h1{margin:0;font-size:18px;letter-spacing:.5px;font-weight:700}
+  header h1 b{color:var(--acc)}
+  header .tag{color:var(--dim);font-size:12px}
+  #stage{flex:1 1 auto;display:flex;gap:10px;min-height:0}
+  #cvsBox{position:relative;flex:1 1 auto;border:1px solid var(--line);border-radius:12px;overflow:hidden;
+    background:linear-gradient(180deg,#0d1220,#0a0d16)}
+  canvas{display:block;width:100%;height:100%;touch-action:none;cursor:crosshair}
+  #panel{flex:0 0 268px;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:12px;backdrop-filter:blur(6px);display:flex;flex-direction:column;gap:10px}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .row label{color:var(--dim);white-space:nowrap}
+  .row output{color:var(--acc);font-variant-numeric:tabular-nums;min-width:42px;text-align:right}
+  input[type=range]{flex:1 1 auto;accent-color:var(--acc);height:4px}
+  select{background:#0c111c;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 6px;flex:1 1 auto}
+  .btns{display:flex;flex-wrap:wrap;gap:6px}
+  button{background:#182035;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:7px 10px;
+    cursor:pointer;font:inherit;transition:.12s}
+  button:hover{border-color:var(--acc);color:var(--acc)}
+  button.primary{background:linear-gradient(180deg,#1c6f68,#134f4a);border-color:#2c9a90;color:#eafffb}
+  button.primary:hover{filter:brightness(1.15)}
+  button.rec[data-on="1"]{background:#5a1e2a;border-color:#ff5c78;color:#ffd7de}
+  .sep{height:1px;background:var(--line);margin:2px 0}
+  .hd{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--acc2);opacity:.85}
+  .presets{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .hint{color:var(--dim);font-size:11px;line-height:1.35}
+  a{color:var(--acc)}
+  #copied{color:var(--acc);font-size:11px}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <header>
+    <h1><b>Scree</b></h1>
+    <span class="tag">drop marbles down a tuned peg field — the physics plays the tune</span>
+  </header>
+  <div id="stage">
+    <div id="cvsBox"><canvas id="cvs"></canvas></div>
+    <div id="panel">
+      <div class="btns">
+        <button id="play" class="primary" aria-label="Play or pause the simulation">▶ Play</button>
+        <button id="pour" aria-label="Pour a burst of marbles">Pour ⇩</button>
+        <button id="clear" aria-label="Clear all marbles">Clear</button>
+      </div>
+      <div class="sep"></div>
+      <div class="hd">Scale</div>
+      <div class="row"><label for="scale">Scale</label>
+        <select id="scale">
+          <option value="pentatonic">Pentatonic minor</option>
+          <option value="major">Major</option>
+          <option value="dorian">Dorian</option>
+          <option value="wholetone">Whole-tone</option>
+          <option value="hirajoshi">Hirajoshi</option>
+        </select></div>
+      <div class="row"><label for="root">Root</label>
+        <select id="root">
+          <option value="57">A</option><option value="59">B</option><option value="60" selected>C</option>
+          <option value="62">D</option><option value="64">E</option><option value="65">F</option><option value="67">G</option>
+        </select></div>
+      <div class="row"><label for="octaves">Octave span</label><input id="octaves" type="range" min="1" max="4" step="1" value="2"><output id="octavesV">2</output></div>
+      <div class="sep"></div>
+      <div class="hd">Physics</div>
+      <div class="row"><label for="gravity">Gravity</label><input id="gravity" type="range" min="200" max="2400" step="20" value="1000"><output id="gravityV"></output></div>
+      <div class="row"><label for="restitution">Bounce</label><input id="restitution" type="range" min="0.1" max="0.92" step="0.01" value="0.6"><output id="restitutionV"></output></div>
+      <div class="row"><label for="spawn">Spawn / s</label><input id="spawn" type="range" min="0.5" max="30" step="0.5" value="6"><output id="spawnV"></output></div>
+      <div class="row"><label for="msize">Marble size</label><input id="msize" type="range" min="3" max="10" step="0.5" value="5"><output id="msizeV"></output></div>
+      <div class="row"><label for="rows">Peg rows</label><input id="rows" type="range" min="4" max="16" step="1" value="10"><output id="rowsV"></output></div>
+      <div class="row"><label for="spacing">Peg spacing</label><input id="spacing" type="range" min="34" max="90" step="2" value="52"><output id="spacingV"></output></div>
+      <div class="sep"></div>
+      <div class="hd">Timbre</div>
+      <div class="row"><label for="decay">Note decay</label><input id="decay" type="range" min="0.08" max="1.4" step="0.02" value="0.5"><output id="decayV"></output></div>
+      <div class="row"><label for="reverb">Reverb mix</label><input id="reverb" type="range" min="0" max="1" step="0.02" value="0.35"><output id="reverbV"></output></div>
+      <div class="sep"></div>
+      <div class="hd">Presets</div>
+      <div class="presets">
+        <button data-p="Rainstorm">Rainstorm</button>
+        <button data-p="Music Box">Music Box</button>
+        <button data-p="Avalanche">Avalanche</button>
+        <button data-p="Glass">Glass</button>
+        <button data-p="Sparse">Sparse</button>
+        <button data-p="Funnel">Funnel</button>
+      </div>
+      <div class="btns">
+        <button id="allon">All pegs on</button>
+        <button id="staircase">Staircase</button>
+      </div>
+      <div class="sep"></div>
+      <div class="hd">Share / Record</div>
+      <div class="btns">
+        <button id="share">Copy share link</button>
+        <button id="rec" class="rec" data-on="0" aria-label="Record audio to a WAV file">● Record WAV</button>
+      </div>
+      <span id="copied"></span>
+      <div class="hint">Click or drag on empty canvas to toggle pegs and carve melodic paths. Every collision fires a note — pitch rises left→right, brightness &amp; decay follow impact speed, pan follows position.</div>
+    </div>
+  </div>
+</div>
+<script>
+"use strict";
+let W=980,H=680;                     // logical playfield size (CSS px); resized to the canvas box
+const $=id=>document.getElementById(id);
+const cvs=$("cvs"),cvsBox=$("cvsBox"),ctx=cvs.getContext("2d");
+const REDUCED=!!(window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+const SCALES={pentatonic:[0,3,5,7,10],major:[0,2,4,5,7,9,11],dorian:[0,2,3,5,7,9,10],wholetone:[0,2,4,6,8,10],hirajoshi:[0,2,3,7,8]};
+const PRESETS={
+  "Rainstorm":{gravity:900,restitution:0.55,spawn:22,msize:4,rows:11,spacing:46,decay:0.35,reverb:0.45,scale:"pentatonic",octaves:3,shape:"all"},
+  "Music Box":{gravity:700,restitution:0.4,spawn:4,msize:6,rows:8,spacing:64,decay:0.7,reverb:0.3,scale:"major",octaves:2,shape:"all"},
+  "Avalanche":{gravity:1800,restitution:0.7,spawn:28,msize:5,rows:14,spacing:44,decay:0.28,reverb:0.5,scale:"dorian",octaves:3,shape:"all"},
+  "Glass":{gravity:600,restitution:0.85,spawn:3,msize:4.5,rows:9,spacing:58,decay:1.1,reverb:0.7,scale:"wholetone",octaves:3,shape:"all"},
+  "Sparse":{gravity:800,restitution:0.5,spawn:1.5,msize:7,rows:6,spacing:78,decay:0.9,reverb:0.4,scale:"hirajoshi",octaves:2,shape:"all"},
+  "Funnel":{gravity:1100,restitution:0.6,spawn:8,msize:5,rows:12,spacing:50,decay:0.5,reverb:0.35,scale:"pentatonic",octaves:2,shape:"funnel"}
+};
+const P={gravity:1000,restitution:0.6,spawn:6,msize:5,rows:10,spacing:52,decay:0.5,reverb:0.35,scale:"pentatonic",root:60,octaves:2,seed:12345};
+const DEF={...P};                    // pristine defaults, used to recover from a corrupt share link
+const CTRLS=["gravity","restitution","spawn","msize","rows","spacing","decay","reverb","octaves"];
+const PEGR=5;let pegs=[],marbles=[],lit=[],litN=0;
+let running=false,pouring=false,spawnAcc=0,rng=mulberry32(P.seed),meterL=0,meterPan=0;
+
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+
+// ---------- peg field ----------
+function buildPegs(keepMask){
+  const prev=keepMask||{};pegs=[];
+  const topY=90,mX=P.spacing*0.7,gap=P.spacing;
+  const cols=Math.floor((W-2*mX)/gap);
+  for(let r=0;r<P.rows;r++){
+    const y=topY+r*gap*0.86, off=(r%2)?gap/2:0;
+    for(let c=0;c<cols;c++){
+      const x=mX+off+c*gap; if(x>W-mX*0.5)continue;
+      const key=r+":"+c;
+      pegs.push({x,y,r,c,on:key in prev?prev[key]:true,flash:0,rings:[]});
+    }
+  }
+  litN=SCALES[P.scale].length*P.octaves;lit=new Array(litN).fill(0);
+}
+function maskOf(){const m={};for(const p of pegs)if(!p.on)m[p.r+":"+p.c]=false;return m;}
+function shape(kind){
+  const cx=W/2;
+  for(const p of pegs){
+    if(kind==="all")p.on=true;
+    else if(kind==="funnel"){const spanTop=W*0.46,spanBot=W*0.12,t=p.r/(P.rows-1||1);const half=(spanTop-(spanTop-spanBot)*t)/1;p.on=Math.abs(p.x-cx)<half;}
+    else if(kind==="staircase")p.on=((p.r+p.c)%3!==0);
+  }
+}
+
+// ---------- audio ----------
+let ac=null,master,soft,limiter,revIn,revWet,noiseBuf,recTap,recording=false,recL=[],recR=[],recStart=0;
+const VOICE_CAP=24,voices=[];
+function initAudio(){
+  if(ac)return; ac=new (window.AudioContext||window.webkitAudioContext)();
+  master=ac.createGain();master.gain.value=0.8;
+  soft=ac.createWaveShaper();const n=1024,cur=new Float32Array(n);
+  for(let i=0;i<n;i++){const x=i/(n-1)*2-1;cur[i]=Math.tanh(x*1.8);}soft.curve=cur;soft.oversample="2x";
+  limiter=ac.createDynamicsCompressor();
+  limiter.threshold.value=-6;limiter.ratio.value=12;limiter.attack.value=0.003;limiter.release.value=0.18;
+  // feedback-delay reverb + shimmer
+  revIn=ac.createGain();const d1=ac.createDelay(1),d2=ac.createDelay(1),fb=ac.createGain(),lp=ac.createBiquadFilter();
+  d1.delayTime.value=0.27;d2.delayTime.value=0.19;fb.gain.value=0.44;lp.type="lowpass";lp.frequency.value=3200;
+  revWet=ac.createGain();revWet.gain.value=1;
+  revIn.connect(d1);revIn.connect(d2);d1.connect(lp);d2.connect(lp);lp.connect(fb);fb.connect(d1);fb.connect(d2);lp.connect(revWet);
+  revWet.connect(master);
+  master.connect(soft);soft.connect(limiter);limiter.connect(ac.destination);
+  // recording tap. NOTE: ScriptProcessor is deprecated in favor of AudioWorklet, but it is kept
+  // deliberately here: it needs no separate module file, which preserves the single-file, zero-build,
+  // works-from-file:// design. Revisit if browsers drop it.
+  recTap=ac.createScriptProcessor(4096,2,2);
+  recTap.onaudioprocess=e=>{if(!recording)return;recL.push(new Float32Array(e.inputBuffer.getChannelData(0)));recR.push(new Float32Array(e.inputBuffer.getChannelData(1)));};
+  const sink=ac.createGain();sink.gain.value=0;limiter.connect(recTap);recTap.connect(sink);sink.connect(ac.destination);
+  noiseBuf=ac.createBuffer(1,ac.sampleRate*0.05,ac.sampleRate);
+  const nd=noiseBuf.getChannelData(0);for(let i=0;i<nd.length;i++)nd[i]=Math.random()*2-1;
+}
+const mtof=m=>440*Math.pow(2,(m-69)/12);
+function pegNote(p){const sc=SCALES[P.scale],tot=sc.length*P.octaves;const n=(p.c+p.r)%tot;return{midi:P.root+12*Math.floor(n/sc.length)+sc[n%sc.length],idx:n};}
+function ping(freq,vel,pan){
+  if(!ac)return;const now=ac.currentTime;
+  while(voices.length&&voices[0].end<now)voices.shift();
+  if(voices.length>=VOICE_CAP){const v=voices.shift();try{v.stop();}catch(e){}}
+  const amp=clamp(vel,0.08,1),dec=P.decay*(0.4+0.6*amp);
+  const g=ac.createGain(),pn=ac.createStereoPanner();pn.pan.value=clamp(pan,-1,1);
+  g.connect(pn);pn.connect(master);
+  const send=ac.createGain();send.gain.value=P.reverb*amp*0.6;g.connect(send);send.connect(revIn);
+  g.gain.setValueAtTime(0.0001,now);g.gain.exponentialRampToValueAtTime(amp*0.9,now+0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001,now+dec);
+  const nodes=[],partials=1+Math.round(amp*3),ratios=[1,2.01,3.0,4.2];
+  for(let i=0;i<partials;i++){const o=ac.createOscillator(),og=ac.createGain();o.type="sine";o.frequency.value=freq*ratios[i];
+    og.gain.value=(1/(i+1))*(i===0?1:0.55);o.connect(og);og.connect(g);o.start(now);o.stop(now+dec+0.05);nodes.push(o);}
+  // FM shimmer on fundamental
+  const mod=ac.createOscillator(),mg=ac.createGain();mod.frequency.value=freq*3.5;mg.gain.value=freq*0.4*amp;
+  mod.connect(mg);mg.connect(nodes[0].frequency);mod.start(now);mod.stop(now+dec+0.05);nodes.push(mod);
+  // noise transient click
+  const ns=ac.createBufferSource(),ng=ac.createGain(),hp=ac.createBiquadFilter();ns.buffer=noiseBuf;hp.type="highpass";hp.frequency.value=1800;
+  ng.gain.setValueAtTime(amp*0.4,now);ng.gain.exponentialRampToValueAtTime(0.0001,now+0.03);
+  ns.connect(hp);hp.connect(ng);ng.connect(g);ns.start(now);ns.stop(now+0.05);nodes.push(ns);
+  voices.push({end:now+dec+0.06,stop(){nodes.forEach(x=>{try{x.stop();}catch(e){}});}});
+  meterL=Math.max(meterL,amp);meterPan=pan;
+}
+
+// ---------- marbles / physics ----------
+function spawn(){
+  if(marbles.length>260)return;
+  const jit=(rng()-0.5)*P.spacing*0.9;
+  marbles.push({x:W/2+jit,y:40,vx:(rng()-0.5)*40,vy:0,r:P.msize,trail:[]});
+}
+function step(dt){
+  const g=P.gravity,e=P.restitution,r2=(P.msize+PEGR);
+  for(let k=marbles.length-1;k>=0;k--){
+    const m=marbles[k];m.vy+=g*dt;m.x+=m.vx*dt;m.y+=m.vy*dt;
+    if(m.trail.length>7)m.trail.shift();m.trail.push([m.x,m.y]);
+    if(m.x<m.r){m.x=m.r;m.vx=-m.vx*e;}else if(m.x>W-m.r){m.x=W-m.r;m.vx=-m.vx*e;}
+    for(const p of pegs){if(!p.on)continue;const dx=m.x-p.x,dy=m.y-p.y,d2=dx*dx+dy*dy;
+      if(d2<r2*r2){const d=Math.sqrt(d2)||0.001,nx=dx/d,ny=dy/d;
+        const ov=r2-d;m.x+=nx*ov;m.y+=ny*ov;
+        const vn=m.vx*nx+m.vy*ny;if(vn<0){m.vx-=(1+e)*vn*nx;m.vy-=(1+e)*vn*ny;
+          const spd=clamp(Math.abs(vn)/620,0.08,1);
+          if(p.flash<0.15){const nt=pegNote(p);ping(mtof(nt.midi),spd,(p.x/W)*2-1);
+            p.flash=1;if(!REDUCED)p.rings.push({r:PEGR,a:1,v:spd});if(nt.idx<lit.length)lit[nt.idx]=1;}
+        }}}
+    if(m.y>H+20)marbles.splice(k,1);
+  }
+}
+
+// ---------- render ----------
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  for(const p of pegs){
+    for(let i=p.rings.length-1;i>=0;i--){const rg=p.rings[i];rg.r+=110*0.016;rg.a-=0.045;
+      if(rg.a<=0){p.rings.splice(i,1);continue;}
+      ctx.beginPath();ctx.arc(p.x,p.y,rg.r,0,7);ctx.strokeStyle="rgba(90,209,201,"+(rg.a*0.6)+")";ctx.lineWidth=1.5;ctx.stroke();}
+    const f=p.flash;p.flash*=0.86;
+    if(p.on){ctx.beginPath();ctx.arc(p.x,p.y,PEGR+f*3,0,7);
+      ctx.fillStyle=f>0.05?`rgba(255,${200+f*55|0},${180+f*70|0},${0.6+f*0.4})`:"#33405e";ctx.fill();}
+    else{ctx.beginPath();ctx.arc(p.x,p.y,2,0,7);ctx.fillStyle="#1a2233";ctx.fill();}
+  }
+  // marbles + trails
+  for(const m of marbles){
+    if(!REDUCED)for(let i=0;i<m.trail.length;i++){const t=m.trail[i],a=i/m.trail.length*0.4;
+      ctx.beginPath();ctx.arc(t[0],t[1],m.r*(i/m.trail.length),0,7);ctx.fillStyle="rgba(201,139,255,"+a+")";ctx.fill();}
+    ctx.beginPath();ctx.arc(m.x,m.y,m.r,0,7);
+    const g=ctx.createRadialGradient(m.x-m.r*0.3,m.y-m.r*0.3,0.5,m.x,m.y,m.r);
+    g.addColorStop(0,"#fff");g.addColorStop(1,"#7ad9ff");ctx.fillStyle=g;ctx.fill();
+  }
+  drawMeter();drawKeyboard();
+}
+function drawMeter(){
+  meterL*=0.9;const y=H-14,w=W-24;
+  ctx.fillStyle="#0d1422";ctx.fillRect(12,y,w,8);
+  ctx.fillStyle="rgba(90,209,201,.9)";ctx.fillRect(12,y,w*clamp(meterL,0,1),8);
+  const px=12+w*((meterPan+1)/2);ctx.fillStyle="#c98bff";ctx.fillRect(px-2,y-2,4,12);
+}
+function drawKeyboard(){
+  const n=lit.length;if(!n)return;const w=(W-24)/n,y=H-40;
+  for(let i=0;i<n;i++){lit[i]*=0.88;
+    ctx.fillStyle=`rgba(${120+lit[i]*135|0},${180+lit[i]*60|0},255,${0.18+lit[i]*0.82})`;
+    ctx.fillRect(12+i*w+1,y,w-2,16);}
+}
+
+// ---------- loop ----------
+let last=0;
+function simulate(dt){const sub=2;for(let i=0;i<sub;i++)step(dt/sub);} // always substep so poured & played marbles collide identically
+function frame(ts){
+  const dt=Math.min((ts-last)||16,40)/1000;last=ts;
+  if(running){spawnAcc+=P.spawn*dt;while(spawnAcc>=1){spawn();spawnAcc--;}simulate(dt);}
+  else if(marbles.length){simulate(dt);}
+  if(pouring&&marbles.length===0)pouring=false;
+  if(recording)tickRecUI();
+  draw();requestAnimationFrame(frame);
+}
+
+// ---------- UI ----------
+function syncOut(){for(const id of CTRLS)$(id+"V").textContent=$(id).value;}
+function readUI(){P.gravity=+$("gravity").value;P.restitution=+$("restitution").value;P.spawn=+$("spawn").value;
+  P.msize=+$("msize").value;P.rows=+$("rows").value;P.spacing=+$("spacing").value;P.decay=+$("decay").value;
+  P.reverb=+$("reverb").value;P.scale=$("scale").value;P.root=+$("root").value;P.octaves=+$("octaves").value;syncOut();}
+function writeUI(){$("gravity").value=P.gravity;$("restitution").value=P.restitution;$("spawn").value=P.spawn;
+  $("msize").value=P.msize;$("rows").value=P.rows;$("spacing").value=P.spacing;$("decay").value=P.decay;
+  $("reverb").value=P.reverb;$("scale").value=P.scale;$("root").value=P.root;$("octaves").value=P.octaves;syncOut();}
+CTRLS.forEach(id=>$(id).addEventListener("input",()=>{
+  const structural=(id==="rows"||id==="spacing");const mask=structural?maskOf():null;readUI();
+  if(structural)buildPegs(mask);                              // peg geometry changed -> rebuild, keep painted mask
+  else if(id==="octaves"){litN=SCALES[P.scale].length*P.octaves;lit=new Array(litN).fill(0);} // keyboard only; pegs untouched
+}));
+["scale","root"].forEach(id=>$(id).addEventListener("change",()=>{readUI();buildPegs(maskOf());}));
+
+$("play").addEventListener("click",()=>{initAudio();ac.resume();running=!running;$("play").textContent=running?"❚❚ Pause":"▶ Play";});
+$("pour").addEventListener("click",()=>{initAudio();ac.resume();rng=mulberry32(P.seed);for(let i=0;i<40;i++)setTimeout(spawn,i*40);pouring=true;});
+$("clear").addEventListener("click",()=>{marbles=[];});
+$("allon").addEventListener("click",()=>{shape("all");});
+$("staircase").addEventListener("click",()=>{shape("staircase");});
+document.querySelectorAll(".presets button").forEach(b=>b.addEventListener("click",()=>{
+  const pr=PRESETS[b.dataset.p];Object.assign(P,pr);writeUI();buildPegs();shape(pr.shape);}));
+
+// canvas peg toggling
+function toCanvas(ev){const r=cvs.getBoundingClientRect();return[(ev.clientX-r.left)/r.width*W,(ev.clientY-r.top)/r.height*H];}
+let painting=false,paintTo=false;
+function pegAt(x,y){let best=null,bd=1e9;for(const p of pegs){const d=(p.x-x)**2+(p.y-y)**2;if(d<bd){bd=d;best=p;}}return bd<(P.spacing*0.5)**2?best:null;}
+cvs.addEventListener("pointerdown",ev=>{const[x,y]=toCanvas(ev);const p=pegAt(x,y);if(p){painting=true;paintTo=!p.on;p.on=paintTo;cvs.setPointerCapture(ev.pointerId);}});
+cvs.addEventListener("pointermove",ev=>{if(!painting)return;const[x,y]=toCanvas(ev);const p=pegAt(x,y);if(p)p.on=paintTo;});
+cvs.addEventListener("pointerup",()=>{painting=false;});
+
+// ---------- share / hash ----------
+function serialize(){const s={...P,off:Object.keys(maskOf())};return btoa(JSON.stringify(s));}
+function restore(){
+  const h=location.hash.slice(1);if(!h)return false;
+  try{
+    const s=JSON.parse(atob(h)),tmp={...DEF};                 // validate into a copy of the defaults first
+    for(const k in DEF)if(k in s&&typeof s[k]===typeof DEF[k])tmp[k]=s[k];
+    if(!(tmp.scale in SCALES))tmp.scale=DEF.scale;            // reject unknown/legacy scale names
+    tmp.rows=clamp(tmp.rows|0,4,16);tmp.octaves=clamp(tmp.octaves|0,1,4);
+    tmp.spacing=clamp(tmp.spacing,34,90);tmp.msize=clamp(tmp.msize,3,10);
+    Object.assign(P,tmp);writeUI();buildPegs();               // buildPegs is now guaranteed a valid P
+    if(Array.isArray(s.off)&&s.off.length){const set=new Set(s.off);for(const p of pegs)if(set.has(p.r+":"+p.c))p.on=false;}
+    return true;
+  }catch(e){                                                  // corrupt hash -> fall back to defaults, never a dead canvas
+    Object.assign(P,DEF);writeUI();buildPegs();return true;
+  }
+}
+$("share").addEventListener("click",()=>{
+  location.hash=serialize();                                  // URL is now the shareable state, regardless of clipboard
+  const say=t=>{$("copied").textContent=t;clearTimeout($("copied")._t);$("copied")._t=setTimeout(()=>$("copied").textContent="",4000);};
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(location.href).then(()=>say("link copied ✓"),()=>say("link in address bar — copy it"));
+  }else say("link in address bar — copy it");
+});
+
+// ---------- WAV record ----------
+function encodeWAV(){
+  const len=recL.reduce((a,b)=>a+b.length,0),sr=ac.sampleRate;
+  const L=new Float32Array(len),R=new Float32Array(len);let o=0;
+  for(let i=0;i<recL.length;i++){L.set(recL[i],o);R.set(recR[i],o);o+=recL[i].length;}
+  const buf=new ArrayBuffer(44+len*4),v=new DataView(buf);
+  const ws=(off,s)=>{for(let i=0;i<s.length;i++)v.setUint8(off+i,s.charCodeAt(i));};
+  ws(0,"RIFF");v.setUint32(4,36+len*4,true);ws(8,"WAVE");ws(12,"fmt ");v.setUint32(16,16,true);
+  v.setUint16(20,1,true);v.setUint16(22,2,true);v.setUint32(24,sr,true);v.setUint32(28,sr*4,true);
+  v.setUint16(32,4,true);v.setUint16(34,16,true);ws(36,"data");v.setUint32(40,len*4,true);
+  let p=44;for(let i=0;i<len;i++){for(const ch of[L[i],R[i]]){const s=clamp(ch,-1,1);v.setInt16(p,s<0?s*32768:s*32767,true);p+=2;}}
+  return new Blob([buf],{type:"audio/wav"});
+}
+function tickRecUI(){const t=Math.max(0,(performance.now()-recStart)/1000|0);
+  $("rec").textContent="■ Stop "+(t/60|0)+":"+String(t%60).padStart(2,"0");}
+$("rec").addEventListener("click",()=>{
+  initAudio();ac.resume();const b=$("rec");
+  if(!recording){recording=true;recL=[];recR=[];recStart=performance.now();b.dataset.on="1";tickRecUI();}
+  else{recording=false;b.dataset.on="0";b.textContent="● Record WAV";
+    const url=URL.createObjectURL(encodeWAV());const a=document.createElement("a");a.href=url;a.download="scree-pour.wav";a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);}
+});
+
+// ---------- boot ----------
+function resize(){
+  const dpr=Math.max(1,window.devicePixelRatio||1);
+  W=Math.max(360,cvsBox.clientWidth||980);
+  H=Math.max(280,cvsBox.clientHeight||680);
+  cvs.width=Math.round(W*dpr);cvs.height=Math.round(H*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);      // draw in CSS px; backing store stays crisp on HiDPI, pegs stay circular
+  buildPegs(maskOf());                    // reflow field to the new size, preserving the painted-off mask
+}
+let rT;const onResize=()=>{clearTimeout(rT);rT=setTimeout(resize,120);};
+resize();                                 // establish W/H + backing store before anything draws
+try{ if(!restore()){writeUI();buildPegs();} }
+catch(e){ Object.assign(P,DEF);writeUI();buildPegs(); } // never leave the canvas dead on a bad hash
+addEventListener("resize",onResize);
+if(window.ResizeObserver)new ResizeObserver(onResize).observe(cvsBox);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uuid5 — name-based UUID v5 generator</title>
+<meta name="description" content="Free offline UUID v5 generator. Create deterministic, name-based UUIDs (SHA-1) from a namespace and a name — same input always yields the same UUID. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/uuid5/">
+<style>
+  :root{
+    --c:#1e1b4b; --bg:#f8f8fc; --fg:#14142b; --muted:#5c5c7e;
+    --card:#ffffff; --border:#e2e2f0; --code:#eeeef8;
+  }
+  [data-theme="dark"]{
+    --bg:#0d0d18; --fg:#e7e7f4; --muted:#9292b4; --card:#161628;
+    --border:#282842; --code:#1e1e38;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:700px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#6366f1);display:grid;place-items:center;color:#fff;font-size:15px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:700px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  input,select{width:100%;padding:11px 13px;border:1px solid var(--border);border-radius:10px;
+    background:var(--bg);color:var(--fg);font-size:1rem;font-family:ui-monospace,monospace}
+  input:focus,select:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .field{margin-bottom:14px}
+  .ns{display:flex;gap:10px}
+  .ns select{flex:0 0 130px}
+  .ns input{flex:1}
+  .out{margin-top:8px;background:var(--code);border-radius:12px;padding:16px 18px;
+    font-family:ui-monospace,monospace;font-size:1.25rem;word-break:break-all;user-select:all;text-align:center}
+  .copy{margin-top:12px;background:none;border:1px solid var(--border);color:var(--muted);
+    border-radius:9px;padding:8px 16px;cursor:pointer;font-size:.85rem}
+  .copy:hover{color:var(--c);border-color:var(--c)}
+  .err{color:#dc2626;font-size:.86rem;margin:8px 0 0;min-height:1.1em}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:700px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('u5.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">v5</div>
+  <div>
+    <h1>Uuid5</h1>
+    <p class="sub">Name-based UUID v5 generator</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <div class="field">
+      <label for="name">Name</label>
+      <input id="name" value="example.com" spellcheck="false">
+    </div>
+    <div class="field">
+      <label for="ns">Namespace</label>
+      <div class="ns">
+        <select id="nsPreset">
+          <option value="dns" selected>DNS</option>
+          <option value="url">URL</option>
+          <option value="oid">OID</option>
+          <option value="x500">X.500</option>
+          <option value="custom">Custom…</option>
+        </select>
+        <input id="ns" value="6ba7b810-9dad-11d1-80b4-00c04fd430c8" spellcheck="false" readonly>
+      </div>
+    </div>
+    <label>UUID v5</label>
+    <div class="out" id="out"></div>
+    <p class="err" id="err"></p>
+    <button class="copy" id="copy">Copy</button>
+    <p class="hint">UUID v5 is <b>deterministic</b>: the same namespace + name always produces the same
+      UUID (via SHA-1). Great for stable IDs derived from URLs, file paths, or keys. Runs locally.</p>
+  </div>
+</main>
+<footer>
+  Uuid5 is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/uuid5">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function textToBytes(str){
+  var u = unescape(encodeURIComponent(String(str)));
+  var out = [];
+  for(var i = 0; i < u.length; i++) out.push(u.charCodeAt(i) & 0xff);
+  return out;
+}
+function sha1Bytes(bytes){
+  var ml = bytes.length * 8;
+  var msg = Array.prototype.slice.call(bytes);
+  msg.push(0x80);
+  while(msg.length % 64 !== 56) msg.push(0);
+  for(var i = 7; i >= 0; i--) msg.push(Math.floor(ml / Math.pow(2, i * 8)) & 0xff);
+  var h0=0x67452301,h1=0xEFCDAB89,h2=0x98BADCFE,h3=0x10325476,h4=0xC3D2E1F0;
+  for(var off = 0; off < msg.length; off += 64){
+    var w = new Array(80);
+    for(var t = 0; t < 16; t++)
+      w[t] = ((msg[off+t*4]<<24)|(msg[off+t*4+1]<<16)|(msg[off+t*4+2]<<8)|(msg[off+t*4+3]))>>>0;
+    for(var t = 16; t < 80; t++){ var v = w[t-3]^w[t-8]^w[t-14]^w[t-16]; w[t] = ((v<<1)|(v>>>31))>>>0; }
+    var a=h0,b=h1,c=h2,d=h3,e=h4;
+    for(var t = 0; t < 80; t++){
+      var f, k;
+      if(t<20){ f=(b&c)|((~b)&d); k=0x5A827999; }
+      else if(t<40){ f=b^c^d; k=0x6ED9EBA1; }
+      else if(t<60){ f=(b&c)|(b&d)|(c&d); k=0x8F1BBCDC; }
+      else { f=b^c^d; k=0xCA62C1D6; }
+      var tmp = ((((a<<5)|(a>>>27))>>>0) + f + e + k + w[t]) >>> 0;
+      e=d; d=c; c=((b<<30)|(b>>>2))>>>0; b=a; a=tmp;
+    }
+    h0=(h0+a)>>>0; h1=(h1+b)>>>0; h2=(h2+c)>>>0; h3=(h3+d)>>>0; h4=(h4+e)>>>0;
+  }
+  var out = [];
+  [h0,h1,h2,h3,h4].forEach(function(h){ out.push((h>>>24)&0xff,(h>>>16)&0xff,(h>>>8)&0xff,h&0xff); });
+  return out;
+}
+function parseUuid(uuid){
+  var hex = String(uuid).replace(/[^0-9a-fA-F]/g, '');
+  if(hex.length !== 32) return null;
+  var out = [];
+  for(var i = 0; i < 32; i += 2) out.push(parseInt(hex.substr(i, 2), 16));
+  return out;
+}
+function bytesToUuid(b){
+  var h = b.map(function(x){ return ('0' + (x & 0xff).toString(16)).slice(-2); });
+  return h.slice(0,4).join('') + '-' + h.slice(4,6).join('') + '-' + h.slice(6,8).join('') +
+    '-' + h.slice(8,10).join('') + '-' + h.slice(10,16).join('');
+}
+var NAMESPACES = {
+  dns:  '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+  url:  '6ba7b811-9dad-11d1-80b4-00c04fd430c8',
+  oid:  '6ba7b812-9dad-11d1-80b4-00c04fd430c8',
+  x500: '6ba7b814-9dad-11d1-80b4-00c04fd430c8'
+};
+function uuidV5(name, namespace){
+  var ns = parseUuid(namespace);
+  if(ns === null) return null;
+  var hash = sha1Bytes(ns.concat(textToBytes(name)));
+  var b = hash.slice(0, 16);
+  b[6] = (b[6] & 0x0f) | 0x50; // version 5
+  b[8] = (b[8] & 0x3f) | 0x80; // RFC 4122 variant
+  return bytesToUuid(b);
+}
+
+if(typeof module !== 'undefined') module.exports = {
+  textToBytes, sha1Bytes, parseUuid, bytesToUuid, NAMESPACES, uuidV5
+};
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var nameEl = document.getElementById('name');
+  var nsEl = document.getElementById('ns');
+  var nsPreset = document.getElementById('nsPreset');
+  var outEl = document.getElementById('out');
+  var errEl = document.getElementById('err');
+
+  function render(){
+    if(nsPreset.value !== 'custom'){ nsEl.value = NAMESPACES[nsPreset.value]; nsEl.readOnly = true; }
+    else nsEl.readOnly = false;
+    var uuid = uuidV5(nameEl.value, nsEl.value);
+    if(uuid === null){ errEl.textContent = 'Namespace must be a valid UUID.'; outEl.textContent = '—'; }
+    else { errEl.textContent = ''; outEl.textContent = uuid; }
+    try{
+      localStorage.setItem('u5.name', nameEl.value);
+      localStorage.setItem('u5.preset', nsPreset.value);
+      if(nsPreset.value === 'custom') localStorage.setItem('u5.ns', nsEl.value);
+    }catch(e){}
+  }
+  nameEl.addEventListener('input', render);
+  nsEl.addEventListener('input', render);
+  nsPreset.addEventListener('change', render);
+  document.getElementById('copy').addEventListener('click', function(){
+    if(navigator.clipboard) navigator.clipboard.writeText(outEl.textContent);
+    this.textContent = 'Copied'; var b = this; setTimeout(function(){ b.textContent = 'Copy'; }, 1000);
+  });
+  try{
+    var sn = localStorage.getItem('u5.name'); if(sn !== null) nameEl.value = sn;
+    var sp = localStorage.getItem('u5.preset'); if(sp) nsPreset.value = sp;
+    if(sp === 'custom'){ var sc = localStorage.getItem('u5.ns'); if(sc) nsEl.value = sc; }
+  }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('u5.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('u5.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,45 @@
+# Changelog
+
+## 0.14.0
+- Sticky section nav with active-section highlighting.
+
+## 0.13.0
+- Burn sensitivity table — runway and time-to-breakeven at burn ±10/20%.
+
+## 0.12.0
+- Print / PDF board summary — clean print stylesheet + PDF button.
+
+## 0.11.0
+- Expansion vs new-logo split — accurate NRR (1 + expansion − churn), gross revenue retention, and new-logo growth.
+
+## 0.10.0
+- ARR milestone ETAs — time to $1M / $10M / $100M ARR at the current net growth.
+
+## 0.9.0
+- Glossary tooltips — hover any metric for a plain-English definition.
+
+## 0.8.0
+- Cohort retention curve — revenue retained over 24 months with a revenue half-life callout.
+
+## 0.7.0
+- Magic number — net new ARR per dollar of implied sales & marketing spend.
+
+## 0.6.0
+- Scenario compare — worst/base/best from an adjustable growth spread.
+
+## 0.5.0
+- Copy metrics summary — one-click multiline snapshot to the clipboard for board/investor updates.
+
+## 0.4.0
+- Shareable links — inputs encode to a URL hash and reopen exactly on load.
+
+## 0.3.0
+- SaaS Quick Ratio and months-to-cash-flow-breakeven.
+
+## 0.2.0
+- Rule of 40 and burn multiple, with verdicts.
+
+## 0.1.0 — first release
+- SaaS metrics: ARR, customers, avg lifetime, LTV, LTV:CAC, CAC payback, NRR, net MRR growth, cash runway.
+- 12-month MRR projection chart at the net growth rate.
+- Plain-English verdicts on unit-economics health. Dark mode, local persistence, 5 CI-backed tests. Single offline index.html.

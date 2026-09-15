@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CacheControl — HTTP Cache-Control Header Builder</title>
+<meta name="description" content="Build a correct HTTP Cache-Control header from public/private, no-store, no-cache, immutable, max-age and s-maxage. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('cache-control-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#0e7490;
+    --bg:#f4f7f8; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e2e6e8; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#0e1416; --card:#171f22; --fg:#eef3f5; --muted:#93a1a6; --line:#253034; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:760px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#155e75);display:flex;align-items:center;justify-content:center;font-size:20px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:760px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  .checks{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .checks label{display:flex;align-items:center;gap:8px;font-weight:600;color:var(--fg);margin:0;cursor:pointer}
+  input[type=number]{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+  .presets{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .presets button{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:999px;padding:4px 11px;cursor:pointer;font:inherit;font-size:.78rem}
+  .out{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:1.05rem;background:var(--bg);border:1px solid var(--c);border-radius:10px;padding:14px;word-break:break-all;margin-top:6px}
+  .hint{color:var(--muted);font-size:.82rem;margin-top:8px}
+  button.act{background:var(--c);color:#fff;border:0;border-radius:8px;padding:9px 15px;cursor:pointer;font:inherit;font-weight:600;margin-top:12px}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:760px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🗄️</div>
+    <div><h1>CacheControl</h1><div class="sub">Build a correct Cache-Control header</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label>Directives</label>
+    <div class="checks">
+      <label><input type="checkbox" id="public" checked> public</label>
+      <label><input type="checkbox" id="private"> private</label>
+      <label><input type="checkbox" id="noStore"> no-store</label>
+      <label><input type="checkbox" id="noCache"> no-cache</label>
+      <label><input type="checkbox" id="mustRevalidate"> must-revalidate</label>
+      <label><input type="checkbox" id="immutable"> immutable</label>
+    </div>
+    <div class="grid">
+      <div><label for="maxAge">max-age (seconds)</label><input type="number" id="maxAge" value="3600" min="0"></div>
+      <div><label for="sMaxAge">s-maxage (optional)</label><input type="number" id="sMaxAge" placeholder="none" min="0"></div>
+    </div>
+    <div class="presets" id="presets"></div>
+  </div>
+  <div class="card">
+    <label>Cache-Control</label>
+    <div class="out" id="out"></div>
+    <div class="hint" id="hint"></div>
+    <button class="act" id="copy" type="button">Copy header</button>
+  </div>
+</main>
+<footer>
+  100% offline. Nothing leaves your browser. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/cache-control">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  function cacheControl(o = {}){
+    const parts = [];
+    if(o.noStore){ parts.push('no-store'); return parts.join(', '); }
+    if(o.public) parts.push('public');
+    if(o.private) parts.push('private');
+    if(o.noCache) parts.push('no-cache');
+    if(o.maxAge != null){
+      if(!(Number.isInteger(o.maxAge) && o.maxAge >= 0)) throw new Error('max-age must be a non-negative integer');
+      parts.push('max-age=' + o.maxAge);
+    }
+    if(o.sMaxAge != null){
+      if(!(Number.isInteger(o.sMaxAge) && o.sMaxAge >= 0)) throw new Error('s-maxage must be a non-negative integer');
+      parts.push('s-maxage=' + o.sMaxAge);
+    }
+    if(o.mustRevalidate) parts.push('must-revalidate');
+    if(o.immutable) parts.push('immutable');
+    return parts.join(', ');
+  }
+
+  function humanizeSeconds(s){
+    if(!(s >= 0)) return '';
+    const u = [[31536000, 'year'], [86400, 'day'], [3600, 'hour'], [60, 'minute'], [1, 'second']];
+    for(const [v, name] of u){ if(s >= v){ const n = Math.floor(s / v); return n + ' ' + name + (n === 1 ? '' : 's') + (s % v ? '+' : ''); } }
+    return '0 seconds';
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('out')){
+    const $ = id => document.getElementById(id);
+    const keys = ['public', 'private', 'noStore', 'noCache', 'mustRevalidate', 'immutable'];
+    const PRESETS = [['1 hour', 3600], ['1 day', 86400], ['1 week', 604800], ['30 days', 2592000], ['1 year', 31536000]];
+
+    function render(){
+      const o = {};
+      keys.forEach(k => { if($(k).checked) o[k] = true; });
+      if($('maxAge').value !== '') o.maxAge = Math.round(+$('maxAge').value);
+      if($('sMaxAge').value !== '') o.sMaxAge = Math.round(+$('sMaxAge').value);
+      try{
+        const header = cacheControl(o);
+        $('out').textContent = header ? 'Cache-Control: ' + header : '(no directives)';
+        $('hint').textContent = (!o.noStore && o.maxAge != null) ? 'max-age = ' + humanizeSeconds(o.maxAge) : '';
+      }catch(e){ $('out').textContent = e.message; $('hint').textContent = ''; }
+    }
+
+    $('presets').innerHTML = PRESETS.map((p, i) => `<button type="button" data-i="${i}">${p[0]}</button>`).join('');
+    $('presets').addEventListener('click', e => { const b = e.target.closest('button'); if(!b) return; $('maxAge').value = PRESETS[+b.dataset.i][1]; render(); });
+    [...keys, 'maxAge', 'sMaxAge'].forEach(id => $(id).addEventListener('input', render));
+    $('copy').addEventListener('click', async () => {
+      try{ await navigator.clipboard.writeText($('out').textContent); $('copy').textContent = 'Copied!'; setTimeout(() => $('copy').textContent = 'Copy header', 1200); }catch(e){}
+    });
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('cache-control-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { cacheControl, humanizeSeconds };
+</script>
+</body>
+</html>

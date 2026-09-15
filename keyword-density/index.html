@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keyword Density — SEO phrase & n-gram analyzer</title>
+<meta name="description" content="Analyze keyword density and repeated phrases (1/2/3-word n-grams) in your text for SEO. Counts, density %, and stop-word filtering. Offline, no tracking.">
+<style>
+  :root{
+    --c:#ea580c;
+    --bg:#fbf6f2; --card:#ffffff; --fg:#20160f; --muted:#75675d;
+    --line:#efe4da; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#171009; --card:#211710; --fg:#f5ede4; --muted:#b3a293;
+    --line:#39291c; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:840px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:24px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.4rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:840px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.82rem;font-weight:600;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+  textarea{width:100%;font:inherit;padding:12px;border:1px solid var(--line);border-radius:10px;
+    background:var(--bg);color:var(--fg);min-height:150px;resize:vertical}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .controls{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-top:14px}
+  .seg{display:flex;gap:6px}
+  .seg button{padding:8px 14px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:9px;cursor:pointer;font-weight:600;font-size:.86rem}
+  .seg button.on{background:var(--c);color:#fff;border-color:var(--c)}
+  .chk{display:flex;align-items:center;gap:8px;font-size:.9rem;color:var(--muted)}
+  .stats{display:flex;gap:20px;flex-wrap:wrap;margin-top:16px;color:var(--muted);font-size:.9rem}
+  .stats b{color:var(--fg);font-variant-numeric:tabular-nums}
+  table{width:100%;border-collapse:collapse;margin-top:12px;font-size:.92rem}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.04em}
+  td.n{font-variant-numeric:tabular-nums;text-align:right;font-family:ui-monospace,monospace}
+  .bar{height:6px;background:var(--c);border-radius:3px;min-width:2px}
+  .phrase{font-weight:600}
+  h2{font-size:1rem;margin:0}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🔑</div>
+  <div>
+    <h1>Keyword Density</h1>
+    <p>Phrase &amp; n-gram frequency for SEO</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <label for="in">Your text</label>
+    <textarea id="in" spellcheck="false" placeholder="Paste an article, page copy, or draft…">The quick brown fox jumps over the lazy dog. The dog was not amused, and the quick fox ran away quickly.</textarea>
+    <div class="controls">
+      <div>
+        <label style="margin-bottom:4px">Phrase length</label>
+        <div class="seg"><button data-n="1" class="on">1 word</button><button data-n="2">2 words</button><button data-n="3">3 words</button></div>
+      </div>
+      <label class="chk"><input type="checkbox" id="stop" checked> Ignore common stop words (1-word only)</label>
+    </div>
+    <div class="stats">
+      <span>Total words: <b id="tw">0</b></span>
+      <span>Unique: <b id="uq">0</b></span>
+      <span>Phrases shown: <b id="shown">0</b></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Top phrases</h2>
+    <table>
+      <thead><tr><th>Phrase</th><th style="text-align:right">Count</th><th style="text-align:right">Density</th><th style="width:30%"></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var STOP = ('a an and are as at be but by for from has have he her his i in is it its of on or ' +
+    'that the their they this to was were will with you your we our').split(' ').reduce(function(m,w){ m[w]=1; return m; }, {});
+
+  function tokenize(text){
+    var m = String(text).toLowerCase().match(/[a-z0-9]+(?:'[a-z]+)?/g);
+    return m || [];
+  }
+  function ngrams(words, n){
+    var out = [];
+    for(var i = 0; i + n <= words.length; i++) out.push(words.slice(i, i + n).join(' '));
+    return out;
+  }
+  function density(text, n, opts){
+    opts = opts || {};
+    var words = tokenize(text);
+    var total = words.length;
+    var grams = ngrams(words, n);
+    var windows = grams.length; // = total - n + 1 when total >= n
+    var counts = {};
+    grams.forEach(function(g){
+      if(n === 1 && opts.stopwords && STOP[g]) return;
+      counts[g] = (counts[g] || 0) + 1;
+    });
+    var results = Object.keys(counts).map(function(phrase){
+      return { phrase: phrase, count: counts[phrase], pct: windows ? counts[phrase] / windows * 100 : 0 };
+    });
+    results.sort(function(a, b){ return b.count - a.count || a.phrase.localeCompare(b.phrase); });
+    return { totalWords: total, windows: windows, unique: results.length, results: results };
+  }
+
+  if(typeof module !== 'undefined') module.exports = { tokenize:tokenize, ngrams:ngrams, density:density };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var inp=document.getElementById('in'), stop=document.getElementById('stop'), rows=document.getElementById('rows');
+    var tw=document.getElementById('tw'), uq=document.getElementById('uq'), shown=document.getElementById('shown');
+    var n=1;
+    function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    function render(){
+      var d=density(inp.value, n, { stopwords: stop.checked });
+      tw.textContent=d.totalWords; uq.textContent=d.unique;
+      var top=d.results.slice(0,50);
+      shown.textContent=top.length;
+      var max=top.length ? top[0].count : 1;
+      rows.innerHTML=top.map(function(r){
+        return '<tr><td class="phrase">'+esc(r.phrase)+'</td><td class="n">'+r.count
+          +'</td><td class="n">'+r.pct.toFixed(1)+'%</td>'
+          +'<td><div class="bar" style="width:'+(r.count/max*100)+'%"></div></td></tr>';
+      }).join('') || '<tr><td colspan="4" style="color:var(--muted)">No words yet.</td></tr>';
+    }
+    inp.addEventListener('input', render);
+    stop.addEventListener('change', render);
+    document.querySelectorAll('.seg button').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        n=Number(btn.getAttribute('data-n'));
+        document.querySelectorAll('.seg button').forEach(function(x){ x.classList.remove('on'); });
+        btn.classList.add('on');
+        stop.parentElement.style.opacity = n===1 ? '1' : '.4';
+        render();
+      });
+    });
+
+    var root=document.documentElement, tb=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); tb.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('kwd-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('kwd-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+
+    render();
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rocket Altitude Tracker 🚀 — Apogee from Angle Tracking</title>
+<meta name="description" content="Estimate a model rocket's peak altitude from a single tracking station: baseline distance and measured elevation angle. Offline, private, single file.">
+<style>
+:root{
+  --c:#e11d48;
+  --bg:#f6f8fa; --card:#fff; --fg:#1a1f24; --muted:#5a6470; --line:#e2e6ea;
+}
+[data-theme="dark"]{
+  --bg:#0b1016; --card:#141b23; --fg:#e6edf3; --muted:#8b98a6; --line:#232d38;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.55;transition:background .2s,color .2s}
+.wrap{max-width:640px;margin:0 auto;padding:24px 18px 60px}
+header{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.logo{font-size:2.2rem;line-height:1}
+h1{font-size:1.5rem;margin:0}
+.tag{color:var(--muted);margin:2px 0 22px;font-size:.98rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:18px}
+label{display:block;font-weight:600;margin:14px 0 6px;font-size:.92rem}
+input{width:100%;padding:11px 12px;font-size:1rem;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--fg)}
+input:focus{outline:2px solid var(--c);border-color:var(--c)}
+.out{margin-top:20px;padding:18px;border-radius:12px;background:linear-gradient(135deg,var(--c)20,transparent);border:1px solid var(--c)}
+.big{font-size:2rem;font-weight:700;color:#be123c}
+[data-theme="dark"] .big{color:#fda4af}
+.sub{color:var(--muted);font-size:.9rem;margin-top:4px}
+table{width:100%;border-collapse:collapse;margin-top:8px;font-size:.95rem}
+th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:600}
+td:last-child{text-align:right;font-weight:700}
+.explain{font-size:.9rem;color:var(--muted)}
+.explain h2{font-size:1rem;color:var(--fg);margin:0 0 8px}
+.explain li{margin:4px 0}
+footer{text-align:center;color:var(--muted);font-size:.85rem;margin-top:30px}
+footer a{color:var(--c);text-decoration:none}
+.theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:7px 11px;cursor:pointer;font-size:1.1rem}
+.note{background:var(--bg);border:1px dashed var(--c);border-radius:9px;padding:10px 12px;font-size:.86rem;color:var(--muted);margin-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <span class="logo">🚀</span>
+  <h1>Rocket Altitude Tracker</h1>
+  <button class="theme" id="themeBtn" title="Toggle theme">🌙</button>
+</header>
+<p class="tag">Peak altitude from one tracking station's baseline and angle.</p>
+
+<div class="card">
+  <label for="base">Baseline distance to pad (feet)</label>
+  <input type="number" id="base" value="500" min="1" step="10">
+
+  <label for="angle">Measured elevation angle (degrees)</label>
+  <input type="number" id="angle" value="45" min="0" max="89.9" step="0.5">
+
+  <label for="eye">Tracker eye height (feet)</label>
+  <input type="number" id="eye" value="5" min="0" step="0.5">
+
+  <div class="out">
+    <div class="big" id="altOut">—</div>
+    <div class="sub">Estimated apogee</div>
+    <table>
+      <tr><th>Detail</th><th>Value</th></tr>
+      <tr><td>Altitude above eye</td><td id="rawOut">—</td></tr>
+      <tr><td>Slant range to rocket</td><td id="slantOut">—</td></tr>
+    </table>
+    <div class="note" id="note"></div>
+  </div>
+</div>
+
+<div class="card explain">
+  <h2>How it works</h2>
+  <ul>
+    <li>Stand a known <strong>baseline</strong> away from the pad and measure the <strong>elevation angle</strong> to the rocket at apogee with a tracker or altiscope.</li>
+    <li>Altitude above your eye = baseline &times; tan(angle). Add your <strong>eye height</strong> for altitude above the ground.</li>
+    <li>At <strong>45&deg;</strong> the altitude equals the baseline — a handy sanity check. The estimate gets touchy above ~80&deg;.</li>
+    <li><strong>Slant range</strong> = baseline &divide; cos(angle) is the straight-line distance to the rocket, always longer than the altitude.</li>
+    <li>Single-station assumes the rocket goes straight up over the pad. Wind drift is why clubs use two stations and average.</li>
+  </ul>
+</div>
+
+<footer>Part of the <a href="https://awictor.github.io/toolkit/" target="_blank" rel="noopener">Toolkit</a> · offline &amp; private · no data leaves your device</footer>
+</div>
+
+<script>
+function trackedAltitude(baseline, angleDeg){
+  if(!(baseline > 0)) throw new Error("baseline must be positive");
+  if(!(angleDeg >= 0 && angleDeg < 90)) throw new Error("angle must be 0-90 degrees");
+  return baseline * Math.tan(angleDeg * Math.PI / 180);
+}
+function slantRange(baseline, angleDeg){
+  if(!(baseline > 0)) throw new Error("baseline must be positive");
+  if(!(angleDeg >= 0 && angleDeg < 90)) throw new Error("angle must be 0-90 degrees");
+  return baseline / Math.cos(angleDeg * Math.PI / 180);
+}
+function apogee(baseline, angleDeg, eyeHeight){
+  var eye = (eyeHeight === undefined) ? 0 : eyeHeight;
+  if(!(eye >= 0)) throw new Error("eye height must be zero or more");
+  return trackedAltitude(baseline, angleDeg) + eye;
+}
+
+function render(){
+  var base = parseFloat(document.getElementById("base").value);
+  var angle = parseFloat(document.getElementById("angle").value);
+  var eye = parseFloat(document.getElementById("eye").value);
+  var aO = document.getElementById("altOut"), rO = document.getElementById("rawOut"),
+      sO = document.getElementById("slantOut"), note = document.getElementById("note");
+  try{
+    aO.textContent = Math.round(apogee(base, angle, eye)) + " ft";
+    rO.textContent = Math.round(trackedAltitude(base, angle)) + " ft";
+    sO.textContent = Math.round(slantRange(base, angle)) + " ft";
+    note.textContent = angle > 80 ? "Above 80° the estimate is very sensitive — move farther back." : "Single-station; use two stations and average to beat wind drift.";
+  }catch(e){
+    aO.textContent = "—"; rO.textContent = "—"; sO.textContent = "—";
+    note.textContent = "Enter a baseline and an elevation angle under 90°.";
+  }
+}
+
+(function(){
+  if(typeof document === "undefined") return;
+  var th = localStorage.getItem("rocketAltTheme") || "dark";
+  document.documentElement.setAttribute("data-theme", th);
+  var btn = document.getElementById("themeBtn");
+  btn.textContent = th === "dark" ? "☀️" : "🌙";
+  btn.addEventListener("click", function(){
+    var cur = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", cur);
+    localStorage.setItem("rocketAltTheme", cur);
+    btn.textContent = cur === "dark" ? "☀️" : "🌙";
+  });
+  ["base", "angle", "eye"].forEach(function(id){
+    document.getElementById(id).addEventListener("input", render);
+  });
+  render();
+})();
+
+if(typeof module !== 'undefined') module.exports = { trackedAltitude, slantRange, apogee };
+</script>
+</body>
+</html>

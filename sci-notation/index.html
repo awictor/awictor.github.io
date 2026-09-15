@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SciNotation — scientific &amp; engineering notation converter</title>
+<meta name="description" content="Free offline scientific and engineering notation converter with significant-figures counting and sig-fig rounding. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/sci-notation/">
+<style>
+  :root{
+    --c:#3f6212; --bg:#f8faf4; --fg:#181f0e; --muted:#5f6b4c;
+    --card:#ffffff; --border:#e2e9d3; --code:#eef3e2;
+  }
+  [data-theme="dark"]{
+    --bg:#12160b; --fg:#e9efdd; --muted:#9aa982; --card:#1a2011;
+    --border:#2c3719; --code:#212a14;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#84cc16);display:grid;place-items:center;color:#fff;font-size:20px}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:720px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  .row{display:flex;gap:12px;align-items:flex-end}
+  input{width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:1.15rem;font-family:ui-monospace,monospace}
+  input[type=number]{max-width:110px}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .err{color:#dc2626;font-size:.86rem;margin:12px 0 0;min-height:1.1em}
+  .grid{margin-top:18px;display:grid;grid-template-columns:1fr;gap:1px;
+    background:var(--border);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .cell{background:var(--card);padding:13px 16px;display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+  .cell .k{font-size:.8rem;color:var(--muted)}
+  .cell .v{font-family:ui-monospace,monospace;font-weight:700;font-size:1.1rem;color:var(--c);word-break:break-all;text-align:right}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('sci.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">×10ⁿ</div>
+  <div>
+    <h1>SciNotation</h1>
+    <p class="sub">Scientific &amp; engineering notation</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <div class="row">
+      <div style="flex:1">
+        <label for="num">Number</label>
+        <input id="num" value="12345.678" spellcheck="false" placeholder="e.g. 12345 or 1.2e-3">
+      </div>
+      <div>
+        <label for="sig">Sig figs</label>
+        <input type="number" id="sig" value="4" min="1" max="15">
+      </div>
+    </div>
+    <p class="err" id="err"></p>
+    <div class="grid" id="out"></div>
+    <p class="hint">Accepts plain decimals or existing scientific notation (<code>1.2e-3</code>).
+      Significant-figure count uses the standard rules (trailing zeros in a bare integer are not
+      counted). Runs entirely in your browser.</p>
+  </div>
+</main>
+<footer>
+  SciNotation is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/sci-notation">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function fromString(str){
+  var s = String(str).trim();
+  if(s === '') return null;
+  var n = Number(s);
+  return isFinite(n) ? n : null;
+}
+function toScientific(n, dp){
+  n = Number(n);
+  if(!isFinite(n)) return null;
+  return (dp === undefined || dp === null) ? n.toExponential() : n.toExponential(dp);
+}
+function roundSig(n, sig){
+  n = Number(n);
+  if(!isFinite(n) || !(sig > 0)) return null;
+  if(n === 0) return 0;
+  return Number(n.toPrecision(Math.min(sig, 100)));
+}
+function toEngineering(n, dp){
+  n = Number(n);
+  if(!isFinite(n)) return null;
+  if(n === 0) return { mantissa: 0, exponent: 0, str: '0e+0' };
+  var exp = Math.floor(Math.log10(Math.abs(n)) / 3) * 3;
+  var mant = n / Math.pow(10, exp);
+  var m = (dp === undefined || dp === null) ? mant : Number(mant.toFixed(dp));
+  return { mantissa: m, exponent: exp, str: m + 'e' + (exp >= 0 ? '+' : '') + exp };
+}
+function sigFigCount(str){
+  var s = String(str).trim().toLowerCase();
+  var m = s.match(/^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/);
+  if(!m) return null;
+  var num = m[1];
+  var hasDot = num.indexOf('.') !== -1;
+  var digits = num.replace('.', '').replace(/^0+/, '');
+  if(digits === '') return 1;              // the number is zero
+  if(hasDot) return digits.length;         // trailing zeros after a decimal count
+  return digits.replace(/0+$/, '').length; // bare integer: trailing zeros not significant
+}
+
+if(typeof module !== 'undefined') module.exports = {
+  fromString, toScientific, roundSig, toEngineering, sigFigCount
+};
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var numEl = document.getElementById('num');
+  var sigEl = document.getElementById('sig');
+  var errEl = document.getElementById('err');
+  var outEl = document.getElementById('out');
+  function cell(k, v){ return '<div class="cell"><span class="k">'+k+'</span><span class="v">'+v+'</span></div>'; }
+  function render(){
+    var n = fromString(numEl.value);
+    if(n === null){
+      errEl.textContent = 'Enter a valid number (e.g. 12345 or 1.2e-3).';
+      outEl.innerHTML = '';
+      return;
+    }
+    errEl.textContent = '';
+    var sig = Math.max(1, Math.min(15, Math.round(Number(sigEl.value) || 4)));
+    outEl.innerHTML =
+      cell('Standard', n.toString()) +
+      cell('Scientific', toScientific(n)) +
+      cell('Engineering', toEngineering(n, 3).str) +
+      cell('Rounded to ' + sig + ' sig figs', roundSig(n, sig)) +
+      cell('Sig figs in input', sigFigCount(numEl.value.trim()) === null ? '—' : sigFigCount(numEl.value.trim()));
+    try{ localStorage.setItem('sci.num', numEl.value); localStorage.setItem('sci.sig', sigEl.value); }catch(e){}
+  }
+  numEl.addEventListener('input', render);
+  sigEl.addEventListener('input', render);
+  try{
+    var sn = localStorage.getItem('sci.num'); if(sn !== null) numEl.value = sn;
+    var ss = localStorage.getItem('sci.sig'); if(ss !== null) sigEl.value = ss;
+  }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('sci.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('sci.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

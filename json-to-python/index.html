@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JSON to Python — generate dataclasses</title>
+<meta name="description" content="Convert JSON into Python @dataclass definitions with typing (List, Optional), nested classes, and inferred field types. Offline, no tracking.">
+<style>
+  :root{
+    --c:#3776ab;
+    --bg:#f2f5f9; --card:#ffffff; --fg:#141a24; --muted:#5c6472;
+    --line:#dde3ed; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#0d1017; --card:#161a23; --fg:#eceff5; --muted:#949cae;
+    --line:#252b37; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:960px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:24px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.4rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:960px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .opts{display:flex;gap:16px;align-items:end;margin-bottom:14px;flex-wrap:wrap}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  input[type=text]{font:inherit;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--fg)}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:680px){.cols{grid-template-columns:1fr}}
+  textarea{width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9rem;padding:12px;
+    border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);min-height:300px;resize:vertical;white-space:pre;overflow-wrap:normal}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .copy{margin-top:10px;background:var(--c);color:#fff;border:0;border-radius:10px;padding:9px 16px;cursor:pointer;font-weight:600}
+  .err{color:#dc2626;font-size:.85rem;margin-top:6px;min-height:18px}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🐍</div>
+  <div>
+    <h1>JSON to Python</h1>
+    <p>Generate @dataclass definitions from JSON</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="opts">
+      <div><label for="root">Root class name</label><input type="text" id="root" value="Root" style="width:160px"></div>
+    </div>
+    <div class="cols">
+      <div>
+        <label for="in">JSON</label>
+        <textarea id="in" spellcheck="false">{
+  "id": 42,
+  "name": "ada",
+  "score": 9.5,
+  "active": true,
+  "tags": ["admin", "dev"],
+  "address": { "city": "Paris", "zip": "75001" }
+}</textarea>
+        <div class="err" id="err"></div>
+      </div>
+      <div>
+        <label for="out">Python</label>
+        <textarea id="out" readonly></textarea>
+        <button class="copy" id="copy">Copy Python</button>
+      </div>
+    </div>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function typeOf(v){ if(v === null) return 'null'; if(Array.isArray(v)) return 'array'; return typeof v; }
+  function toPascal(s){
+    var parts = String(s).replace(/[^a-zA-Z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+    var out = parts.map(function(w){ return w.charAt(0).toUpperCase() + w.slice(1); }).join('');
+    return out || 'Root';
+  }
+  function pyFieldName(key){
+    var name = String(key).replace(/[^A-Za-z0-9_]/g, '_');
+    if(name === '' || /^[0-9]/.test(name)) name = '_' + name;
+    return name;
+  }
+  function singular(k){ return String(k).replace(/s$/, ''); }
+
+  function jsonToPython(obj, rootName){
+    rootName = toPascal(rootName || 'Root');
+    var classes = [], seen = {};
+    function pyType(v, key){
+      var t = typeOf(v);
+      if(t === 'null') return 'Optional[Any]';
+      if(t === 'boolean') return 'bool';
+      if(t === 'number') return Number.isInteger(v) ? 'int' : 'float';
+      if(t === 'string') return 'str';
+      if(t === 'array') return 'List[' + (v.length === 0 ? 'Any' : pyType(v[0], singular(key))) + ']';
+      var name = toPascal(key);
+      build(name, v);
+      return name;
+    }
+    function build(name, o){
+      if(seen[name]) return; seen[name] = true;
+      var entry = { name: name, fields: [] };
+      classes.push(entry);
+      entry.fields = Object.keys(o).map(function(k){ return { name: pyFieldName(k), type: pyType(o[k], k) }; });
+    }
+    if(typeOf(obj) !== 'object') throw new Error('top-level JSON must be an object');
+    build(rootName, obj);
+    var header = 'from __future__ import annotations\nfrom dataclasses import dataclass\nfrom typing import Any, List, Optional\n\n\n';
+    var body = classes.map(function(c){
+      var lines = c.fields.length
+        ? c.fields.map(function(f){ return '    ' + f.name + ': ' + f.type; }).join('\n')
+        : '    pass';
+      return '@dataclass\nclass ' + c.name + ':\n' + lines;
+    }).join('\n\n\n');
+    return header + body;
+  }
+
+  if(typeof module !== 'undefined') module.exports = { toPascal:toPascal, pyFieldName:pyFieldName, jsonToPython:jsonToPython };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var inp=document.getElementById('in'), out=document.getElementById('out'), err=document.getElementById('err'), root=document.getElementById('root');
+    function render(){
+      try{ var obj = JSON.parse(inp.value); err.textContent=''; out.value = jsonToPython(obj, root.value || 'Root'); }
+      catch(e){ err.textContent = '✗ ' + e.message; }
+    }
+    [inp, root].forEach(function(el){ el.addEventListener('input', render); });
+    document.getElementById('copy').addEventListener('click', function(){ if(navigator.clipboard) navigator.clipboard.writeText(out.value); });
+
+    var rootEl=document.documentElement, tb=document.getElementById('theme');
+    function setTheme(t){ rootEl.setAttribute('data-theme',t); tb.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('j2py-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('j2py-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    tb.addEventListener('click', function(){ setTheme(rootEl.getAttribute('data-theme')==='dark'?'light':'dark'); });
+
+    render();
+  }
+</script>
+</body>
+</html>

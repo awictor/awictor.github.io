@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sluice — four rate limiters, one traffic stream</title>
+<style>
+  :root{
+    --bg:#0f172a; --panelA:#131f38; --panelB:#0e1830; --text:#e6edf6; --sub:#93a4bd;
+    --edge:#26344f; --line:rgba(148,163,184,.16); --accept:#22c55e; --reject:#ef4444; --div:#f59e0b;
+  }
+  body.light{
+    --bg:#f5f3ef; --panelA:#ffffff; --panelB:#faf7f2; --text:#232f3e; --sub:#5b6875;
+    --edge:#e4ddd2; --line:rgba(100,116,139,.18); --accept:#16a34a; --reject:#dc2626; --div:#d97706;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--text);font:13px/1.4 ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial}
+  #wrap{max-width:1180px;margin:0 auto;padding:14px 16px 22px}
+  header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+  h1{font-size:19px;margin:0;letter-spacing:.3px}
+  h1 b{color:var(--accept)}
+  .tag{color:var(--sub);font-size:12px}
+  .bar{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;background:var(--panelB);
+    border:1px solid var(--edge);border-radius:10px;padding:10px 12px;margin-bottom:10px}
+  .grp{display:flex;flex-direction:column;gap:3px}
+  .grp>span{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--sub)}
+  .hint{text-transform:none;letter-spacing:0;font-style:normal;font-size:9.5px;color:var(--sub);opacity:.75}
+  .grp>div{display:flex;align-items:center;gap:6px}
+  input[type=number]{width:58px}
+  input,select{background:var(--bg);color:var(--text);border:1px solid var(--edge);border-radius:6px;padding:4px 6px;font:inherit}
+  input[type=range]{width:120px;padding:0;accent-color:var(--accept)}
+  button{background:var(--panelA);color:var(--text);border:1px solid var(--edge);border-radius:6px;
+    padding:5px 10px;font:inherit;cursor:pointer}
+  button:hover{border-color:var(--sub)}
+  button.on{background:var(--accept);color:#04120a;border-color:var(--accept)}
+  button.p{background:var(--div);color:#1a1200;border-color:var(--div)}
+  #burst:active,#burst.held{background:var(--reject);color:#170303;border-color:var(--reject)}
+  .val{color:var(--sub);min-width:34px;display:inline-block;font-variant-numeric:tabular-nums}
+  label.ck{display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;user-select:none}
+  canvas{width:100%;display:block;border:1px solid var(--edge);border-radius:10px;background:var(--panelB);cursor:default}
+  #tip{position:fixed;pointer-events:none;z-index:9;background:#000d;color:#fff;border:1px solid #ffffff33;
+    padding:6px 8px;border-radius:6px;font-size:11.5px;max-width:240px;display:none;box-shadow:0 4px 14px #0007}
+  #tip b{color:#ffd27a}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;color:var(--sub);font-size:11.5px;margin-top:8px}
+  .sw{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px;margin-right:4px}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <header>
+    <h1><b>Sluice</b></h1>
+    <span class="tag">Watch four rate-limiting algorithms decide the same traffic in real time.</span>
+  </header>
+
+  <div class="bar">
+    <div class="grp"><span>Traffic (req/s)</span><div><input type="range" id="rps" min="0" max="30" step="0.5"><i class="val" id="rpsv"></i></div></div>
+    <div class="grp"><span>Limit N <em class="hint">all four · rate=N/period</em></span><div><input type="number" id="N" min="1" max="200" title="Drives all four: window cap for Fixed/Sliding Window, and the refill/drain rate (N/period) for Token/Leaky Bucket."></div></div>
+    <div class="grp"><span>Period (s) <em class="hint">all four · rate=N/period</em></span><div><input type="number" id="period" min="0.5" max="60" step="0.5" title="Drives all four: window length for Fixed/Sliding Window, and the refill/drain rate (N/period) for Token/Leaky Bucket."></div></div>
+    <div class="grp"><span>Capacity <em class="hint">token · leaky only</em></span><div><input type="number" id="cap" min="1" max="400" title="Bucket size — affects Token Bucket (burst allowance) and Leaky Bucket (queue depth) only. Fixed/Sliding Window ignore it."></div></div>
+    <div class="grp"><span>Seed</span><div><input type="number" id="seed" min="0"></div></div>
+    <div class="grp"><span>Fire</span><div>
+      <button id="tap" title="Single manual request">Tap</button>
+      <button id="burst" title="Hold to spam requests">Burst ⏻</button>
+    </div></div>
+    <div class="grp"><span>Run</span><div>
+      <button id="pause" class="p">Pause</button>
+      <button id="step">Step</button>
+      <button id="reset">Reset</button>
+    </div></div>
+    <div class="grp"><span>Scenario</span><div>
+      <select id="scen">
+        <option value="custom">Custom</option>
+        <option value="steady">Steady</option>
+        <option value="bursty">Bursty</option>
+        <option value="herd">Thundering Herd</option>
+      </select>
+      <button id="edge" title="Deterministic window-boundary double-burst">Burst at window edge</button>
+    </div></div>
+    <div class="grp"><span>View</span><div>
+      <label class="ck"><input type="checkbox" id="divg" checked>Highlight divergences</label>
+      <button id="theme">◐ Theme</button>
+      <button id="share">Copy link</button>
+    </div></div>
+  </div>
+
+  <canvas id="cv"></canvas>
+  <div class="legend">
+    <span><i class="sw" style="background:var(--accept)"></i>accepted</span>
+    <span><i class="sw" style="background:var(--reject)"></i>rejected</span>
+    <span><i class="sw" style="background:var(--div)"></i>algorithms disagreed</span>
+    <span>faint verticals = fixed-window boundaries</span>
+    <span>dashed sparkline line = target rate (N/period)</span>
+    <span>hover a tick for the reason it was accepted/rejected</span>
+  </div>
+</div>
+<div id="tip"></div>
+
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const cv=$("cv"), ctx=cv.getContext("2d"), tip=$("tip");
+
+// ---- config ----
+const cfg={N:8,period:4,cap:8,rps:4,seed:1234,scen:"custom",theme:"dark",divg:true};
+const rate=()=>cfg.N/cfg.period;                 // tokens/leaks per second
+
+// ---- seeded RNG (mulberry32) ----
+let rngState=cfg.seed>>>0;
+function rng(){let x=(rngState+=0x6D2B79F5);x=Math.imul(x^x>>>15,x|1);x^=x+Math.imul(x^x>>>7,x|61);return((x^x>>>14)>>>0)/4294967296;}
+const expo=lam=>-Math.log(1-rng())/lam;
+
+// ---- limiters: each is a tiny state object sharing cfg ----
+function mkAlgos(){return[
+  {name:"Token Bucket",accent:"#38bdf8",tok:cfg.cap,lastT:0,served:[],acc:0,
+   meter(){return[this.tok/cfg.cap, this.tok.toFixed(1)+"/"+cfg.cap+" tok"];},
+   adv(t){this.tok=Math.min(cfg.cap,this.tok+rate()*(t-this.lastT));this.lastT=t;},
+   decide(t){if(this.tok>=1){const b=this.tok;this.tok-=1;this.served.push(t);
+       return{ok:true,why:`${b.toFixed(2)}→${this.tok.toFixed(2)} tokens (≥1)`};}
+     return{ok:false,why:`${this.tok.toFixed(2)} tokens < 1 — refills ${rate().toFixed(2)}/s`};}},
+
+  {name:"Leaky Bucket",accent:"#a78bfa",q:0,leak:0,lastT:0,served:[],acc:0,
+   meter(){return[this.q/cfg.cap, this.q.toFixed(0)+"/"+cfg.cap+" queued"];},
+   adv(t){this.leak+=rate()*(t-this.lastT);this.lastT=t;
+     while(this.leak>=1&&this.q>0){this.q--;this.leak-=1;this.served.push(t);}
+     if(this.q<=0)this.leak=0;},
+   decide(t){if(this.q<cfg.cap){this.q++;return{ok:true,why:`queued, depth ${this.q}/${cfg.cap} — drains ${rate().toFixed(2)}/s`};}
+     return{ok:false,why:`queue full ${cfg.cap}/${cfg.cap}`};}},
+
+  {name:"Fixed Window",accent:"#fb7185",cnt:0,win:-1,lastT:0,served:[],acc:0,
+   meter(){return[this.cnt/cfg.N, this.cnt+"/"+cfg.N+" this win"];},
+   adv(t){const w=Math.floor(t/cfg.period);if(w!==this.win){this.win=w;this.cnt=0;}this.lastT=t;},
+   decide(t){if(this.cnt<cfg.N){this.cnt++;this.served.push(t);
+       return{ok:true,why:`${this.cnt}/${cfg.N} in window #${this.win}`};}
+     return{ok:false,why:`${cfg.N}/${cfg.N} in window #${this.win} (resets @ ${((this.win+1)*cfg.period).toFixed(1)}s)`};}},
+
+  {name:"Sliding Window Log",accent:"#34d399",log:[],lastT:0,served:[],acc:0,
+   meter(){return[this.log.length/cfg.N, this.log.length+"/"+cfg.N+" in "+cfg.period+"s"];},
+   adv(t){const lo=t-cfg.period;while(this.log.length&&this.log[0]<=lo)this.log.shift();this.lastT=t;},
+   decide(t){if(this.log.length<cfg.N){this.log.push(t);this.served.push(t);
+       return{ok:true,why:`${this.log.length}/${cfg.N} in last ${cfg.period}s`};}
+     return{ok:false,why:`${cfg.N}/${cfg.N} in last ${cfg.period}s`};}},
+];}
+
+// ---- simulation state ----
+let algos,requests,t,nextArr,scheduled,burst,burstAcc,paused,totOffered,last,hist,herdT;
+function reset(){
+  rngState=cfg.seed>>>0;
+  algos=mkAlgos(); requests=[]; t=0; scheduled=[]; burst=false; burstAcc=0;
+  paused=false; totOffered=0; hist=algos.map(()=>[]); herdT=Infinity;
+  nextArr = cfg.rps>0 ? expo(cfg.rps) : Infinity;
+  applyScenario(cfg.scen,true);
+  $("pause").textContent="Pause";
+}
+function applyScenario(s,init){
+  if(s==="steady"){cfg.rps=+(rate()*0.9).toFixed(2);}
+  else if(s==="bursty"){cfg.rps=+(rate()*1.7).toFixed(2);}
+  else if(s==="herd"){cfg.rps=+(rate()*0.4).toFixed(2);
+    if(init)herdT=cfg.period;}   // re-armed each period in advance() so the herd keeps recurring
+  if(s==="steady"||s==="bursty"||s==="herd"){nextArr=t+(cfg.rps>0?expo(cfg.rps):Infinity);}
+  syncInputs();
+}
+function scheduleHerdBurst(bt){for(let j=0;j<2*cfg.N;j++)scheduled.push(bt+j*0.004);}
+// deterministic fixed-window double-burst at the next boundary
+function edgeBurst(){
+  const b=(Math.floor(t/cfg.period)+1)*cfg.period, n=cfg.N;
+  for(let j=0;j<n;j++)scheduled.push(b-0.45+j*(0.40/n));   // N just before the edge
+  for(let j=0;j<n;j++)scheduled.push(b+0.03+j*(0.40/n));   // N just after the edge
+  scheduled.sort((a,c)=>a-c);
+}
+
+function emit(tt){
+  const rec={t:tt,res:[]}; let ok0=null,div=false;
+  for(let i=0;i<4;i++){algos[i].adv(tt);const r=algos[i].decide(tt);rec.res.push(r);
+    if(r.ok)algos[i].acc++; if(ok0===null)ok0=r.ok; else if(r.ok!==ok0)div=true;}
+  rec.div=div; requests.push(rec); totOffered++;
+  if(requests.length>3000)requests.splice(0,requests.length-3000);
+}
+
+function advance(dt){
+  const t0=t; t+=dt;
+  // keep the Thundering Herd recurring: arm the next burst one period ahead
+  if(cfg.scen==="herd")while(herdT<=t+cfg.period){scheduleHerdBurst(herdT);herdT+=cfg.period;}
+  const arr=[];
+  if(cfg.rps>0)while(nextArr<=t){arr.push(nextArr);nextArr+=expo(cfg.rps);}
+  while(scheduled.length&&scheduled[0]<=t){arr.push(scheduled.shift());}
+  if(burst){burstAcc+=40*dt;while(burstAcc>=1){const f=(burstAcc-Math.floor(burstAcc));arr.push(t0+(t-t0)*Math.min(1,(1-f)));burstAcc-=1;}}
+  arr.sort((a,b)=>a-b);
+  for(const tt of arr)emit(Math.max(t0,Math.min(t,tt)));
+  const lo=t-cfg.period;
+  for(let i=0;i<4;i++){const a=algos[i];a.adv(t);while(a.served.length&&a.served[0]<=lo)a.served.shift();
+    hist[i].push({t,r:a.served.length/cfg.period});}
+  const hlo=t-viewSpan()-1;
+  for(let i=0;i<4;i++){const h=hist[i];while(h.length&&h[0].t<hlo)h.shift();}
+}
+
+// ---- geometry / rendering ----
+const rowH=128, padL=176, tlTop=26, tlH=52, spTop=88, spH=30;
+function viewSpan(){return Math.max(cfg.period*2.6,8);}
+function css(v){return getComputedStyle(document.body).getPropertyValue(v).trim();}
+let W=900;
+function resize(){W=cv.clientWidth||900;const dpr=Math.min(2,devicePixelRatio||1);
+  cv.width=W*dpr;cv.height=rowH*4*dpr;cv.style.height=(rowH*4)+"px";ctx.setTransform(dpr,0,0,dpr,0,0);}
+const tlX=()=>padL, tlW=()=>W-padL-14;
+const xFor=tt=>tlX()+ (tt-(t-viewSpan()))/viewSpan()*tlW();
+
+function draw(){
+  const P={bg:css("--panelB"),pa:css("--panelA"),tx:css("--text"),sub:css("--sub"),
+    edge:css("--edge"),line:css("--line"),ok:css("--accept"),no:css("--reject"),dv:css("--div")};
+  ctx.clearRect(0,0,W,rowH*4);
+  const x0=tlX(),w=tlW();
+  // per-row backgrounds + fixed-window boundary overlay + sparklines + meters
+  for(let i=0;i<4;i++){
+    const y=i*rowH, a=algos[i];
+    ctx.fillStyle=i%2?P.bg:P.pa; ctx.fillRect(0,y,W,rowH);
+    ctx.fillStyle=P.edge; ctx.fillRect(0,y+rowH-1,W,1);
+    // label + meter
+    ctx.fillStyle=a.accent; ctx.font="600 13px ui-sans-serif,system-ui"; ctx.fillText(a.name,12,y+18);
+    const[fill,mlab]=a.meter();
+    const mx=12,my=y+28,mw=padL-30,mh=13;
+    ctx.fillStyle=P.edge; roundRect(mx,my,mw,mh,4); ctx.fill();
+    const fw=Math.max(0,Math.min(1,fill))*mw;
+    ctx.fillStyle=fill>=0.999?P.no:a.accent; roundRect(mx,my,fw,mh,4); ctx.fill();
+    ctx.fillStyle=P.tx; ctx.font="11px ui-sans-serif,system-ui"; ctx.fillText(mlab,mx,my+27);
+    // stats
+    const acc=totOffered?100*a.acc/totOffered:0, rej=totOffered-a.acc, thr=a.served.length/cfg.period;
+    ctx.fillStyle=P.sub; ctx.font="11px ui-sans-serif,system-ui";
+    ctx.fillText(`accept ${acc.toFixed(0)}%  ·  reject ${rej}`,12,y+74);
+    ctx.fillText(`throughput ${thr.toFixed(2)}/s`,12,y+90);
+    // timeline frame
+    ctx.strokeStyle=P.edge; ctx.lineWidth=1; ctx.strokeRect(x0,y+tlTop,w,tlH);
+  }
+  // boundary verticals spanning all timelines
+  const yTop=tlTop, yBot=3*rowH+tlTop+tlH;
+  ctx.strokeStyle=P.line; ctx.lineWidth=1;
+  const firstWin=Math.ceil((t-viewSpan())/cfg.period);
+  for(let k=firstWin;;k++){const bx=xFor(k*cfg.period); if(bx>x0+w)break; if(bx<x0)continue;
+    ctx.beginPath();ctx.moveTo(bx,yTop);ctx.lineTo(bx,yBot);ctx.stroke();}
+  // sparklines (per row) with target-rate reference line
+  const maxR=Math.max(rate()*2.2,0.5);
+  for(let i=0;i<4;i++){const y=i*rowH,a=algos[i],h=hist[i];
+    const sy=y+spTop, base=sy+spH;
+    ctx.strokeStyle=P.edge;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x0,base);ctx.lineTo(x0+w,base);ctx.stroke();
+    ctx.setLineDash([3,3]);ctx.strokeStyle=P.sub;const ry=base-Math.min(1,rate()/maxR)*spH;
+    ctx.beginPath();ctx.moveTo(x0,ry);ctx.lineTo(x0+w,ry);ctx.stroke();ctx.setLineDash([]);
+    ctx.strokeStyle=a.accent;ctx.lineWidth=1.6;ctx.beginPath();let started=false;
+    for(const p of h){const px=xFor(p.t);if(px<x0-2)continue;if(px>x0+w)break;
+      const py=base-Math.min(1,p.r/maxR)*spH; if(!started){ctx.moveTo(px,py);started=true;}else ctx.lineTo(px,py);}
+    ctx.stroke();
+    ctx.fillStyle=P.sub;ctx.font="9.5px ui-sans-serif";ctx.fillText("eff. throughput",x0+3,sy-2);
+  }
+  // request ticks
+  for(const rec of requests){const x=xFor(rec.t); if(x<x0-1||x>x0+w+1)continue;
+    for(let i=0;i<4;i++){const y=i*rowH,r=rec.res[i];
+      ctx.strokeStyle=r.ok?P.ok:P.no; ctx.lineWidth=1.6;
+      ctx.beginPath();ctx.moveTo(x,y+tlTop+4);ctx.lineTo(x,y+tlTop+tlH-4);ctx.stroke();}
+  }
+  // divergence connectors
+  if(cfg.divg){for(const rec of requests){if(!rec.div)continue;const x=xFor(rec.t);
+    if(x<x0-1||x>x0+w+1)continue;
+    ctx.strokeStyle=P.dv;ctx.lineWidth=1;ctx.globalAlpha=.55;
+    ctx.beginPath();ctx.moveTo(x,yTop);ctx.lineTo(x,yBot);ctx.stroke();ctx.globalAlpha=1;
+    for(let i=0;i<4;i++){ctx.fillStyle=P.dv;ctx.beginPath();ctx.arc(x,i*rowH+tlTop+2,2.4,0,7);ctx.fill();}}}
+  // clock
+  ctx.fillStyle=P.sub;ctx.font="11px ui-sans-serif";
+  ctx.fillText("t = "+t.toFixed(1)+"s"+(paused?"  (paused)":""),x0+w-78,rowH*4-6);
+}
+function roundRect(x,y,w,h,r){r=Math.min(r,h/2,w/2);ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+
+// ---- loop ----
+function loop(now){const dt=Math.min(0.1,(now-last)/1000||0);last=now;
+  if(!paused)advance(dt); draw(); requestAnimationFrame(loop);}
+
+// ---- tooltip ----
+cv.addEventListener("mousemove",e=>{
+  const rc=cv.getBoundingClientRect(),mx=e.clientX-rc.left,my=e.clientY-rc.top;
+  const row=Math.floor(my/rowH), local=my-row*rowH;
+  const inBand=(row>=0&&row<=3&&local>=tlTop-4&&local<=tlTop+tlH+4&&mx>=tlX()&&mx<=tlX()+tlW());
+  cv.style.cursor=inBand?"crosshair":"default";     // probe cursor only over the interactive timeline band
+  if(!inBand){tip.style.display="none";return;}
+  let best=null,bd=9;
+  for(const rec of requests){const x=xFor(rec.t);const d=Math.abs(x-mx);if(d<bd){bd=d;best=rec;}}
+  if(!best){tip.style.display="none";return;}
+  const r=best.res[row];
+  tip.innerHTML=`<b>${algos[row].name}</b> · t=${best.t.toFixed(2)}s<br>`+
+    `<span style="color:${r.ok?'#7be0a0':'#ff9a9a'}">${r.ok?'ACCEPTED':'REJECTED'}</span> — ${r.why}`+
+    (best.div?`<br><span style="color:#ffd27a">⚠ algorithms disagreed here</span>`:``);
+  tip.style.display="block";
+  tip.style.left=Math.max(6,Math.min(innerWidth-tip.offsetWidth-8,e.clientX+12))+"px";
+  const ty=e.clientY+14;   // flip above the cursor when it would overflow the bottom edge
+  tip.style.top=(ty+tip.offsetHeight+8>innerHeight?Math.max(6,e.clientY-tip.offsetHeight-8):ty)+"px";
+});
+cv.addEventListener("mouseleave",()=>tip.style.display="none");
+
+// ---- controls ----
+function syncInputs(){$("rps").value=cfg.rps;$("rpsv").textContent=cfg.rps;$("N").value=cfg.N;
+  $("period").value=cfg.period;$("cap").value=cfg.cap;$("seed").value=cfg.seed;$("scen").value=cfg.scen;
+  $("divg").checked=cfg.divg;}
+function onParam(){cfg.N=clampi($("N").value,1,200,cfg.N);cfg.period=clampf($("period").value,0.5,60,cfg.period);
+  cfg.cap=clampi($("cap").value,1,400,cfg.cap);cfg.seed=clampi($("seed").value,0,1e9,cfg.seed);writeHash();}
+const clampi=(v,a,b,d)=>{v=parseInt(v);return isNaN(v)?d:Math.max(a,Math.min(b,v));};
+const clampf=(v,a,b,d)=>{v=parseFloat(v);return isNaN(v)?d:Math.max(a,Math.min(b,v));};
+$("rps").oninput=()=>{cfg.rps=+$("rps").value;$("rpsv").textContent=cfg.rps;
+  nextArr=t+(cfg.rps>0?expo(cfg.rps):Infinity);cfg.scen="custom";$("scen").value="custom";writeHash();};
+["N","period","cap"].forEach(id=>$(id).onchange=onParam);
+$("seed").onchange=()=>{onParam();reset();};
+$("tap").onclick=()=>emit(t);
+$("burst").addEventListener("pointerdown",e=>{e.preventDefault();burst=true;$("burst").classList.add("held");
+  if(e.target.setPointerCapture)try{e.target.setPointerCapture(e.pointerId);}catch(_){}});
+const stopBurst=()=>{burst=false;$("burst").classList.remove("held");};
+// capture keeps the pointer on the button, so dragging off no longer stops the burst — only release/cancel does
+["pointerup","pointercancel"].forEach(ev=>$("burst").addEventListener(ev,stopBurst));
+addEventListener("pointerup",stopBurst);
+$("pause").onclick=()=>{paused=!paused;$("pause").textContent=paused?"Resume":"Pause";$("pause").classList.toggle("on",paused);};
+$("step").onclick=()=>{paused=true;$("pause").textContent="Resume";$("pause").classList.add("on");advance(0.1);};
+$("reset").onclick=()=>{onParam();reset();};
+$("scen").onchange=()=>{cfg.scen=$("scen").value;writeHash();reset();};
+$("edge").onclick=()=>{if(paused){paused=false;$("pause").textContent="Pause";$("pause").classList.remove("on");}edgeBurst();};
+$("divg").onchange=()=>{cfg.divg=$("divg").checked;writeHash();};
+$("theme").onclick=()=>{cfg.theme=cfg.theme==="dark"?"light":"dark";document.body.classList.toggle("light",cfg.theme==="light");writeHash();};
+function legacyCopy(text){                       // file:// / insecure-context fallback
+  try{const ta=document.createElement("textarea");ta.value=text;ta.style.position="fixed";ta.style.opacity="0";
+    document.body.appendChild(ta);ta.focus();ta.select();
+    const ok=document.execCommand("copy");document.body.removeChild(ta);return ok;}catch(_){return false;}}
+$("share").onclick=async()=>{writeHash();const b=$("share"),url=location.href;
+  let ok=false;
+  if(navigator.clipboard&&navigator.clipboard.writeText){try{await navigator.clipboard.writeText(url);ok=true;}catch(_){}}
+  if(!ok)ok=legacyCopy(url);
+  b.textContent=ok?"Copied!":"Copy failed — Ctrl+C";   // never claim success unless the copy actually happened
+  setTimeout(()=>b.textContent="Copy link",1600);};
+addEventListener("resize",()=>{resize();});
+
+// ---- URL hash ----
+function writeHash(){const p=new URLSearchParams();
+  p.set("seed",cfg.seed);p.set("n",cfg.N);p.set("p",cfg.period);p.set("c",cfg.cap);
+  p.set("rps",cfg.rps);p.set("sc",cfg.scen);p.set("th",cfg.theme);p.set("dv",cfg.divg?1:0);
+  history.replaceState(null,"","#"+p.toString());}
+function readHash(){const h=location.hash.replace(/^#/,"");if(!h)return;const p=new URLSearchParams(h);
+  if(p.has("seed"))cfg.seed=clampi(p.get("seed"),0,1e9,cfg.seed);
+  if(p.has("n"))cfg.N=clampi(p.get("n"),1,200,cfg.N);
+  if(p.has("p"))cfg.period=clampf(p.get("p"),0.5,60,cfg.period);
+  if(p.has("c"))cfg.cap=clampi(p.get("c"),1,400,cfg.cap);
+  if(p.has("rps"))cfg.rps=clampf(p.get("rps"),0,60,cfg.rps);
+  if(p.has("sc"))cfg.scen=p.get("sc");
+  if(p.has("th"))cfg.theme=p.get("th")==="light"?"light":"dark";
+  if(p.has("dv"))cfg.divg=p.get("dv")==="1";}
+
+// ---- boot ----
+readHash();
+document.body.classList.toggle("light",cfg.theme==="light");
+resize(); syncInputs(); reset(); writeHash();
+last=performance.now(); requestAnimationFrame(loop);
+</script>
+</body>
+</html>

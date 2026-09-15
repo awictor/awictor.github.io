@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aircraft Fuel Endurance — flight time & range from fuel and burn</title>
+<meta name="description" content="Calculate an aircraft's endurance and still-air range from usable fuel, burn rate, and true airspeed, with a VFR reserve and fuel needed for a leg. Free, offline, single-file.">
+<style>
+  :root{--c:#1e40af;--bg:#f4f6fb;--fg:#0b1020;--card:#fff;--mut:#556080;--bd:#dde2f0;--in:#fff}
+  [data-theme="dark"]{--bg:#080b16;--fg:#e6ebf7;--card:#111726;--mut:#8b98b8;--bd:#212a42;--in:#0d1220}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5}
+  header{max-width:760px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{font-size:38px;line-height:1}
+  h1{font-size:1.5rem;margin:0}
+  .sub{color:var(--mut);font-size:.9rem;margin:2px 0 0}
+  main{max-width:760px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:20px;margin:16px 0}
+  label{display:block;font-size:.82rem;color:var(--mut);margin:10px 0 4px;font-weight:600}
+  input,select{width:100%;padding:11px 12px;border:1px solid var(--bd);border-radius:9px;background:var(--in);color:var(--fg);font-size:1rem}
+  .row{display:flex;gap:12px;flex-wrap:wrap}.row>div{flex:1;min-width:110px}
+  .out{display:flex;flex-wrap:wrap;gap:14px;margin-top:14px}
+  .stat{flex:1;min-width:150px;background:var(--in);border:1px solid var(--bd);border-radius:11px;padding:14px}
+  .stat.hi{background:var(--c);border-color:var(--c)}
+  .stat.hi .k,.stat.hi .v{color:#fff}
+  .stat .k{font-size:.72rem;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+  .stat .v{font-size:1.5rem;font-weight:700;color:var(--c);margin-top:3px}
+  .stat .v small{font-size:.8rem;color:var(--mut);font-weight:500}
+  .note{font-size:.85rem;color:var(--mut);margin-top:12px}
+  h2{font-size:1.05rem;margin:0 0 8px}
+  details{margin-top:6px}summary{cursor:pointer;font-weight:600;color:var(--c)}
+  .exp{font-size:.9rem;color:var(--mut)}.exp li{margin:5px 0}
+  footer{max-width:760px;margin:0 auto;padding:20px;text-align:center;color:var(--mut);font-size:.82rem}
+  a{color:var(--c)}
+  .tgl{margin-left:auto;background:none;border:1px solid var(--bd);color:var(--fg);border-radius:8px;padding:7px 11px;cursor:pointer;font-size:.85rem}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">✈️</div>
+  <div><h1>Aircraft Fuel Endurance</h1><p class="sub">Flight time &amp; range from fuel, burn &amp; airspeed</p></div>
+  <button class="tgl" id="tgl">☀️</button>
+</header>
+<main>
+  <div class="card">
+    <div class="row">
+      <div><label for="fuel">Total usable fuel (gal)</label><input id="fuel" type="number" min="0" step="1" value="40"></div>
+      <div><label for="burn">Fuel burn (gal/hr)</label><input id="burn" type="number" min="0.1" step="0.1" value="10"></div>
+    </div>
+    <div class="row">
+      <div><label for="tas">True airspeed (kt)</label><input id="tas" type="number" min="0" step="1" value="120"></div>
+      <div><label for="reserve">VFR reserve (min)</label><input id="reserve" type="number" min="0" step="5" value="45"></div>
+      <div><label for="leg">Leg distance (nm)</label><input id="leg" type="number" min="0" step="1" value="240"></div>
+    </div>
+    <div class="out" id="out"></div>
+    <div class="note" id="note"></div>
+  </div>
+  <div class="card">
+    <h2>How it works</h2>
+    <details open><summary>Endurance, range &amp; reserves</summary>
+    <ul class="exp">
+      <li><b>Endurance</b> = usable fuel ÷ burn rate. <b>Still-air range</b> = endurance × true airspeed.</li>
+      <li>A <b>VFR reserve</b> (30 min day, 45 min night in the US) is held back: usable-after-reserve = fuel − burn × reserve.</li>
+      <li><b>Fuel for a leg</b> = (distance ÷ TAS) × burn — always plan to land with your reserve intact.</li>
+      <li>This is still-air planning; real flights add wind, taxi, climb, and weather. Everything runs in your browser.</li>
+    </ul>
+    </details>
+  </div>
+</main>
+<footer>Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> — free, offline, single-file tools.</footer>
+<script>
+  function enduranceHours(usableGal, burnGph){ return burnGph > 0 ? usableGal / burnGph : 0; }
+  function rangeNm(usableGal, burnGph, tasKts){ return enduranceHours(usableGal, burnGph) * tasKts; }
+  function usableAfterReserve(totalGal, burnGph, reserveMin){
+    return Math.max(0, totalGal - burnGph * (reserveMin / 60));
+  }
+  function fuelForLegGal(distanceNm, tasKts, burnGph){ return tasKts > 0 ? (distanceNm / tasKts) * burnGph : 0; }
+
+  function hm(hours){
+    var t = Math.round(hours * 60), h = Math.floor(t / 60), m = t % 60;
+    return h + 'h ' + (m < 10 ? '0' : '') + m + 'm';
+  }
+  function r(n, d){ if(!isFinite(n)) return '–'; var f=Math.pow(10, d==null?1:d); return Math.round(n*f)/f; }
+  function render(){
+    var fuel=+document.getElementById('fuel').value||0;
+    var burn=+document.getElementById('burn').value||0;
+    var tas=+document.getElementById('tas').value||0;
+    var reserve=+document.getElementById('reserve').value||0;
+    var leg=+document.getElementById('leg').value||0;
+    var usable=usableAfterReserve(fuel, burn, reserve);
+    document.getElementById('out').innerHTML=
+      '<div class="stat hi"><div class="k">Endurance (total)</div><div class="v">'+hm(enduranceHours(fuel,burn))+'</div></div>'+
+      '<div class="stat hi"><div class="k">Range (total)</div><div class="v">'+r(rangeNm(fuel,burn,tas),0)+' <small>nm</small></div></div>'+
+      '<div class="stat"><div class="k">Usable after reserve</div><div class="v">'+r(usable,1)+' <small>gal</small></div></div>'+
+      '<div class="stat"><div class="k">Range w/ reserve</div><div class="v">'+r(rangeNm(usable,burn,tas),0)+' <small>nm</small></div></div>'+
+      '<div class="stat"><div class="k">Fuel for leg</div><div class="v">'+r(fuelForLegGal(leg,tas,burn),1)+' <small>gal</small></div></div>';
+    var need=fuelForLegGal(leg,tas,burn);
+    document.getElementById('note').textContent = need > usable
+      ? 'The '+leg+' nm leg needs '+r(need,1)+' gal but only '+r(usable,1)+' gal is usable after reserve — add fuel or a stop.'
+      : 'The '+leg+' nm leg needs '+r(need,1)+' gal, within the '+r(usable,1)+' gal usable after reserve.';
+  }
+
+  if(typeof document !== 'undefined'){
+    ['fuel','burn','tas','reserve','leg'].forEach(function(id){ document.getElementById(id).addEventListener('input',render); });
+    var KEY='fuel-endurance-theme';
+    var applyTheme=function(t){document.documentElement.setAttribute('data-theme',t);document.getElementById('tgl').textContent=t==='dark'?'☀️':'🌙';};
+    applyTheme(localStorage.getItem(KEY)||'dark');
+    document.getElementById('tgl').addEventListener('click',function(){
+      var t=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';
+      localStorage.setItem(KEY,t);applyTheme(t);
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { enduranceHours, rangeNm, usableAfterReserve, fuelForLegGal };
+</script>
+</body>
+</html>

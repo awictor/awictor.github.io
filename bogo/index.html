@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bogo — Buy-X-Get-Y Effective Discount Calculator</title>
+<meta name="description" content="Work out the real discount behind buy-one-get-one and buy-X-get-Y deals, plus the true price per item. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('bogo-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#16a34a;
+    --bg:#f2f8f4; --card:#ffffff; --fg:#12201a; --muted:#566b60; --line:#dcebe2; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#08130d; --card:#0f1d15; --fg:#e7f4ec; --muted:#84a394; --line:#1a2c21; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:640px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#15803d);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:640px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.78rem;color:var(--muted);margin-bottom:5px;font-weight:600}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .field{margin-bottom:14px}
+  input{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem}
+  .deal{text-align:center;color:var(--muted);font-size:.95rem;margin-bottom:6px}
+  .deal b{color:var(--fg)}
+  .out{text-align:center}
+  .big{font-size:3.2rem;font-weight:800;color:var(--c);line-height:1}
+  .u{color:var(--muted);font-size:.85rem}
+  .extra{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+  .box{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+  .box .v{font-size:1.3rem;font-weight:800}
+  .box .k{color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:640px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.8rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🛍️</div>
+    <div><h1>Bogo</h1><div class="sub">What's the real discount?</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div class="field"><label for="buy">Buy (at full price)</label><input type="number" id="buy" value="1" min="1" step="1"></div>
+      <div class="field"><label for="get">Get (discounted)</label><input type="number" id="get" value="1" min="1" step="1"></div>
+    </div>
+    <div class="grid">
+      <div class="field"><label for="disc">Discount on the "get" items (%)</label><input type="number" id="disc" value="100" min="0" max="100" step="5"></div>
+      <div class="field"><label for="price">Price per item (optional)</label><input type="number" id="price" value="10" min="0" step="0.5"></div>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card out">
+    <div class="deal" id="deal"></div>
+    <div class="big" id="pct">—</div>
+    <div class="u">effective discount</div>
+    <div class="extra">
+      <div class="box"><div class="v" id="perItem">—</div><div class="k">Price per item</div></div>
+      <div class="box"><div class="v" id="total">—</div><div class="k">Total for the bundle</div></div>
+    </div>
+  </div>
+</main>
+<footer>
+  "Buy one get one free" is really 50% off; "buy 2 get 1 free" is only 33%. Bogo turns any buy-X-get-Y deal into the true discount and per-item price. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/bogo">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  function chk(buy, get, discPct){
+    const b = Number(buy), g = Number(get), d = Number(discPct);
+    if(![b, g, d].every(Number.isFinite)) throw new Error('enter numbers');
+    if(!Number.isInteger(b) || b < 1) throw new Error('"buy" must be a positive integer');
+    if(!Number.isInteger(g) || g < 1) throw new Error('"get" must be a positive integer');
+    if(d < 0 || d > 100) throw new Error('discount must be 0–100%');
+    return { b, g, d };
+  }
+
+  // Effective discount (fraction) for "buy b, get g at discPct% off".
+  function effectiveDiscount(buy, get, discPct){
+    const { b, g, d } = chk(buy, get, discPct);
+    const paidUnits = b + g * (1 - d / 100);
+    const regularUnits = b + g;
+    return 1 - paidUnits / regularUnits;
+  }
+
+  // True price per item across the whole bundle.
+  function pricePerItem(unitPrice, buy, get, discPct){
+    const { b, g, d } = chk(buy, get, discPct);
+    const p = Number(unitPrice);
+    if(!Number.isFinite(p) || p < 0) throw new Error('price must be ≥ 0');
+    const total = p * (b + g * (1 - d / 100));
+    return { total, perItem: total / (b + g) };
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('pct')){
+    const $ = id => document.getElementById(id);
+    const money = n => '$' + (Math.round(n * 100) / 100).toFixed(2);
+
+    function render(){
+      try{
+        const buy = $('buy').value, get = $('get').value, disc = $('disc').value;
+        const eff = effectiveDiscount(buy, get, disc);
+        $('pct').textContent = (eff * 100).toFixed(1) + '%';
+        const dealTxt = Number(disc) === 100 ? 'free' : `${disc}% off`;
+        $('deal').innerHTML = `Buy <b>${buy}</b>, get <b>${get}</b> ${dealTxt} → you get ${Number(buy) + Number(get)} items`;
+        const pp = pricePerItem($('price').value, buy, get, disc);
+        $('perItem').textContent = money(pp.perItem);
+        $('total').textContent = money(pp.total);
+        $('err').textContent = '';
+      }catch(e){ $('pct').textContent = '—'; $('deal').textContent = ''; $('perItem').textContent = '—'; $('total').textContent = '—'; $('err').textContent = e.message; }
+    }
+    [...document.querySelectorAll('input')].forEach(el => el.addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('bogo-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { effectiveDiscount, pricePerItem };
+</script>
+</body>
+</html>

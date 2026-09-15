@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Barchan — tilt-to-marble sand-art sandbox</title>
+<style>
+  :root{ --bg:#0b0d12; --panel:#151a24; --panel2:#1c2431; --ink:#e7ecf3; --dim:#8a95a8; --accent:#ff7a3d; --line:#2a3444; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family:ui-sans-serif,system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; overflow:hidden; -webkit-user-select:none; user-select:none; }
+  #app{ display:flex; height:100%; align-items:stretch; }
+  #stage{ flex:1; display:flex; align-items:center; justify-content:center; position:relative; padding:14px; min-width:0; }
+  canvas#view{ background:#0d0f14; border-radius:10px; box-shadow:0 18px 60px rgba(0,0,0,.6), inset 0 0 0 1px var(--line);
+    max-height:96vh; max-width:100%; height:96vh; width:auto; touch-action:none; cursor:crosshair;
+    image-rendering:-moz-crisp-edges; image-rendering:-webkit-optimize-contrast; image-rendering:crisp-edges; image-rendering:pixelated; }
+  #bar{ width:212px; flex:none; background:var(--panel); border-right:1px solid var(--line); padding:14px 13px; display:flex; flex-direction:column; gap:12px; overflow-y:auto; }
+  .brand{ display:flex; align-items:baseline; gap:8px; }
+  .brand h1{ font-size:20px; margin:0; letter-spacing:.5px; }
+  .brand h1 b{ color:var(--accent); }
+  .brand span{ font-size:10.5px; color:var(--dim); }
+  .grp{ display:flex; flex-direction:column; gap:6px; }
+  .lbl{ font-size:10px; text-transform:uppercase; letter-spacing:1.1px; color:var(--dim); margin-bottom:1px; }
+  .row{ display:flex; gap:6px; flex-wrap:wrap; }
+  button{ font:inherit; color:var(--ink); background:var(--panel2); border:1px solid var(--line); border-radius:8px;
+    padding:7px 9px; cursor:pointer; font-size:12.5px; flex:1; transition:.12s; }
+  button:hover{ border-color:var(--accent); }
+  button.on{ background:var(--accent); color:#1a1005; border-color:var(--accent); font-weight:600; }
+  .sw{ width:26px; height:26px; border-radius:6px; border:2px solid transparent; cursor:pointer; flex:none; padding:0; }
+  .sw.on{ border-color:#fff; transform:scale(1.08); }
+  input[type=range]{ width:100%; accent-color:var(--accent); }
+  #dialWrap{ display:flex; flex-direction:column; align-items:center; gap:6px; }
+  #dial{ width:120px; height:120px; border-radius:50%; background:radial-gradient(circle at 50% 40%,#212c3c,#10151d);
+    position:relative; border:1px solid var(--line); cursor:grab; touch-action:none; box-shadow:inset 0 2px 10px rgba(0,0,0,.5); }
+  #dial:active{ cursor:grabbing; }
+  #needle{ position:absolute; left:50%; top:50%; width:4px; height:46px; background:linear-gradient(var(--accent),#ffd0a8);
+    border-radius:3px; transform-origin:top center; transform:translate(-50%,0); }
+  #hub{ position:absolute; left:50%; top:50%; width:12px; height:12px; border-radius:50%; background:#fff; transform:translate(-50%,-50%); }
+  .tick{ position:absolute; left:50%; top:50%; width:2px; height:6px; background:var(--line); }
+  .tick.card{ height:9px; background:var(--dim); }
+  .tick.down{ background:var(--accent); height:11px; width:3px; }
+  .angle{ font-size:12px; color:var(--dim); font-variant-numeric:tabular-nums; }
+  #empty{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none;
+    color:var(--dim); font-size:15px; letter-spacing:.3px; text-shadow:0 1px 4px #000; opacity:0; transition:.4s; }
+  #empty.show{ opacity:.85; }
+  #toast{ position:absolute; bottom:18px; left:50%; transform:translateX(-50%); background:#000c; border:1px solid var(--accent);
+    color:#fff; padding:8px 14px; border-radius:8px; font-size:12.5px; opacity:0; transition:.3s; pointer-events:none; }
+  #toast.show{ opacity:1; }
+  .hint{ font-size:10.5px; color:var(--dim); line-height:1.5; }
+  kbd{ background:var(--panel2); border:1px solid var(--line); border-radius:4px; padding:0 4px; font-size:10px; }
+  @media (max-width:640px){
+    #app{ flex-direction:column; }
+    #bar{ width:100%; flex-direction:row; flex-wrap:wrap; align-items:flex-start; border-right:none; border-bottom:1px solid var(--line); }
+    #bar .grp{ flex:1 1 130px; }
+    canvas#view{ height:auto; max-height:58vh; width:96vw; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="bar">
+    <div class="brand"><h1>Lo<b>ess</b></h1><span>tilt · pour · marble</span></div>
+
+    <div class="grp">
+      <div class="lbl">Tool</div>
+      <div class="row" id="tools">
+        <button data-tool="pour" class="on">Pour</button>
+        <button data-tool="wall">Wall</button>
+        <button data-tool="erase">Erase</button>
+        <button data-tool="shake">Shake</button>
+      </div>
+      <div class="row"><button id="clear" style="flex:1">Clear all</button></div>
+    </div>
+
+    <div class="grp">
+      <div class="lbl">Brush · <span id="bsz" class="angle">6</span></div>
+      <input id="brush" type="range" min="1" max="18" value="6" aria-label="Brush size">
+    </div>
+
+    <div class="grp">
+      <div class="lbl">Sediment <span id="autoTag" class="angle">(auto-band)</span></div>
+      <div class="row" id="swatches"></div>
+    </div>
+
+    <div class="grp">
+      <div class="lbl">Palette</div>
+      <div class="row" id="themes">
+        <button data-pal="0" class="on">Desert</button>
+        <button data-pal="1">Aurora</button>
+        <button data-pal="2">Ember</button>
+      </div>
+    </div>
+
+    <div class="grp" id="dialWrap">
+      <div class="lbl">Gravity</div>
+      <div id="dial" role="slider" aria-label="Gravity direction" tabindex="0"><div id="needle"></div><div id="hub"></div></div>
+      <div class="angle" id="angleTxt">0°</div>
+      <button id="pend" style="flex:none;width:100%">Pendulum: off</button>
+    </div>
+
+    <div class="grp">
+      <div class="row">
+        <button id="share">Share</button>
+        <button id="png">PNG</button>
+      </div>
+    </div>
+
+    <div class="hint">Drag the dial or use <kbd>←</kbd><kbd>→</kbd> to tilt gravity.
+      <kbd>Space</kbd> pendulum · <kbd>[</kbd><kbd>]</kbd> brush. Pour long strokes to lay strata, then tilt to marble.</div>
+  </aside>
+
+  <div id="stage">
+    <canvas id="view"></canvas>
+    <div id="empty">Drag on the canvas to pour sand</div>
+    <div id="toast"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+// ---- grid ----
+const W = 200, H = 240, N = W*H, SC = 3, cW = W*SC, cH = H*SC;
+const grid = new Uint8Array(N);          // 0 empty, 1 wall, 2..6 sediment
+const jit  = new Int8Array(N);           // per-grain brightness jitter (texture / marbling identity)
+const movedStamp = new Int32Array(N);    // last frame a cell moved (prevents double moves)
+const actStamp = new Int32Array(N);      // dedup for active list
+let active = [], curStamp = 1, frame = 0;
+
+const PALETTES = [
+  { name:"Desert", cols:[[232,192,125],[216,155,90],[181,113,58],[124,74,45],[236,217,160]] },
+  { name:"Aurora", cols:[[61,220,151],[46,196,182],[91,140,255],[155,93,229],[241,91,181]] },
+  { name:"Ember",  cols:[[255,209,102],[243,114,44],[230,57,70],[157,2,8],[90,20,30]] },
+];
+let paletteIdx = 0;
+let PAL = buildPal();
+const WALL = [74,78,87], BG = [13,15,20];
+function buildPal(){ const p=[BG, WALL]; for(const c of PALETTES[paletteIdx].cols) p.push(c); return p; }
+
+// ---- state ----
+let grav = 0;                 // radians; 0 = straight down. gx=sin, gy=cos
+let curDirs = [[0,1],[1,1],[-1,1]];
+let tool = "pour", brush = 6, pendulum = false, penCount = 0;
+let lockColor = null;         // null => auto-band, else fixed sediment index (0-based)
+const dust = [];
+
+// ---- canvas ----
+const view = document.getElementById("view");
+const emptyEl = document.getElementById("empty");
+view.width = cW; view.height = cH;
+const ctx = view.getContext("2d");
+const bcan = document.createElement("canvas"); bcan.width = W; bcan.height = H;
+const bctx = bcan.getContext("2d");
+const img = bctx.createImageData(W, H);
+const buf = img.data;
+
+// ---- active-cell tracking ----
+function activate(i){ if(i>=0 && i<N && actStamp[i]!==curStamp){ actStamp[i]=curStamp; active.push(i); } }
+function activateN(x,y){ // wake 8-neighborhood
+  for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+    const nx=x+dx, ny=y+dy; if(nx>=0&&nx<W&&ny>=0&&ny<H) activate(ny*W+nx);
+  }
+}
+function activateAll(){ for(let i=0;i<N;i++) if(grid[i]>=2) activate(i); }
+
+// gravity -> ordered candidate moves: [straight, diag toward gx, other diag]
+function fallDirs(gx,gy){
+  if(Math.abs(gy) >= Math.abs(gx)){
+    const sy = gy>=0?1:-1, sx = gx>=0?1:-1;
+    return [[0,sy],[sx,sy],[-sx,sy]];
+  } else {
+    const sx = gx>=0?1:-1, sy = gy>=0?1:-1;
+    return [[sx,0],[sx,sy],[sx,-sy]];
+  }
+}
+
+// ---- simulation step (only active cells) ----
+function step(){
+  const gx = Math.sin(grav), gy = Math.cos(grav);
+  curDirs = fallDirs(gx,gy);
+  const d0 = curDirs[0], d1 = curDirs[1], d2 = curDirs[2];
+  const pref = 0.5 + 0.45*Math.abs(gx);   // probabilistic lateral bias for smooth tilt
+  const consume = active;
+  active = []; curStamp++; frame++;
+
+  for(let k=0;k<consume.length;k++){
+    const i = consume[k];
+    const t = grid[i];
+    if(t < 2) continue;                    // empty or wall: not simulated
+    if(movedStamp[i] === frame) continue;  // already moved as a destination this frame
+    const x = i % W, y = (i - x) / W;
+
+    // 1) straight downhill
+    if(tryMove(i,x,y,d0[0],d0[1])) continue;
+    // 2) diagonal slide (angle of repose), biased by gx
+    let a=d1, b=d2;
+    if(Math.random() >= pref){ a=d2; b=d1; }
+    if(tryMove(i,x,y,a[0],a[1])) continue;
+    tryMove(i,x,y,b[0],b[1]);
+    // if none succeeded the grain rests and is dropped from the active set
+  }
+}
+function tryMove(i,x,y,dx,dy){
+  const nx=x+dx, ny=y+dy;
+  if(nx<0||nx>=W||ny<0||ny>=H) return false;
+  const j = ny*W+nx;
+  if(grid[j] !== 0) return false;
+  // move grain (carry colour + texture id)
+  grid[j]=grid[i]; jit[j]=jit[i]; grid[i]=0; movedStamp[j]=frame;
+  activateN(x,y); activateN(nx,ny); activate(j);
+  // dust on impact: landed onto a solid surface
+  const fx=nx+curDirs[0][0], fy=ny+curDirs[0][1];
+  if(Math.random()<0.045 && (fx<0||fx>=W||fy<0||fy>=H || grid[fy*W+fx]!==0)) spawnDust(nx,ny,grid[j]);
+  return true;
+}
+
+// ---- dust motes ----
+function spawnDust(x,y,t){
+  if(dust.length>250) return;
+  const c = PAL[t] || WALL;
+  dust.push({ x, y, vx:(Math.random()-0.5)*0.7, vy:(Math.random()-0.5)*0.6-0.25,
+    life:14+Math.random()*10, max:24, r:c[0], g:c[1], b:c[2] });
+}
+function updateDust(){
+  const gx=Math.sin(grav)*0.05, gy=Math.cos(grav)*0.05;
+  for(let k=dust.length-1;k>=0;k--){ const p=dust[k];
+    p.vx=p.vx*0.9+gx; p.vy=p.vy*0.9+gy; p.x+=p.vx; p.y+=p.vy;
+    if(--p.life<=0) dust.splice(k,1);
+  }
+}
+
+// ---- render (depth shading + dust) ----
+let anyGrain=false;
+function render(){
+  const pdx=curDirs[0][0], pdy=curDirs[0][1];
+  anyGrain=false;
+  for(let i=0;i<N;i++){
+    const t=grid[i], o=i*4;
+    if(t===0){ buf[o]=BG[0]; buf[o+1]=BG[1]; buf[o+2]=BG[2]; buf[o+3]=255; continue; }
+    let r,g,b;
+    if(t===1){ r=WALL[0]; g=WALL[1]; b=WALL[2]; }
+    else {
+      anyGrain=true;
+      const c=PAL[t]||WALL; r=c[0]; g=c[1]; b=c[2];
+      // depth: distance from surface along -gravity (deeper => darker => 3D sand-bottle look)
+      const x=i%W, y=(i-x)/W; let d=0, xx=x-pdx, yy=y-pdy;
+      while(d<13){ if(xx<0||xx>=W||yy<0||yy>=H) break; if(grid[yy*W+xx]===0) break; d++; xx-=pdx; yy-=pdy; }
+      const f=1 - d*0.042; r*=f; g*=f; b*=f;
+    }
+    const j=jit[i]; r+=j; g+=j; b+=j;
+    buf[o]  = r<0?0:r>255?255:r;
+    buf[o+1]= g<0?0:g>255?255:g;
+    buf[o+2]= b<0?0:b>255?255:b;
+    buf[o+3]=255;
+  }
+  bctx.putImageData(img,0,0);
+  ctx.imageSmoothingEnabled=false;
+  ctx.drawImage(bcan,0,0,cW,cH);
+  for(const p of dust){ ctx.fillStyle=`rgba(${p.r|0},${p.g|0},${p.b|0},${(p.life/p.max*0.55).toFixed(3)})`;
+    ctx.fillRect(p.x*SC,p.y*SC,SC,SC); }
+  // brush preview ring while pointer is over the canvas
+  if(hovering){
+    ctx.beginPath();
+    ctx.arc(hovX*SC, hovY*SC, brush*SC, 0, Math.PI*2);
+    ctx.strokeStyle = tool==="erase" ? "rgba(255,255,255,.5)" : "rgba(255,122,61,.7)";
+    ctx.lineWidth = 1.5; ctx.stroke();
+  }
+  emptyEl.classList.toggle("show", !anyGrain);
+}
+
+// ---- main loop ----
+function loop(){
+  if(pointerDown) applyTool();
+  if(pendulum){ grav += 0.0065; if(grav>Math.PI*2) grav-=Math.PI*2; updateNeedle(); if((++penCount)%3===0) activateAll(); }
+  step();
+  updateDust();
+  render();
+  requestAnimationFrame(loop);
+}
+
+// ---- tools / painting ----
+let pointerDown=false, ptX=0, ptY=0;
+function eventCell(e){
+  const r=view.getBoundingClientRect();
+  ptX=Math.floor((e.clientX-r.left)/r.width*W);
+  ptY=Math.floor((e.clientY-r.top)/r.height*H);
+}
+function pourType(){
+  const n=PALETTES[paletteIdx].cols.length;
+  if(lockColor!=null) return 2+lockColor;
+  return 2 + (Math.floor(Date.now()/230) % n);   // auto-band while pouring
+}
+function applyTool(){
+  const cx=ptX, cy=ptY, R=brush, R2=R*R, pt=pourType();
+  for(let dy=-R;dy<=R;dy++) for(let dx=-R;dx<=R;dx++){
+    if(dx*dx+dy*dy>R2) continue;
+    const x=cx+dx, y=cy+dy; if(x<0||x>=W||y<0||y>=H) continue;
+    const i=y*W+x;
+    if(tool==="pour"){ if(grid[i]===0 && Math.random()<0.62){ grid[i]=pt; jit[i]=(Math.random()*24-12)|0; activateN(x,y);} }
+    else if(tool==="wall"){ grid[i]=1; jit[i]=(Math.random()*10-5)|0; activateN(x,y); }
+    else if(tool==="erase"){ if(grid[i]!==0){ grid[i]=0; activateN(x,y);} }
+    else if(tool==="shake"){ // fluidize: swap grains with a random empty neighbour
+      if(grid[i]>=2 && Math.random()<0.5){
+        const rx=x+((Math.random()*3|0)-1), ry=y+((Math.random()*3|0)-1);
+        if(rx>=0&&rx<W&&ry>=0&&ry<H){ const j=ry*W+rx; if(grid[j]===0){ grid[j]=grid[i]; jit[j]=jit[i]; grid[i]=0; } }
+        activateN(x,y);
+      }
+    }
+  }
+}
+let hovering=false, hovX=0, hovY=0;
+function hoverCell(e){ const r=view.getBoundingClientRect();
+  hovX=(e.clientX-r.left)/r.width*W; hovY=(e.clientY-r.top)/r.height*H; }
+view.addEventListener("pointerdown", e=>{ pointerDown=true; eventCell(e); view.setPointerCapture(e.pointerId); });
+view.addEventListener("pointermove", e=>{ hovering=true; hoverCell(e); if(pointerDown) eventCell(e); });
+view.addEventListener("pointerenter", e=>{ hovering=true; hoverCell(e); });
+view.addEventListener("pointerleave", ()=>{ hovering=false; });
+window.addEventListener("pointerup", ()=>{ pointerDown=false; });
+
+// ---- gravity dial ----
+const dial=document.getElementById("dial"), needle=document.getElementById("needle"), angleTxt=document.getElementById("angleTxt");
+function updateNeedle(){
+  needle.style.transform=`translate(-50%,0) rotate(${-grav}rad)`;
+  angleTxt.textContent=Math.round(((grav*180/Math.PI)%360+360)%360)+"°";
+}
+// orientation reference marks around the dial rim (0deg = down = gravity default)
+function buildDialTicks(){
+  for(let k=0;k<12;k++){
+    const t=document.createElement("div");
+    const card = k%3===0;
+    t.className="tick"+(k===6?" down":card?" card":"");
+    // k=6 -> bottom (down = gravity 0). ticks sit radially on the rim.
+    t.style.transform=`translate(-50%,-50%) rotate(${k*30}deg) translateY(-52px)`;
+    dial.appendChild(t);
+  }
+}
+let dialDown=false;
+function dialSet(e){
+  const r=dial.getBoundingClientRect(), ex=e.clientX-(r.left+r.width/2), ey=e.clientY-(r.top+r.height/2);
+  grav=Math.atan2(ex,ey); updateNeedle(); activateAll();
+}
+dial.addEventListener("pointerdown", e=>{ dialDown=true; dial.setPointerCapture(e.pointerId); dialSet(e); });
+dial.addEventListener("pointermove", e=>{ if(dialDown) dialSet(e); });
+window.addEventListener("pointerup", ()=>{ dialDown=false; });
+
+// ---- UI wiring ----
+const swatchWrap=document.getElementById("swatches"), autoTag=document.getElementById("autoTag");
+function buildSwatches(){
+  swatchWrap.innerHTML="";
+  PALETTES[paletteIdx].cols.forEach((c,idx)=>{
+    const b=document.createElement("button");
+    b.className="sw"+(lockColor===idx?" on":""); b.style.flex="none";
+    b.style.background=`rgb(${c[0]},${c[1]},${c[2]})`;
+    b.title="Sediment "+(idx+1); b.setAttribute("aria-label","Sediment "+(idx+1));
+    b.onclick=()=>{ lockColor = (lockColor===idx? null : idx); buildSwatches(); autoTag.textContent = lockColor==null?"(auto-band)":"(locked)"; };
+    swatchWrap.appendChild(b);
+  });
+}
+document.getElementById("tools").addEventListener("click", e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  tool=b.dataset.tool;
+  [...e.currentTarget.children].forEach(x=>x.classList.toggle("on", x===b));
+});
+document.getElementById("themes").addEventListener("click", e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  paletteIdx=+b.dataset.pal; PAL=buildPal();
+  [...e.currentTarget.children].forEach(x=>x.classList.toggle("on", x===b));
+  buildSwatches();
+});
+const brushEl=document.getElementById("brush"), bsz=document.getElementById("bsz");
+brushEl.oninput=()=>{ brush=+brushEl.value; bsz.textContent=brush; };
+document.getElementById("clear").onclick=()=>{ grid.fill(0); dust.length=0; active=[]; toast("Cleared"); };
+const pendBtn=document.getElementById("pend");
+pendBtn.onclick=()=>{ pendulum=!pendulum; pendBtn.classList.toggle("on",pendulum); pendBtn.textContent="Pendulum: "+(pendulum?"on":"off"); if(pendulum) activateAll(); };
+document.getElementById("png").onclick=()=>{
+  const a=document.createElement("a"); a.download="barchan.png"; a.href=view.toDataURL("image/png"); a.click(); toast("PNG saved");
+};
+const SHARE_LIMIT=8000;   // keep URLs within common paste/address-bar limits
+document.getElementById("share").onclick=()=>{
+  const h=encodeState();
+  if(h.length>SHARE_LIMIT){
+    toast("Scene too detailed to share via URL — use PNG");
+    return;
+  }
+  location.hash=h;
+  const url=location.href;
+  if(navigator.clipboard) navigator.clipboard.writeText(url).then(()=>toast("Share URL copied"),()=>toast("URL in address bar"));
+  else toast("URL in address bar");
+};
+
+// keyboard
+window.addEventListener("keydown", e=>{
+  // don't fight focused form controls (e.g. the brush slider)
+  const tn=e.target && e.target.tagName;
+  if(tn==="INPUT"||tn==="TEXTAREA"||tn==="SELECT") return;
+  if(e.key==="ArrowLeft"){ e.preventDefault(); grav-=0.06; updateNeedle(); activateAll(); }
+  else if(e.key==="ArrowRight"){ e.preventDefault(); grav+=0.06; updateNeedle(); activateAll(); }
+  else if(e.key===" "){ e.preventDefault(); pendBtn.click(); }
+  else if(e.key==="["){ brush=Math.max(1,brush-1); brushEl.value=brush; bsz.textContent=brush; }
+  else if(e.key==="]"){ brush=Math.min(18,brush+1); brushEl.value=brush; bsz.textContent=brush; }
+});
+
+let toastT;
+function toast(msg){ const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show");
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),1400); }
+
+// ---- shareable hash: header + RLE, base64 ----
+function encodeState(){
+  const bytes=[1, Math.round(((grav%(2*Math.PI))+2*Math.PI)%(2*Math.PI)/(2*Math.PI)*255), paletteIdx];
+  let i=0;
+  while(i<N){ const t=grid[i]; let run=1; while(i+run<N && grid[i+run]===t && run<65535) run++;
+    bytes.push(t, run&255, (run>>8)&255); i+=run; }
+  let s=""; for(let k=0;k<bytes.length;k++) s+=String.fromCharCode(bytes[k]);
+  return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+function decodeState(h){
+  try{
+    const s=atob(h.replace(/-/g,"+").replace(/_/g,"/"));
+    if(s.length<6) return false;                       // too short to be a real payload
+    const b=new Array(s.length); for(let k=0;k<s.length;k++) b[k]=s.charCodeAt(k);
+    let p=0; const ver=b[p++]; if(ver!==1) return false; // version guard
+    const ang=b[p++]; const pIdx=(b[p++]||0)%PALETTES.length;
+    const maxT = 1 + PALETTES[pIdx].cols.length;        // highest valid cell value for this palette
+    // validate the whole RLE stream before mutating grid
+    let q=p, i=0;
+    while(q+2<b.length && i<N){ const t=b[q++], run=b[q++]|(b[q++]<<8);
+      if(t>maxT) return false;                          // out-of-range cell -> reject, fall back to seed
+      i+=run; }
+    // accepted: commit
+    paletteIdx=pIdx; PAL=buildPal(); grav=ang/255*2*Math.PI;
+    grid.fill(0); i=0;
+    while(p+2<b.length && i<N){ const t=b[p++], run=b[p++]|(b[p++]<<8); for(let k=0;k<run&&i<N;k++) grid[i++]=t; }
+    for(let k=0;k<N;k++) jit[k]=(Math.random()*24-12)|0;
+    return true;
+  }catch(e){ return false; }
+}
+
+// ---- seed a layered scene ----
+function seedBands(){
+  grid.fill(0);
+  const cols=PALETTES[paletteIdx].cols.length, top=Math.floor(H*0.30);
+  for(let y=top;y<H;y++){
+    const band = 2 + Math.floor((y-top)/((H-top)/cols)) % cols;
+    for(let x=0;x<W;x++){ const i=y*W+x; grid[i]=band; jit[i]=(Math.random()*24-12)|0; }
+  }
+}
+
+// ---- boot ----
+function boot(){
+  const h=location.hash.slice(1);
+  if(!(h && decodeState(h))){ seedBands(); }
+  else { /* re-sync theme buttons */ [...document.getElementById("themes").children].forEach((x,ix)=>x.classList.toggle("on",ix===paletteIdx)); }
+  buildSwatches(); buildDialTicks(); updateNeedle(); bsz.textContent=brush;
+  activateAll();
+  requestAnimationFrame(loop);
+}
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,1595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Retrograde — a 16-bit CPU you can rewind</title>
+<meta name="description" content="Retrograde is a self-contained fantasy 16-bit CPU with an in-page assembler, animated execution view, a 64x64 framebuffer, and a full time-travel debugger.">
+<style>
+  :root{
+    --bg:#0b0d17; --panel:#141726; --panel2:#0f1220; --ink:#e7e3d8; --dim:#8b90a8;
+    --accent:#ffa300; --accent2:#29adff; --green:#00e436; --red:#ff004d; --pink:#ff77a8;
+    --line:#242a41; --font:"SF Mono",ui-monospace,"Cascadia Mono","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:radial-gradient(1200px 800px at 70% -10%,#1a1f38 0,var(--bg) 60%);color:var(--ink);
+    font-family:var(--font);font-size:13px;line-height:1.4;overflow:hidden}
+  button,input,select{font-family:inherit;font-size:12px;color:var(--ink)}
+  button{background:#1c2136;border:1px solid var(--line);border-radius:6px;padding:5px 9px;cursor:pointer;transition:.12s}
+  button:hover{background:#262c47;border-color:#39406a}
+  button.on{background:var(--accent);color:#1a1200;border-color:var(--accent);font-weight:700}
+  button:disabled{opacity:.4;cursor:default}
+  select,input[type=text]{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
+  a{color:var(--accent2)}
+  .app{display:grid;grid-template-rows:auto 1fr auto;height:100vh;gap:8px;padding:8px}
+
+  /* ---- top bar ---- */
+  header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:2px 6px}
+  .logo{font-weight:800;font-size:18px;letter-spacing:.5px}
+  .logo b{color:var(--accent)}
+  .logo .cur{color:var(--accent2);animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+  .tag{color:var(--dim);font-size:11px;font-family:var(--sans)}
+  header .spacer{flex:1}
+  header .grp{display:flex;gap:6px;align-items:center}
+
+  /* ---- main split ---- */
+  main{display:grid;grid-template-columns:minmax(360px,42%) 1fr;gap:8px;min-height:0}
+  .col{display:flex;flex-direction:column;gap:8px;min-height:0}
+  .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);
+    border-radius:10px;padding:10px;min-height:0;display:flex;flex-direction:column}
+  .panel h2{margin:0 0 8px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim);font-weight:700;
+    display:flex;align-items:center;gap:8px}
+  .panel h2 .hint{font-weight:400;letter-spacing:0;text-transform:none;color:#5c6280;font-size:10px}
+
+  /* ---- editor ---- */
+  .editorPanel{flex:1;min-height:0}
+  .editorWrap{position:relative;flex:1;display:flex;min-height:0;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#0a0c15}
+  #gutter{width:42px;flex:0 0 42px;overflow:hidden;background:#0c0f1c;border-right:1px solid var(--line);
+    padding:10px 0;text-align:right;color:#4a5175;user-select:none}
+  #gutter .gl{padding:0 8px 0 0;height:18px;line-height:18px;cursor:pointer;position:relative}
+  #gutter .gl:hover{color:var(--ink);background:#161a2d}
+  #gutter .gl.bp{color:var(--red)}
+  #gutter .gl.bp::before{content:"●";position:absolute;left:4px;color:var(--red)}
+  .codeArea{position:relative;flex:1;min-width:0}
+  #hl,#src{margin:0;padding:10px 12px;border:0;white-space:pre;overflow:auto;
+    font-family:var(--font);font-size:13px;line-height:18px;tab-size:2}
+  #hl{position:absolute;inset:0;pointer-events:none;color:var(--ink);z-index:1}
+  #src{position:absolute;inset:0;background:transparent;color:transparent;caret-color:var(--accent);
+    resize:none;z-index:2;outline:none}
+  #src::selection{background:rgba(255,163,0,.25)}
+  #curline{position:absolute;left:0;right:0;height:18px;background:rgba(255,163,0,.1);
+    border-left:3px solid var(--accent);pointer-events:none;z-index:0;display:none}
+  #curline.prov{animation:provpulse .8s ease}
+  @keyframes provpulse{0%{background:rgba(41,173,255,.5)}100%{background:rgba(255,163,0,.1)}}
+  /* token colors */
+  .t-op{color:var(--accent)}.t-reg{color:var(--accent2)}.t-num{color:var(--green)}
+  .t-lbl{color:var(--pink);font-weight:700}.t-com{color:#5c6280;font-style:italic}
+  .t-sym{color:#e9d16a}.t-punc{color:var(--dim)}
+
+  #errors{margin-top:8px;max-height:120px;overflow:auto;font-size:11px;flex:0 0 auto}
+  #errors .ok{color:var(--green)}
+  #errors.has-err{color:var(--red)}
+  #errors .err{cursor:pointer;padding:1px 0}
+  #errors .err:hover{text-decoration:underline}
+
+  .toolsRow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+  /* watches */
+  .watchPanel{flex:0 0 auto;max-height:210px}
+  #watchList{overflow:auto;font-size:12px}
+  .watch{display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid #1a1e30}
+  .watch code{color:var(--accent2)}
+  .watch .wv{color:var(--green);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .watch .wm{color:var(--dim);font-size:10px}
+  .watch button{padding:2px 6px}
+  .empty{color:#5c6280;font-style:italic;padding:4px 0}
+  .watchAdd{display:flex;gap:6px;margin-bottom:6px}
+  .watchAdd input{flex:1}
+  .breakwrap{display:flex;align-items:center;gap:6px;color:var(--dim);font-size:11px;margin-top:6px}
+
+  /* ---- machine view ---- */
+  .machineGrid{display:grid;grid-template-columns:1fr 320px;gap:8px;min-height:0;flex:1}
+  .mcol{display:flex;flex-direction:column;gap:8px;min-height:0}
+  #regs{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
+  .reg{background:#0d1020;border:1px solid var(--line);border-radius:7px;padding:6px 8px;
+    display:flex;justify-content:space-between;align-items:baseline;cursor:pointer;transition:.1s}
+  .reg:hover{border-color:#39406a}
+  .reg .n{color:var(--dim);font-weight:700}
+  .reg .v{color:var(--ink);font-variant-numeric:tabular-nums}
+  .reg.pcsp{background:#111830;cursor:default}
+  .reg.pcsp .n{color:var(--accent2)}
+  .reg.flash{animation:cellflash .5s ease}
+  @keyframes cellflash{0%{background:var(--accent);color:#1a1200}100%{}}
+  #flags{display:flex;gap:6px}
+  .flag{flex:1;text-align:center;padding:5px 0;border:1px solid var(--line);border-radius:6px;background:#0d1020;color:#4a5175;font-weight:700}
+  .flag.on{background:var(--green);color:#04210f;border-color:var(--green)}
+  #curinstr{background:#0d1020;border:1px solid var(--line);border-radius:7px;padding:8px}
+  #curinstr .mono{color:var(--accent);font-weight:700}
+
+  .memWrap{flex:1;min-height:0;display:flex;flex-direction:column}
+  #mem{display:grid;grid-template-columns:repeat(16,1fr);gap:2px;overflow:auto;flex:1;
+    font-size:10px;font-variant-numeric:tabular-nums;align-content:start}
+  .mc{background:#0a0c16;border:1px solid #171b2c;border-radius:3px;text-align:center;padding:3px 0;color:#3d4363;cursor:pointer;min-width:0;overflow:hidden}
+  .mc.nz{color:var(--ink);background:#12172a}
+  .mc:hover{border-color:var(--accent2)}
+  .mc.flash{animation:memflash .55s ease}
+  @keyframes memflash{0%{background:var(--accent);color:#1a1200;border-color:var(--accent)}100%{}}
+
+  .fbWrap{display:flex;flex-direction:column;gap:8px}
+  #fb{width:100%;image-rendering:pixelated;background:#000;border:1px solid var(--line);border-radius:8px;aspect-ratio:1/1}
+  #stackPanel{flex:1;min-height:0}
+  #stack{overflow:auto;flex:1;font-size:11px}
+  .scell{display:flex;justify-content:space-between;padding:2px 6px;border-bottom:1px solid #1a1e30}
+  .scell.sp{background:rgba(255,163,0,.12);border-left:2px solid var(--accent)}
+  .scell .a{color:var(--dim)}
+  .scell .d{color:var(--green);font-variant-numeric:tabular-nums}
+
+  /* ISA reference */
+  #isaPanel{flex:0 0 auto;max-height:190px}
+  #isawrap{overflow:auto}
+  table#isatable{border-collapse:collapse;width:100%;font-size:11px}
+  #isatable th{position:sticky;top:0;background:var(--panel);text-align:left;color:var(--dim);padding:3px 6px;border-bottom:1px solid var(--line)}
+  #isatable td{padding:2px 6px;border-bottom:1px solid #1a1e30;vertical-align:top}
+  #isatable td.op{color:var(--accent);font-weight:700}
+  #isatable td.syn{color:var(--accent2);white-space:nowrap}
+
+  /* ---- transport / timeline ---- */
+  footer{display:flex;flex-direction:column;gap:6px;padding:4px 6px}
+  .transport{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .transport .big{font-size:13px;padding:7px 12px}
+  .transport label{color:var(--dim);font-size:11px;display:flex;align-items:center;gap:6px}
+  .tlrow{display:flex;flex-direction:column;gap:2px}
+  #timeline{width:100%;accent-color:var(--accent)}
+  #tlmarks{width:100%;height:12px;display:block}
+  #cyclelbl{color:var(--dim);font-size:11px;font-variant-numeric:tabular-nums}
+  input[type=range]{cursor:pointer}
+  #speed{width:150px;accent-color:var(--accent2)}
+  #speedlbl{color:var(--dim);font-size:10px;min-width:78px;font-variant-numeric:tabular-nums}
+
+  /* info toast */
+  #info{position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(20px);
+    background:#1c2136;border:1px solid var(--accent);color:var(--ink);padding:10px 16px;border-radius:8px;
+    max-width:640px;opacity:0;pointer-events:none;transition:.25s;z-index:50;box-shadow:0 10px 40px rgba(0,0,0,.5);font-size:12px;font-family:var(--sans)}
+  #info.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  /* tutorial modal */
+  #tutmodal{position:fixed;inset:0;background:rgba(5,7,15,.7);display:none;align-items:center;justify-content:center;z-index:100;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+  #tutmodal.show{display:flex}
+  .tutcard{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--accent);
+    border-radius:14px;max-width:520px;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+  .tutcard h3{margin:0 0 6px;color:var(--accent);font-size:18px;font-family:var(--sans)}
+  .tutcard p{color:var(--ink);line-height:1.55;font-family:var(--sans)}
+  .tutfoot{display:flex;align-items:center;gap:10px;margin-top:16px}
+  .tutfoot .spacer{flex:1}
+  #tutprog{color:var(--dim)}
+
+  /* CRT theme */
+  body.crt::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:200;
+    background:repeating-linear-gradient(0deg,rgba(0,0,0,.16) 0,rgba(0,0,0,.16) 1px,transparent 1px,transparent 3px)}
+  body.crt{text-shadow:0 0 2px rgba(255,163,0,.35)}
+  body.crt .panel{box-shadow:0 0 22px rgba(41,173,255,.06) inset}
+  body.crt #fb{box-shadow:0 0 24px rgba(0,228,70,.25),0 0 60px rgba(41,173,255,.12)}
+  body.crt .logo b{text-shadow:0 0 8px var(--accent)}
+
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:#2a3050;border-radius:5px}
+  ::-webkit-scrollbar-track{background:transparent}
+  @media(max-width:900px){
+    html,body{height:auto}
+    body{overflow:auto}
+    .app{height:auto;min-height:100vh}
+    main{grid-template-columns:1fr}
+    .machineGrid{grid-template-columns:1fr}
+    .editorPanel{min-height:340px}
+    .memWrap{min-height:200px}
+    #fb{max-width:360px;margin:0 auto}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo"><b>RETRO</b>GRADE<span class="cur">_</span></div>
+    <div class="tag">a 16-bit CPU you can watch think — and rewind</div>
+    <div class="spacer"></div>
+    <div class="grp">
+      <select id="sample" title="Load a bundled program"></select>
+      <button id="attract" title="Auto-playing demo carousel">▶ Attract</button>
+      <button id="tut" title="Guided tutorial">? Tutorial</button>
+      <button id="crt" title="CRT scanline theme">CRT</button>
+      <button id="sound" title="Chiptune blips on writes/jumps">♪ Sound</button>
+      <button id="rec" title="Record framebuffer to WebM">● Rec</button>
+      <button id="share" title="Copy shareable link (program saved in URL)">⧉ Share</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- LEFT: editor + tools -->
+    <div class="col">
+      <div class="panel editorPanel">
+        <h2>Source <span class="hint">— assembles live · click a line number to set a breakpoint</span></h2>
+        <div class="editorWrap">
+          <div id="gutter"></div>
+          <div class="codeArea">
+            <div id="curline"></div>
+            <pre id="hl"></pre>
+            <textarea id="src" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off"></textarea>
+          </div>
+        </div>
+        <div id="errors"></div>
+      </div>
+
+      <div class="panel watchPanel">
+        <h2>Watches <span class="hint">— jump between every mutation of a value</span></h2>
+        <div class="watchAdd">
+          <input type="text" id="watchInput" placeholder="R0 · mem[100] · mem[100..107]">
+          <button id="watchAdd">+ Watch</button>
+        </div>
+        <div id="watchList"></div>
+        <label class="breakwrap"><input type="checkbox" id="breakwatch"> break when a watched value changes</label>
+      </div>
+
+      <div class="panel" id="isaPanel">
+        <h2>Instruction set <span class="hint">— 26 opcodes</span></h2>
+        <div id="isawrap"><table id="isatable"></table></div>
+      </div>
+    </div>
+
+    <!-- RIGHT: machine -->
+    <div class="col">
+      <div class="panel" style="flex:1;min-height:0">
+        <h2>Machine <span class="hint">— click any register or memory cell to trace who wrote it</span></h2>
+        <div class="machineGrid">
+          <div class="mcol">
+            <div id="regs"></div>
+            <div id="flags">
+              <div class="flag" id="flag-Z">Z</div>
+              <div class="flag" id="flag-N">N</div>
+              <div class="flag" id="flag-C">C</div>
+              <div class="flag" id="flag-V">V</div>
+            </div>
+            <div id="curinstr"><div class="mono">@0 —</div></div>
+            <div class="panel memWrap" style="padding:8px;background:var(--panel2)">
+              <h2 style="margin-bottom:6px">Memory <span class="hint">0–255</span></h2>
+              <div id="mem"></div>
+            </div>
+          </div>
+          <div class="mcol">
+            <div class="fbWrap">
+              <canvas id="fb" width="64" height="64"></canvas>
+            </div>
+            <div class="panel" id="stackPanel" style="padding:8px;background:var(--panel2)">
+              <h2 style="margin-bottom:6px">Stack</h2>
+              <div id="stack"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="transport">
+      <button id="reset" title="Reset (r)">⟲ Reset</button>
+      <button id="back" title="Step backward (b / ←)">⟸ Back</button>
+      <button id="playpause" class="big" title="Play/Pause (space)">▶ Play</button>
+      <button id="step" title="Step forward (s / →)">Step ⟹</button>
+      <label>speed <input type="range" id="speed" min="1" max="100" value="14"><span id="speedlbl">1 instr/frame</span></label>
+      <span id="cyclelbl">cycle 0 / 0</span>
+    </div>
+    <div class="tlrow">
+      <input type="range" id="timeline" min="0" max="0" value="0" step="1" title="Scrub through execution history">
+      <canvas id="tlmarks" height="12"></canvas>
+    </div>
+  </footer>
+</div>
+
+<div id="info"></div>
+
+<div id="tutmodal">
+  <div class="tutcard">
+    <h3 id="tuttitle"></h3>
+    <p id="tutbody"></p>
+    <div class="tutfoot">
+      <span id="tutprog"></span>
+      <div class="spacer"></div>
+      <button id="tutclose">Exit</button>
+      <button id="tutprev">◀ Back</button>
+      <button id="tutnext" class="on">Next ▶</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---- core.js ---- */
+/* =====================================================================
+ * Retrograde — fantasy 16-bit CPU core (assembler + virtual machine)
+ * Pure logic, no DOM. Shared verbatim by index.html and the test harness.
+ * ===================================================================== */
+(function (root) {
+  'use strict';
+
+  var MEM_WORDS = 4096;      // total addressable words
+  var STACK_TOP = MEM_WORDS; // SP starts here, pre-decrement on push
+  var FB_W = 64, FB_H = 64;
+
+  // ---- Instruction set --------------------------------------------------
+  // Encoding (16-bit word0):
+  //   [15:11] opcode(5)  [10:8] A(3)  [7:5] B(3)  [4:3] mode(2)  [2:0] C(3)
+  // Some ops carry 1 or 2 trailing immediate/address words.
+  var OPS = {
+    MOV:  { code: 0,  form: 'alu'   },
+    ADD:  { code: 1,  form: 'alu'   },
+    SUB:  { code: 2,  form: 'alu'   },
+    MUL:  { code: 3,  form: 'alu'   },
+    AND:  { code: 4,  form: 'alu'   },
+    OR:   { code: 5,  form: 'alu'   },
+    XOR:  { code: 6,  form: 'alu'   },
+    SHL:  { code: 7,  form: 'alu'   },
+    SHR:  { code: 8,  form: 'alu'   },
+    CMP:  { code: 9,  form: 'alu'   },
+    LOAD: { code: 10, form: 'load'  },
+    STORE:{ code: 11, form: 'store' },
+    JMP:  { code: 12, form: 'jump'  },
+    JEQ:  { code: 13, form: 'jump'  },
+    JNE:  { code: 14, form: 'jump'  },
+    JLT:  { code: 15, form: 'jump'  },
+    JGT:  { code: 16, form: 'jump'  },
+    JLE:  { code: 17, form: 'jump'  },
+    JGE:  { code: 18, form: 'jump'  },
+    PUSH: { code: 19, form: 'push'  },
+    POP:  { code: 20, form: 'pop'   },
+    CALL: { code: 21, form: 'call'  },
+    RET:  { code: 22, form: 'none'  },
+    DRAW: { code: 23, form: 'draw'  },
+    CLS:  { code: 24, form: 'cls'   },
+    HLT:  { code: 25, form: 'none'  }
+  };
+  var CODE_TO_NAME = {};
+  Object.keys(OPS).forEach(function (k) { CODE_TO_NAME[OPS[k].code] = k; });
+
+  // Human-readable opcode reference (used by the tutorial + README generator).
+  var ISA_DOC = [
+    ['MOV',  'MOV Rd, Rs|imm',        'Copy a value into a register.'],
+    ['ADD',  'ADD Rd, Rs|imm',        'Rd = Rd + operand (sets flags).'],
+    ['SUB',  'SUB Rd, Rs|imm',        'Rd = Rd - operand (sets flags).'],
+    ['MUL',  'MUL Rd, Rs|imm',        'Rd = Rd * operand (low 16 bits).'],
+    ['AND',  'AND Rd, Rs|imm',        'Bitwise AND into Rd.'],
+    ['OR',   'OR Rd, Rs|imm',         'Bitwise OR into Rd.'],
+    ['XOR',  'XOR Rd, Rs|imm',        'Bitwise XOR into Rd.'],
+    ['SHL',  'SHL Rd, Rs|imm',        'Shift Rd left by operand bits.'],
+    ['SHR',  'SHR Rd, Rs|imm',        'Shift Rd right by operand bits.'],
+    ['CMP',  'CMP Ra, Rb|imm',        'Compare (Ra - Rb); sets Z/N/C/V flags only.'],
+    ['LOAD', 'LOAD Rd, [addr|Rs]',    'Load a word from memory into Rd.'],
+    ['STORE','STORE [addr|Rs], Rv|imm','Store a value into memory.'],
+    ['JMP',  'JMP label',             'Unconditional jump.'],
+    ['JEQ',  'JEQ label',             'Jump if equal (Z set).'],
+    ['JNE',  'JNE label',             'Jump if not equal (Z clear).'],
+    ['JLT',  'JLT label',             'Jump if signed less-than.'],
+    ['JGT',  'JGT label',             'Jump if signed greater-than.'],
+    ['JLE',  'JLE label',             'Jump if signed less-or-equal.'],
+    ['JGE',  'JGE label',             'Jump if signed greater-or-equal.'],
+    ['PUSH', 'PUSH Rs|imm',           'Push a value onto the stack.'],
+    ['POP',  'POP Rd',                'Pop the top of stack into Rd.'],
+    ['CALL', 'CALL label',            'Push return address and jump.'],
+    ['RET',  'RET',                   'Pop return address and jump back.'],
+    ['DRAW', 'DRAW Rx, Ry, Rc|imm',   'Plot a pixel (x,y) with color 0-15.'],
+    ['CLS',  'CLS [color]',           'Clear the framebuffer (default 0).'],
+    ['HLT',  'HLT',                   'Halt the processor.']
+  ];
+
+  // Modes
+  var M_REG = 0, M_IMM = 1, M_MEM_IMM = 2, M_MEM_REG = 3;
+
+  function s16(v) { v &= 0xffff; return v < 0x8000 ? v : v - 0x10000; }
+  function mask(v) { return v & 0xffff; }
+
+  // ---- Assembler --------------------------------------------------------
+  function parseNumber(tok, symbols) {
+    var t = tok.trim();
+    if (t === '') return null;
+    var neg = false;
+    if (t[0] === '-') { neg = true; t = t.slice(1); }
+    var val;
+    if (/^0x[0-9a-f]+$/i.test(t)) val = parseInt(t.slice(2), 16);
+    else if (/^0b[01]+$/i.test(t)) val = parseInt(t.slice(2), 2);
+    else if (/^[0-9]+$/.test(t)) val = parseInt(t, 10);
+    else if (/^'.'$/.test(tok)) return tok.charCodeAt(1);
+    else if (symbols && Object.prototype.hasOwnProperty.call(symbols, t)) val = symbols[t];
+    else return null;
+    return neg ? -val : val;
+  }
+
+  function isReg(tok) { return /^R[0-7]$/i.test(tok.trim()); }
+  function regNum(tok) { return parseInt(tok.trim().slice(1), 10); }
+
+  function splitOperands(rest) {
+    if (!rest || rest.trim() === '') return [];
+    return rest.split(',').map(function (s) { return s.trim(); });
+  }
+
+  // Determine mode + trailing-word count from operand syntax alone (pass 1).
+  function planInstruction(name, ops, lineNo) {
+    var spec = OPS[name];
+    var plan = { name: name, code: spec.code, mode: 0, A: 0, B: 0, C: 0,
+                 imm1: null, imm2: null, words: 1, line: lineNo };
+    function memTarget(tok) { return /^\[.*\]$/.test(tok); }
+    function memInner(tok) { return tok.slice(1, -1).trim(); }
+
+    switch (spec.form) {
+      case 'alu': {
+        if (ops.length !== 2) throw 'expects 2 operands';
+        if (!isReg(ops[0])) throw 'first operand must be a register';
+        plan.A = regNum(ops[0]);
+        if (isReg(ops[1])) { plan.mode = M_REG; plan.B = regNum(ops[1]); }
+        else { plan.mode = M_IMM; plan.imm1 = ops[1]; plan.words = 2; }
+        break;
+      }
+      case 'load': {
+        if (ops.length !== 2) throw 'expects 2 operands';
+        if (!isReg(ops[0])) throw 'destination must be a register';
+        if (!memTarget(ops[1])) throw 'source must be [addr] or [Rn]';
+        plan.A = regNum(ops[0]);
+        var inner = memInner(ops[1]);
+        if (isReg(inner)) { plan.mode = M_MEM_REG; plan.B = regNum(inner); }
+        else { plan.mode = M_MEM_IMM; plan.imm1 = inner; plan.words = 2; }
+        break;
+      }
+      case 'store': {
+        if (ops.length !== 2) throw 'expects 2 operands';
+        if (!memTarget(ops[0])) throw 'target must be [addr] or [Rn]';
+        var innerS = memInner(ops[0]);
+        var addrReg = isReg(innerS);
+        var valReg = isReg(ops[1]);
+        if (addrReg && valReg) { plan.mode = M_REG; plan.B = regNum(innerS); plan.A = regNum(ops[1]); }
+        else if (addrReg && !valReg) { plan.mode = M_IMM; plan.B = regNum(innerS); plan.imm1 = ops[1]; plan.words = 2; }
+        else if (!addrReg && valReg) { plan.mode = M_MEM_IMM; plan.imm1 = innerS; plan.A = regNum(ops[1]); plan.words = 2; }
+        else { plan.mode = M_MEM_REG; plan.imm1 = innerS; plan.imm2 = ops[1]; plan.words = 3; }
+        break;
+      }
+      case 'jump': case 'call': {
+        if (ops.length !== 1) throw 'expects 1 operand (label/address)';
+        plan.mode = M_IMM; plan.imm1 = ops[0]; plan.words = 2;
+        break;
+      }
+      case 'push': {
+        if (ops.length !== 1) throw 'expects 1 operand';
+        if (isReg(ops[0])) { plan.mode = M_REG; plan.A = regNum(ops[0]); }
+        else { plan.mode = M_IMM; plan.imm1 = ops[0]; plan.words = 2; }
+        break;
+      }
+      case 'pop': {
+        if (ops.length !== 1 || !isReg(ops[0])) throw 'expects a register';
+        plan.mode = M_REG; plan.A = regNum(ops[0]);
+        break;
+      }
+      case 'draw': {
+        if (ops.length !== 3) throw 'expects Rx, Ry, color';
+        if (!isReg(ops[0]) || !isReg(ops[1])) throw 'x and y must be registers';
+        plan.A = regNum(ops[0]); plan.B = regNum(ops[1]);
+        if (isReg(ops[2])) { plan.mode = M_REG; plan.C = regNum(ops[2]); }
+        else { plan.mode = M_IMM; plan.imm1 = ops[2]; plan.words = 2; }
+        break;
+      }
+      case 'cls': {
+        if (ops.length === 0) { plan.mode = M_REG; }
+        else if (ops.length === 1) { plan.mode = M_IMM; plan.imm1 = ops[0]; plan.words = 2; }
+        else throw 'expects 0 or 1 operand';
+        break;
+      }
+      case 'none': {
+        if (ops.length !== 0) throw 'expects no operands';
+        break;
+      }
+    }
+    return plan;
+  }
+
+  function assemble(src) {
+    var lines = src.split(/\r?\n/);
+    var symbols = {};
+    var planned = [];      // {plan, addr}
+    var errors = [];
+    var addr = 0;
+
+    // Pass 1: labels, constants, sizing.
+    for (var i = 0; i < lines.length; i++) {
+      var raw = lines[i];
+      var lineNo = i + 1;
+      var code = raw.replace(/;.*$/, '').trim();
+      if (code === '') continue;
+
+      // Label(s) prefix, e.g. "loop:" possibly followed by an instruction.
+      var mLabel;
+      while ((mLabel = code.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*/))) {
+        var lbl = mLabel[1];
+        if (Object.prototype.hasOwnProperty.call(symbols, lbl)) {
+          errors.push({ line: lineNo, msg: 'duplicate label "' + lbl + '"' });
+        }
+        symbols[lbl] = addr;
+        code = code.slice(mLabel[0].length).trim();
+      }
+      if (code === '') continue;
+
+      // Constant definition: NAME EQU value  |  NAME = value
+      var mConst = code.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|\bEQU\b)\s*(.+)$/i);
+      if (mConst && !OPS[mConst[1].toUpperCase()]) {
+        var cname = mConst[1];
+        var cval = parseNumber(mConst[2].trim(), symbols);
+        if (cval === null) errors.push({ line: lineNo, msg: 'bad constant value: ' + mConst[2] });
+        else symbols[cname] = mask(cval);
+        continue;
+      }
+
+      // Instruction.
+      var parts = code.match(/^(\S+)\s*(.*)$/);
+      var mnem = parts[1].toUpperCase();
+      var rest = parts[2];
+      if (!OPS[mnem]) { errors.push({ line: lineNo, msg: 'unknown instruction "' + parts[1] + '"' }); continue; }
+      try {
+        var plan = planInstruction(mnem, splitOperands(rest), lineNo);
+        planned.push({ plan: plan, addr: addr });
+        addr += plan.words;
+      } catch (e) {
+        errors.push({ line: lineNo, msg: mnem + ': ' + e });
+      }
+    }
+
+    if (addr > MEM_WORDS) errors.push({ line: 0, msg: 'program too large (' + addr + ' > ' + MEM_WORDS + ' words)' });
+
+    // Pass 2: emit words, resolve symbols.
+    var codeArr = new Uint16Array(MEM_WORDS);
+    var lineForAddr = {};
+    var length = addr;
+    for (var p = 0; p < planned.length; p++) {
+      var pl = planned[p].plan, at = planned[p].addr;
+      var word0 = (pl.code << 11) | ((pl.A & 7) << 8) | ((pl.B & 7) << 5) | ((pl.mode & 3) << 3) | (pl.C & 7);
+      codeArr[at] = word0;
+      lineForAddr[at] = pl.line;
+      var off = 1;
+      if (pl.imm1 !== null) {
+        var v1 = parseNumber(pl.imm1, symbols);
+        if (v1 === null) errors.push({ line: pl.line, msg: 'unresolved operand "' + pl.imm1 + '"' });
+        codeArr[at + off] = mask(v1 || 0); off++;
+      }
+      if (pl.imm2 !== null) {
+        var v2 = parseNumber(pl.imm2, symbols);
+        if (v2 === null) errors.push({ line: pl.line, msg: 'unresolved operand "' + pl.imm2 + '"' });
+        codeArr[at + off] = mask(v2 || 0); off++;
+      }
+    }
+
+    return { code: codeArr, length: length, symbols: symbols,
+             lineForAddr: lineForAddr, errors: errors };
+  }
+
+  // ---- Disassembler (for the current-instruction readout) --------------
+  function decodeAt(mem, pc) {
+    var w0 = mem[pc];
+    var code = (w0 >> 11) & 0x1f;
+    var A = (w0 >> 8) & 7, B = (w0 >> 5) & 7, mode = (w0 >> 3) & 3, C = w0 & 7;
+    var name = CODE_TO_NAME[code];
+    var spec = name ? OPS[name] : null;
+    var words = 1;
+    if (spec) {
+      switch (spec.form) {
+        case 'alu': words = (mode === M_IMM) ? 2 : 1; break;
+        case 'load': words = (mode === M_MEM_IMM) ? 2 : 1; break;
+        case 'store': words = (mode === M_MEM_REG) ? 3 : (mode === M_REG ? 1 : 2); break;
+        case 'jump': case 'call': words = 2; break;
+        case 'push': words = (mode === M_IMM) ? 2 : 1; break;
+        case 'draw': case 'cls': words = (mode === M_IMM) ? 2 : 1; break;
+        default: words = 1;
+      }
+    }
+    return { name: name, code: code, A: A, B: B, C: C, mode: mode, words: words,
+             imm1: mem[pc + 1], imm2: mem[pc + 2] };
+  }
+
+  function disasm(mem, pc) {
+    var d = decodeAt(mem, pc);
+    if (!d.name) return '???';
+    var n = d.name, form = OPS[n].form;
+    function imm() { return String(s16(d.imm1)); }
+    switch (form) {
+      case 'alu': return n + ' R' + d.A + ', ' + (d.mode === M_IMM ? imm() : 'R' + d.B);
+      case 'load': return n + ' R' + d.A + ', ' + (d.mode === M_MEM_IMM ? '[' + d.imm1 + ']' : '[R' + d.B + ']');
+      case 'store':
+        if (d.mode === M_REG) return 'STORE [R' + d.B + '], R' + d.A;
+        if (d.mode === M_IMM) return 'STORE [R' + d.B + '], ' + imm();
+        if (d.mode === M_MEM_IMM) return 'STORE [' + d.imm1 + '], R' + d.A;
+        return 'STORE [' + d.imm1 + '], ' + s16(d.imm2);
+      case 'jump': case 'call': return n + ' ' + d.imm1;
+      case 'push': return 'PUSH ' + (d.mode === M_IMM ? imm() : 'R' + d.A);
+      case 'pop': return 'POP R' + d.A;
+      case 'draw': return 'DRAW R' + d.A + ', R' + d.B + ', ' + (d.mode === M_IMM ? imm() : 'R' + d.C);
+      case 'cls': return 'CLS' + (d.mode === M_IMM ? ' ' + imm() : '');
+      default: return n;
+    }
+  }
+
+  // ---- Virtual machine --------------------------------------------------
+  function VM(program) {
+    this.reg = new Uint16Array(8);
+    this.mem = new Uint16Array(MEM_WORDS);
+    this.fb = new Uint8Array(FB_W * FB_H);
+    this.pc = 0;
+    this.sp = STACK_TOP;
+    this.flags = { Z: false, N: false, C: false, V: false };
+    this.halted = false;
+    this.cycle = 0;
+    this.drawCount = 0;   // total pixels plotted, for stats
+    if (program) this.load(program);
+  }
+
+  VM.prototype.load = function (program) {
+    this.mem.set(program.code.subarray(0, MEM_WORDS));
+  };
+
+  VM.prototype.snapshotFlags = function () {
+    return { Z: this.flags.Z, N: this.flags.N, C: this.flags.C, V: this.flags.V };
+  };
+
+  VM.prototype.setFlagsLogic = function (res) {
+    this.flags.Z = (res & 0xffff) === 0;
+    this.flags.N = (res & 0x8000) !== 0;
+    this.flags.C = false; this.flags.V = false;
+  };
+  VM.prototype.setFlagsAdd = function (a, b) {
+    var sum = a + b; var res = sum & 0xffff;
+    this.flags.Z = res === 0;
+    this.flags.N = (res & 0x8000) !== 0;
+    this.flags.C = sum > 0xffff;
+    var sr = s16(a) + s16(b);
+    this.flags.V = sr > 32767 || sr < -32768;
+    return res;
+  };
+  VM.prototype.setFlagsSub = function (a, b) {
+    var diff = a - b; var res = diff & 0xffff;
+    this.flags.Z = res === 0;
+    this.flags.N = (res & 0x8000) !== 0;
+    this.flags.C = a >= b; // no borrow
+    var sr = s16(a) - s16(b);
+    this.flags.V = sr > 32767 || sr < -32768;
+    return res;
+  };
+
+  // Execute exactly one instruction, returning a reversible delta.
+  VM.prototype.step = function () {
+    if (this.halted) return null;
+    var before = { pc: this.pc, sp: this.sp, flags: this.snapshotFlags(), halted: this.halted };
+    var d = decodeAt(this.mem, this.pc);
+    var delta = { cycle: this.cycle, addr: this.pc, op: d.name || '???',
+                  regs: [], mem: [], fb: [], before: before, after: null };
+    var self = this;
+    function wReg(i, v) { v = mask(v); var o = self.reg[i]; if (o !== v) { self.reg[i] = v; delta.regs.push([i, o, v]); } }
+    function wMem(a, v) { a &= 0xffff; if (a >= MEM_WORDS) return; v = mask(v); var o = self.mem[a]; if (o !== v) { self.mem[a] = v; delta.mem.push([a, o, v]); } }
+    function wFb(idx, v) { v &= 15; var o = self.fb[idx]; if (o !== v) { self.fb[idx] = v; delta.fb.push([idx, o, v]); } }
+
+    var next = this.pc + d.words;   // default fall-through
+    var name = d.name, spec = name ? OPS[name] : null;
+
+    if (!spec) { this.halted = true; }
+    else {
+      var srcVal = (d.mode === M_IMM) ? d.imm1 : this.reg[d.B];
+      switch (name) {
+        case 'MOV': wReg(d.A, srcVal); break;
+        case 'ADD': wReg(d.A, this.setFlagsAdd(this.reg[d.A], srcVal)); break;
+        case 'SUB': wReg(d.A, this.setFlagsSub(this.reg[d.A], srcVal)); break;
+        case 'MUL': { var m = (this.reg[d.A] * srcVal) & 0xffff; this.setFlagsLogic(m); wReg(d.A, m); break; }
+        case 'AND': { var r = this.reg[d.A] & srcVal; this.setFlagsLogic(r); wReg(d.A, r); break; }
+        case 'OR':  { var r2 = this.reg[d.A] | srcVal; this.setFlagsLogic(r2); wReg(d.A, r2); break; }
+        case 'XOR': { var r3 = this.reg[d.A] ^ srcVal; this.setFlagsLogic(r3); wReg(d.A, r3); break; }
+        case 'SHL': { var r4 = (this.reg[d.A] << (srcVal & 15)) & 0xffff; this.setFlagsLogic(r4); wReg(d.A, r4); break; }
+        case 'SHR': { var r5 = (this.reg[d.A] >>> (srcVal & 15)) & 0xffff; this.setFlagsLogic(r5); wReg(d.A, r5); break; }
+        case 'CMP': this.setFlagsSub(this.reg[d.A], srcVal); break;
+        case 'LOAD': { var la = (d.mode === M_MEM_IMM) ? d.imm1 : this.reg[d.B]; wReg(d.A, this.mem[la & 0xffff] || 0); break; }
+        case 'STORE': {
+          if (d.mode === M_REG) wMem(this.reg[d.B], this.reg[d.A]);
+          else if (d.mode === M_IMM) wMem(this.reg[d.B], d.imm1);
+          else if (d.mode === M_MEM_IMM) wMem(d.imm1, this.reg[d.A]);
+          else wMem(d.imm1, d.imm2);
+          break;
+        }
+        case 'JMP': next = d.imm1; break;
+        case 'JEQ': if (this.flags.Z) next = d.imm1; break;
+        case 'JNE': if (!this.flags.Z) next = d.imm1; break;
+        case 'JLT': if (this.flags.N !== this.flags.V) next = d.imm1; break;
+        case 'JGE': if (this.flags.N === this.flags.V) next = d.imm1; break;
+        case 'JGT': if (!this.flags.Z && (this.flags.N === this.flags.V)) next = d.imm1; break;
+        case 'JLE': if (this.flags.Z || (this.flags.N !== this.flags.V)) next = d.imm1; break;
+        case 'PUSH': { var pv = (d.mode === M_IMM) ? d.imm1 : this.reg[d.A]; this.sp = (this.sp - 1) & 0xffff; wMem(this.sp, pv); break; }
+        case 'POP': { wReg(d.A, this.mem[this.sp] || 0); this.sp = (this.sp + 1) & 0xffff; break; }
+        case 'CALL': { this.sp = (this.sp - 1) & 0xffff; wMem(this.sp, this.pc + d.words); next = d.imm1; break; }
+        case 'RET': { next = this.mem[this.sp]; this.sp = (this.sp + 1) & 0xffff; break; }
+        case 'DRAW': {
+          var x = s16(this.reg[d.A]), y = s16(this.reg[d.B]);
+          var col = (d.mode === M_IMM) ? d.imm1 : this.reg[d.C];
+          if (x >= 0 && x < FB_W && y >= 0 && y < FB_H) { wFb(y * FB_W + x, col); this.drawCount++; }
+          break;
+        }
+        case 'CLS': { var cc = ((d.mode === M_IMM) ? d.imm1 : 0) & 15; for (var f = 0; f < this.fb.length; f++) wFb(f, cc); break; }
+        case 'HLT': this.halted = true; break;
+      }
+    }
+
+    this.pc = next & 0xffff;
+    this.cycle++;
+    delta.after = { pc: this.pc, sp: this.sp, flags: this.snapshotFlags(), halted: this.halted };
+    return delta;
+  };
+
+  VM.prototype.undo = function (delta) {
+    for (var i = delta.regs.length - 1; i >= 0; i--) this.reg[delta.regs[i][0]] = delta.regs[i][1];
+    for (var m = delta.mem.length - 1; m >= 0; m--) this.mem[delta.mem[m][0]] = delta.mem[m][1];
+    for (var f = delta.fb.length - 1; f >= 0; f--) this.fb[delta.fb[f][0]] = delta.fb[f][1];
+    this.pc = delta.before.pc; this.sp = delta.before.sp;
+    this.flags = { Z: delta.before.flags.Z, N: delta.before.flags.N, C: delta.before.flags.C, V: delta.before.flags.V };
+    this.halted = delta.before.halted;
+    this.cycle = delta.cycle;
+  };
+
+  VM.prototype.redo = function (delta) {
+    for (var i = 0; i < delta.regs.length; i++) this.reg[delta.regs[i][0]] = delta.regs[i][2];
+    for (var m = 0; m < delta.mem.length; m++) this.mem[delta.mem[m][0]] = delta.mem[m][2];
+    for (var f = 0; f < delta.fb.length; f++) this.fb[delta.fb[f][0]] = delta.fb[f][2];
+    this.pc = delta.after.pc; this.sp = delta.after.sp;
+    this.flags = { Z: delta.after.flags.Z, N: delta.after.flags.N, C: delta.after.flags.C, V: delta.after.flags.V };
+    this.halted = delta.after.halted;
+    this.cycle = delta.cycle + 1;
+  };
+
+  var api = {
+    MEM_WORDS: MEM_WORDS, STACK_TOP: STACK_TOP, FB_W: FB_W, FB_H: FB_H,
+    OPS: OPS, ISA_DOC: ISA_DOC, assemble: assemble, VM: VM,
+    disasm: disasm, decodeAt: decodeAt, s16: s16
+  };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  root.Retrograde = api;
+})(typeof self !== 'undefined' ? self : this);
+/* ---- samples.js ---- */
+/* Bundled sample programs. Shared by the test harness and embedded in index.html. */
+(function (root) {
+  'use strict';
+  var SAMPLES = [
+    {
+      name: 'Bouncing pixel',
+      code:
+'; A single pixel bouncing around the 64x64 screen forever.\n' +
+'; Great for watching CLS/DRAW paint the framebuffer.\n' +
+'      MOV R0, 10       ; x\n' +
+'      MOV R1, 8        ; y\n' +
+'      MOV R2, 1        ; dx\n' +
+'      MOV R3, 1        ; dy\n' +
+'frame: CLS 1\n' +
+'       DRAW R0, R1, 15 ; white pixel\n' +
+'       ADD R0, R2\n' +
+'       ADD R1, R3\n' +
+'       CMP R0, 0\n' +
+'       JNE ck1\n' +
+'       MOV R2, 1\n' +
+'ck1:   CMP R0, 63\n' +
+'       JNE ck2\n' +
+'       MOV R2, -1\n' +
+'ck2:   CMP R1, 0\n' +
+'       JNE ck3\n' +
+'       MOV R3, 1\n' +
+'ck3:   CMP R1, 63\n' +
+'       JNE frame\n' +
+'       MOV R3, -1\n' +
+'       JMP frame\n'
+    },
+    {
+      name: 'Plasma',
+      code:
+'; Scrolling XOR plasma field across the whole framebuffer.\n' +
+'; R7 is the animation clock; each full screen is one frame.\n' +
+'      MOV R7, 0        ; time\n' +
+'tloop: MOV R1, 0       ; y\n' +
+'yloop: MOV R0, 0       ; x\n' +
+'xloop: MOV R2, R0\n' +
+'       XOR R2, R1      ; x ^ y\n' +
+'       ADD R2, R7      ; + time\n' +
+'       AND R2, 15      ; -> color 0..15\n' +
+'       DRAW R0, R1, R2\n' +
+'       ADD R0, 1\n' +
+'       CMP R0, 64\n' +
+'       JLT xloop\n' +
+'       ADD R1, 1\n' +
+'       CMP R1, 64\n' +
+'       JLT yloop\n' +
+'       ADD R7, 1\n' +
+'       JMP tloop\n'
+    },
+    {
+      name: 'Fibonacci',
+      code:
+'; Fibonacci sequence -> memory[0..11]\n' +
+'; Watch R0/R1 flip as the sequence marches forward,\n' +
+'; then scrub back to see any value being born.\n' +
+'OUT   = 200            ; data lives clear of the code\n' +
+'      MOV R0, 0        ; a\n' +
+'      MOV R1, 1        ; b\n' +
+'      MOV R2, OUT      ; write pointer\n' +
+'      MOV R3, 212      ; stop after 12 values\n' +
+'loop: STORE [R2], R0   ; mem[ptr] = a\n' +
+'      MOV R4, R0\n' +
+'      ADD R4, R1       ; next = a + b\n' +
+'      MOV R0, R1       ; a = b\n' +
+'      MOV R1, R4       ; b = next\n' +
+'      ADD R2, 1        ; ptr++\n' +
+'      CMP R2, R3\n' +
+'      JLT loop\n' +
+'      HLT\n'
+    },
+    {
+      name: 'Bubble sort',
+      code:
+'; Bubble sort 8 values living at memory[100..107].\n' +
+'; Memory cells pulse orange as they are swapped.\n' +
+'N     = 8\n' +
+'BASE  = 100\n' +
+'      STORE [100], 42\n' +
+'      STORE [101], 7\n' +
+'      STORE [102], 55\n' +
+'      STORE [103], 19\n' +
+'      STORE [104], 3\n' +
+'      STORE [105], 33\n' +
+'      STORE [106], 61\n' +
+'      STORE [107], 14\n' +
+'outer: MOV R6, 0        ; swapped flag\n' +
+'       MOV R0, 0        ; i\n' +
+'inner: MOV R1, R0\n' +
+'       ADD R1, 1        ; j = i+1\n' +
+'       CMP R1, N\n' +
+'       JGE endin\n' +
+'       MOV R2, BASE\n' +
+'       ADD R2, R0       ; &a\n' +
+'       LOAD R3, [R2]    ; a\n' +
+'       MOV R4, BASE\n' +
+'       ADD R4, R1       ; &b\n' +
+'       LOAD R5, [R4]    ; b\n' +
+'       CMP R3, R5\n' +
+'       JLE noswap\n' +
+'       STORE [R2], R5\n' +
+'       STORE [R4], R3\n' +
+'       MOV R6, 1\n' +
+'noswap: ADD R0, 1\n' +
+'        JMP inner\n' +
+'endin: CMP R6, 1\n' +
+'       JEQ outer\n' +
+'      HLT\n'
+    }
+  ];
+  if (typeof module !== 'undefined' && module.exports) module.exports = SAMPLES;
+  root.RETRO_SAMPLES = SAMPLES;
+})(typeof self !== 'undefined' ? self : this);
+/* ---- app.js ---- */
+/* =====================================================================
+ * Retrograde — UI / renderer / time-travel controller.
+ * Depends on globals: Retrograde (core), RETRO_SAMPLES (samples).
+ * ===================================================================== */
+(function () {
+  'use strict';
+  var R = window.Retrograde;
+  var SAMPLES = window.RETRO_SAMPLES;
+  var $ = function (id) { return document.getElementById(id); };
+
+  // 16-colour retro palette (index 0 = background).
+  var PALETTE = ['#0d0f1a', '#1d2b53', '#7e2553', '#008751', '#ab5236', '#5f574f',
+    '#c2c3c7', '#fff1e8', '#ff004d', '#ffa300', '#ffec27', '#00e436',
+    '#29adff', '#83769c', '#ff77a8', '#ffccaa'];
+
+  // ---- Machine + time-travel state ------------------------------------
+  var asm = null;               // last successful assembly
+  var vm = null;                // virtual machine
+  var deltas = [];              // reversible per-cycle deltas (ring buffer)
+  var baseCycle = 0;            // absolute cycle of deltas[0]
+  var CAP = 30000;              // retained-delta ring cap
+  var STEPS_GUARD = 2000000;    // absolute runaway guard for a play session
+  var sessionSteps = 0;
+  var lastSrc = null;
+  var playing = false, rafId = null;
+  var bpLines = {};             // line -> true (instruction breakpoints)
+  var addrForLine = {};         // source line -> first code address
+  var breakOnWatch = false;
+  var watches = [];             // {expr, kind, a, b}
+
+  // ---- DOM refs (populated on load) -----------------------------------
+  var srcEl, hlEl, gutterEl, curlineEl, errorsEl, regsEl, curinstrEl,
+      memEl, stackEl, fbCanvas, fbCtx, fbImg, tlEl, tlMarks, cyclelbl, speedEl,
+      watchListEl;
+  var regEls = [], regValShown = new Array(8).fill(-1);
+  var pcEl, spEl;
+  var memCellEls = [], memShown = null;
+  var lineHeight = 18, padTop = 10;
+
+  // ---- Audio (chiptune blips) -----------------------------------------
+  var audioCtx = null, soundOn = false;
+  function beep(freq, dur, type) {
+    if (!soundOn) return;
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'square'; o.frequency.value = freq;
+      g.gain.value = 0.05;
+      o.connect(g); g.connect(audioCtx.destination);
+      var t = audioCtx.currentTime;
+      g.gain.setValueAtTime(0.05, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + (dur || 0.06));
+      o.start(t); o.stop(t + (dur || 0.06));
+    } catch (e) { /* ignore */ }
+  }
+
+  // ---- Syntax highlighting --------------------------------------------
+  function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  var MNEMS = Object.keys(R.OPS);
+  function highlight(src) {
+    return src.split('\n').map(function (line) {
+      var out = '', rest = line;
+      var cm = rest.indexOf(';');
+      var comment = '';
+      if (cm >= 0) { comment = rest.slice(cm); rest = rest.slice(0, cm); }
+      // tokenise the code part
+      var tokRe = /(\s+)|([A-Za-z_][A-Za-z0-9_]*:)|(\bR[0-7]\b)|(\b(?:0x[0-9A-Fa-f]+|0b[01]+|-?\d+)\b)|([A-Za-z_][A-Za-z0-9_]*)|([\[\],=])|(.)/g;
+      var m;
+      while ((m = tokRe.exec(rest))) {
+        if (m[1]) out += esc(m[1]);
+        else if (m[2]) out += '<span class="t-lbl">' + esc(m[2]) + '</span>';
+        else if (m[3]) out += '<span class="t-reg">' + esc(m[3]) + '</span>';
+        else if (m[4]) out += '<span class="t-num">' + esc(m[4]) + '</span>';
+        else if (m[5]) {
+          out += (MNEMS.indexOf(m[5].toUpperCase()) >= 0)
+            ? '<span class="t-op">' + esc(m[5]) + '</span>'
+            : '<span class="t-sym">' + esc(m[5]) + '</span>';
+        } else if (m[6]) out += '<span class="t-punc">' + esc(m[6]) + '</span>';
+        else out += esc(m[7]);
+      }
+      if (comment) out += '<span class="t-com">' + esc(comment) + '</span>';
+      return out || '&nbsp;';
+    }).join('\n');
+  }
+
+  // ---- Editor plumbing -------------------------------------------------
+  function refreshHighlight() {
+    hlEl.innerHTML = highlight(srcEl.value);
+    buildGutter();
+  }
+  function buildGutter() {
+    var n = srcEl.value.split('\n').length;
+    var html = '';
+    for (var i = 1; i <= n; i++) {
+      var bp = bpLines[i] ? ' bp' : '';
+      html += '<div class="gl' + bp + '" data-line="' + i + '">' + i + '</div>';
+    }
+    gutterEl.innerHTML = html;
+  }
+  function syncScroll() {
+    hlEl.scrollTop = srcEl.scrollTop; hlEl.scrollLeft = srcEl.scrollLeft;
+    gutterEl.scrollTop = srcEl.scrollTop;
+    positionCurLine();
+  }
+  function positionCurLine() {
+    if (!vm || !asm) { curlineEl.style.display = 'none'; return; }
+    var ln = asm.lineForAddr[vm.pc];
+    if (!ln || vm.halted) { curlineEl.style.display = 'none'; return; }
+    curlineEl.style.display = 'block';
+    curlineEl.style.top = (padTop + (ln - 1) * lineHeight - srcEl.scrollTop) + 'px';
+  }
+
+  // ---- Assembly + errors ----------------------------------------------
+  function assembleNow(force) {
+    var src = srcEl.value;
+    if (!force && src === lastSrc) return;
+    lastSrc = src;
+    asm = R.assemble(src);
+    // reverse line -> address map
+    addrForLine = {};
+    Object.keys(asm.lineForAddr).forEach(function (a) {
+      var ln = asm.lineForAddr[a]; a = +a;
+      if (addrForLine[ln] === undefined || a < addrForLine[ln]) addrForLine[ln] = a;
+    });
+    renderErrors();
+    resetMachine();
+  }
+  function renderErrors() {
+    if (!asm.errors.length) { errorsEl.innerHTML = '<span class="ok">✓ assembled ' + asm.length + ' words, no errors</span>'; errorsEl.classList.remove('has-err'); return; }
+    errorsEl.classList.add('has-err');
+    errorsEl.innerHTML = asm.errors.map(function (e) {
+      return '<div class="err" data-line="' + e.line + '">' + (e.line ? 'line ' + e.line + ': ' : '') + esc(e.msg) + '</div>';
+    }).join('');
+  }
+
+  // ---- Machine lifecycle ----------------------------------------------
+  function resetMachine() {
+    stopPlay();
+    vm = new R.VM(asm);
+    deltas = []; baseCycle = 0; sessionSteps = 0;
+    memShown = new Int32Array(256).fill(-1);
+    regValShown = new Array(8).fill(-1);
+    render(null);
+    updateTimeline();
+    recomputeWatchMarks();
+  }
+  function maxCycle() { return baseCycle + deltas.length; }
+  function idx() { return vm.cycle - baseCycle; }
+
+  function applyForward() {
+    var i = idx();
+    var d;
+    if (i < deltas.length) { d = deltas[i]; vm.redo(d); }
+    else {
+      if (vm.halted || sessionSteps >= STEPS_GUARD) return null;
+      d = vm.step(); sessionSteps++;
+      if (!d) return null;
+      deltas.push(d);
+      if (deltas.length > CAP) { deltas.shift(); baseCycle++; }
+    }
+    return d;
+  }
+  function applyBack() {
+    if (idx() <= 0) return null;
+    var d = deltas[idx() - 1];
+    vm.undo(d);
+    return d;
+  }
+
+  // Feedback blips for a single delta.
+  function blipDelta(d) {
+    if (!d) return;
+    if (/^J/.test(d.op) || d.op === 'CALL' || d.op === 'RET') beep(220, 0.05, 'triangle');
+    else if (d.op === 'DRAW') beep(880, 0.02, 'square');
+    else if (d.mem.length || d.regs.length) beep(440 + d.regs.length * 40, 0.04, 'square');
+  }
+
+  function doStep() {
+    if (!vm) return;
+    if (vm.halted) { flashInfo('Program halted — press Reset to run again, or Step Back to rewind.'); return; }
+    var d = applyForward();
+    if (!d) { flashInfo('Nothing left to run at this point — press Reset or Step Back.'); return; }
+    render(d); updateTimeline(); blipDelta(d);
+  }
+  function doBack() {
+    if (!vm) return;
+    var d = applyBack();
+    render(d); updateTimeline();
+    if (d) beep(180, 0.04, 'sine');
+  }
+
+  // ---- Play loop -------------------------------------------------------
+  function stepsPerTick() {
+    var v = +speedEl.value; // 1..100
+    // exponential feel: 1 .. ~3000
+    return Math.max(1, Math.round(Math.pow(v / 100, 2.6) * 3000)) || 1;
+  }
+  function updateSpeedLabel() {
+    var n = stepsPerTick();
+    var el = $('speedlbl');
+    if (el) el.textContent = n === 1 ? '1 instr/frame' : n + ' instr/frame';
+  }
+  function startPlay() {
+    if (playing || !vm) return;
+    if (vm.halted) { flashInfo('Program halted — press Reset to run again, or Step Back to rewind.'); return; }
+    playing = true; $('playpause').textContent = '⏸ Pause';
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    tick();
+  }
+  function stopPlay() {
+    playing = false;
+    if ($('playpause')) $('playpause').textContent = '▶ Play';
+    if (rafId) cancelAnimationFrame(rafId); rafId = null;
+  }
+  function tick() {
+    if (!playing) return;
+    var n = stepsPerTick();
+    var single = n === 1;
+    var lastD = null, stopped = false;
+    for (var k = 0; k < n; k++) {
+      var d = applyForward();
+      if (!d) { stopped = true; break; }
+      lastD = d;
+      // instruction breakpoint: pause when we ARRIVE at a breakpoint line
+      var ln = asm.lineForAddr[vm.pc];
+      if (ln && bpLines[ln]) { stopped = true; flashBreak(ln); break; }
+      if (breakOnWatch && (d.regs.length || d.mem.length) && watchHitAt(d)) { stopped = true; break; }
+    }
+    render(single ? lastD : null);
+    updateTimeline();
+    if (single) blipDelta(lastD);
+    if (stopped || vm.halted || sessionSteps >= STEPS_GUARD) { stopPlay(); return; }
+    rafId = requestAnimationFrame(tick);
+  }
+  function flashBreak(ln) {
+    beep(120, 0.15, 'sawtooth');
+  }
+  function watchHitAt(d) {
+    return watches.some(function (w) {
+      if (w.kind === 'reg') return d.regs.some(function (r) { return r[0] === w.a; });
+      return d.mem.some(function (m) { return m[0] >= w.a && m[0] <= w.b; });
+    });
+  }
+
+  // ---- Scrub to arbitrary cycle ---------------------------------------
+  function scrubTo(target) {
+    target = Math.max(baseCycle, Math.min(maxCycle(), target));
+    var guard = 0;
+    while (vm.cycle < target && guard++ < 5000000) { var i = idx(); if (i < deltas.length) vm.redo(deltas[i]); else break; }
+    while (vm.cycle > target && guard++ < 5000000) { vm.undo(deltas[idx() - 1]); }
+    render(null); updateTimeline();
+  }
+  // Execute forward until reaching an absolute cycle (used by the tutorial).
+  function ensureCycle(target) {
+    var guard = 0;
+    while (vm.cycle < target && !vm.halted && guard++ < 500000) { if (!applyForward()) break; }
+    render(null); updateTimeline(); recomputeWatchMarks();
+  }
+
+  // ---- Rendering -------------------------------------------------------
+  function flash(el) { if (!el) return; el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
+
+  function render(flashDelta) {
+    if (!vm) return;
+    // registers
+    var changed = {};
+    if (flashDelta) flashDelta.regs.forEach(function (r) { changed[r[0]] = true; });
+    for (var i = 0; i < 8; i++) {
+      if (vm.reg[i] !== regValShown[i]) {
+        regEls[i].querySelector('.v').textContent = fmt(vm.reg[i]);
+        regValShown[i] = vm.reg[i];
+      }
+      if (changed[i]) flash(regEls[i]);
+    }
+    pcEl.querySelector('.v').textContent = vm.pc; if (flashDelta) flash(pcEl);
+    spEl.querySelector('.v').textContent = vm.sp;
+    // flags
+    ['Z', 'N', 'C', 'V'].forEach(function (f) {
+      var el = $('flag-' + f);
+      el.classList.toggle('on', !!vm.flags[f]);
+    });
+    // current instruction
+    var txt = vm.halted ? 'HLT — processor stopped'
+      : (asm.lineForAddr[vm.pc] ? R.disasm(vm.mem, vm.pc) : '—');
+    curinstrEl.querySelector('.mono').textContent = '@' + vm.pc + '  ' + txt;
+    positionCurLine();
+    // memory grid
+    var memChanged = {};
+    if (flashDelta) flashDelta.mem.forEach(function (m) { if (m[0] < 256) memChanged[m[0]] = true; });
+    for (var a = 0; a < 256; a++) {
+      if (vm.mem[a] !== memShown[a]) {
+        memCellEls[a].textContent = vm.mem[a];
+        memCellEls[a].classList.toggle('nz', vm.mem[a] !== 0);
+        memShown[a] = vm.mem[a];
+      }
+      if (memChanged[a]) flash(memCellEls[a]);
+    }
+    // stack
+    renderStack();
+    // framebuffer
+    renderFB();
+  }
+  function fmt(v) {
+    if (v <= 9) return String(v);
+    var hex = ' (0x' + v.toString(16).toUpperCase();
+    var s = R.s16(v);
+    return v + hex + (s < 0 ? ', ' + s : '') + ')';
+  }
+
+  function renderStack() {
+    var top = R.STACK_TOP, sp = vm.sp;
+    var html = '';
+    if (sp >= top) html = '<div class="empty">stack empty</div>';
+    else {
+      var count = Math.min(top - sp, 16);
+      for (var k = 0; k < count; k++) {
+        var addr = sp + k;
+        html += '<div class="scell' + (k === 0 ? ' sp' : '') + '"><span class="a">' + addr + '</span><span class="d">' + vm.mem[addr] + '</span></div>';
+      }
+      if (top - sp > 16) html += '<div class="empty">… ' + (top - sp - 16) + ' more</div>';
+    }
+    stackEl.innerHTML = html;
+  }
+
+  function renderFB() {
+    var d = fbImg.data;
+    for (var i = 0; i < vm.fb.length; i++) {
+      var c = PALETTE[vm.fb[i] & 15];
+      var r = parseInt(c.slice(1, 3), 16), g = parseInt(c.slice(3, 5), 16), b = parseInt(c.slice(5, 7), 16);
+      var o = i * 4; d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
+    }
+    fbCtx.putImageData(fbImg, 0, 0);
+  }
+
+  function updateTimeline() {
+    tlEl.min = baseCycle; tlEl.max = maxCycle(); tlEl.value = vm.cycle;
+    cyclelbl.textContent = 'cycle ' + vm.cycle + ' / ' + maxCycle() +
+      (vm.halted ? '  [halted]' : '') +
+      (baseCycle > 0 ? '  (log from ' + baseCycle + ')' : '');
+    drawMarks();
+  }
+
+  // ---- Provenance: "who wrote this?" ----------------------------------
+  function lastWriteCycle(pred, fromIdx) {
+    for (var i = Math.min(fromIdx, deltas.length) - 1; i >= 0; i--) {
+      if (pred(deltas[i])) return i; // index into deltas
+    }
+    return -1;
+  }
+  function provenanceReg(regIdx) {
+    var i = lastWriteCycle(function (d) { return d.regs.some(function (r) { return r[0] === regIdx; }); }, idx());
+    landProvenance(i, 'R' + regIdx);
+  }
+  function provenanceMem(addr) {
+    var i = lastWriteCycle(function (d) { return d.mem.some(function (m) { return m[0] === addr; }); }, idx());
+    landProvenance(i, 'mem[' + addr + ']');
+  }
+  function landProvenance(i, label) {
+    if (i < 0) { flashInfo('No write to ' + label + ' in the recorded timeline.'); return; }
+    var d = deltas[i];
+    scrubTo(d.cycle); // land on the instruction that is about to write
+    var ln = asm.lineForAddr[d.addr];
+    flashInfo(label + ' was last written at cycle ' + d.cycle + ' by "' + R.disasm(vm.mem, d.addr) + '"' + (ln ? ' (line ' + ln + ')' : '') + '. Press Step to watch it happen.');
+    // pulse source line
+    if (ln) { curlineEl.classList.remove('prov'); void curlineEl.offsetWidth; curlineEl.classList.add('prov'); }
+  }
+  var infoTimer = null;
+  function flashInfo(msg) {
+    var el = $('info');
+    el.textContent = msg; el.classList.add('show');
+    if (infoTimer) clearTimeout(infoTimer);
+    infoTimer = setTimeout(function () { el.classList.remove('show'); }, 6000);
+  }
+
+  // ---- Watches ---------------------------------------------------------
+  function parseWatch(expr) {
+    expr = expr.trim();
+    var mr = expr.match(/^R([0-7])$/i);
+    if (mr) return { expr: expr, kind: 'reg', a: +mr[1], b: +mr[1] };
+    var mrange = expr.match(/^mem\[(\d+)\.\.(\d+)\]$/i);
+    if (mrange) return { expr: expr, kind: 'mem', a: +mrange[1], b: +mrange[2] };
+    var mm = expr.match(/^mem\[(\d+)\]$/i);
+    if (mm) return { expr: expr, kind: 'mem', a: +mm[1], b: +mm[1] };
+    return null;
+  }
+  function addWatch() {
+    var w = parseWatch($('watchInput').value);
+    if (!w) { flashInfo('Watch must be Rn, mem[addr], or mem[a..b].'); return; }
+    watches.push(w); $('watchInput').value = '';
+    renderWatchList(); recomputeWatchMarks();
+  }
+  function watchValue(w) {
+    if (w.kind === 'reg') return vm.reg[w.a];
+    var parts = [];
+    for (var a = w.a; a <= w.b && parts.length < 12; a++) parts.push(vm.mem[a]);
+    return '[' + parts.join(',') + ']';
+  }
+  function watchMutations(w) {
+    var arr = [];
+    for (var i = 0; i < deltas.length; i++) {
+      var d = deltas[i], hit = false;
+      if (w.kind === 'reg') hit = d.regs.some(function (r) { return r[0] === w.a; });
+      else hit = d.mem.some(function (m) { return m[0] >= w.a && m[0] <= w.b; });
+      if (hit) arr.push(d.cycle);
+    }
+    return arr;
+  }
+  var watchMarkCache = [];
+  function recomputeWatchMarks() {
+    watchMarkCache = watches.map(function (w) { return { w: w, cycles: watchMutations(w) }; });
+    renderWatchList(); drawMarks();
+  }
+  function renderWatchList() {
+    watchListEl.innerHTML = watches.map(function (w, i) {
+      var muts = watchMarkCache[i] ? watchMarkCache[i].cycles.length : 0;
+      return '<div class="watch"><code>' + esc(w.expr) + '</code>' +
+        '<span class="wv">' + esc(String(watchValue(w))) + '</span>' +
+        '<span class="wm">' + muts + ' changes</span>' +
+        '<button data-w="' + i + '" data-dir="-1" title="previous change">◀</button>' +
+        '<button data-w="' + i + '" data-dir="1" title="next change">▶</button>' +
+        '<button data-del="' + i + '" title="remove">×</button></div>';
+    }).join('') || '<div class="empty">no watches — add R0, mem[100], mem[100..107]…</div>';
+  }
+  function jumpWatch(i, dir) {
+    var cyc = watchMarkCache[i] ? watchMarkCache[i].cycles : [];
+    if (!cyc.length) { flashInfo('No recorded changes for ' + watches[i].expr + ' yet — run the program.'); return; }
+    var cur = vm.cycle, target = null;
+    if (dir > 0) { for (var a = 0; a < cyc.length; a++) if (cyc[a] + 1 > cur) { target = cyc[a] + 1; break; } if (target === null) target = cyc[cyc.length - 1] + 1; }
+    else { for (var b = cyc.length - 1; b >= 0; b--) if (cyc[b] + 1 < cur) { target = cyc[b] + 1; break; } if (target === null) target = cyc[0] + 1; }
+    scrubTo(target);
+    flashInfo(watches[i].expr + ' changed at cycle ' + (target - 1) + ' → now ' + watchValue(watches[i]));
+  }
+
+  // ---- Timeline mark strip --------------------------------------------
+  function drawMarks() {
+    var c = tlMarks, ctx = c.getContext('2d');
+    var w = c.width = c.clientWidth, h = c.height;
+    ctx.clearRect(0, 0, w, h);
+    var lo = baseCycle, hi = maxCycle(); if (hi <= lo) return;
+    var colors = ['#ffa300', '#00e436', '#29adff', '#ff77a8', '#ffec27'];
+    watchMarkCache.forEach(function (m, wi) {
+      ctx.fillStyle = colors[wi % colors.length];
+      m.cycles.forEach(function (cy) {
+        var x = Math.round((cy - lo) / (hi - lo) * (w - 2)) + 1;
+        ctx.fillRect(x, (wi % 3) * 4, 2, 4);
+      });
+    });
+    // playhead
+    var px = Math.round((vm.cycle - lo) / (hi - lo) * (w - 2)) + 1;
+    ctx.fillStyle = '#fff1e8'; ctx.fillRect(px - 1, 0, 2, h);
+  }
+
+  // ---- Sharing (URL hash) ---------------------------------------------
+  function encodeSrc(src) { return btoa(unescape(encodeURIComponent(src))); }
+  function decodeSrc(b64) { try { return decodeURIComponent(escape(atob(b64))); } catch (e) { return null; } }
+  function share() {
+    var hash = '#p=' + encodeSrc(srcEl.value);
+    var url = location.href.replace(/#.*$/, '') + hash;
+    try { history.replaceState(null, '', hash); } catch (e) { location.hash = hash; }
+    if (navigator.clipboard) navigator.clipboard.writeText(url).then(function () { flashInfo('Shareable link copied to clipboard.'); }, function () { flashInfo('Link is in the address bar.'); });
+    else flashInfo('Link is in the address bar.');
+  }
+  function loadFromHash() {
+    var m = location.hash.match(/#p=(.*)$/);
+    if (m) { var s = decodeSrc(m[1]); if (s) { srcEl.value = s; return true; } }
+    return false;
+  }
+
+  // ---- WebM export (framebuffer capture) ------------------------------
+  var recorder = null, recChunks = [];
+  function toggleRecord() {
+    var btn = $('rec');
+    if (recorder) { recorder.stop(); return; }
+    if (!fbCanvas.captureStream || typeof MediaRecorder === 'undefined') {
+      flashInfo('Video capture is not supported in this browser.'); return;
+    }
+    try {
+      var stream = fbCanvas.captureStream(30);
+      recChunks = [];
+      recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+      recorder.ondataavailable = function (e) { if (e.data.size) recChunks.push(e.data); };
+      recorder.onstop = function () {
+        var blob = new Blob(recChunks, { type: 'video/webm' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'retrograde-run.webm'; a.click();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+        recorder = null; btn.textContent = '● Rec'; btn.classList.remove('on');
+        flashInfo('Saved retrograde-run.webm');
+      };
+      recorder.start();
+      btn.textContent = '■ Stop'; btn.classList.add('on');
+      flashInfo('Recording the framebuffer — press Play, then Stop to download WebM.');
+    } catch (e) { flashInfo('Could not start recording: ' + e); recorder = null; }
+  }
+
+  // ---- Attract mode ----------------------------------------------------
+  var attract = false, attractTimer = null, attractIdx = 0;
+  function toggleAttract() {
+    attract = !attract;
+    $('attract').classList.toggle('on', attract);
+    if (attract) { attractIdx = 0; nextAttract(); }
+    else { if (attractTimer) clearTimeout(attractTimer); stopPlay(); }
+  }
+  function nextAttract() {
+    if (!attract) return;
+    loadSample(attractIdx % SAMPLES.length);
+    $('sample').value = String(attractIdx % SAMPLES.length);
+    speedEl.value = 62;
+    startPlay();
+    attractIdx++;
+    attractTimer = setTimeout(function () { stopPlay(); nextAttract(); }, 9000);
+  }
+
+  // ---- Samples ---------------------------------------------------------
+  function loadSample(i) {
+    srcEl.value = SAMPLES[i].code;
+    refreshHighlight();
+    assembleNow(true);
+  }
+
+  // ---- Tutorial --------------------------------------------------------
+  var TUT = [
+    { t: 'Welcome to Retrograde', b: 'This is a complete 16-bit fantasy CPU. You write assembly on the left; the machine on the right shows every register, memory cell, the stack and a 64×64 screen. The magic trick: every cycle is recorded, so you can rewind. Click Next.', prog: null },
+    { t: 'MOV — put a value in a register', b: 'The loaded program does MOV R0, 5 then MOV R1, 10. Press Step (or the Step button) once. Watch R0 light up as it receives 5.', prog: 'MOV R0, 5\nMOV R1, 10\nADD R0, R1\nSTORE [100], R0\nHLT\n', cycle: 1, hi: 'reg' },
+    { t: 'ADD — arithmetic + flags', b: 'Step again to reach ADD R0, R1. R0 becomes 15 and the Z/N/C/V flags update from the result. Every ALU op sets flags that conditional jumps read.', prog: null, cycle: 3, hi: 'reg' },
+    { t: 'STORE — write to memory', b: 'Step once more: STORE [100], R0 writes 15 into memory cell 100 — watch cell 100 pulse in the grid. LOAD reads it back.', prog: null, cycle: 4, hi: 'mem' },
+    { t: 'Time travel', b: 'Now drag the timeline slider at the bottom back and forth — the whole machine rewinds and replays. Step Back undoes one instruction exactly.', prog: null, cycle: 4 },
+    { t: 'Provenance — one click', b: 'Click memory cell 100 (or any register). Retrograde jumps to the exact instruction and cycle that last wrote it. That is the heart of Retrograde: "how did this value get here?" answered instantly.', prog: null, cycle: 4 },
+    { t: 'Now draw!', b: 'Load the Plasma or Bouncing pixel sample from the dropdown and press Play. Try the CRT theme and sound toggles. Have fun — share your creation with the link button.', prog: null }
+  ];
+  var tutStep = 0;
+  function openTutorial() { tutStep = 0; showTut(); $('tutmodal').classList.add('show'); }
+  function closeTutorial() { $('tutmodal').classList.remove('show'); }
+  function showTut() {
+    var s = TUT[tutStep];
+    $('tuttitle').textContent = s.t;
+    $('tutbody').textContent = s.b;
+    $('tutprog').textContent = (tutStep + 1) + ' / ' + TUT.length;
+    $('tutprev').disabled = tutStep === 0;
+    $('tutnext').textContent = tutStep === TUT.length - 1 ? 'Finish' : 'Next ▶';
+    if (s.prog) { srcEl.value = s.prog; refreshHighlight(); assembleNow(true); }
+    if (typeof s.cycle === 'number' && vm) ensureCycle(s.cycle);
+  }
+
+  // ---- Build machine-view DOM -----------------------------------------
+  function mkReg(cls, label, id, dreg) {
+    var d = document.createElement('div'); d.className = cls;
+    if (id) d.id = id;
+    if (dreg !== undefined) d.dataset.reg = dreg;
+    if (dreg !== undefined && dreg !== 'pc') d.title = 'click for provenance';
+    var n = document.createElement('span'); n.className = 'n'; n.textContent = label;
+    var v = document.createElement('span'); v.className = 'v'; v.textContent = '0';
+    d.appendChild(n); d.appendChild(v); return d;
+  }
+  function buildMachine() {
+    regsEl.innerHTML = ''; regEls = [];
+    for (var i = 0; i < 8; i++) { var el = mkReg('reg', 'R' + i, null, i); regsEl.appendChild(el); regEls[i] = el; }
+    pcEl = mkReg('reg pcsp', 'PC', 'reg-pc', 'pc'); regsEl.appendChild(pcEl);
+    spEl = mkReg('reg pcsp', 'SP', 'reg-sp'); regsEl.appendChild(spEl);
+    // memory 0..255
+    memEl.innerHTML = ''; memCellEls = [];
+    for (var a = 0; a < 256; a++) {
+      var c = document.createElement('div'); c.className = 'mc'; c.dataset.addr = a;
+      c.title = 'mem[' + a + '] — click for provenance'; c.textContent = '0';
+      memEl.appendChild(c); memCellEls[a] = c;
+    }
+  }
+
+  // ---- Wire up ---------------------------------------------------------
+  function init() {
+    srcEl = $('src'); hlEl = $('hl'); gutterEl = $('gutter'); curlineEl = $('curline');
+    errorsEl = $('errors'); regsEl = $('regs'); curinstrEl = $('curinstr');
+    memEl = $('mem'); stackEl = $('stack'); fbCanvas = $('fb'); tlEl = $('timeline');
+    tlMarks = $('tlmarks'); cyclelbl = $('cyclelbl'); speedEl = $('speed'); watchListEl = $('watchList');
+    fbCtx = fbCanvas.getContext('2d'); fbCtx.imageSmoothingEnabled = false;
+    fbImg = fbCtx.createImageData(R.FB_W, R.FB_H);
+
+    buildMachine();
+
+    // sample dropdown
+    var sel = $('sample');
+    SAMPLES.forEach(function (s, i) { var o = document.createElement('option'); o.value = i; o.textContent = s.name; sel.appendChild(o); });
+    sel.addEventListener('change', function () { loadSample(+sel.value); });
+
+    // ISA reference table
+    var isaHtml = R.ISA_DOC.map(function (r) {
+      return '<tr><td class="op">' + r[0] + '</td><td class="syn">' + esc(r[1]) + '</td><td>' + esc(r[2]) + '</td></tr>';
+    }).join('');
+    $('isatable').innerHTML = '<tr><th>Op</th><th>Syntax</th><th>Meaning</th></tr>' + isaHtml;
+
+    // editor events
+    srcEl.addEventListener('input', function () { refreshHighlight(); scheduleAssemble(); });
+    srcEl.addEventListener('scroll', syncScroll);
+    srcEl.addEventListener('keydown', function (e) {
+      if (e.key === 'Tab') { e.preventDefault(); insertText('  '); }
+    });
+
+    // gutter click -> toggle breakpoint
+    gutterEl.addEventListener('click', function (e) {
+      var g = e.target.closest('.gl'); if (!g) return;
+      var ln = +g.dataset.line;
+      if (bpLines[ln]) delete bpLines[ln]; else bpLines[ln] = true;
+      buildGutter();
+    });
+    errorsEl.addEventListener('click', function (e) {
+      var d = e.target.closest('[data-line]'); if (!d) return;
+      gotoLine(+d.dataset.line);
+    });
+
+    // register / memory provenance
+    regsEl.addEventListener('click', function (e) {
+      var r = e.target.closest('.reg'); if (!r) return;
+      var v = r.dataset.reg;
+      if (v === 'pc' || v === undefined) return;
+      provenanceReg(+v);
+    });
+    memEl.addEventListener('click', function (e) {
+      var c = e.target.closest('.mc'); if (!c) return;
+      provenanceMem(+c.dataset.addr);
+    });
+
+    // transport
+    $('step').addEventListener('click', function () { stopPlay(); doStep(); });
+    $('back').addEventListener('click', function () { stopPlay(); doBack(); });
+    $('reset').addEventListener('click', function () { resetMachine(); });
+    $('playpause').addEventListener('click', function () { if (playing) stopPlay(); else startPlay(); });
+    tlEl.addEventListener('input', function () { stopPlay(); scrubTo(+tlEl.value); });
+    speedEl.addEventListener('input', updateSpeedLabel);
+
+    // watches
+    $('watchAdd').addEventListener('click', addWatch);
+    $('watchInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') addWatch(); });
+    watchListEl.addEventListener('click', function (e) {
+      var del = e.target.closest('[data-del]');
+      if (del) { watches.splice(+del.dataset.del, 1); recomputeWatchMarks(); return; }
+      var b = e.target.closest('[data-w]');
+      if (b) jumpWatch(+b.dataset.w, +b.dataset.dir);
+    });
+    $('breakwatch').addEventListener('change', function (e) { breakOnWatch = e.target.checked; });
+
+    // toolbar toggles
+    $('crt').addEventListener('click', function () { document.body.classList.toggle('crt'); $('crt').classList.toggle('on'); });
+    $('sound').addEventListener('click', function () { soundOn = !soundOn; $('sound').classList.toggle('on', soundOn); if (soundOn) beep(660, 0.05); });
+    $('share').addEventListener('click', share);
+    $('rec').addEventListener('click', toggleRecord);
+    $('attract').addEventListener('click', toggleAttract);
+    $('tut').addEventListener('click', openTutorial);
+    $('tutnext').addEventListener('click', function () { if (tutStep === TUT.length - 1) closeTutorial(); else { tutStep++; showTut(); } });
+    $('tutprev').addEventListener('click', function () { if (tutStep > 0) { tutStep--; showTut(); } });
+    $('tutclose').addEventListener('click', closeTutorial);
+
+    // keyboard shortcuts
+    document.addEventListener('keydown', function (e) {
+      if (e.target === srcEl || e.target.tagName === 'INPUT') return;
+      if (e.key === 's' || e.key === 'ArrowRight') { doStep(); e.preventDefault(); }
+      else if (e.key === 'b' || e.key === 'ArrowLeft') { doBack(); e.preventDefault(); }
+      else if (e.key === ' ') { if (playing) stopPlay(); else startPlay(); e.preventDefault(); }
+      else if (e.key === 'r') { resetMachine(); }
+    });
+
+    // recompute watch marks whenever we might have grown the log
+    setInterval(function () { if (playing) recomputeWatchMarksLight(); }, 500);
+
+    // initial program: hash or first sample
+    if (!loadFromHash()) srcEl.value = SAMPLES[0].code;
+    refreshHighlight();
+    assembleNow(true);
+    // measure line height for the current-line indicator
+    measureLineHeight();
+    updateSpeedLabel();
+    window.addEventListener('resize', drawMarks);
+
+    // open the guided tutorial once, on a visitor's first arrival
+    try {
+      if (!localStorage.getItem('retrograde_seen')) {
+        localStorage.setItem('retrograde_seen', '1');
+        openTutorial();
+      }
+    } catch (e) { /* localStorage unavailable (private mode / file://) — skip */ }
+  }
+
+  function recomputeWatchMarksLight() {
+    watchMarkCache = watches.map(function (w) { return { w: w, cycles: watchMutations(w) }; });
+    // update only values + counts cheaply
+    renderWatchList(); drawMarks();
+  }
+
+  function measureLineHeight() {
+    var cs = getComputedStyle(srcEl);
+    var probe = document.createElement('div');
+    probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font-family:' +
+      cs.fontFamily + ';font-size:' + cs.fontSize + ';line-height:' + cs.lineHeight;
+    probe.textContent = 'X\nX';
+    document.body.appendChild(probe);
+    lineHeight = probe.offsetHeight / 2;
+    document.body.removeChild(probe);
+    padTop = parseFloat(cs.paddingTop) || 10;
+    positionCurLine();
+  }
+
+  var asmTimer = null;
+  function scheduleAssemble() { if (asmTimer) clearTimeout(asmTimer); asmTimer = setTimeout(function () { assembleNow(false); }, 250); }
+
+  function insertText(t) {
+    var s = srcEl.selectionStart, e = srcEl.selectionEnd;
+    srcEl.value = srcEl.value.slice(0, s) + t + srcEl.value.slice(e);
+    srcEl.selectionStart = srcEl.selectionEnd = s + t.length;
+    refreshHighlight(); scheduleAssemble();
+  }
+  function gotoLine(ln) {
+    var lines = srcEl.value.split('\n'); var pos = 0;
+    for (var i = 0; i < ln - 1 && i < lines.length; i++) pos += lines[i].length + 1;
+    srcEl.focus(); srcEl.selectionStart = pos; srcEl.selectionEnd = pos + (lines[ln - 1] || '').length;
+    srcEl.scrollTop = Math.max(0, (ln - 3) * lineHeight);
+    syncScroll();
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
+
+</script>
+</body>
+</html>

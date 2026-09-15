@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hyphae — a mycelial idle</title>
+<style>
+  :root{
+    --bg:#0d0f0c; --panel:#15180f; --ink:#e8ecd8; --dim:#8f9a72;
+    --gold:#d8c26a; --accent:#7fd66a; --line:#2a2f1e;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(circle at 50% 0%,#1a1e12,#0d0f0c 70%);
+    color:var(--ink);
+    font:14px/1.45 "SF Mono",ui-monospace,Menlo,Consolas,monospace;
+    display:flex;align-items:center;justify-content:center;min-height:100%;
+    padding:16px;gap:22px;flex-wrap:wrap;
+  }
+  h1{font-size:20px;margin:0 0 2px;letter-spacing:.06em;color:var(--accent)}
+  .sub{color:var(--dim);font-size:11px;margin-bottom:14px}
+  .stage{position:relative}
+  canvas{
+    display:block;border-radius:50%;
+    width:440px;max-width:calc(100vw - 32px);height:auto;aspect-ratio:1/1;
+    box-shadow:0 12px 40px rgba(0,0,0,.6), inset 0 0 0 1px rgba(255,255,255,.04);
+  }
+  @media(max-width:720px){ .panel{width:min(440px,calc(100vw - 32px))} }
+  .panel{
+    width:330px;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;padding:16px;box-shadow:0 12px 40px rgba(0,0,0,.5)
+  }
+  .biomass{font-size:30px;font-weight:600;color:var(--gold);letter-spacing:.02em;line-height:1.1}
+  .rate{color:var(--accent);font-size:12px;margin-bottom:12px}
+  .hud{
+    display:flex;justify-content:space-between;font-size:11px;color:var(--dim);
+    border-top:1px dashed var(--line);border-bottom:1px dashed var(--line);
+    padding:8px 0;margin-bottom:12px
+  }
+  .hud b{color:var(--ink);font-weight:600}
+  .up{
+    display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+    background:#1c2012;border:1px solid var(--line);border-radius:10px;
+    color:var(--ink);padding:9px 11px;margin-bottom:8px;cursor:pointer;
+    transition:.12s;font-family:inherit;font-size:12px;position:relative
+  }
+  .up:hover:not(:disabled){border-color:var(--accent);transform:translateY(-1px)}
+  .up:disabled{opacity:.4;cursor:not-allowed}
+  .up .nm{flex:1}
+  .up .nm small{display:block;color:var(--dim);font-size:10px;margin-top:1px}
+  .up .lv{color:var(--gold);font-weight:600;min-width:34px;text-align:right}
+  .up .cost{color:var(--accent);font-size:11px;min-width:64px;text-align:right}
+  .up.best::after{content:"★ best";position:absolute;top:-7px;right:8px;
+    background:var(--accent);color:#0d0f0c;font-size:9px;font-weight:700;
+    padding:1px 5px;border-radius:6px;letter-spacing:.04em}
+  .spore{
+    width:100%;margin-top:6px;padding:11px;border-radius:10px;cursor:pointer;
+    background:linear-gradient(180deg,#3a2d5e,#241a3d);border:1px solid #5a4a8a;
+    color:#e6dcff;font-family:inherit;font-size:12px;transition:.12s
+  }
+  .spore:hover:not(:disabled){filter:brightness(1.15)}
+  .spore:disabled{opacity:.45;cursor:not-allowed}
+  .spore b{font-size:15px}
+  .spore.confirm{background:linear-gradient(180deg,#5e2d3a,#3d1a24);border-color:#8a4a5a}
+  .sporebar{height:5px;background:#241a3d;border-radius:3px;margin:6px 2px 0;overflow:hidden}
+  .sporebar>div{height:100%;width:0;background:linear-gradient(90deg,#7a5edf,#b39cff);transition:width .3s}
+  .foot{color:var(--dim);font-size:10px;margin-top:10px;text-align:center}
+  #away{
+    position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+    background:rgba(5,6,4,.82);z-index:9;font-size:13px
+  }
+  #away .box{background:var(--panel);border:1px solid var(--accent);border-radius:14px;
+    padding:24px 28px;max-width:320px;text-align:center}
+  #away b{color:var(--gold)}
+  #away button{margin-top:14px;padding:8px 22px;border-radius:8px;border:none;
+    background:var(--accent);color:#0d0f0c;font-family:inherit;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="stage">
+  <canvas id="dish" width="440" height="440"></canvas>
+</div>
+
+<div class="panel">
+  <h1>HYPHAE</h1>
+  <div class="sub">tend one colony until it eats the dish</div>
+  <div class="biomass" id="biomass">0</div>
+  <div class="rate" id="rate">+0 biomass/s</div>
+  <div class="hud">
+    <div>strain <b id="strain">Wild Type</b></div>
+    <div>lifetime <b id="lifetime">0</b></div>
+    <div>spores <b id="spores">0</b> · ×<b id="mult">1.00</b></div>
+  </div>
+  <div id="ups"></div>
+  <button class="spore" id="sporulate" disabled></button>
+  <div class="sporebar"><div id="sporefill"></div></div>
+  <div class="foot">autosaves locally · offline growth capped at 12h</div>
+</div>
+
+<div id="away"><div class="box">
+  <div id="awaytxt"></div>
+  <button onclick="document.getElementById('away').style.display='none'">Resume</button>
+</div></div>
+
+<script>
+"use strict";
+// ---------- number formatting: K/M/B/T -> e-notation ----------
+const UN = ["","K","M","B","T","Qa","Qi","Sx","Sp"];
+function fmt(n){
+  if(n<1000) return (n<10 && n%1) ? n.toFixed(2) : Math.floor(n).toString();
+  const t=Math.floor(Math.log10(n)/3);
+  if(t<UN.length){ const v=n/Math.pow(1000,t); return (v<10?v.toFixed(2):v<100?v.toFixed(1):Math.floor(v))+UN[t]; }
+  return n.toExponential(2).replace("e+","e");
+}
+function fmtTime(s){ s=Math.floor(s); const h=Math.floor(s/3600),m=Math.floor(s%3600/60),ss=s%60;
+  return h? h+"h "+m+"m" : m? m+"m "+ss+"s" : ss+"s"; }
+
+// ---------- strain names per rebirth tier ----------
+const STRAINS=["Wild Type","Verdant","Amber Rot","Bioluminex","Cordyceps","Azure Bloom",
+  "Ashveil","Crimson Cap","Obsidian","Golden Prime","Voidcrown"];
+function strainName(t){ return t<STRAINS.length?STRAINS[t]:"Strain-"+t; }
+
+// ---------- upgrade definitions ----------
+// growth = (base + tips) * moisture^lvl * broth^lvl * enzyme^lvl * anastomosis(tips) * sporeMult
+const UPS=[
+  {id:"tips", nm:"Hyphal Tips", desc:"+1.2 base growth each", base:15, growth:1.15, lvl:0},
+  {id:"moist",nm:"Moisture",    desc:"×1.15 growth per level", base:60, growth:1.15, lvl:0},
+  {id:"broth",nm:"Nutrient Broth",desc:"×1.28 growth per level",base:500, growth:1.16, lvl:0},
+  {id:"enz",  nm:"Enzymes",     desc:"×1.22 growth per level", base:4000,growth:1.17, lvl:0},
+  {id:"ana",  nm:"Anastomosis", desc:"network ×(1+0.08·tips)", base:32000,growth:1.20, lvl:0},
+];
+function upCost(u){ return u.base*Math.pow(u.growth, u.lvl); }
+
+// ---------- state ----------
+let S={ biomass:0, lifetime:0, spores:0, tier:0, last:Date.now() };
+function get(id){ return UPS.find(u=>u.id===id); }
+
+function growthRate(){
+  const tips=get("tips").lvl;
+  const base=1 + tips*1.2;
+  let g=base;
+  g*=Math.pow(1.15, get("moist").lvl);
+  g*=Math.pow(1.28, get("broth").lvl);
+  g*=Math.pow(1.22, get("enz").lvl);
+  g*=Math.pow(1 + 0.08*tips, get("ana").lvl); // each Anastomosis level ×(1+0.08·tips); ×1 at lvl 0
+  g*=(1 + S.spores*0.5);                    // permanent spore multiplier
+  return g;
+}
+function sporesFor(lt){ return Math.floor(Math.sqrt(lt/1e6)); } // gentle sqrt scaling
+function pendingSpores(){ return Math.max(0, sporesFor(S.lifetime)-S.spores); }
+
+// ---------- persistence ----------
+const KEY="hyphae.save.v1";
+function save(){
+  try{
+    localStorage.setItem(KEY, JSON.stringify({
+      b:S.biomass, l:S.lifetime, sp:S.spores, t:S.tier, last:Date.now(),
+      u:UPS.map(u=>u.lvl)
+    }));
+  }catch(e){/* storage unavailable (private mode, file://, sandboxed) — degrade silently */}
+}
+function load(){
+  try{
+    const d=JSON.parse(localStorage.getItem(KEY)); if(!d) return;
+    S.biomass=d.b||0; S.lifetime=d.l||0; S.spores=d.sp||0; S.tier=d.t||0; S.last=d.last||Date.now();
+    if(d.u) d.u.forEach((v,i)=>{ if(UPS[i]) UPS[i].lvl=v; });
+  }catch(e){}
+}
+
+// ---------- offline catch-up ----------
+function offline(){
+  const dt=Math.min((Date.now()-S.last)/1000, 12*3600);
+  if(dt>20){
+    const g=growthRate()*dt;
+    S.biomass+=g; S.lifetime+=g;
+    document.getElementById("awaytxt").innerHTML=
+      "While you were away for <b>"+fmtTime(dt)+"</b>,<br>the colony grew by<br><b>"+fmt(g)+"</b> biomass.";
+    document.getElementById("away").style.display="flex";
+  }
+  S.last=Date.now();
+}
+
+// ---------- purchase / prestige ----------
+function buy(u){ const c=upCost(u); if(S.biomass>=c){ S.biomass-=c; u.lvl++; syncUps(1); } }
+function bestBuy(){
+  // rank by payback time: cost / marginal growth gain
+  let best=null,bestPay=Infinity;
+  UPS.forEach(u=>{
+    const g0=growthRate(); u.lvl++; const g1=growthRate(); u.lvl--;
+    const gain=g1-g0; if(gain<=0) return;
+    const pay=upCost(u)/gain;
+    if(pay<bestPay){ bestPay=pay; best=u; }
+  });
+  return best;
+}
+function sporulate(){
+  const gain=pendingSpores(); if(gain<=0) return;
+  spawnBurst();
+  S.spores+=gain; S.tier++; S.biomass=0;
+  UPS.forEach(u=>u.lvl=0);
+  netCache=null; // force mycelium regrow
+  syncUps(1);
+}
+// two-tap confirm so a stray click can't wipe an unprestiged run
+let sporeConfirm=false, sporeConfirmT=0;
+function onSporulate(){
+  if(pendingSpores()<=0) return;
+  if(!sporeConfirm){ sporeConfirm=true; sporeConfirmT=Date.now(); renderStats(); return; }
+  sporeConfirm=false; sporulate();
+}
+
+// ================= CANVAS RENDERER =================
+const cv=document.getElementById("dish"), ctx=cv.getContext("2d");
+const W=440, H=440, CX=W/2, CY=H/2, R=W/2-14;
+// scale the backing store for HiDPI/Retina so filaments render crisp; CSS keeps the display size
+const DPR=Math.max(1, window.devicePixelRatio||1);
+cv.width=W*DPR; cv.height=H*DPR;
+ctx.scale(DPR,DPR); // draw in logical 440×440 units hereafter
+let netCache=null, netFor=-1, particles=[], pops=[];
+
+// deterministic RNG so the network is stable within a run
+function mulberry(a){ return function(){ a|=0;a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+// build a branching filament tree sized by log(biomass)
+function buildNet(){
+  const rng=mulberry(1337+S.tier*97);
+  const primary=7+S.tier;                        // main hyphae
+  const reach=Math.min(1, Math.log10(S.lifetime+10)/9); // 0..1 dish fill
+  const segs=[];
+  for(let i=0;i<primary;i++){
+    const a=(i/primary)*Math.PI*2 + rng()*0.3;
+    grow(CX,CY,a, R*reach, 0, rng, segs);
+  }
+  netCache=segs; netFor=Math.floor(reach*40);
+}
+function grow(x,y,a,len,depth,rng,segs){
+  if(len<6||depth>5) return;
+  const steps=3;
+  for(let s=0;s<steps;s++){
+    a+=(rng()-0.5)*0.5;
+    const nx=x+Math.cos(a)*len/steps, ny=y+Math.sin(a)*len/steps;
+    segs.push({x1:x,y1:y,x2:nx,y2:ny,d:depth});
+    x=nx;y=ny;
+    if(rng()<0.45 && depth<5) grow(x,y,a+(rng()<0.5?1:-1)*(0.4+rng()*0.5), len*0.62, depth+1, rng, segs);
+  }
+  // occasional fruiting tip
+  if(depth>=2 && rng()<0.15) segs.push({tip:true,x2:x,y2:y,d:depth});
+}
+
+function spawnBurst(){
+  if(!netCache) return;
+  netCache.filter(s=>s.tip).forEach(t=>{
+    for(let i=0;i<6;i++){
+      const a=Math.random()*Math.PI*2, sp=0.6+Math.random()*1.8;
+      particles.push({x:t.x2,y:t.y2,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-0.4,life:1});
+    }
+  });
+}
+
+let lastMilestone=0;
+function checkMilestone(){
+  const m=Math.floor(Math.log10(S.biomass+1));
+  if(m>lastMilestone && m>2 && netCache){
+    lastMilestone=m;
+    const tips=netCache.filter(s=>s.tip);
+    if(tips.length){ const t=tips[(Math.random()*tips.length)|0]; pops.push({x:t.x2,y:t.y2,r:0,life:1}); }
+  }
+}
+
+function hue(){ return (95 + S.tier*34) % 360; }
+
+function draw(t){
+  ctx.clearRect(0,0,W,H);
+  // agar medium
+  const bg=ctx.createRadialGradient(CX,CY-30,20,CX,CY,R);
+  bg.addColorStop(0,`hsl(${hue()},22%,13%)`);
+  bg.addColorStop(1,`hsl(${hue()},26%,7%)`);
+  ctx.save();
+  ctx.beginPath();ctx.arc(CX,CY,R,0,7);ctx.clip();
+  ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+
+  // rebuild network on meaningful growth
+  const reachKey=Math.floor(Math.min(1,Math.log10(S.lifetime+10)/9)*40);
+  if(!netCache||reachKey!==netFor) buildNet();
+
+  const H0=hue(), breathe=Math.sin(t/900)*0.5+0.5;
+  // filaments
+  netCache.forEach((s)=>{
+    if(s.tip){
+      const pulse=(Math.sin(t/500 + s.x2)*0.5+0.5);
+      const r=1.6+pulse*1.6;
+      ctx.fillStyle=`hsla(${H0},70%,${62+pulse*15}%,0.9)`;
+      ctx.beginPath();ctx.arc(s.x2,s.y2,r,0,7);ctx.fill();
+      ctx.shadowBlur=8;ctx.shadowColor=`hsl(${H0},80%,60%)`;
+      ctx.fill();ctx.shadowBlur=0;
+      return;
+    }
+    const w=Math.max(0.4, (6-s.d)*0.55*(0.85+breathe*0.3));
+    ctx.strokeStyle=`hsla(${H0},${45-s.d*4}%,${40+(5-s.d)*7}%,${0.72})`;
+    ctx.lineWidth=w;ctx.lineCap="round";
+    ctx.beginPath();ctx.moveTo(s.x1,s.y1);ctx.lineTo(s.x2,s.y2);ctx.stroke();
+  });
+
+  // milestone pops (linger + glow)
+  pops=pops.filter(p=>p.life>0);
+  pops.forEach(p=>{
+    p.r+=0.6; p.life-=0.012;
+    ctx.strokeStyle=`hsla(${H0},80%,70%,${p.life*0.6})`;ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,7);ctx.stroke();
+    ctx.fillStyle=`hsla(${H0},85%,75%,${p.life})`;
+    ctx.beginPath();ctx.arc(p.x,p.y,2.5,0,7);ctx.fill();
+  });
+
+  // spore burst particles
+  particles=particles.filter(p=>p.life>0);
+  particles.forEach(p=>{
+    p.x+=p.vx;p.y+=p.vy;p.vy+=0.015;p.life-=0.012;
+    ctx.fillStyle=`hsla(${(H0+40)%360},70%,72%,${p.life})`;
+    ctx.beginPath();ctx.arc(p.x,p.y,1.8,0,7);ctx.fill();
+  });
+  ctx.restore();
+
+  // glass rim + specular highlight
+  ctx.lineWidth=5;ctx.strokeStyle="rgba(200,220,255,.10)";
+  ctx.beginPath();ctx.arc(CX,CY,R,0,7);ctx.stroke();
+  ctx.lineWidth=2;ctx.strokeStyle="rgba(255,255,255,.22)";
+  ctx.beginPath();ctx.arc(CX,CY,R-2,-2.5,-1.4);ctx.stroke();
+  const spec=ctx.createRadialGradient(CX-R*0.4,CY-R*0.5,4,CX-R*0.4,CY-R*0.5,R*0.7);
+  spec.addColorStop(0,"rgba(255,255,255,.10)");spec.addColorStop(1,"rgba(255,255,255,0)");
+  ctx.fillStyle=spec;ctx.beginPath();ctx.arc(CX,CY,R,0,7);ctx.fill();
+
+  // hand-labeled sticker
+  ctx.save();
+  ctx.translate(CX-58,H-46);ctx.rotate(-0.04);
+  ctx.fillStyle="rgba(238,236,220,.92)";
+  roundRect(0,0,116,32,4);ctx.fill();
+  ctx.fillStyle="#3a3a2a";ctx.font="italic 12px Georgia,serif";
+  ctx.fillText(strainName(S.tier),8,14);
+  ctx.font="10px Georgia,serif";ctx.fillStyle="#6a6a4a";
+  ctx.fillText("spores: "+fmt(S.spores),8,27);
+  ctx.restore();
+
+  requestAnimationFrame(draw);
+}
+function roundRect(x,y,w,h,r){ ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath(); }
+
+// ================= UI =================
+const upsEl=document.getElementById("ups");
+const upRefs=[];
+// build the button DOM once; mutate in place afterward so focus/hover/cursor survive buys
+function buildUps(){
+  upsEl.innerHTML=""; upRefs.length=0;
+  UPS.forEach(u=>{
+    const b=document.createElement("button");
+    b.className="up";
+    b.innerHTML=`<span class="lv"></span>
+      <span class="nm">${u.nm}<small>${u.desc}</small></span>
+      <span class="cost"></span>`;
+    b.onclick=()=>buy(u);
+    upsEl.appendChild(b);
+    upRefs.push({u, btn:b, lv:b.querySelector(".lv"), cost:b.querySelector(".cost")});
+  });
+}
+let bestId=null, bestAcc=999;
+// cheap per-frame sync of level/cost/affordability + best marker (best recomputed ~5×/s)
+function syncUps(dt){
+  bestAcc+=dt||0;
+  if(bestAcc>=0.2){ bestAcc=0; const b=bestBuy(); bestId=b?b.id:null; }
+  upRefs.forEach(r=>{
+    const c=upCost(r.u);
+    r.lv.textContent="L"+r.u.lvl;
+    r.cost.textContent=fmt(c);
+    r.btn.disabled=S.biomass<c;
+    r.btn.classList.toggle("best", r.u.id===bestId);
+  });
+}
+function renderStats(){
+  document.getElementById("biomass").textContent=fmt(S.biomass);
+  document.getElementById("rate").textContent="+"+fmt(growthRate())+" biomass/s";
+  document.getElementById("spores").textContent=fmt(S.spores);
+  document.getElementById("mult").textContent=(1+S.spores*0.5).toFixed(2);
+  document.getElementById("strain").textContent=strainName(S.tier);
+  document.getElementById("lifetime").textContent=fmt(S.lifetime);
+
+  const p=pendingSpores(), btn=document.getElementById("sporulate");
+  // progress toward the next spore: from last-earned threshold up to the next one
+  const base=1e6*S.spores*S.spores, target=1e6*(S.spores+1)*(S.spores+1);
+  const frac=Math.max(0,Math.min(1,(S.lifetime-base)/(target-base)));
+  document.getElementById("sporefill").style.width=(frac*100).toFixed(1)+"%";
+
+  if(sporeConfirm && Date.now()-sporeConfirmT>3000) sporeConfirm=false; // confirm window expires
+  btn.disabled=p<=0;
+  btn.classList.toggle("confirm", sporeConfirm && p>0);
+  if(sporeConfirm && p>0){
+    btn.innerHTML=`Sporulate? <b>tap again</b><br><small>releases ${fmt(p)} spores &amp; resets your colony</small>`;
+  }else if(p>0){
+    btn.innerHTML=`Sporulate → <b>+${fmt(p)}</b> spores<br><small>new mult ×${(1+(S.spores+p)*0.5).toFixed(2)} · resets colony</small>`;
+  }else{
+    btn.innerHTML=`Sporulate<br><small>${fmt(S.lifetime)} / ${fmt(target)} lifetime to next spore</small>`;
+  }
+}
+
+// ================= LOOP =================
+let lastT=performance.now();
+function tick(now){
+  const dt=Math.min(0.25,(now-lastT)/1000); lastT=now;
+  const g=growthRate()*dt;
+  S.biomass+=g; S.lifetime+=g;
+  checkMilestone();
+  renderStats();
+  syncUps(dt);   // per-frame affordability; best hint refreshed ~5×/s inside
+  setTimeout(()=>requestAnimationFrame(tick),33);
+}
+
+document.getElementById("sporulate").onclick=onSporulate;
+
+load();
+offline();
+buildUps(); syncUps(1); renderStats();
+lastMilestone=Math.floor(Math.log10(S.biomass+1));
+requestAnimationFrame(draw);
+requestAnimationFrame(tick);
+setInterval(save,4000);
+window.addEventListener("beforeunload",save);
+</script>
+</body>
+</html>

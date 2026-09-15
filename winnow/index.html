@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Winnow — .gitignore playground &amp; debugger</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a23; --panel2:#1e222d; --edge:#2a2f3d;
+    --ink:#e7e9f0; --dim:#9aa3b2; --accent:#f7a13b; --accent2:#ffcf8a;
+    --track:#4ade80; --ignore:#8a93a5; --flip-i:#f87171; --flip-t:#4ade80; --warn:#fbbf24;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  header{padding:14px 20px;border-bottom:1px solid var(--edge);display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  header h1{margin:0;font-size:19px;letter-spacing:.3px}
+  header h1 b{color:var(--accent)}
+  header .tag{color:var(--dim);font-size:12.5px}
+  header .grow{flex:1}
+  #selftest{font:12px/1 var(--mono);padding:5px 9px;border-radius:6px;border:1px solid var(--edge);background:var(--panel)}
+  #selftest.ok{color:var(--track);border-color:#2c5a3a}
+  #selftest.bad{color:var(--flip-i);border-color:#5a2c2c}
+  .wrap{display:grid;grid-template-columns:minmax(300px,1fr) minmax(300px,1fr) minmax(320px,1.2fr);gap:14px;padding:14px 20px}
+  .col{display:flex;flex-direction:column;gap:8px;min-width:0}
+  .col h2{margin:0;font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--dim);display:flex;align-items:center;gap:8px}
+  .col h2 .grow{flex:1}
+  textarea{width:100%;background:var(--panel);color:var(--ink);border:1px solid var(--edge);border-radius:8px;
+    padding:10px 12px;font:13px/1.55 var(--mono);resize:vertical;tab-size:2}
+  textarea:focus{outline:none;border-color:var(--accent)}
+  #rulesB{border-color:#4a3a5a}
+  .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  select,button{background:var(--panel2);color:var(--ink);border:1px solid var(--edge);border-radius:6px;
+    padding:6px 10px;font-size:12.5px;cursor:pointer}
+  button:hover,select:hover{border-color:var(--accent)}
+  label.chk{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--dim);cursor:pointer;user-select:none}
+  #drop{border:1px dashed var(--edge);border-radius:8px;padding:8px 10px;font-size:12px;color:var(--dim);text-align:center;transition:.15s}
+  #drop.over{border-color:var(--accent);color:var(--accent2);background:var(--panel)}
+  #drop b{color:var(--accent)}
+  /* tree */
+  #tree{background:var(--panel);border:1px solid var(--edge);border-radius:8px;padding:8px 6px;overflow:auto;flex:1;min-height:220px;font:13px/1.6 var(--mono)}
+  ul.tree{list-style:none;margin:0;padding-left:16px}
+  #tree>ul.tree{padding-left:4px}
+  .node{display:flex;align-items:center;gap:6px;border-radius:5px;padding:1px 6px;cursor:pointer;white-space:nowrap}
+  .node:hover{background:var(--panel2)}
+  .node.sel{background:#2a2333;outline:1px solid var(--accent)}
+  .node.dim{opacity:.4}
+  .node.gov{background:#33290f;outline:1px solid var(--accent)}
+  .caret{width:12px;display:inline-block;color:var(--dim);text-align:center}
+  .nm.tracked{color:var(--track)}
+  .nm.ignored{color:var(--ignore);text-decoration:line-through}
+  .nm.dir{color:var(--accent2);font-weight:600}
+  /* verdict color must win over the dir accent so folders stay on the grain/chaff scheme */
+  .nm.dir.tracked{color:var(--track)}
+  .nm.dir.ignored{color:var(--ignore)}
+  .badge{font-size:10px;padding:1px 6px;border-radius:20px;border:1px solid var(--edge);color:var(--dim)}
+  .badge.foot{color:var(--warn);border-color:#5a4a1a;background:#2a2410}
+  .badge.flipI{color:var(--flip-i);border-color:#5a2c2c;background:#2a1414}
+  .badge.flipT{color:var(--flip-t);border-color:#2c5a3a;background:#142a1a}
+  .collapsed>ul{display:none}
+  /* rules legend */
+  #rulelist{background:var(--panel);border:1px solid var(--edge);border-radius:8px;padding:6px;font:12.5px/1.5 var(--mono);max-height:150px;overflow:auto}
+  .rline{display:flex;gap:8px;padding:2px 6px;border-radius:5px;cursor:pointer}
+  .rline:hover,.rline.active{background:#33290f}
+  .rline .ln{color:var(--dim);min-width:20px;text-align:right}
+  .rline.neg .pat{color:var(--track)}
+  .rline .pat{color:var(--accent2)}
+  .rline .cnt{margin-left:auto;color:var(--dim);font-size:11px}
+  /* detail */
+  #detail{background:var(--panel);border:1px solid var(--edge);border-radius:8px;padding:12px;font-size:13px;overflow:auto;flex:1;min-height:200px}
+  #detail h3{margin:0 0 8px;font:13px/1 var(--mono)}
+  #detail .v{color:var(--track)}.v.ig{color:var(--ignore)}
+  .cmd{position:relative;background:#0b0d12;border:1px solid var(--edge);border-radius:6px;padding:9px 12px;font:12.5px/1.5 var(--mono);white-space:pre-wrap;word-break:break-all;margin:8px 0}
+  .cmd .copy{position:absolute;top:6px;right:6px;padding:2px 8px;font-size:11px}
+  .trail{margin:8px 0 0;padding:0;list-style:none;font:12px/1.6 var(--mono)}
+  .trail li{display:flex;gap:8px;padding:1px 4px;border-radius:4px}
+  .trail li.hit{color:var(--accent2)}
+  .trail li.decide{background:#33290f;color:var(--accent);font-weight:600}
+  .trail .mk{width:16px;color:var(--dim)}
+  .foot{border:1px solid #5a4a1a;background:#211d10;border-radius:8px;padding:10px 12px;margin:8px 0;font-size:12.5px}
+  .foot h4{margin:0 0 6px;color:var(--warn);font-size:12.5px}
+  .foot code{background:#0b0d12;padding:1px 5px;border-radius:4px;color:var(--accent2)}
+  .foot .fix{margin-top:8px}
+  .foot .apply{margin-top:8px}
+  .muted{color:var(--dim)}
+  a{color:var(--accent)}
+  @media(max-width:900px){.wrap{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1><b>Winnow</b> · .gitignore debugger</h1>
+  <span class="tag">separate the grain (tracked) from the chaff (ignored) — and see which rule decided.</span>
+  <span class="grow"></span>
+  <span id="selftest" title="Built-in regression self-test">self-test…</span>
+</header>
+
+<div class="wrap">
+  <!-- LEFT: rules -->
+  <div class="col">
+    <h2><span id="rulesLabel">.gitignore rules</span>
+      <span class="grow"></span>
+      <label class="chk"><input type="checkbox" id="diffToggle"> diff mode</label>
+    </h2>
+    <div class="bar">
+      <select id="preset"><option value="">Load a preset…</option></select>
+      <button id="share">Copy share link</button>
+    </div>
+    <textarea id="rules" rows="12" spellcheck="false" aria-label="gitignore rules"></textarea>
+    <div id="diffBox" style="display:none">
+      <h2 style="margin-top:4px">rules — version B (before)</h2>
+      <textarea id="rulesB" rows="8" spellcheck="false" aria-label="gitignore rules version B"></textarea>
+      <div class="muted" style="font-size:11.5px;margin-top:4px">Badges in the tree show how <b>version A</b> (top, current/after) changed <b>vs version B</b> (before).</div>
+    </div>
+    <div class="muted" style="font-size:11.5px">Parsed rules — hover or click one to light up the paths it decides.</div>
+    <div id="rulelist" aria-label="parsed rules"></div>
+  </div>
+
+  <!-- MIDDLE: paths -->
+  <div class="col">
+    <h2>file paths / tree</h2>
+    <div id="drop">Drop a repo folder here, or
+      <label style="cursor:pointer"><b>pick a folder</b><input id="picker" type="file" webkitdirectory directory multiple style="display:none"></label>
+      — paths auto-populate below.</div>
+    <textarea id="paths" rows="16" spellcheck="false" aria-label="file paths, one per line; end with / for a directory"></textarea>
+    <div class="muted" style="font-size:12px">One path per line. End a line with <code>/</code> to mark a directory.</div>
+  </div>
+
+  <!-- RIGHT: results -->
+  <div class="col">
+    <h2>result
+      <span class="grow"></span>
+      <span class="muted" id="counts"></span>
+    </h2>
+    <div id="tree"></div>
+    <div id="detail"><span class="muted">Click a path to see its verdict, the deciding rule, and copyable <code>git check-ignore -v</code> output.</span></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ---------- platform-aware copy hint ---------- */
+const IS_MAC=/Mac|iPhone|iPad|iPod/i.test(navigator.platform||navigator.userAgent||"");
+const COPY_HINT=(IS_MAC?"⌘":"Ctrl")+"+C to copy";
+/* ---------- gitignore engine ---------- */
+function escapeRe(c){return c.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");}
+function segToRegex(seg){
+  let r="";
+  for(let i=0;i<seg.length;i++){
+    const c=seg[i];
+    if(c==="\\"){ r+=escapeRe(seg[i+1]||"\\"); i++; continue; }
+    if(c==="*"){ r+="[^/]*"; continue; }
+    if(c==="?"){ r+="[^/]"; continue; }
+    if(c==="["){
+      let j=i+1, cls="[";
+      if(seg[j]==="!"){cls+="^";j++;} else if(seg[j]==="^"){cls+="\\^";j++;}
+      if(seg[j]==="]"){cls+="\\]";j++;}
+      while(j<seg.length && seg[j]!=="]"){ if(seg[j]==="\\"){cls+="\\"+(seg[j+1]||"");j+=2;} else {cls+=seg[j]==="["?"\\[":seg[j];j++;} }
+      if(seg[j]!=="]"){ r+="\\["; continue; }
+      cls+="]"; i=j; r+=cls; continue;
+    }
+    r+=escapeRe(c);
+  }
+  return r;
+}
+// Parse one raw line into a rule object, or null to skip.
+function parseRule(raw,lineNo){
+  let s=raw;
+  // strip trailing whitespace unless backslash-escaped
+  s=s.replace(/((?:^|[^\\])(?:\\\\)*)\s+$/,"$1");
+  if(s==="") return null;
+  if(s[0]==="#") return null;            // comment
+  if(s.slice(0,2)==="\\#") s="#"+s.slice(2);
+  let negated=false;
+  if(s[0]==="!"){ negated=true; s=s.slice(1); }
+  else if(s.slice(0,2)==="\\!") s="!"+s.slice(2);
+  let dirOnly=false;
+  if(s.endsWith("/")){ dirOnly=true; s=s.replace(/\/+$/,""); }
+  if(s==="") return null;
+  let anchored=false;
+  if(s[0]==="/"){ anchored=true; s=s.slice(1); }
+  else if(s.slice(0,3)!=="**/" && s.indexOf("/")!==-1) anchored=true;
+  // build regex
+  let re="^";
+  if(!anchored) re+="(?:.*/)?";
+  const parts=s.split("/");
+  for(let i=0;i<parts.length;i++){
+    const p=parts[i], last=i===parts.length-1;
+    if(p==="**"){
+      if(last) re+=".*";
+      else re+="(?:.*/)?";
+      continue;
+    }
+    re+=segToRegex(p);
+    if(!last && parts[i+1]!=="**") re+="/";
+    else if(!last && parts[i+1]==="**") re+="/";
+  }
+  re+="$";
+  return {raw:raw.replace(/\s+$/,""),display:raw.trim(),line:lineNo,negated,dirOnly,anchored,pattern:s,regex:new RegExp(re)};
+}
+function parseRules(text){
+  const out=[];
+  text.split(/\r?\n/).forEach((ln,i)=>{ const r=parseRule(ln,i+1); if(r) out.push(r); });
+  return out;
+}
+// Last matching rule wins for a single path level.
+function matchLast(path,isDir,rules){
+  let res=null;
+  for(const r of rules){
+    if(r.dirOnly && !isDir) continue;
+    if(r.regex.test(path)) res=r;
+  }
+  return res;
+}
+// Full git decision, reproducing the parent-directory short-circuit.
+function decide(path,isDir,rules){
+  const comps=path.split("/");
+  for(let i=1;i<comps.length;i++){
+    const sub=comps.slice(0,i).join("/");
+    const m=matchLast(sub,true,rules);
+    if(m && !m.negated){
+      const full=matchLast(path,isDir,rules);
+      return {ignored:true,rule:m,ancestor:sub,footgun:!!(full&&full.negated),fullRule:full};
+    }
+  }
+  const m=matchLast(path,isDir,rules);
+  return {ignored:!!(m&&!m.negated),rule:m};
+}
+
+/* ---------- presets ---------- */
+const PRESETS={
+  "node_modules & build artifacts":{
+    rules:"# dependencies & build output\nnode_modules/\ndist/\n*.log\n.env\nbuild/\ncoverage/",
+    paths:"src/index.js\nsrc/app.log\nnode_modules/react/index.js\ndist/bundle.js\n.env\nbuild/\ncoverage/lcov.info\nREADME.md"
+  },
+  "Footgun: !file inside ignored dir":{
+    rules:"# TRAP: dist is fully ignored, so the negation can never win\ndist/\n!dist/keep.js",
+    paths:"dist/bundle.js\ndist/keep.js\nsrc/main.js"
+  },
+  "Footgun FIXED (dir/* pattern)":{
+    rules:"# Correct: ignore contents, keep the dir entry, then re-include\ndist/*\n!dist/keep.js",
+    paths:"dist/bundle.js\ndist/keep.js\nsrc/main.js"
+  },
+  "Negation that works (parent tracked)":{
+    rules:"*.log\n!important.log",
+    paths:"debug.log\nimportant.log\nlogs/other.log"
+  },
+  "Anchoring & double-star":{
+    rules:"/config.json\n**/temp/\nsrc/**/*.min.js\ndoc?.txt\nfile[0-9].txt",
+    paths:"config.json\nsub/config.json\na/temp/x\nsrc/a/b/app.min.js\nsrc/app.js\ndoc1.txt\ndocs.txt\nfile3.txt\nfileA.txt"
+  }
+};
+
+/* ---------- state & rendering ---------- */
+const $=id=>document.getElementById(id);
+let selected=null, activeRuleLine=null, cache=[];
+
+function buildTree(paths){
+  const root={name:"",children:new Map(),isDir:true,path:""};
+  paths.split(/\r?\n/).map(s=>s.trim()).filter(Boolean).forEach(line=>{
+    const dir=line.endsWith("/");
+    const parts=line.replace(/\/+$/,"").split("/").filter(Boolean);
+    let node=root;
+    parts.forEach((seg,idx)=>{
+      const leaf=idx===parts.length-1;
+      if(!node.children.has(seg))
+        node.children.set(seg,{name:seg,children:new Map(),isDir:!leaf||dir,path:parts.slice(0,idx+1).join("/")});
+      node=node.children.get(seg);
+      if(!leaf) node.isDir=true;
+    });
+  });
+  return root;
+}
+
+function renderTree(){
+  const rules=parseRules($("rules").value);
+  const diff=$("diffToggle").checked;
+  const rulesB=diff?parseRules($("rulesB").value):null;
+  const root=buildTree($("paths").value);
+  cache=[];
+  let tracked=0,ignored=0,foot=0,flips=0;
+  const wrap=document.createElement("ul"); wrap.className="tree";
+  function walk(node,parent){
+    [...node.children.values()].sort((a,b)=>(b.isDir-a.isDir)||a.name.localeCompare(b.name)).forEach(c=>{
+      const li=document.createElement("li");
+      const d=decide(c.path,c.isDir,rules);
+      const rec={path:c.path,isDir:c.isDir,decision:d};
+      cache.push(rec);
+      const row=document.createElement("div"); row.className="node"; row.tabIndex=0;
+      row.dataset.path=c.path;
+      const decideLine=d.rule?d.rule.line:0;
+      row.dataset.decidedby=decideLine;
+      const caret=document.createElement("span"); caret.className="caret";
+      const nm=document.createElement("span"); nm.className="nm "+(c.isDir?"dir ":"")+(d.ignored?"ignored":"tracked");
+      nm.textContent=c.name+(c.isDir?"/":"");
+      row.appendChild(caret); row.appendChild(nm);
+      if(d.ignored) ignored++; else tracked++;
+      if(d.footgun){ foot++; const b=document.createElement("span"); b.className="badge foot"; b.textContent="footgun"; b.title="A !negation for this path is defeated because ancestor \""+d.ancestor+"\" is ignored."; row.appendChild(b); }
+      if(diff){
+        const db=decide(c.path,c.isDir,rulesB);
+        if(db.ignored!==d.ignored){
+          flips++;
+          const b=document.createElement("span");
+          if(d.ignored){b.className="badge flipI";b.textContent="→ ignored";} else {b.className="badge flipT";b.textContent="→ tracked";}
+          b.title="Verdict flipped vs version B"; row.appendChild(b);
+          rec.flip=d.ignored?"i":"t";
+        }
+      }
+      row.addEventListener("click",e=>{e.stopPropagation();select(c.path);});
+      row.addEventListener("keydown",e=>{if(e.key==="Enter"){select(c.path);}});
+      li.appendChild(row);
+      if(c.children.size){
+        caret.textContent="▾"; caret.style.cursor="pointer";
+        const ul=document.createElement("ul"); ul.className="tree";
+        walk(c,ul); li.appendChild(ul);
+        caret.addEventListener("click",e=>{e.stopPropagation();li.classList.toggle("collapsed");caret.textContent=li.classList.contains("collapsed")?"▸":"▾";});
+      }
+      parent.appendChild(li);
+    });
+  }
+  walk(root,wrap);
+  const t=$("tree"); t.innerHTML="";
+  if(!cache.length) t.innerHTML='<span class="muted">No paths yet. Paste some on the left, load a preset, or drop a folder.</span>';
+  else t.appendChild(wrap);
+  $("counts").textContent=`${tracked} tracked · ${ignored} ignored`+(foot?` · ${foot} footgun`:"")+(diff?` · ${flips} flipped`:"");
+  renderRuleList(rules);
+  if(selected) select(selected,true);
+  if(activeRuleLine) highlightRule(activeRuleLine);
+}
+
+function renderRuleList(rules){
+  const el=$("rulelist"); el.innerHTML="";
+  if(!rules.length){ el.innerHTML='<span class="muted">No active rules parsed.</span>'; return; }
+  rules.forEach(r=>{
+    const govn=cache.filter(c=>c.decision.rule&&c.decision.rule.line===r.line).length;
+    const row=document.createElement("div"); row.className="rline"+(r.negated?" neg":""); row.dataset.line=r.line;
+    row.title="Click or hover to highlight the "+govn+" path"+(govn===1?"":"s")+" this rule currently decides";
+    row.innerHTML=`<span class="ln">${r.line}</span><span class="pat">${r.display.replace(/</g,"&lt;")}</span><span class="cnt">${govn} path${govn===1?"":"s"}</span>`;
+    row.addEventListener("mouseenter",()=>highlightRule(r.line));
+    row.addEventListener("mouseleave",()=>{if(activeRuleLine!==r.line)clearHighlight();});
+    row.addEventListener("click",()=>{activeRuleLine=activeRuleLine===r.line?null:r.line; activeRuleLine?highlightRule(r.line):clearHighlight();});
+    el.appendChild(row);
+  });
+}
+function highlightRule(line){
+  document.querySelectorAll("#rulelist .rline").forEach(x=>x.classList.toggle("active",+x.dataset.line===line&&activeRuleLine===line));
+  document.querySelectorAll("#tree .node").forEach(n=>{
+    const gov=+n.dataset.decidedby===line;
+    n.classList.toggle("gov",gov);
+    n.classList.toggle("dim",!gov);
+  });
+}
+function clearHighlight(){
+  document.querySelectorAll("#rulelist .rline").forEach(x=>x.classList.remove("active"));
+  document.querySelectorAll("#tree .node").forEach(n=>{n.classList.remove("gov");n.classList.remove("dim");});
+}
+
+function select(path,keep){
+  selected=path;
+  document.querySelectorAll("#tree .node").forEach(n=>n.classList.toggle("sel",n.dataset.path===path));
+  const rec=cache.find(c=>c.path===path); if(!rec){renderDetail(null);return;}
+  renderDetail(rec);
+}
+function renderDetail(rec){
+  const el=$("detail");
+  if(!rec){ el.innerHTML='<span class="muted">Path not found.</span>'; return; }
+  const rules=parseRules($("rules").value);
+  const d=rec.decision;
+  const verdict=d.ignored?'<span class="v ig">IGNORED</span>':'<span class="v">TRACKED</span>';
+  let html=`<h3>${rec.path.replace(/</g,"&lt;")}${rec.isDir?"/":""} — ${verdict}</h3>`;
+  // check-ignore -v parity line
+  if(d.rule){
+    const cmd=`.gitignore:${d.rule.line}:${d.rule.display}\t${rec.path}`;
+    html+=`<div class="muted" style="font-size:11.5px">git check-ignore -v parity</div>`;
+    html+=`<div class="cmd"><button class="copy" data-copy="${cmd.replace(/"/g,"&quot;")}">copy</button>${cmd.replace(/</g,"&lt;")}</div>`;
+  } else {
+    html+=`<div class="muted" style="margin:6px 0">No rule matches — <b>${d.ignored?"ignored":"tracked by default"}</b>. <code>git check-ignore</code> prints nothing.</div>`;
+  }
+  // footgun
+  if(d.footgun){
+    const anc=d.rule; // ancestor rule that ignored the dir
+    const fixed=anc.pattern+"/*";
+    // recompute with patched rules
+    const patched=rules.map(r=>r.line===anc.line?parseRule((r.negated?"!":"")+fixed,r.line):r);
+    const after=decide(rec.path,rec.isDir,patched);
+    html+=`<div class="foot"><h4>⚠ Footgun: negation defeated by an ignored ancestor</h4>`;
+    html+=`Your rule <code>!${d.fullRule.display.replace(/^!/,"")}</code> (line ${d.fullRule.line}) tries to re-include this file, but git already excluded the whole <code>${d.ancestor}/</code> directory on line ${anc.line}. Git never descends into an ignored directory, so the negation can <b>never</b> take effect.`;
+    html+=`<div class="fix"><b>Fix:</b> ignore the directory's <i>contents</i> instead of the directory itself — replace line ${anc.line}<br>`;
+    html+=`<code>${anc.display.replace(/</g,"&lt;")}</code> &nbsp;→&nbsp; <code>${(anc.negated?"!":"")+fixed}</code></div>`;
+    html+=`<div class="apply">With that change this path becomes <b>${after.ignored?'<span class="v ig">still IGNORED</span>':'<span class="v">TRACKED</span> ✓'}</b>.</div></div>`;
+  }
+  // trail of tested rules
+  html+=`<div class="muted" style="font-size:11.5px;margin-top:10px">rules tested (last match wins)</div><ul class="trail">`;
+  const testDir=rec.isDir;
+  rules.forEach(r=>{
+    const applies=!(r.dirOnly&&!testDir);
+    const hit=applies&&r.regex.test(rec.path);
+    const isDecider=d.rule&&r.line===d.rule.line&&(!d.ancestor||d.rule===r);
+    const decider=d.rule&&r===d.rule;
+    let mk=hit?(r.negated?"◄!":"✓"):"·";
+    html+=`<li class="${decider?"decide":hit?"hit":""}"><span class="mk">${mk}</span><span>${r.line}: ${r.display.replace(/</g,"&lt;")}</span>${decider?'<span style="margin-left:auto">deciding</span>':''}</li>`;
+  });
+  if(d.ancestor){
+    html+=`<li class="muted"><span class="mk">↑</span><span>ancestor "${d.ancestor}/" is ignored → short-circuit (line ${d.rule.line})</span></li>`;
+  }
+  html+="</ul>";
+  el.innerHTML=html;
+  el.querySelectorAll("[data-copy]").forEach(b=>b.addEventListener("click",async()=>{
+    try{await navigator.clipboard.writeText(b.dataset.copy);b.textContent="copied!";setTimeout(()=>b.textContent="copy",1200);}
+    catch{b.textContent=COPY_HINT;}
+  }));
+}
+
+/* ---------- hash serialization ---------- */
+// URLs above ~8KB get truncated/rejected by chat apps, issue trackers and proxies.
+// Above this, we stop churning the hash (it would rebuild on every keystroke) and
+// flip the share button to a disabled "too large to share" state instead.
+const HASH_MAX=8000;
+let shareTooBig=false;
+function saveHash(){
+  const s={r:$("rules").value,p:$("paths").value};
+  if($("diffToggle").checked){s.d=1;s.b=$("rulesB").value;}
+  let enc;
+  try{ enc=btoa(unescape(encodeURIComponent(JSON.stringify(s)))); }catch{ updateShareState(); return; }
+  if(enc.length>HASH_MAX){
+    shareTooBig=true;
+    if(location.hash&&location.hash.length>1){ try{history.replaceState(null,"","#");}catch{} }
+  }else{
+    shareTooBig=false;
+    try{location.replace("#"+enc);}catch{}
+  }
+  updateShareState();
+}
+function updateShareState(){
+  const b=$("share");
+  if(shareTooBig){ b.disabled=true; b.textContent="Too large to share"; b.title="This tree is too big to fit in a shareable URL. Trim the path list to share a link."; }
+  else if(b.disabled){ b.disabled=false; b.textContent="Copy share link"; b.title=""; }
+}
+function loadHash(){
+  if(!location.hash||location.hash.length<2) return false;
+  try{
+    const s=JSON.parse(decodeURIComponent(escape(atob(location.hash.slice(1)))));
+    $("rules").value=s.r||""; $("paths").value=s.p||"";
+    if(s.d){$("diffToggle").checked=true;$("diffBox").style.display="";$("rulesB").value=s.b||"";$("rulesLabel").textContent=".gitignore rules — version A (current / after)";}
+    return true;
+  }catch{return false;}
+}
+
+/* ---------- self-test ---------- */
+function selfTest(){
+  const cases=[
+    ["node_modules/x.js",false,["node_modules/"],true],
+    ["app.log",false,["*.log"],true],
+    ["app.log",false,["*.log","!app.log"],false],
+    ["dist/keep.js",false,["dist/","!dist/keep.js"],true],      // footgun: still ignored
+    ["dist/keep.js",false,["dist/*","!dist/keep.js"],false],    // fixed
+    ["src/main.js",false,["*.log"],false],
+    ["config.json",false,["/config.json"],true],
+    ["sub/config.json",false,["/config.json"],false],
+    ["src/a/b/app.min.js",false,["src/**/*.min.js"],true],
+    ["a/temp/x",false,["**/temp/"],true],
+    ["file3.txt",false,["file[0-9].txt"],true],
+    ["fileA.txt",false,["file[0-9].txt"],false],
+    ["logs/debug.log",false,["logs/"],true],
+    ["important.log",false,["*.log","!important.log"],false],
+    ["a/x/b",false,["a/**/b"],true],
+    ["a/b",false,["a/**/b"],true],
+    ["doc.txt",false,["doc?.txt"],false],
+    ["doc1.txt",false,["doc?.txt"],true]
+  ];
+  let pass=0,fails=[];
+  cases.forEach((c,i)=>{
+    const got=decide(c[0],c[1],parseRules(c[2].join("\n"))).ignored;
+    if(got===c[3]) pass++; else fails.push(`#${i} ${c[0]}`);
+  });
+  const el=$("selftest");
+  if(fails.length){el.className="bad";el.textContent=`self-test ${pass}/${cases.length} ✗ ${fails[0]}`;}
+  else{el.className="ok";el.textContent=`self-test ${pass}/${cases.length} ✓`;}
+  return fails.length===0;
+}
+
+/* ---------- folder ingest ---------- */
+function ingestFiles(files){
+  const IGNORE_WALK=/(^|\/)\.git\//;
+  const set=new Set();
+  [...files].forEach(f=>{
+    const rel=(f.webkitRelativePath||f.name).split("/").slice(1).join("/")||f.name;
+    if(rel && !IGNORE_WALK.test(rel)) set.add(rel);
+  });
+  if(set.size){ $("paths").value=[...set].sort().slice(0,1000).join("\n"); refresh(); }
+}
+function setupDrop(){
+  const dz=$("drop");
+  ["dragenter","dragover"].forEach(e=>dz.addEventListener(e,ev=>{ev.preventDefault();dz.classList.add("over");}));
+  ["dragleave","drop"].forEach(e=>dz.addEventListener(e,ev=>{ev.preventDefault();dz.classList.remove("over");}));
+  dz.addEventListener("drop",async ev=>{
+    const items=ev.dataTransfer.items;
+    if(items&&items[0]&&items[0].webkitGetAsEntry){
+      const paths=[]; const roots=[];
+      for(const it of items){const e=it.webkitGetAsEntry();if(e)roots.push(e);}
+      const rootName=roots.length===1&&roots[0].isDirectory?roots[0].name+"/":"";
+      await Promise.all(roots.map(e=>walkEntry(e,"",paths)));
+      // Strip the single dropped root so anchored rules resolve against the true repo
+      // root — matching the folder-picker, which drops the top segment via slice(1).
+      const set=[...new Set(paths.map(p=>rootName&&p.startsWith(rootName)?p.slice(rootName.length):p).filter(p=>p&&!/(^|\/)\.git\//.test(p)))].sort().slice(0,1000);
+      if(set.length){$("paths").value=set.join("\n");refresh();}
+    } else if(ev.dataTransfer.files.length){ ingestFiles(ev.dataTransfer.files); }
+  });
+  $("picker").addEventListener("change",e=>ingestFiles(e.target.files));
+}
+function walkEntry(entry,prefix,out){
+  return new Promise(res=>{
+    if(entry.isFile){ out.push(prefix+entry.name); res(); }
+    else if(entry.isDirectory){
+      const rd=entry.createReader(); const all=[];
+      const read=()=>rd.readEntries(async ents=>{
+        if(!ents.length){ await Promise.all(all.map(e=>walkEntry(e,prefix+entry.name+"/",out))); res(); }
+        else{ all.push(...ents); read(); }
+      },()=>res());
+      read();
+    } else res();
+  });
+}
+
+/* ---------- wiring ---------- */
+let rafId=null;
+function refresh(){ cancelAnimationFrame(rafId); rafId=requestAnimationFrame(()=>{renderTree();saveHash();}); }
+
+function init(){
+  const psel=$("preset");
+  Object.keys(PRESETS).forEach(k=>{const o=document.createElement("option");o.value=k;o.textContent=k;psel.appendChild(o);});
+  psel.addEventListener("change",()=>{const p=PRESETS[psel.value];if(p){$("rules").value=p.rules;$("paths").value=p.paths;selected=null;activeRuleLine=null;refresh();}});
+  $("rules").addEventListener("input",refresh);
+  $("rulesB").addEventListener("input",refresh);
+  $("paths").addEventListener("input",()=>{selected=null;refresh();});
+  $("diffToggle").addEventListener("change",e=>{const on=e.target.checked;$("diffBox").style.display=on?"":"none";$("rulesLabel").textContent=on?".gitignore rules — version A (current / after)":".gitignore rules";refresh();});
+  $("share").addEventListener("click",async e=>{saveHash();if(shareTooBig)return;try{await navigator.clipboard.writeText(location.href);e.target.textContent="Link copied!";setTimeout(()=>e.target.textContent="Copy share link",1400);}catch{e.target.textContent="URL updated";}});
+  setupDrop();
+  selfTest();
+  if(!loadHash()){ const p=PRESETS["Footgun: !file inside ignored dir"]; $("rules").value=p.rules; $("paths").value=p.paths; }
+  // Render synchronously here (not via refresh()'s deferred rAF) so `cache` is
+  // populated before we auto-select the footgun example below.
+  renderTree(); saveHash();
+  const first=cache.find(c=>c.decision.footgun)||cache[0];
+  if(first) select(first.path);
+}
+document.addEventListener("DOMContentLoaded",init);
+</script>
+</body>
+</html>

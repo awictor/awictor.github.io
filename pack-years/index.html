@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PackYears — Smoking Pack-Year Calculator</title>
+<meta name="description" content="Calculate smoking pack-years (cigarettes per day ÷ 20 × years smoked) across one or more periods, with the USPSTF 20 pack-year screening threshold. 100% offline, informational only.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('packyears-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#b91c1c;
+    --bg:#faf5f4; --card:#ffffff; --fg:#1f1614; --muted:#6b5652; --line:#efe1de; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#130c0b; --card:#1d1412; --fg:#f5ece9; --muted:#a88d87; --line:#2c1e1b; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:640px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#7f1d1d);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:640px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.78rem;color:var(--muted);margin-bottom:5px;font-weight:600}
+  .period{display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;margin-bottom:10px}
+  input{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  .rm{padding:10px 12px;border:1px solid var(--line);background:var(--bg);color:var(--muted);border-radius:8px;cursor:pointer;font:inherit}
+  .add{margin-top:4px;background:none;border:1px dashed var(--line);color:var(--c);border-radius:8px;padding:9px 14px;cursor:pointer;font:inherit;width:100%}
+  .out{text-align:center}
+  .big{font-size:3.2rem;font-weight:800;color:var(--c);line-height:1}
+  .unit{color:var(--muted);font-size:.85rem}
+  .cat{display:inline-block;margin-top:12px;padding:5px 16px;border-radius:999px;color:#fff;font-weight:700}
+  .screen{margin-top:10px;font-size:.9rem}
+  .err{color:var(--c);font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:640px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.8rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🚬</div>
+    <div><h1>PackYears</h1><div class="sub">Smoking pack-year calculator</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div id="periods"></div>
+    <button class="add" id="add" type="button">+ Add another smoking period</button>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card out">
+    <div class="big" id="total">—</div>
+    <div class="unit">pack-years</div>
+    <div><span class="cat" id="cat"></span></div>
+    <div class="screen" id="screen"></div>
+  </div>
+</main>
+<footer>
+  Pack-years = (cigarettes per day ÷ 20) × years smoked, summed over periods. The USPSTF recommends lung-cancer screening consideration at <strong>≥ 20 pack-years</strong> (with age/quit criteria). Informational only — <strong>not medical advice</strong>. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/pack-years">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  // One pack = 20 cigarettes. Pack-years = (cigs/day / 20) * years.
+  function packYears(cigsPerDay, years){
+    const c = Number(cigsPerDay), y = Number(years);
+    if(!Number.isFinite(c) || !Number.isFinite(y)) throw new Error('enter numbers');
+    if(c < 0 || y < 0) throw new Error('values must be ≥ 0');
+    return (c / 20) * y;
+  }
+
+  function totalPackYears(periods){
+    return periods.reduce((sum, p) => sum + packYears(p.cigsPerDay, p.years), 0);
+  }
+
+  const CATS = [
+    { max: 0.0001,  name: 'None',       color: '#16a34a' },
+    { max: 10,      name: 'Light',      color: '#65a30d' },
+    { max: 20,      name: 'Moderate',   color: '#ca8a04' },
+    { max: 30,      name: 'Heavy',      color: '#ea580c' },
+    { max: Infinity,name: 'Very heavy', color: '#b91c1c' }
+  ];
+  function category(py){ return CATS.find(c => Number(py) < c.max); }
+
+  // USPSTF lung-cancer screening threshold.
+  function meetsScreening(py){ return Number(py) >= 20; }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('periods')){
+    const $ = id => document.getElementById(id);
+    let rows = [{ cigsPerDay: 20, years: 10 }];
+
+    function draw(){
+      $('periods').innerHTML = rows.map((r, i) => `
+        <div class="period">
+          <div><label>Cigarettes / day</label><input type="number" min="0" step="1" data-i="${i}" data-f="cigsPerDay" value="${r.cigsPerDay}"></div>
+          <div><label>Years smoked</label><input type="number" min="0" step="0.5" data-i="${i}" data-f="years" value="${r.years}"></div>
+          <button class="rm" data-rm="${i}" type="button" ${rows.length === 1 ? 'style="visibility:hidden"' : ''}>✕</button>
+        </div>`).join('');
+      $('periods').querySelectorAll('input').forEach(el =>
+        el.addEventListener('input', () => { rows[+el.dataset.i][el.dataset.f] = el.value; compute(); }));
+      $('periods').querySelectorAll('[data-rm]').forEach(el =>
+        el.addEventListener('click', () => { rows.splice(+el.dataset.rm, 1); draw(); compute(); }));
+    }
+
+    function compute(){
+      try{
+        const py = totalPackYears(rows);
+        const cat = category(py);
+        $('total').textContent = (Math.round(py * 10) / 10);
+        $('cat').textContent = cat.name;
+        $('cat').style.background = cat.color;
+        $('screen').innerHTML = meetsScreening(py)
+          ? '⚠ At or above the 20 pack-year screening threshold.'
+          : 'Below the 20 pack-year screening threshold.';
+        $('err').textContent = '';
+      }catch(e){ $('total').textContent = '—'; $('cat').textContent = ''; $('screen').textContent = ''; $('err').textContent = e.message; }
+    }
+    $('add').addEventListener('click', () => { rows.push({ cigsPerDay: 20, years: 5 }); draw(); compute(); });
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('packyears-theme', cur); }catch(e){}
+    });
+    draw(); compute();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { packYears, totalPackYears, category, meetsScreening };
+</script>
+</body>
+</html>

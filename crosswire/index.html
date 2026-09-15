@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crosswire — Braitenberg Vehicles</title>
+<style>
+  :root{ --bg:#0b0e14; --panel:#131824; --ink:#e8ecf4; --dim:#8a93a6; --accent:#ff8a3d; --line:#232c3e; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; height:100%; overflow:hidden; background:var(--bg); color:var(--ink);
+    font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  #c{ position:fixed; inset:0; display:block; cursor:crosshair; touch-action:none; }
+  #panel{ position:fixed; top:12px; left:12px; width:238px; background:rgba(19,24,36,.86);
+    border:1px solid var(--line); border-radius:12px; padding:12px 13px; -webkit-backdrop-filter:blur(9px); backdrop-filter:blur(9px);
+    box-shadow:0 8px 30px rgba(0,0,0,.45); user-select:none; max-height:calc(100vh - 24px); overflow:auto; }
+  #panel h1{ margin:0 0 2px; font-size:16px; letter-spacing:.4px; }
+  #panel h1 b{ color:var(--accent); }
+  #tag{ color:var(--dim); font-size:11px; margin:0 0 10px; line-height:1.35; }
+  .grp{ margin:9px 0; }
+  .lbl{ color:var(--dim); font-size:10px; text-transform:uppercase; letter-spacing:.7px; margin-bottom:5px; }
+  .row{ display:flex; gap:6px; flex-wrap:wrap; }
+  button{ flex:1; min-width:0; background:#1c2333; color:var(--ink); border:1px solid var(--line);
+    border-radius:7px; padding:6px 4px; font-size:11px; cursor:pointer; transition:.12s; white-space:nowrap; }
+  button:hover{ background:#252f45; border-color:#39455f; }
+  button:active{ transform:translateY(1px); }
+  button:focus-visible, .sl input:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+  button.sp{ border-left:3px solid var(--k); }
+  button.tg.on{ background:var(--accent); color:#1a1206; border-color:var(--accent); font-weight:600; }
+  .sl{ display:flex; align-items:center; gap:8px; margin:5px 0; }
+  .sl label{ flex:0 0 62px; color:var(--dim); font-size:10.5px; }
+  .sl input{ flex:1; accent-color:var(--accent); }
+  .sl span{ flex:0 0 30px; text-align:right; font-variant-numeric:tabular-nums; color:var(--ink); font-size:10.5px; }
+  #legend{ position:fixed; bottom:12px; left:12px; background:rgba(19,24,36,.82); border:1px solid var(--line);
+    border-radius:10px; padding:8px 11px; font-size:11px; -webkit-backdrop-filter:blur(9px); backdrop-filter:blur(9px); }
+  #legend div{ display:flex; align-items:center; gap:7px; margin:2px 0; }
+  #legend i{ width:9px; height:9px; border-radius:2px; display:inline-block; box-shadow:0 0 7px currentColor; }
+  #legend em{ color:var(--dim); font-style:normal; }
+  #hint{ position:fixed; bottom:12px; right:12px; color:var(--dim); font-size:11px; text-align:right;
+    background:rgba(19,24,36,.6); padding:6px 10px; border-radius:8px; }
+  a{ color:var(--accent); text-decoration:none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="panel">
+  <h1><b>Cross</b>wire</h1>
+  <p id="tag">Two sensors, two wheels, four emotions — personality from wiring alone. <b>Click</b> to drop light, <b>drag</b> to move.</p>
+
+  <div class="grp"><div class="lbl">Spawn species (keys 1–4)</div>
+    <div class="row" id="species"></div></div>
+
+  <div class="grp"><div class="lbl">Scenarios</div>
+    <div class="row" id="presets"></div></div>
+
+  <div class="grp"><div class="lbl">Wiring & world</div>
+    <div class="sl"><label>Sensor gain</label><input id="s_gain" type="range" min="0.5" max="11" step="0.1"><span></span></div>
+    <div class="sl"><label>Speed cap</label><input id="s_cap" type="range" min="1" max="6" step="0.1"><span></span></div>
+    <div class="sl"><label>Sensor spread</label><input id="s_spread" type="range" min="0.2" max="1.05" step="0.02"><span></span></div>
+    <div class="sl"><label>Trail life</label><input id="s_persist" type="range" min="0.8" max="0.99" step="0.005"><span></span></div>
+    <div class="sl"><label>Brightness</label><input id="s_bright" type="range" min="0.3" max="3" step="0.05"><span></span></div>
+  </div>
+
+  <div class="grp"><div class="lbl">Toggles & scene</div>
+    <div class="row">
+      <button class="tg" id="t_field" title="F">Field</button>
+      <button class="tg" id="t_over" title="O">Rays</button>
+      <button class="tg" id="t_live" title="L">Living</button>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <button id="b_rand" title="R">Randomize</button>
+      <button id="b_clear" title="C">Clear</button>
+      <button id="b_share">Copy link</button>
+    </div>
+  </div>
+</div>
+
+<div id="legend"></div>
+<div id="hint">Braitenberg vehicles · flip one crossing → coward becomes missile</div>
+
+<script>
+"use strict";
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let W, H, DPR;
+function resize(){ DPR = Math.min(2, devicePixelRatio||1); W = innerWidth; H = innerHeight;
+  cv.width = W*DPR; cv.height = H*DPR; cv.style.width = W+'px'; cv.style.height = H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0); }
+addEventListener('resize', resize); resize();
+
+// ---- Archetypes: the whole "psychology" is these two booleans -------------
+const ARCH = [
+  { name:'Fear',       emo:'flees light',          cross:false, inhibit:false, color:'#54d6ff' },
+  { name:'Aggression', emo:'charges & rams',        cross:true,  inhibit:false, color:'#ff5a6a' },
+  { name:'Love',       emo:'approaches & settles',  cross:false, inhibit:true,  color:'#ffcf4a' },
+  { name:'Explorer',   emo:'drifts & wanders on',   cross:true,  inhibit:true,  color:'#b48bff' },
+];
+const FALL = 5200;          // light-field falloff radius^2
+const SENSE = 21;           // sensor distance ahead of vehicle
+const WHEELBASE = 13, R = 10, MARGIN = 8;
+
+// ---- Live state -----------------------------------------------------------
+let vehicles = [], lights = [];
+let P = { gain:5, cap:3.1, spread:0.55, persist:0.93, bright:1.35 };
+let showField=false, overlay=false, live=false;
+let labelT = 0;
+
+function rnd(a,b){ return a + Math.random()*(b-a); }
+
+class Vehicle{
+  constructor(t,x,y,h){ this.t=t; this.x=x; this.y=y; this.h=(h==null?rnd(0,6.28):h);
+    this.vl=0; this.vr=0; }
+  step(dt){
+    const a = ARCH[this.t];
+    // sample the scalar field at two sensors splayed ±spread ahead of heading
+    const sL = fieldAt(this.x+Math.cos(this.h-P.spread)*SENSE, this.y+Math.sin(this.h-P.spread)*SENSE, this);
+    const sR = fieldAt(this.x+Math.cos(this.h+P.spread)*SENSE, this.y+Math.sin(this.h+P.spread)*SENSE, this);
+    // wiring: crossed swaps which sensor feeds which wheel
+    const inL = a.cross ? sR : sL, inR = a.cross ? sL : sR;
+    let mL, mR;
+    if(a.inhibit){ const cr = P.cap*0.72; mL = cr - P.gain*inL; mR = cr - P.gain*inR; }
+    else         {                        mL = 0.25 + P.gain*inL; mR = 0.25 + P.gain*inR; }
+    this.vl = clamp(mL,0,P.cap); this.vr = clamp(mR,0,P.cap);
+    const v = (this.vl+this.vr)*0.5, w = (this.vr-this.vl)/WHEELBASE;
+    this.h += w*dt; this.x += Math.cos(this.h)*v*dt; this.y += Math.sin(this.h)*v*dt;
+    // soft reflect off arena walls
+    if(this.x<MARGIN){ this.x=MARGIN; this.h=Math.PI-this.h; }
+    if(this.x>W-MARGIN){ this.x=W-MARGIN; this.h=Math.PI-this.h; }
+    if(this.y<MARGIN){ this.y=MARGIN; this.h=-this.h; }
+    if(this.y>H-MARGIN){ this.y=H-MARGIN; this.h=-this.h; }
+  }
+}
+function clamp(v,a,b){ return v<a?a:v>b?b:v; }
+
+// scalar light field = placed lights + faint vehicle glow (vehicle coupling)
+function fieldAt(x,y,self){
+  let s=0;
+  for(const L of lights){ const dx=x-L.x, dy=y-L.y; s += L.b*P.bright*FALL/(FALL+dx*dx+dy*dy); }
+  for(const V of vehicles){ if(V===self) continue; const dx=x-V.x, dy=y-V.y;
+    s += 0.34*P.bright*FALL/(FALL+(dx*dx+dy*dy)*1.6); }
+  return s;
+}
+
+// ---- Spawns & scenes ------------------------------------------------------
+function spawn(t,x,y){ vehicles.push(new Vehicle(t, x==null?rnd(60,W-60):x, y==null?rnd(60,H-60):y)); }
+function addLight(x,y,b){ lights.push({ x,y, b:b==null?1:b, b0:b==null?1:b,
+  vx:rnd(-.25,.25), vy:rnd(-.25,.25), ph:rnd(0,6.28) }); }
+
+const PRESETS = {
+  Timid:      { arch:[0,0,0,0,0], lights:3 },
+  Aggressive: { arch:[1,1,1,1],   lights:2 },
+  Lover:      { arch:[2,2,2,2],   lights:4 },
+  Explorer:   { arch:[3,3,3,3,3], lights:3 },
+  Ecosystem:  { arch:[0,0,1,1,2,2,3,3], lights:4 },
+};
+function loadPreset(name){
+  const p = PRESETS[name]; vehicles=[]; lights=[];
+  for(let i=0;i<p.lights;i++) addLight(rnd(W*.2,W*.8), rnd(H*.2,H*.8), rnd(.8,1.4));
+  for(const t of p.arch) spawn(t);
+  labelT = 2.4; save();
+}
+function randomize(){
+  vehicles=[]; lights=[];
+  const nl = 2+((Math.random()*4)|0); for(let i=0;i<nl;i++) addLight(rnd(80,W-80), rnd(80,H-80), rnd(.7,1.5));
+  const nv = 5+((Math.random()*6)|0); for(let i=0;i<nv;i++) spawn((Math.random()*4)|0);
+  labelT = 2; save();
+}
+
+// ---- Rendering ------------------------------------------------------------
+function drawField(){
+  const cell = 15, gx = Math.ceil(W/cell), gy = Math.ceil(H/cell);
+  for(let j=0;j<gy;j++) for(let i=0;i<gx;i++){
+    const f = fieldAt(i*cell+cell/2, j*cell+cell/2, null);
+    const t = 1 - 1/(1+f*0.95);
+    ctx.fillStyle = 'rgb('+((11+244*t)|0)+','+((14+83*t)|0)+','+((20+t*t*30)|0)+')';
+    ctx.fillRect(i*cell, j*cell, cell, cell);
+  }
+}
+function drawLight(L){
+  const rad = 34*Math.sqrt(L.b*P.bright);
+  const g = ctx.createRadialGradient(L.x,L.y,0, L.x,L.y,rad);
+  g.addColorStop(0,'rgba(255,236,190,.95)'); g.addColorStop(.35,'rgba(255,150,60,.5)'); g.addColorStop(1,'rgba(255,120,40,0)');
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(L.x,L.y,rad,0,6.283); ctx.fill();
+  ctx.fillStyle='#fff7e6'; ctx.beginPath(); ctx.arc(L.x,L.y,3.2,0,6.283); ctx.fill();
+}
+function drawVehicle(V){
+  const a = ARCH[V.t], c=Math.cos(V.h), s=Math.sin(V.h);
+  if(overlay){ // sensor rays + per-wheel thrust
+    ctx.strokeStyle='rgba(255,255,255,.28)'; ctx.lineWidth=1;
+    for(const d of [-P.spread,P.spread]){ ctx.beginPath(); ctx.moveTo(V.x,V.y);
+      ctx.lineTo(V.x+Math.cos(V.h+d)*SENSE, V.y+Math.sin(V.h+d)*SENSE); ctx.stroke(); }
+    const px=-s, py=c; // perpendicular = wheel axle
+    ctx.strokeStyle=a.color; ctx.lineWidth=2.4;
+    for(const [side,thr] of [[-1,V.vl],[1,V.vr]]){ const wx=V.x+px*side*7, wy=V.y+py*side*7;
+      ctx.beginPath(); ctx.moveTo(wx,wy); ctx.lineTo(wx-c*thr*7, wy-s*thr*7); ctx.stroke(); }
+  }
+  ctx.save(); ctx.translate(V.x,V.y); ctx.rotate(V.h);
+  ctx.shadowColor=a.color; ctx.shadowBlur=12; ctx.fillStyle=a.color;
+  ctx.beginPath(); ctx.moveTo(R,0); ctx.lineTo(-R*0.7,R*0.7); ctx.lineTo(-R*0.4,0); ctx.lineTo(-R*0.7,-R*0.7);
+  ctx.closePath(); ctx.fill(); ctx.restore();
+  if(labelT>0){ ctx.shadowBlur=0; ctx.globalAlpha=Math.min(1,labelT)*0.95;
+    ctx.fillStyle=a.color; ctx.font='700 11px sans-serif'; ctx.textAlign='center';
+    ctx.fillText(a.name, V.x, V.y-R-6);
+    ctx.globalAlpha*=0.72; ctx.fillStyle='#c7cede'; ctx.font='10px sans-serif';
+    ctx.fillText(a.emo, V.x, V.y-R-18); ctx.globalAlpha=1; }
+}
+
+// ---- Main loop ------------------------------------------------------------
+let last=performance.now();
+function frame(now){
+  let dt = Math.min(2.2, (now-last)/16.667); last=now; if(labelT>0) labelT-=dt/60;
+  if(live){ for(const L of lights){ L.ph+=0.02*dt; L.b = L.b0*(0.78+0.28*Math.sin(L.ph));
+      L.x=clamp(L.x+L.vx*dt,20,W-20); L.y=clamp(L.y+L.vy*dt,20,H-20);
+      if(L.x<=20||L.x>=W-20) L.vx*=-1; if(L.y<=20||L.y>=H-20) L.vy*=-1; }
+    // Love vehicles that settle onto a light slowly consume it
+    for(const V of vehicles){ if(V.t!==2 || (V.vl+V.vr)>0.9) continue;
+      for(const L of lights){ const dx=V.x-L.x, dy=V.y-L.y; if(dx*dx+dy*dy<340){ L.b0-=0.004*dt; } } }
+    lights = lights.filter(L=>L.b0>0.12); }
+
+  for(const V of vehicles) V.step(dt);
+
+  if(showField) drawField();
+  else { ctx.fillStyle='rgba(11,14,20,'+(1-P.persist)+')'; ctx.fillRect(0,0,W,H); }
+  for(const L of lights) drawLight(L);
+  for(const V of vehicles) drawVehicle(V);
+  if(vehicles.length===0 && lights.length===0){   // turn the empty canvas into an invitation, not a dead end
+    ctx.save(); ctx.textAlign='center'; ctx.shadowBlur=0; ctx.globalAlpha=0.55; ctx.fillStyle='#8a93a6';
+    ctx.font='600 15px sans-serif'; ctx.fillText('Click anywhere to drop a light', W/2, H/2-8);
+    ctx.globalAlpha=0.4; ctx.font='12px sans-serif';
+    ctx.fillText('Press 1–4 to spawn vehicles · R to randomize · or pick a scenario', W/2, H/2+15);
+    ctx.restore();
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ---- Input: click to place, drag to move ---------------------------------
+let pick=null, downX=0, downY=0, moved=false, startedOnCanvas=false, lastTouch=0;
+function pos(e){ const t=e.touches?e.touches[0]:e; return { x:t.clientX, y:t.clientY }; }
+function grab(x,y){
+  for(let i=vehicles.length-1;i>=0;i--){ const v=vehicles[i]; if((v.x-x)**2+(v.y-y)**2<400) return {k:'v',o:v}; }
+  for(let i=lights.length-1;i>=0;i--){ const l=lights[i]; if((l.x-x)**2+(l.y-y)**2<400) return {k:'l',o:l}; }
+  return null;
+}
+// ignore the emulated mouse events a browser fires ~300ms after a touch tap
+function stale(e){ if(e.type[0]==='t'){ lastTouch=Date.now(); return false; } return Date.now()-lastTouch<600; }
+function down(e){ if(stale(e)) return; const {x,y}=pos(e); downX=x; downY=y; moved=false; startedOnCanvas=true;
+  pick=grab(x,y); if(pick&&e.cancelable)e.preventDefault(); }
+function move(e){ const {x,y}=pos(e); if(Math.abs(x-downX)+Math.abs(y-downY)>4) moved=true;
+  if(pick){ pick.o.x=x; pick.o.y=y; if(e.cancelable)e.preventDefault(); } }
+function up(e){ if(stale(e)) return;
+  // only treat as a canvas click if the press actually started on the canvas
+  if(startedOnCanvas && !pick && !moved){ const {x,y}=(e.changedTouches?{x:e.changedTouches[0].clientX,y:e.changedTouches[0].clientY}:pos(e));
+    addLight(x,y,1); labelT=Math.max(labelT,0); } pick=null; startedOnCanvas=false; save(); }
+cv.addEventListener('mousedown',down); addEventListener('mousemove',move); addEventListener('mouseup',up);
+cv.addEventListener('touchstart',down,{passive:false}); addEventListener('touchmove',move,{passive:false}); addEventListener('touchend',up);
+
+addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase();
+  if(k>='1'&&k<='4'){ spawn(+k-1); labelT=2.2; save(); }
+  else if(k==='f') tog('t_field'); else if(k==='o') tog('t_over'); else if(k==='l') tog('t_live');
+  else if(k==='c'){ vehicles=[]; lights=[]; save(); } else if(k==='r') randomize();
+});
+
+// ---- Panel wiring ---------------------------------------------------------
+const spEl=document.getElementById('species'), prEl=document.getElementById('presets'), lgEl=document.getElementById('legend');
+ARCH.forEach((a,i)=>{ const b=document.createElement('button'); b.className='sp'; b.style.setProperty('--k',a.color);
+  b.textContent=(i+1)+' '+a.name; b.onclick=()=>{ spawn(i); labelT=2.2; save(); }; spEl.appendChild(b);
+  const d=document.createElement('div'); d.innerHTML='<i style="color:'+a.color+'"></i><b>'+a.name+'</b> <em>'+a.emo+'</em>'; lgEl.appendChild(d); });
+Object.keys(PRESETS).forEach(n=>{ const b=document.createElement('button'); b.textContent=n; b.onclick=()=>loadPreset(n); prEl.appendChild(b); });
+
+const S = { s_gain:['gain',v=>v.toFixed(1)], s_cap:['cap',v=>v.toFixed(1)], s_spread:['spread',v=>v.toFixed(2)],
+  s_persist:['persist',v=>v.toFixed(3)], s_bright:['bright',v=>v.toFixed(2)] };
+for(const id in S){ const el=document.getElementById(id), key=S[id][0], span=el.nextElementSibling;
+  const sync=()=>{ P[key]=+el.value; span.textContent=S[id][1](+el.value); };
+  el.addEventListener('input',()=>{ sync(); save(); }); el.__sync=sync; }
+function pushSliders(){ for(const id in S){ const el=document.getElementById(id); el.value=P[S[id][0]]; el.__sync(); } }
+
+function tog(id){ const b=document.getElementById(id); b.classList.toggle('on');
+  const on=b.classList.contains('on');
+  if(id==='t_field') showField=on; if(id==='t_over') overlay=on; if(id==='t_live') live=on; save(); }
+document.getElementById('t_field').onclick=()=>tog('t_field');
+document.getElementById('t_over').onclick=()=>tog('t_over');
+document.getElementById('t_live').onclick=()=>tog('t_live');
+document.getElementById('b_rand').onclick=randomize;
+document.getElementById('b_clear').onclick=()=>{ vehicles=[]; lights=[]; save(); };
+document.getElementById('b_share').onclick=()=>{
+  flush();                                   // write the hash synchronously so we copy the CURRENT scene
+  const b=document.getElementById('b_share'), url=location.href, o=b.textContent;
+  const flash=t=>{ b.textContent=t; setTimeout(()=>b.textContent=o,1100); };
+  const fallback=()=>{                        // file:// / insecure contexts often lack navigator.clipboard
+    try{ const ta=document.createElement('textarea'); ta.value=url; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.select(); const ok=document.execCommand('copy'); ta.remove();
+      flash(ok?'Copied!':'Copy failed'); if(!ok) prompt('Copy this link:',url);
+    }catch(_){ flash('Copy failed'); prompt('Copy this link:',url); }
+  };
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(url).then(()=>flash('Copied!')).catch(fallback); }
+  else fallback();
+};
+
+// ---- URL-hash serialize / restore ----------------------------------------
+let saveT=0;
+function flush(){                              // serialize the scene to the URL hash synchronously
+  clearTimeout(saveT);
+  const r=n=>Math.round(n);
+  const v=vehicles.map(o=>o.t+','+r(o.x)+','+r(o.y)+','+o.h.toFixed(2)).join(';');
+  const l=lights.map(o=>r(o.x)+','+r(o.y)+','+o.b0.toFixed(2)).join(';');
+  const p=[P.gain,P.cap,P.spread,P.persist,P.bright].join(',');
+  const o=(showField?1:0)+''+(overlay?1:0)+(live?1:0);
+  history.replaceState(null,'','#v='+v+'~l='+l+'~p='+p+'~o='+o);
+}
+function save(){ clearTimeout(saveT); saveT=setTimeout(flush,120); }   // debounced writer for live edits
+function load(){
+  if(location.hash.length<2) return false;
+  try{
+    const h=decodeURIComponent(location.hash.slice(1)); if(!h) return false;   // malformed % escapes -> caught below
+    const parts={}; h.split('~').forEach(s=>{ const i=s.indexOf('='); if(i>0) parts[s.slice(0,i)]=s.slice(i+1); });
+    if(parts.p){ const a=parts.p.split(',').map(Number); if(a.length===5) P={gain:a[0],cap:a[1],spread:a[2],persist:a[3],bright:a[4]}; }
+    vehicles=[]; if(parts.v) parts.v.split(';').filter(Boolean).forEach(s=>{ const [t,x,y,hh]=s.split(',').map(Number);
+      if(t>=0&&t<4) vehicles.push(new Vehicle(t,x,y,hh)); });
+    lights=[]; if(parts.l) parts.l.split(';').filter(Boolean).forEach(s=>{ const [x,y,b]=s.split(',').map(Number); addLight(x,y,b); });
+    if(parts.o){ if(parts.o[0]==='1')tog('t_field'); if(parts.o[1]==='1')tog('t_over'); if(parts.o[2]==='1')tog('t_live'); }
+  }catch(e){ return false; }
+  return vehicles.length>0 || lights.length>0;
+}
+
+// ---- Boot -----------------------------------------------------------------
+if(!load()) loadPreset('Ecosystem');
+pushSliders();
+</script>
+</body>
+</html>

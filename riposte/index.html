@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Riposte</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; background:#0a0b10; overflow:hidden; touch-action:none;
+    font-family:'Segoe UI',system-ui,sans-serif; color:#e8ecf5; }
+  #wrap { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; }
+  canvas { display:block; background:#0a0b10; touch-action:none; }
+  #hint { position:fixed; left:0; right:0; bottom:10px; text-align:center; font-size:12px;
+    color:#5a6377; letter-spacing:.5px; pointer-events:none; transition:opacity .6s ease; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas></div>
+<div id="hint">aim: move mouse · nudge stick · drag on touch &nbsp;·&nbsp; click / tap / space to PARRY &nbsp;·&nbsp; R to restart</div>
+<script>
+"use strict";
+// ---- tunables (top-of-file so balance is easy) --------------------------
+const RING_R      = 74;    // parry ring radius from core
+const ARC_HALF    = 0.62;  // half-width of parry wedge (radians)
+const RING_TOL    = 26;    // px band around ring a bullet can be parried in
+const PERFECT_TOL = 8;     // px band for a Perfect
+const CORE_R      = 13;    // core radius (death)
+const FLICK_TIME  = 150;   // ms the arc stays "active" after a flick
+const COOLDOWN    = 260;   // ms lockout after a whiffed flick
+const DEFLECT_SPD = 9.2;   // speed of a deflected bullet
+const SLOMO_TIME  = 340;   // ms of bullet-time
+// -------------------------------------------------------------------------
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let W=0,H=0,cx=0,cy=0,DPR=1;
+function resize(){
+  DPR = Math.min(2, window.devicePixelRatio||1);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = W*DPR; cv.height = H*DPR; cv.style.width=W+'px'; cv.style.height=H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  cx = W/2; cy = H/2;
+}
+window.addEventListener('resize', resize); resize();
+
+// ---- seeded RNG (mulberry32) --------------------------------------------
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0;
+  let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t;
+  return ((t^t>>>14)>>>0)/4294967296; }; }
+function hashStr(s){ let h=2166136261>>>0; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619); } return h>>>0; }
+function utcDaySeed(){ const d=new Date(); return 'daily-'+d.getUTCFullYear()+'-'+(d.getUTCMonth()+1)+'-'+d.getUTCDate(); }
+
+// ---- parse hash: #seed=abc  or  #seed=abc:score --------------------------
+let seedStr, targetScore=0, dailyMode=false;
+function parseHash(){
+  const m = /seed=([^:&]+)(?::(\d+))?/.exec(location.hash||'');
+  if(m){ seedStr=decodeURIComponent(m[1]); targetScore=m[2]?parseInt(m[2],10):0; }
+  else { seedStr = utcDaySeed(); dailyMode=true; }
+}
+parseHash();
+let rng;
+
+// ---- audio (WebAudio only) ----------------------------------------------
+let actx=null;
+function A(){ if(!actx){ try{ actx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } return actx; }
+function blip(freq,dur,type,vol){
+  const a=A(); if(!a) return;
+  const o=a.createOscillator(), g=a.createGain();
+  o.type=type||'sine'; o.frequency.value=freq;
+  g.gain.setValueAtTime((vol||0.2),a.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.0001,a.currentTime+dur);
+  o.connect(g).connect(a.destination); o.start(); o.stop(a.currentTime+dur);
+}
+function whoosh(){ const a=A(); if(!a) return;
+  const o=a.createOscillator(), g=a.createGain();
+  o.type='sawtooth'; o.frequency.setValueAtTime(220,a.currentTime);
+  o.frequency.exponentialRampToValueAtTime(600,a.currentTime+0.12);
+  g.gain.setValueAtTime(0.14,a.currentTime); g.gain.exponentialRampToValueAtTime(0.0001,a.currentTime+0.13);
+  o.connect(g).connect(a.destination); o.start(); o.stop(a.currentTime+0.14);
+}
+
+// ---- archetypes ----------------------------------------------------------
+const TYPES = {
+  straight: { color:'#eef2ff', spd:2.4 },
+  spiral:   { color:'#ff8a3d', spd:2.2 },
+  zigzag:   { color:'#3ddcff', spd:2.6 },
+};
+
+// ---- accessibility: honor reduced-motion --------------------------------
+let RM=false; try{ RM=!!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches); }catch(e){}
+
+// ---- best-effort persistence (localStorage can throw in private modes) ---
+function loadBest(){ try{ return parseInt(localStorage.getItem('riposte_best')||'0',10)||0; }catch(e){ return 0; } }
+function saveBest(v){ try{ localStorage.setItem('riposte_best',String(v)); }catch(e){} }
+
+// ---- game state ----------------------------------------------------------
+let bullets, parts, flashes, edgeTells;
+let aimAng, flickUntil, cooldownUntil, ringPulse, shake, timeScale, slomoUntil;
+let combo, score, best, alive, started, waveN, spawnTimer, nextWaveAt;
+let copyRect=null, copyToast=0, shareLink='';
+let last=0;
+const hintEl=document.getElementById('hint');
+
+best = loadBest();
+
+function reset(){
+  rng = mulberry32(hashStr(seedStr));
+  bullets=[]; parts=[]; flashes=[]; edgeTells=[];
+  aimAng=-Math.PI/2; flickUntil=0; cooldownUntil=0; ringPulse=0; shake=0;
+  timeScale=1; slomoUntil=0;
+  combo=0; score=0; alive=true; started=true;
+  waveN=0; spawnTimer=0; nextWaveAt=800;
+  copyRect=null; copyToast=0; shareLink='';
+}
+
+function spawnEdge(){ // returns a point just outside a random edge + inward velocity
+  const side = (rng()*4)|0;
+  let x,y;
+  if(side===0){ x=rng()*W; y=-12; }
+  else if(side===1){ x=W+12; y=rng()*H; }
+  else if(side===2){ x=rng()*W; y=H+12; }
+  else { x=-12; y=rng()*H; }
+  return {x,y};
+}
+
+function addBullet(x,y,ang,type,spd){
+  // NOTE: every RNG-derived value (edge, angle) is resolved synchronously by the
+  // caller BEFORE the spawn timer fires — this function must never touch rng(),
+  // or wall-clock timer ordering would desync the seeded/daily wave stream.
+  bullets.push({ x,y, vx:Math.cos(ang)*spd, vy:Math.sin(ang)*spd,
+    type, r:6, deflected:false, born:performance.now() });
+}
+
+function tell(x,y,color){ edgeTells.push({x,y,color,t:0,life:420}); }
+
+function launchWave(){
+  waveN++;
+  const diff = waveN;
+  const mix = Math.min(1, diff/8);
+  // choose archetype set by difficulty
+  let type;
+  const roll = rng();
+  if(diff<3) type='straight';
+  else if(diff<6) type = roll<0.6?'straight':'spiral';
+  else type = roll<0.4?'straight':(roll<0.72?'spiral':'zigzag');
+  const speed = TYPES[type].spd * (1 + mix*0.9);
+
+  if(type==='spiral'){
+    // spiral fan from one edge point
+    const p=spawnEdge(); tell(p.x,p.y,TYPES.spiral.color);
+    const base=Math.atan2(cy-p.y, cx-p.x);
+    const n=5+((diff*rng())|0)%5;
+    for(let i=0;i<n;i++){
+      const a=base + (i-(n-1)/2)*0.22;
+      setTimeout(()=>{ if(alive) addBullet(p.x,p.y,a,'spiral',speed); }, i*70);
+    }
+  } else {
+    const n=2 + Math.min(6, (diff/1.5)|0);
+    for(let i=0;i<n;i++){
+      const p=spawnEdge(); tell(p.x,p.y,TYPES[type].color);
+      const a=Math.atan2(cy-p.y, cx-p.x) + (rng()-0.5)*0.15;
+      setTimeout(()=>{ if(alive) addBullet(p.x,p.y,a,type,speed); }, i*90);
+    }
+  }
+  // next wave sooner as it ramps (director keeps pressure even if screen clears)
+  nextWaveAt = Math.max(520, 1500 - waveN*55);
+}
+
+// ---- particles / flashes -------------------------------------------------
+function burst(x,y,color,n){
+  for(let i=0;i<n;i++){
+    const a=Math.random()*6.28, s=1+Math.random()*4;
+    parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:1,color});
+  }
+}
+function coreFlash(perfect){ flashes.push({t:0,life:perfect?320:200,perfect}); }
+
+// ---- deflect resolution --------------------------------------------------
+function doFlick(){
+  if(!started){ if(hintEl) hintEl.style.opacity='0'; reset(); return; }
+  if(!alive){ reset(); return; }
+  const now=performance.now();
+  if(now < cooldownUntil) return;
+  flickUntil = now + FLICK_TIME;
+  ringPulse = 1;
+  whoosh();
+  // check bullets crossing the ring inside the arc, right now
+  let hits=0, perfect=false;
+  for(const b of bullets){
+    if(b.deflected) continue;
+    const dx=b.x-cx, dy=b.y-cy, d=Math.hypot(dx,dy);
+    if(Math.abs(d-RING_R) > RING_TOL) continue;
+    let ba=Math.atan2(dy,dx);
+    let diff=Math.abs(((ba-aimAng+Math.PI*3)%(Math.PI*2))-Math.PI);
+    if(diff > ARC_HALF) continue;
+    // parried! slam outward
+    b.deflected=true; b.r=7;
+    const out=Math.atan2(dy,dx);
+    b.vx=Math.cos(out)*DEFLECT_SPD; b.vy=Math.sin(out)*DEFLECT_SPD;
+    hits++;
+    if(Math.abs(d-RING_R) <= PERFECT_TOL) perfect=true;
+    burst(b.x,b.y,'#ffffff',10);
+  }
+  if(hits>0){
+    combo++;
+    const gain = hits * 10 * combo * (perfect?2:1);
+    score += gain;
+    shake = RM ? 0 : Math.min(16, 6+hits*2);
+    coreFlash(perfect);
+    // rising arpeggio with combo
+    const baseF = 340 + Math.min(12,combo)*40;
+    for(let i=0;i<hits;i++) setTimeout(()=>blip(baseF+i*90,0.12,'square',0.16), i*45);
+    if(perfect){ blip(1200,0.14,'triangle',0.2); slomoUntil=performance.now()+SLOMO_TIME; }
+  } else {
+    // whiff: lockout + combo reset
+    cooldownUntil = now + COOLDOWN;
+    combo=0;
+    blip(120,0.14,'sawtooth',0.12);
+  }
+}
+
+function die(){
+  if(!alive) return;
+  alive=false; combo=0;
+  shake=RM?0:22; blip(90,0.4,'sawtooth',0.25); blip(60,0.5,'sine',0.2);
+  burst(cx,cy,'#ff5566',40);
+  if(score>best){ best=score; saveBest(best); }
+  // build the shareable run URL once, on death (not every frame in draw).
+  // use location.href base so it also works under file:// (origin is "null" there).
+  const base=(location.href||'').split('#')[0];
+  shareLink = base+'#seed='+encodeURIComponent(seedStr)+':'+score;
+  try{ location.hash = 'seed='+encodeURIComponent(seedStr)+':'+score; }catch(e){}
+}
+
+// ---- input ---------------------------------------------------------------
+function setAimFromPoint(px,py){ aimAng=Math.atan2(py-cy,px-cx); }
+function inCopyRect(px,py){ return copyRect && px>=copyRect.x && px<=copyRect.x+copyRect.w && py>=copyRect.y && py<=copyRect.y+copyRect.h; }
+function doCopy(){
+  copyToast = performance.now()+1400;
+  try{ if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(shareLink).catch(()=>{}); }catch(e){}
+  blip(760,0.08,'triangle',0.14);
+}
+// a press either taps the Copy pill (game-over only) or flicks/retries
+function pressAt(px,py){
+  if(started && !alive && inCopyRect(px,py)){ doCopy(); return; }
+  doFlick();
+}
+let lastTX=0,lastTY=0;
+window.addEventListener('mousemove',e=>setAimFromPoint(e.clientX,e.clientY));
+window.addEventListener('mousedown',e=>{ e.preventDefault(); A(); pressAt(e.clientX,e.clientY); });
+// touch: drag to aim, flick fires on release (so you can aim before committing)
+window.addEventListener('touchstart',e=>{ e.preventDefault(); A();
+  const t=e.touches[0]; if(t){ lastTX=t.clientX; lastTY=t.clientY; setAimFromPoint(t.clientX,t.clientY); } },{passive:false});
+window.addEventListener('touchmove',e=>{ e.preventDefault(); const t=e.touches[0]; if(t){ lastTX=t.clientX; lastTY=t.clientY; setAimFromPoint(t.clientX,t.clientY); } },{passive:false});
+window.addEventListener('touchend',e=>{ e.preventDefault(); const t=e.changedTouches[0]; if(t){ lastTX=t.clientX; lastTY=t.clientY; } pressAt(lastTX,lastTY); },{passive:false});
+window.addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase();
+  if(k===' '||k==='enter'){ e.preventDefault(); A(); doFlick(); }
+  else if(k==='r'){ reset(); }
+  // arrow-key 8-way aim
+  else if(k==='arrowup') aimAng=-Math.PI/2;
+  else if(k==='arrowdown') aimAng=Math.PI/2;
+  else if(k==='arrowleft') aimAng=Math.PI;
+  else if(k==='arrowright') aimAng=0;
+});
+// gamepad aim + flick
+let padFlickPrev=false;
+function pollPad(){
+  const pads=navigator.getGamepads?navigator.getGamepads():[];
+  for(const p of pads){ if(!p) continue;
+    const ax=p.axes[0]||0, ay=p.axes[1]||0;
+    if(Math.hypot(ax,ay)>0.35) aimAng=Math.atan2(ay,ax);
+    const pressed = p.buttons.some(b=>b.pressed);
+    if(pressed && !padFlickPrev){ A(); doFlick(); }
+    padFlickPrev=pressed;
+  }
+}
+
+// ---- update --------------------------------------------------------------
+function update(dt,now){
+  pollPad();
+  timeScale = (now<slomoUntil && !RM) ? 0.3 : 1;
+  const ts = timeScale;
+  if(alive && started){
+    spawnTimer += dt;
+    if(spawnTimer>=nextWaveAt){ spawnTimer=0; launchWave(); }
+  }
+  // bullets
+  for(let i=bullets.length-1;i>=0;i--){
+    const b=bullets[i];
+    if(!b.deflected){
+      // archetype motion
+      if(b.type==='zigzag'){
+        const perp=Math.atan2(b.vy,b.vx)+Math.PI/2;
+        const w=Math.sin((now-b.born)/90)*1.6;
+        b.x += (b.vx + Math.cos(perp)*w)*ts;
+        b.y += (b.vy + Math.sin(perp)*w)*ts;
+      } else if(b.type==='spiral'){
+        const sp=Math.hypot(b.vx,b.vy), a=Math.atan2(b.vy,b.vx)+0.03*ts;
+        b.vx=Math.cos(a)*sp; b.vy=Math.sin(a)*sp;
+        b.x+=b.vx*ts; b.y+=b.vy*ts;
+      } else { b.x+=b.vx*ts; b.y+=b.vy*ts; }
+    } else {
+      b.x+=b.vx; b.y+=b.vy; // deflected bullets ignore slow-mo for punch
+    }
+    // core collision
+    const dcore=Math.hypot(b.x-cx,b.y-cy);
+    if(!b.deflected && dcore < CORE_R+b.r){ die(); bullets.splice(i,1); continue; }
+    if(!b.deflected && dcore < CORE_R+34 && dcore>CORE_R+b.r){
+      // near-miss slow-mo (only when very close, and not already in slomo)
+      if(dcore < CORE_R+20 && now>=slomoUntil && alive) slomoUntil=now+180;
+    }
+    // deflected bullets destroy incoming bullets (chain reaction)
+    if(b.deflected){
+      for(let j=bullets.length-1;j>=0;j--){ const o=bullets[j];
+        if(o===b||o.deflected) continue;
+        if(Math.hypot(o.x-b.x,o.y-b.y) < b.r+o.r+2){
+          // chain kill
+          combo++; const g=8*combo; score+=g;
+          burst(o.x,o.y,TYPES[o.type].color,8);
+          blip(500+Math.min(12,combo)*60,0.09,'square',0.14);
+          bullets.splice(j,1); if(j<i) i--;
+        }
+      }
+    }
+    // offscreen cull
+    if(b.x<-40||b.x>W+40||b.y<-40||b.y>H+40) bullets.splice(i,1);
+  }
+  // particles
+  for(let i=parts.length-1;i>=0;i--){ const p=parts[i];
+    p.x+=p.vx; p.y+=p.vy; p.vx*=0.94; p.vy*=0.94; p.life-=0.03;
+    if(p.life<=0) parts.splice(i,1); }
+  // flashes
+  for(let i=flashes.length-1;i>=0;i--){ flashes[i].t+=dt; if(flashes[i].t>=flashes[i].life) flashes.splice(i,1); }
+  // edge tells
+  for(let i=edgeTells.length-1;i>=0;i--){ edgeTells[i].t+=dt; if(edgeTells[i].t>=edgeTells[i].life) edgeTells.splice(i,1); }
+  // decay
+  if(ringPulse>0) ringPulse=Math.max(0,ringPulse-dt/200);
+  if(shake>0) shake=Math.max(0,shake-dt/22);
+}
+
+// ---- render --------------------------------------------------------------
+function draw(now){
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#0a0b10'; ctx.fillRect(0,0,W,H);
+  const sh = shake>0 ? shake : 0;
+  const ox=(Math.random()-0.5)*sh, oy=(Math.random()-0.5)*sh;
+  ctx.save(); ctx.translate(ox,oy);
+
+  // arena vignette ring
+  ctx.strokeStyle='rgba(90,99,119,0.15)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.arc(cx,cy,Math.min(W,H)*0.46,0,6.283); ctx.stroke();
+
+  // edge tells (telegraph)
+  for(const t of edgeTells){
+    const a=1-t.t/t.life;
+    ctx.fillStyle=t.color; ctx.globalAlpha=a*0.8;
+    ctx.beginPath(); ctx.arc(t.x,t.y,10+ (1-a)*30,0,6.283); ctx.fill();
+    ctx.globalAlpha=1;
+  }
+
+  // parry ring
+  const active = now<flickUntil;
+  ctx.strokeStyle = active? '#ffffff' : 'rgba(120,140,180,0.35)';
+  ctx.lineWidth = 2 + ringPulse*5;
+  ctx.beginPath(); ctx.arc(cx,cy,RING_R,0,6.283); ctx.stroke();
+
+  // aim-arc ghost wedge
+  ctx.beginPath();
+  ctx.moveTo(cx,cy);
+  ctx.arc(cx,cy,RING_R+RING_TOL, aimAng-ARC_HALF, aimAng+ARC_HALF);
+  ctx.closePath();
+  const cool = now<cooldownUntil;
+  ctx.fillStyle = active? 'rgba(255,255,255,0.22)' : (cool?'rgba(255,80,90,0.12)':'rgba(120,180,255,0.10)');
+  ctx.fill();
+  // inner arc edge
+  ctx.beginPath();
+  ctx.arc(cx,cy,RING_R, aimAng-ARC_HALF, aimAng+ARC_HALF);
+  ctx.strokeStyle = active?'#ffffff':'rgba(150,190,255,0.5)'; ctx.lineWidth=3; ctx.stroke();
+
+  // core flashes
+  for(const f of flashes){ const a=1-f.t/f.life;
+    ctx.globalAlpha=a*(f.perfect?0.9:0.6);
+    ctx.fillStyle=f.perfect?'#ffffff':'#ffcf6b';
+    ctx.beginPath(); ctx.arc(cx,cy,CORE_R+ (1-a)*(f.perfect?90:60)*(RM?0:1),0,6.283); ctx.fill();
+    ctx.globalAlpha=1;
+  }
+
+  // core
+  ctx.fillStyle = alive? '#e8ecf5' : '#ff5566';
+  ctx.beginPath(); ctx.arc(cx,cy,CORE_R,0,6.283); ctx.fill();
+  ctx.fillStyle='#0a0b10'; ctx.beginPath(); ctx.arc(cx,cy,CORE_R*0.45,0,6.283); ctx.fill();
+
+  // bullets
+  for(const b of bullets){
+    const c = b.deflected? '#fff2a8' : TYPES[b.type].color;
+    ctx.fillStyle=c;
+    ctx.shadowColor=c; ctx.shadowBlur= b.deflected?14:8;
+    ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,6.283); ctx.fill();
+    ctx.shadowBlur=0;
+  }
+
+  // particles
+  for(const p of parts){ ctx.globalAlpha=Math.max(0,p.life);
+    ctx.fillStyle=p.color; ctx.fillRect(p.x-1.5,p.y-1.5,3,3); }
+  ctx.globalAlpha=1;
+
+  ctx.restore();
+
+  // HUD — only while playing / on the game-over screen, never under the title
+  if(started){
+    ctx.fillStyle='#e8ecf5'; ctx.textAlign='left'; ctx.textBaseline='top';
+    ctx.font='700 26px Segoe UI, system-ui, sans-serif';
+    ctx.fillText(String(score), 20, 18);
+    ctx.font='600 13px Segoe UI, system-ui, sans-serif'; ctx.fillStyle='#7f8aa3';
+    ctx.fillText('BEST '+best, 20, 50);
+    // combo
+    if(combo>1){ ctx.textAlign='right'; ctx.fillStyle='#ff8a3d';
+      ctx.font='800 30px Segoe UI, system-ui, sans-serif';
+      ctx.fillText('x'+combo, W-20, 18); }
+    // wave + mode
+    ctx.textAlign='right'; ctx.fillStyle='#5a6377';
+    ctx.font='600 12px Segoe UI, system-ui, sans-serif';
+    ctx.fillText((dailyMode?'DAILY · ':'SEED · ')+seedStr+' · wave '+waveN, W-20, H-30);
+    if(targetScore>0){ ctx.fillStyle= score>=targetScore?'#3ddcff':'#7f8aa3';
+      ctx.fillText('target '+targetScore+(score>=targetScore?' ✓ beaten!':''), W-20, H-48); }
+  }
+
+  // overlays
+  if(!started){
+    dim();
+    ctx.textAlign='center'; ctx.fillStyle='#e8ecf5';
+    ctx.font='800 52px Segoe UI, system-ui, sans-serif';
+    ctx.fillText('RIPOSTE', cx, cy-70);
+    ctx.font='500 17px Segoe UI, system-ui, sans-serif'; ctx.fillStyle='#aeb7cc';
+    ctx.fillText('Aim the arc. Flick to parry. Chain the deflections.', cx, cy-16);
+    ctx.fillStyle='#7f8aa3'; ctx.font='500 15px Segoe UI, system-ui, sans-serif';
+    ctx.fillText('Perfect parries on the ring bend time.', cx, cy+14);
+    ctx.fillStyle='#ff8a3d'; ctx.font='700 18px Segoe UI, system-ui, sans-serif';
+    ctx.fillText('click · tap · space  to begin', cx, cy+58);
+  } else if(!alive){
+    dim();
+    ctx.textAlign='center';
+    ctx.fillStyle='#ff5566'; ctx.font='800 46px Segoe UI, system-ui, sans-serif';
+    ctx.fillText('CORE BREACHED', cx, cy-64);
+    ctx.fillStyle='#e8ecf5'; ctx.font='700 30px Segoe UI, system-ui, sans-serif';
+    ctx.fillText('score '+score, cx, cy-8);
+    ctx.fillStyle='#7f8aa3'; ctx.font='500 15px Segoe UI, system-ui, sans-serif';
+    ctx.fillText('best '+best+'   ·   reached wave '+waveN, cx, cy+30);
+    if(targetScore>0){ ctx.fillStyle=score>=targetScore?'#3ddcff':'#ff8a3d';
+      ctx.fillText(score>=targetScore?'you beat the shared score!':'target was '+targetScore, cx, cy+52); }
+    ctx.fillStyle='#ff8a3d'; ctx.font='700 18px Segoe UI, system-ui, sans-serif';
+    ctx.fillText('press R  ·  space  ·  click / tap outside  to retry', cx, cy+92);
+
+    // shareable run — render the URL + a Copy pill that does NOT trigger a retry
+    ctx.fillStyle='#5a6377'; ctx.font='500 12px Segoe UI, system-ui, sans-serif';
+    ctx.fillText('same waves, your score to beat', cx, cy+124);
+    let disp=shareLink; if(disp.length>56) disp='…'+disp.slice(-55);
+    ctx.fillStyle='#7f8aa3'; ctx.font='500 12px "Segoe UI", ui-monospace, monospace';
+    ctx.fillText(disp, cx, cy+144);
+    const pw=170, ph=34, px=cx-pw/2, py=cy+168;
+    copyRect={x:px,y:py,w:pw,h:ph};
+    const toasting=performance.now()<copyToast;
+    ctx.fillStyle = toasting?'rgba(61,220,255,0.28)':'rgba(61,220,255,0.14)';
+    roundRect(px,py,pw,ph,9); ctx.fill();
+    ctx.strokeStyle='rgba(61,220,255,0.65)'; ctx.lineWidth=1.5; roundRect(px,py,pw,ph,9); ctx.stroke();
+    ctx.fillStyle='#3ddcff'; ctx.font='700 14px Segoe UI, system-ui, sans-serif';
+    ctx.textBaseline='middle';
+    ctx.fillText(toasting?'Copied!':'Copy share link', cx, py+ph/2+1);
+    ctx.textBaseline='top';
+  }
+}
+function dim(){ ctx.fillStyle='rgba(10,11,16,0.72)'; ctx.fillRect(0,0,W,H); }
+function roundRect(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+
+// ---- main loop -----------------------------------------------------------
+function frame(now){
+  if(!last) last=now;
+  let dt=now-last; last=now; if(dt>50) dt=50;
+  if(started && alive) update(dt,now);
+  else { // keep particles alive on overlays
+    for(let i=parts.length-1;i>=0;i--){ const p=parts[i]; p.x+=p.vx;p.y+=p.vy;p.vx*=0.94;p.vy*=0.94;p.life-=0.03; if(p.life<=0)parts.splice(i,1);}
+    if(shake>0) shake=Math.max(0,shake-dt/22);
+  }
+  draw(now);
+  requestAnimationFrame(frame);
+}
+started=false; alive=true;
+reset(); started=false; // show title first
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

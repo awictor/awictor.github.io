@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StackDiscount — Stacked Discount Calculator</title>
+<meta name="description" content="Apply multiple discounts in sequence and see the final price, savings, and true effective discount (20% + 10% = 28% off, not 30%). Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('stack-discount-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#f59e0b;
+    --bg:#f8f6f2; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e8e2d6; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#16130c; --card:#201b12; --fg:#f2ede3; --muted:#a39a86; --line:#332b1c; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:680px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#b45309);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:680px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  .disc{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;margin-bottom:8px}
+  .disc .pct{position:relative}
+  .disc button{border:1px solid var(--line);background:var(--bg);color:var(--muted);border-radius:8px;padding:9px 12px;cursor:pointer}
+  .add{background:var(--c);color:#fff;border:0;border-radius:8px;padding:9px 15px;cursor:pointer;font:inherit;font-weight:600;margin-top:6px}
+  .res{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:6px}
+  @media(max-width:520px){.res{grid-template-columns:1fr}}
+  .stat{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+  .stat span{display:block;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .stat b{font-size:1.4rem;font-variant-numeric:tabular-nums}
+  .note{text-align:center;margin-top:14px;color:var(--muted);font-size:.9rem}
+  .note b{color:var(--c)}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:680px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🏷️</div>
+    <div><h1>StackDiscount</h1><div class="sub">Sequential discounts &amp; the true effective rate</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="price">Original price</label>
+    <input type="number" id="price" value="100" step="any" min="0">
+    <label style="margin-top:14px">Discounts (applied in order, %)</label>
+    <div id="discs"></div>
+    <button class="add" id="add" type="button">+ Add discount</button>
+  </div>
+  <div class="card">
+    <div class="res">
+      <div class="stat"><span>Final price</span><b id="final">—</b></div>
+      <div class="stat"><span>You save</span><b id="save">—</b></div>
+      <div class="stat"><span>Effective off</span><b id="eff">—</b></div>
+    </div>
+    <div class="note" id="note"></div>
+  </div>
+</main>
+<footer>
+  Stacked discounts multiply — they don't add. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/stack-discount">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  function applyDiscounts(price, discounts){
+    if(!(price >= 0)) throw new Error('price must be non-negative');
+    let p = price;
+    for(const d of discounts){
+      const dd = Number(d);
+      if(!(dd >= 0 && dd <= 100)) throw new Error('each discount must be 0-100');
+      p *= (1 - dd / 100);
+    }
+    return p;
+  }
+
+  function effectiveDiscount(discounts){
+    let factor = 1;
+    for(const d of discounts){
+      const dd = Number(d);
+      if(!(dd >= 0 && dd <= 100)) throw new Error('each discount must be 0-100');
+      factor *= (1 - dd / 100);
+    }
+    return (1 - factor) * 100;
+  }
+
+  function savings(price, discounts){
+    return price - applyDiscounts(price, discounts);
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('discs')){
+    const $ = id => document.getElementById(id);
+    const money = n => n.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+    let discs = [20, 10];
+
+    function build(){
+      $('discs').innerHTML = '';
+      discs.forEach((d, i) => {
+        const row = document.createElement('div');
+        row.className = 'disc';
+        row.innerHTML = `<input type="number" min="0" max="100" step="any" value="${d}"> <span style="color:var(--muted)">% off</span>` + (discs.length > 1 ? `<button type="button">✕</button>` : '<span></span>');
+        const inp = row.querySelector('input');
+        inp.addEventListener('input', () => { discs[i] = +inp.value; render(); });
+        const rm = row.querySelector('button');
+        if(rm) rm.addEventListener('click', () => { discs.splice(i, 1); build(); render(); });
+        $('discs').appendChild(row);
+      });
+    }
+
+    function render(){
+      const price = +$('price').value;
+      try{
+        const final = applyDiscounts(price, discs);
+        const eff = effectiveDiscount(discs);
+        $('final').textContent = money(final);
+        $('save').textContent = money(price - final);
+        $('eff').textContent = eff.toFixed(2) + '%';
+        const naiveSum = discs.reduce((s, d) => s + Number(d), 0);
+        $('note').innerHTML = naiveSum !== eff && discs.length > 1
+          ? `Adding them up would suggest ${naiveSum}% off, but stacked they're really <b>${eff.toFixed(2)}%</b>.`
+          : '';
+      }catch(e){ ['final', 'save', 'eff'].forEach(id => $(id).textContent = '—'); $('note').textContent = e.message; }
+    }
+
+    $('add').addEventListener('click', () => { if(discs.length < 8){ discs.push(5); build(); render(); } });
+    $('price').addEventListener('input', render);
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('stack-discount-theme', cur); }catch(e){}
+    });
+    build(); render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { applyDiscounts, effectiveDiscount, savings };
+</script>
+</body>
+</html>

@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ocellate — grow circles until they kiss</title>
+<style>
+  :root{
+    --bg:#0e0f13; --fg:#e8e6e0; --panel:rgba(20,22,28,.82); --line:rgba(255,255,255,.12);
+    --accent:#ff6a3d; --muted:#9aa0aa;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f5f3ef; --fg:#232f3e; --panel:rgba(255,255,255,.86); --line:rgba(0,0,0,.12); --muted:#6a707a; }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);
+    font:13px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  #cv{position:fixed;inset:0;width:100vw;height:100vh;display:block;touch-action:none;cursor:crosshair}
+  #panel{position:fixed;top:12px;left:12px;width:236px;max-height:calc(100vh - 24px);overflow:auto;
+    background:var(--panel);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border:1px solid var(--line);border-radius:14px;
+    padding:12px 13px;z-index:10;box-shadow:0 8px 34px rgba(0,0,0,.28);user-select:none}
+  #panel.hidden{transform:translateX(-260px);opacity:0;pointer-events:none;transition:.25s}
+  h1{font:600 15px/1 system-ui;margin:0 0 2px;letter-spacing:.2px}
+  h1 b{color:var(--accent)}
+  .sub{color:var(--muted);font-size:11px;margin:0 0 10px}
+  label{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:9px 0 2px;font-size:11.5px;color:var(--muted)}
+  label span{color:var(--fg);font-variant-numeric:tabular-nums;font-weight:600}
+  input[type=range]{width:100%;accent-color:var(--accent);margin:0;height:16px}
+  select,input[type=text]{width:100%;background:transparent;color:var(--fg);border:1px solid var(--line);
+    border-radius:8px;padding:6px 8px;font:inherit;margin-top:2px}
+  select:focus,input:focus{outline:1px solid var(--accent);border-color:var(--accent)}
+  .row{display:flex;gap:6px}
+  .row>*{flex:1}
+  .btns{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:11px}
+  button{background:transparent;color:var(--fg);border:1px solid var(--line);border-radius:8px;
+    padding:7px 4px;font:600 11.5px system-ui;cursor:pointer;transition:.12s}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  button.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.pri:hover{filter:brightness(1.08);color:#fff}
+  .hint{color:var(--muted);font-size:10.5px;margin-top:10px;line-height:1.5}
+  kbd{border:1px solid var(--line);border-radius:4px;padding:0 4px;font:11px monospace}
+  #drop{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;
+    background:rgba(255,106,61,.14);border:3px dashed var(--accent);font:600 20px system-ui;color:var(--accent)}
+  #drop.on{display:flex}
+  #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%) translateY(20px);opacity:0;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 16px;z-index:30;
+    transition:.25s;pointer-events:none;font-weight:600}
+  #toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+  #hide{position:fixed;top:12px;left:12px;z-index:11;width:30px;height:30px;padding:0;display:none}
+  #hide.on{display:block}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<button id="hide" title="Show controls">≡</button>
+<div id="drop">Drop an image to use its shape as the mask</div>
+<div id="toast"></div>
+<div id="panel">
+  <h1>Oc<b>e</b>llate</h1>
+  <p class="sub">Grow circles until they kiss.</p>
+
+  <label>Shape<select id="mode">
+    <option value="0">Canvas</option><option value="5">Type a word</option>
+    <option value="1">Heart</option><option value="2">Hexagon</option>
+    <option value="3">Ring</option><option value="4">Blob</option>
+  </select></label>
+  <input type="text" id="text" value="HELLO" maxlength="14" spellcheck="false" placeholder="type a word…">
+
+  <label>Density <span id="vdensity"></span></label><input type="range" id="density" min="0.1" max="1" step="0.01">
+  <div class="row">
+    <div><label>Min r <span id="vminR"></span></label><input type="range" id="minR" min="1" max="16" step="1"></div>
+    <div><label>Max r <span id="vmaxR"></span></label><input type="range" id="maxR" min="10" max="120" step="1"></div>
+  </div>
+  <div class="row">
+    <div><label>Speed <span id="vgrowth"></span></label><input type="range" id="growth" min="0.2" max="4" step="0.1"></div>
+    <div><label>Jitter <span id="vjitter"></span></label><input type="range" id="jitter" min="0" max="1" step="0.01"></div>
+  </div>
+
+  <label>Palette<select id="pal">
+    <option value="0">Viridis</option><option value="1">Warm</option><option value="2">Mono</option>
+    <option value="3">Duotone</option><option value="4">Rainbow</option><option value="5">From image</option>
+  </select></label>
+  <label>Color by<select id="colorby">
+    <option value="0">Radius</option><option value="1">Angle</option>
+    <option value="2">Index</option><option value="3">Neighbor count</option>
+  </select></label>
+  <label>Seed <span id="vseed"></span></label><input type="range" id="seed" min="1" max="99999" step="1">
+
+  <div class="btns">
+    <button id="bReseed">Reseed</button>
+    <button id="bTighten" class="pri">Tighten</button>
+    <button id="bPause">Pause</button>
+    <button id="bPng">PNG</button>
+    <button id="bSvg">SVG</button>
+    <button id="bAnim">Anim SVG</button>
+  </div>
+  <button id="bCopy" style="width:100%;margin-top:6px">Copy share link</button>
+
+  <p class="hint">
+    <kbd>Space</kbd> pause · <kbd>R</kbd> reseed · <kbd>T</kbd> tighten<br>
+    <kbd>S</kbd> PNG · <kbd>V</kbd> SVG · <kbd>C</kbd> link · <kbd>H</kbd> hide UI<br>
+    Click/drag the canvas to seed discs. Drop an image to shape the pack.
+  </p>
+</div>
+
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const cv=$("cv"), ctx=cv.getContext("2d",{alpha:false});
+// select values: 0 canvas,5 text,1 heart,2 hex,3 ring,4 blob  -> normalize via SHAPE map
+const SHAPE={0:"canvas",5:"text",1:"heart",2:"hex",3:"ring",4:"blob"};
+const reduceMotion=matchMedia("(prefers-reduced-motion: reduce)").matches;
+let bgColor="#111";
+let W=0,H=0,dpr=1;
+let alpha=null;            // Uint8 ink mask (0/255) at CSS-pixel resolution, null => whole canvas
+let dropImg=null;          // dropped Image element (used as a mask + palette source)
+let circles=[], grid=[], gCols=0, cell=1, running=true, done=false, palColors=null;
+
+const P={seed:8421,density:0.55,minR:3,maxR:52,growth:1.4,jitter:0.55,shape:5,pal:0,colorby:0,text:"HELLO"};
+
+/* ---------- deterministic PRNG ---------- */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+/* ---------- mask construction ---------- */
+function buildMask(){
+  const s=SHAPE[P.shape];
+  if(s==="canvas"){alpha=null;return;}
+  const o=document.createElement("canvas"); o.width=W; o.height=H;
+  const c=o.getContext("2d"); c.fillStyle="#fff";
+  const cx=W/2, cy=H/2, R=Math.min(W,H)*0.42;
+  if(s==="text"){
+    c.textAlign="center"; c.textBaseline="middle";
+    let fs=H*0.7; c.font="900 "+fs+"px system-ui,'Segoe UI',sans-serif";
+    const txt=(P.text||" ").toUpperCase();
+    let w=c.measureText(txt).width;
+    if(w>W*0.92){fs*=W*0.92/w; c.font="900 "+fs+"px system-ui,'Segoe UI',sans-serif";}
+    if(fs>H*0.86){fs=H*0.86; c.font="900 "+fs+"px system-ui,'Segoe UI',sans-serif";}
+    c.fillText(txt,cx,cy);
+  } else if(s==="heart"){
+    c.beginPath();
+    for(let a=0;a<=Math.PI*2+0.01;a+=0.03){
+      const x=16*Math.pow(Math.sin(a),3);
+      const y=13*Math.cos(a)-5*Math.cos(2*a)-2*Math.cos(3*a)-Math.cos(4*a);
+      const px=cx+x/16*R, py=cy-y/16*R;
+      a===0?c.moveTo(px,py):c.lineTo(px,py);
+    }
+    c.closePath(); c.fill();
+  } else if(s==="hex"){
+    c.beginPath();
+    for(let i=0;i<6;i++){const a=Math.PI/6+i*Math.PI/3;const px=cx+Math.cos(a)*R,py=cy+Math.sin(a)*R;i?c.lineTo(px,py):c.moveTo(px,py);}
+    c.closePath(); c.fill();
+  } else if(s==="ring"){
+    c.beginPath(); c.arc(cx,cy,R,0,7); c.fill();
+    c.globalCompositeOperation="destination-out"; c.beginPath(); c.arc(cx,cy,R*0.55,0,7); c.fill();
+    c.globalCompositeOperation="source-over";
+  } else if(s==="blob"){
+    const rnd=mulberry32(12345); const amp=[], ph=[];
+    for(let k=0;k<5;k++){amp.push(rnd()*0.16); ph.push(rnd()*7);}
+    c.beginPath();
+    for(let a=0;a<=Math.PI*2+0.01;a+=0.02){
+      let rr=1; for(let k=0;k<5;k++)rr+=amp[k]*Math.sin((k+2)*a+ph[k]);
+      const px=cx+Math.cos(a)*R*rr, py=cy+Math.sin(a)*R*rr;
+      a===0?c.moveTo(px,py):c.lineTo(px,py);
+    }
+    c.closePath(); c.fill();
+  }
+  bakeAlpha(c);
+}
+function bakeAlpha(c){
+  const d=c.getImageData(0,0,W,H).data; alpha=new Uint8Array(W*H);
+  for(let i=0,j=0;i<alpha.length;i++,j+=4) alpha[i]=d[j+3]>96?255:0;
+}
+function useImageMask(img){
+  const o=document.createElement("canvas"); o.width=W; o.height=H;
+  const c=o.getContext("2d");
+  const sc=Math.min(W/img.width,H/img.height)*0.92;
+  const w=img.width*sc, h=img.height*sc;
+  const ox=(W-w)/2, oy=(H-h)/2;
+  c.drawImage(img,ox,oy,w,h);
+  const d=c.getImageData(0,0,W,H).data; alpha=new Uint8Array(W*H);
+  // Decide opaque-vs-transparent from ONLY the drawn image rect, not the letterbox border.
+  const x0=Math.max(0,Math.floor(ox)), y0=Math.max(0,Math.floor(oy));
+  const x1=Math.min(W,Math.ceil(ox+w)), y1=Math.min(H,Math.ceil(oy+h));
+  let opaque=true;
+  for(let y=y0;y<y1&&opaque;y++)for(let x=x0;x<x1;x++){if(d[(y*W+x)*4+3]<250){opaque=false;break;}}
+  for(let i=0,j=0;i<alpha.length;i++,j+=4){
+    // transparent PNGs: use alpha. opaque images: treat non-near-white as ink.
+    const lum=(d[j]*0.299+d[j+1]*0.587+d[j+2]*0.114);
+    alpha[i]=opaque?(lum<230?255:0):(d[j+3]>96?255:0);
+  }
+  palColors=kmeans(d,8);
+}
+/* dominant-color extraction for the "From image" palette */
+function kmeans(d,k){
+  const rnd=mulberry32(7); const N=d.length/4, step=Math.max(1,(N/2200)|0), pts=[];
+  for(let i=0;i<N;i+=step){const o=i*4;if(d[o+3]<40)continue;pts.push([d[o],d[o+1],d[o+2]]);}
+  if(pts.length<k)return ["#888888"];
+  let cen=[]; for(let i=0;i<k;i++)cen.push(pts[(rnd()*pts.length)|0].slice());
+  for(let it=0;it<8;it++){
+    const sum=cen.map(()=>[0,0,0,0]);
+    for(const p of pts){let bi=0,bd=1e12;for(let i=0;i<k;i++){const c=cen[i];const dd=(p[0]-c[0])**2+(p[1]-c[1])**2+(p[2]-c[2])**2;if(dd<bd){bd=dd;bi=i;}}const s=sum[bi];s[0]+=p[0];s[1]+=p[1];s[2]+=p[2];s[3]++;}
+    for(let i=0;i<k;i++)if(sum[i][3])cen[i]=[sum[i][0]/sum[i][3],sum[i][1]/sum[i][3],sum[i][2]/sum[i][3]];
+  }
+  return cen.map(c=>"#"+c.map(v=>Math.round(v).toString(16).padStart(2,"0")).join(""))
+            .sort((a,b)=>lum(a)-lum(b));
+}
+const lum=h=>{const n=parseInt(h.slice(1),16);return (n>>16)*0.299+((n>>8)&255)*0.587+(n&255)*0.114;};
+
+/* ---------- mask query ---------- */
+function inkAt(x,y){const xi=x|0,yi=y|0;if(xi<0||yi<0||xi>=W||yi>=H)return false;return alpha[yi*W+xi]>0;}
+function inkCount(){if(!alpha)return W*H;let n=0;for(let i=0;i<alpha.length;i++)if(alpha[i])n++;return n;}
+function maskOk(x,y,r){
+  if(x-r<1||y-r<1||x+r>W-1||y+r>H-1)return false;   // canvas boundary applies in every mode
+  if(!alpha)return true;
+  if(!inkAt(x,y))return false;
+  const n=12; for(let i=0;i<n;i++){const a=i/n*6.283;if(!inkAt(x+Math.cos(a)*r,y+Math.sin(a)*r))return false;}
+  return true;
+}
+
+/* ---------- spatial hash grid ---------- */
+function buildGrid(){
+  cell=Math.max(8,P.maxR*2); gCols=Math.ceil(W/cell); const rows=Math.ceil(H/cell);
+  grid=new Array(gCols*rows); for(let i=0;i<grid.length;i++)grid[i]=[];
+  for(const c of circles){const gi=((c.y/cell)|0)*gCols+((c.x/cell)|0);if(grid[gi])grid[gi].push(c);}
+}
+function neighbors(c,cb){
+  const gx=(c.x/cell)|0, gy=(c.y/cell)|0, rows=Math.ceil(H/cell);
+  for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+    const nx=gx+dx, ny=gy+dy; if(nx<0||ny<0||nx>=gCols||ny>=rows)continue;
+    const b=grid[ny*gCols+nx]; if(!b)continue; for(const n of b)if(n!==c)cb(n);
+  }
+}
+
+/* ---------- seeding & growth ---------- */
+function scatter(){
+  const rnd=mulberry32(P.seed); circles=[]; done=false;
+  const spacing=Math.max(P.minR*1.7, P.maxR*(2.6-P.density*2.1));
+  let idx=0;
+  for(let y=spacing*0.5;y<H;y+=spacing)for(let x=spacing*0.5;x<W;x+=spacing){
+    const jx=x+(rnd()-0.5)*spacing*P.jitter*1.7;
+    const jy=y+(rnd()-0.5)*spacing*P.jitter*1.7;
+    if(maskOk(jx,jy,P.minR))circles.push({x:jx,y:jy,r:P.minR,active:true,i:idx++,nbr:0});
+  }
+  buildGrid();
+}
+function step(){
+  let any=false;
+  for(const c of circles){
+    if(!c.active)continue; any=true;
+    const nr=c.r+P.growth;
+    let cap=P.maxR;
+    neighbors(c,n=>{const d=Math.hypot(c.x-n.x,c.y-n.y)-n.r;if(d<cap)cap=d;});
+    if(nr>=cap){c.r=Math.max(c.r,cap);c.active=false;}
+    else if(nr>=P.maxR){c.r=P.maxR;c.active=false;}
+    else if(!maskOk(c.x,c.y,nr)){c.active=false;}
+    else c.r=nr;
+  }
+  return any;
+}
+function computeNeighbors(){
+  for(const c of circles)c.nbr=0;
+  buildGrid();
+  for(const c of circles)neighbors(c,n=>{if(Math.hypot(c.x-n.x,c.y-n.y)<=c.r+n.r+1.5)c.nbr++;});
+}
+/* fast-forward growth to the settled state without per-frame animation */
+function settleNow(){
+  for(let i=0;i<4000&&step();i++){}
+  done=true; computeNeighbors(); running=false; syncPauseBtn(); render();
+}
+/* Lloyd-style relaxation: equalize spacing to close gaps, then re-grow */
+function tighten(){
+  for(let it=0;it<14;it++){
+    buildGrid();
+    for(const c of circles){
+      let fx=0,fy=0;
+      neighbors(c,n=>{const dx=c.x-n.x,dy=c.y-n.y;const d=Math.hypot(dx,dy)||1e-3;
+        const gap=d-(c.r+n.r); fx-=dx/d*gap*0.14; fy-=dy/d*gap*0.14;}); // gap>0 pulls together, overlap pushes apart
+      const nx=c.x+Math.max(-3,Math.min(3,fx)), ny=c.y+Math.max(-3,Math.min(3,fy));
+      if(maskOk(nx,ny,P.minR)){c.x=nx;c.y=ny;}
+    }
+  }
+  for(const c of circles){c.r=P.minR;c.active=true;}
+  buildGrid();
+  settleNow();
+  toast("Tightened");
+}
+
+/* ---------- palettes ---------- */
+const STOPS={
+  0:[[68,1,84],[59,82,139],[33,145,140],[94,201,98],[253,231,37]],           // viridis
+  1:[[28,0,24],[120,22,32],[220,86,26],[250,182,54],[255,242,200]],          // warm
+  2:[[26,26,30],[240,240,236]],                                              // mono
+  3:[[38,22,86],[255,106,61]]                                                // duotone
+};
+function ramp(stops,t){t=Math.max(0,Math.min(1,t));const n=stops.length-1;const f=t*n,i=Math.min(n-1,f|0),k=f-i;
+  const a=stops[i],b=stops[i+1];return "rgb("+Math.round(a[0]+(b[0]-a[0])*k)+","+Math.round(a[1]+(b[1]-a[1])*k)+","+Math.round(a[2]+(b[2]-a[2])*k)+")";}
+function colorFor(c){
+  let t;
+  if(P.colorby===1)t=(Math.atan2(c.y-H/2,c.x-W/2)+Math.PI)/6.283;
+  else if(P.colorby===2)t=circles.length>1?c.i/(circles.length-1):0;
+  else if(P.colorby===3)t=Math.min(1,c.nbr/7);
+  else t=(c.r-P.minR)/Math.max(1,P.maxR-P.minR);
+  if(P.pal===5&&palColors){return palColors[Math.min(palColors.length-1,(t*palColors.length)|0)];}
+  if(P.pal===4)return "hsl("+(t*310)+",72%,58%)";
+  return ramp(STOPS[P.pal]||STOPS[0],t);
+}
+
+/* ---------- render ---------- */
+function bg(){return bgColor;}
+function refreshBg(){bgColor=getComputedStyle(document.documentElement).getPropertyValue("--bg").trim()||"#111";}
+function render(){
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.fillStyle=bg(); ctx.fillRect(0,0,W,H);
+  for(const c of circles){
+    if(c.r<0.4)continue;
+    ctx.beginPath(); ctx.arc(c.x,c.y,c.r,0,6.2832); ctx.fillStyle=colorFor(c); ctx.fill();
+  }
+}
+function frame(){
+  if(running){ if(!step()){if(!done){done=true;computeNeighbors();}} render(); }
+  requestAnimationFrame(frame);
+}
+
+/* ---------- exports ---------- */
+function download(blob,name){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000);}
+function exportPNG(){cv.toBlob(b=>{download(b,"ocellate-"+P.seed+".png");toast("Saved PNG");});}
+function svgHead(){return '<svg xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'"><rect width="'+W+'" height="'+H+'" fill="'+bg()+'"/>';}
+function exportSVG(){
+  let s=svgHead();
+  for(const c of circles)if(c.r>=0.4)
+    s+='<circle cx="'+c.x.toFixed(1)+'" cy="'+c.y.toFixed(1)+'" r="'+c.r.toFixed(1)+'" fill="'+colorFor(c)+'"/>';
+  s+="</svg>"; download(new Blob([s],{type:"image/svg+xml"}),"ocellate-"+P.seed+".svg"); toast("Saved SVG ("+circles.length+" circles)");
+}
+function exportAnim(){
+  const ordered=circles.filter(c=>c.r>=0.4).slice().sort((a,b)=>a.i-b.i);
+  const total=Math.max(1,ordered.length), span=2.4, hold=1.2;
+  let s=svgHead();
+  ordered.forEach((c,k)=>{
+    const begin=(k/total*span).toFixed(2);
+    s+='<circle cx="'+c.x.toFixed(1)+'" cy="'+c.y.toFixed(1)+'" r="0" fill="'+colorFor(c)+'">'
+      +'<animate attributeName="r" begin="'+begin+'s" dur="0.7s" from="0" to="'+c.r.toFixed(1)+'" fill="freeze" calcMode="spline" keySplines="0.2 0.8 0.2 1" keyTimes="0;1"/>'
+      +'</circle>';
+  });
+  // one soft restart so the clip loops in feeds
+  s+='<rect width="0" height="0"><animate attributeName="width" begin="'+(span+hold)+'s" dur="0.01s" repeatCount="indefinite"/></rect>';
+  s+="</svg>";
+  download(new Blob([s],{type:"image/svg+xml"}),"ocellate-anim-"+P.seed+".svg"); toast("Saved animated SVG");
+}
+
+/* ---------- URL hash (compact base36 tuple) ---------- */
+let hashLock=false;
+function writeHash(){
+  const t=[P.seed,Math.round(P.density*1000),P.minR,P.maxR,Math.round(P.growth*10),Math.round(P.jitter*100),P.shape,P.pal,P.colorby]
+    .map(n=>n.toString(36)).join(".")+"~"+encodeURIComponent(P.text);
+  hashLock=true; location.hash=t; setTimeout(()=>hashLock=false,50);
+}
+function readHash(){
+  const raw=location.hash.replace(/^#/,""); if(!raw)return false;
+  const i=raw.indexOf("~");                          // split on FIRST ~ so words containing ~ survive
+  const tup=i<0?raw:raw.slice(0,i), txt=i<0?null:raw.slice(i+1);
+  const a=tup.split(".").map(x=>parseInt(x,36)); if(a.length<9||a.some(isNaN))return false;
+  P.seed=a[0];P.density=a[1]/1000;P.minR=a[2];P.maxR=a[3];P.growth=a[4]/10;P.jitter=a[5]/100;P.shape=a[6];P.pal=a[7];P.colorby=a[8];
+  if(txt!=null){try{P.text=decodeURIComponent(txt);}catch(_){P.text=txt;}}  // tolerate malformed % sequences
+  return true;
+}
+
+/* ---------- UI wiring ---------- */
+const IDS=["density","minR","maxR","growth","jitter","seed"];
+function pushUI(){
+  $("mode").value=P.shape; $("text").value=P.text;
+  $("density").value=P.density;$("minR").value=P.minR;$("maxR").value=P.maxR;
+  $("growth").value=P.growth;$("jitter").value=P.jitter;$("seed").value=P.seed;
+  $("pal").value=P.pal;$("colorby").value=P.colorby; labels();
+  $("text").style.display=SHAPE[P.shape]==="text"?"block":"none";
+}
+function labels(){
+  $("vdensity").textContent=P.density.toFixed(2);$("vminR").textContent=P.minR;$("vmaxR").textContent=P.maxR;
+  $("vgrowth").textContent=P.growth.toFixed(1);$("vjitter").textContent=P.jitter.toFixed(2);$("vseed").textContent=P.seed;
+}
+function restart(rebuildMask){
+  if(rebuildMask){ if(dropImg)useImageMask(dropImg); else buildMask(); }
+  scatter(); labels(); writeHash();
+  if(circles.length===0){ running=false; syncPauseBtn(); render();
+    toast("No shape to fill — try a different word/image or lower Min r"); return; }
+  if(reduceMotion){ settleNow(); }
+  else { running=true; syncPauseBtn(); }
+}
+function syncPauseBtn(){$("bPause").textContent=running?"Pause":"Play";}
+function toast(m){const t=$("toast");t.textContent=m;t.classList.add("on");clearTimeout(toast._);toast._=setTimeout(()=>t.classList.remove("on"),1400);}
+
+IDS.forEach(id=>$(id).addEventListener("input",()=>{
+  const v=parseFloat($(id).value);
+  if(id==="density")P.density=v;else if(id==="minR")P.minR=v|0;else if(id==="maxR")P.maxR=v|0;
+  else if(id==="growth")P.growth=v;else if(id==="jitter")P.jitter=v;else if(id==="seed")P.seed=v|0;
+  if(P.minR>P.maxR-4){P.minR=Math.max(1,P.maxR-4);$("minR").value=P.minR;$("vminR").textContent=P.minR;
+    if(id==="maxR")toast("Min r lowered to "+P.minR+" to keep a gap");}
+  restart(false);
+}));
+$("mode").addEventListener("change",()=>{P.shape=parseInt($("mode").value);dropImg=null;pushUI();restart(true);});
+$("text").addEventListener("input",()=>{P.text=$("text").value;if(SHAPE[P.shape]==="text")restart(true);});
+$("pal").addEventListener("change",()=>{P.pal=parseInt($("pal").value);writeHash();
+  if(P.pal===5&&!palColors)toast("Drop an image first to sample its colors");});
+$("colorby").addEventListener("change",()=>{P.colorby=parseInt($("colorby").value);if(P.colorby===3&&!done)computeNeighbors();writeHash();});
+$("bReseed").onclick=()=>{P.seed=(Math.random()*99999|0)+1;pushUI();restart(false);};
+$("bTighten").onclick=tighten;
+$("bPause").onclick=()=>{running=!running;syncPauseBtn();};
+$("bPng").onclick=exportPNG; $("bSvg").onclick=exportSVG; $("bAnim").onclick=exportAnim;
+$("bCopy").onclick=()=>{writeHash();const u=location.href;
+  (navigator.clipboard?navigator.clipboard.writeText(u):Promise.reject()).then(()=>toast("Link copied")).catch(()=>{prompt("Copy link:",u);});};
+$("hide").onclick=()=>toggleUI();
+function toggleUI(){$("panel").classList.toggle("hidden");$("hide").classList.toggle("on");}
+
+/* keyboard */
+addEventListener("keydown",e=>{
+  if(/INPUT|SELECT/.test(document.activeElement.tagName))return;
+  const k=e.key.toLowerCase();
+  if(k===" "){e.preventDefault();running=!running;syncPauseBtn();}
+  else if(k==="r"){P.seed=(Math.random()*99999|0)+1;pushUI();restart(false);}
+  else if(k==="t")tighten();
+  else if(k==="s")exportPNG();
+  else if(k==="v")exportSVG();
+  else if(k==="c")$("bCopy").onclick();
+  else if(k==="h")toggleUI();
+});
+
+/* pointer seeding */
+let drawing=false;
+function seedAt(x,y){
+  if(!maskOk(x,y,P.minR))return;
+  const c={x,y,r:P.minR,active:true,i:circles.length,nbr:0};
+  circles.push(c); const gi=((y/cell)|0)*gCols+((x/cell)|0); if(grid[gi])grid[gi].push(c);
+  running=true; syncPauseBtn(); done=false;
+}
+cv.addEventListener("pointerdown",e=>{drawing=true;seedAt(e.clientX,e.clientY);});
+cv.addEventListener("pointermove",e=>{if(drawing)seedAt(e.clientX,e.clientY);});
+addEventListener("pointerup",()=>drawing=false);
+
+/* drag-and-drop image mask */
+let dragc=0;
+addEventListener("dragenter",e=>{e.preventDefault();if(++dragc)$("drop").classList.add("on");});
+addEventListener("dragover",e=>e.preventDefault());
+addEventListener("dragleave",e=>{e.preventDefault();if(--dragc<=0)$("drop").classList.remove("on");});
+addEventListener("drop",e=>{
+  e.preventDefault();dragc=0;$("drop").classList.remove("on");
+  const f=e.dataTransfer.files[0]; if(!f||!/image\//.test(f.type))return;
+  const img=new Image(); img.onload=()=>{
+    URL.revokeObjectURL(img.src);                    // decoded pixels are retained; drop the blob URL
+    dropImg=img; P.shape=0; $("mode").value=0; $("text").style.display="none";
+    useImageMask(img); scatter(); writeHash();
+    if(inkCount()===0||circles.length===0){ running=false; syncPauseBtn(); render();
+      toast("No ink found — try a higher-contrast image"); return; }
+    if(reduceMotion){ settleNow(); } else { running=true; syncPauseBtn(); }
+    toast("Image mask loaded");
+  };
+  img.src=URL.createObjectURL(f);
+});
+
+/* resize */
+function resize(){
+  dpr=Math.min(2,window.devicePixelRatio||1);
+  W=innerWidth; H=innerHeight; cv.width=W*dpr; cv.height=H*dpr;
+  cv.style.width=W+"px"; cv.style.height=H+"px";
+  refreshBg();
+  if(dropImg)useImageMask(dropImg); else buildMask();
+  scatter();
+  if(reduceMotion){ settleNow(); } else { running=true; syncPauseBtn(); }
+}
+let rt; addEventListener("resize",()=>{
+  const nw=innerWidth, nh=innerHeight;
+  if(nw===W && Math.abs(nh-H)<120){return;}   // ignore mobile URL/toolbar show-hide height jitter on scroll
+  clearTimeout(rt); rt=setTimeout(resize,180);
+});
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change",()=>{refreshBg();render();});
+
+/* boot */
+readHash();
+addEventListener("hashchange",()=>{if(hashLock)return;if(readHash()){pushUI();restart(true);}});
+pushUI(); resize(); frame();
+</script>
+</body>
+</html>

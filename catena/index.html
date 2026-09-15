@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Catena — soap-film catenoid</title>
+<style>
+  :root{ --ink:#eaf2ff; --dim:#7f93b3; --hi:#8fe3ff; --warn:#ff9f6b; --bad:#ff5a5a; }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{ height:100%; background:#05070d; overflow:hidden; }
+  body{ font:12px/1.45 ui-monospace,"SF Mono",Menlo,Consolas,monospace; color:var(--ink);
+        -webkit-user-select:none; user-select:none; touch-action:none; }
+  #c{ position:fixed; inset:0; display:block; cursor:grab; touch-action:none; }
+  #c.drag{ cursor:grabbing; }
+  .panel{ position:fixed; background:rgba(8,12,22,.66); border:1px solid rgba(120,160,220,.18);
+          border-radius:10px; -webkit-backdrop-filter:blur(7px); backdrop-filter:blur(7px); padding:10px 12px; }
+  #hud{ top:14px; left:14px; min-width:214px; }
+  #hud h1{ font-size:13px; letter-spacing:3px; color:var(--hi); font-weight:600; margin-bottom:2px; }
+  #hud .sub{ color:var(--dim); font-size:10.5px; margin-bottom:9px; letter-spacing:.3px; }
+  .row{ display:flex; justify-content:space-between; gap:14px; padding:1.5px 0; }
+  .row .k{ color:var(--dim); } .row .v{ color:var(--ink); font-variant-numeric:tabular-nums; }
+  .v.hi{ color:var(--hi); } .v.warn{ color:var(--warn); } .v.bad{ color:var(--bad); }
+  #meterWrap{ margin-top:9px; }
+  #meterWrap .lab{ display:flex; justify-content:space-between; color:var(--dim); font-size:10px; margin-bottom:3px; }
+  #meter{ height:7px; border-radius:4px; background:rgba(255,255,255,.08); overflow:hidden; }
+  #meterFill{ height:100%; width:0; border-radius:4px; transition:width .05s linear; }
+  #state{ margin-top:8px; text-align:center; font-size:11px; letter-spacing:2px; padding:3px;
+          border-radius:6px; color:#062; background:var(--hi); font-weight:700; }
+  #state.bare{ background:var(--bad); color:#fff; } #state.snap{ background:var(--warn); color:#301; }
+  #bifWrap{ bottom:14px; right:14px; padding:8px 8px 4px; }
+  #bifWrap .cap{ color:var(--dim); font-size:10px; letter-spacing:1px; text-align:center; margin-bottom:2px; }
+  #help{ bottom:14px; left:14px; color:var(--dim); font-size:10.5px; max-width:340px; line-height:1.7; }
+  #help b{ color:var(--hi); font-weight:600; } kbd{ color:var(--ink); background:rgba(255,255,255,.07);
+          border:1px solid rgba(255,255,255,.12); border-radius:4px; padding:0 5px; font-size:10px; }
+  #btns{ top:14px; right:14px; display:flex; gap:7px; }
+  .btn{ cursor:pointer; background:rgba(20,28,44,.7); border:1px solid rgba(120,160,220,.22);
+        color:var(--ink); border-radius:8px; padding:7px 11px; font:inherit; font-size:11px; letter-spacing:.5px; }
+  .btn:hover{ border-color:var(--hi); color:var(--hi); }
+  .btn.on{ background:var(--hi); color:#052; border-color:var(--hi); font-weight:700; }
+  /* small viewports: keep the corner panels from colliding (esp. help vs bifurcation inset) */
+  @media (max-width:640px){
+    #hud{ min-width:0; max-width:56vw; }
+    #btns{ flex-wrap:wrap; justify-content:flex-end; max-width:40vw; }
+    #bifWrap{ display:none; }              /* reclaim the bottom-right; readout stays legible */
+    #help{ max-width:none; right:14px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="Interactive soap-film catenoid between two rings. Drag vertically to pull the rings apart until the film necks down and snaps."></canvas>
+
+<div id="hud" class="panel">
+  <h1>CATENA</h1>
+  <div class="sub">minimal soap film · a catenoid</div>
+  <div class="row"><span class="k">H / R ratio</span><span class="v hi" id="vRatio">—</span></div>
+  <div class="row"><span class="k">waist radius a/R</span><span class="v" id="vWaist">—</span></div>
+  <div class="row"><span class="k">Δ to critical</span><span class="v" id="vDelta">—</span></div>
+  <div class="row"><span class="k">film area (energy)</span><span class="v" id="vArea">—</span></div>
+  <div id="meterWrap">
+    <div class="lab"><span>proximity to snap</span><span id="vPct">0%</span></div>
+    <div id="meter"><div id="meterFill"></div></div>
+  </div>
+  <div id="state">BRIDGE STABLE</div>
+</div>
+
+<div id="btns">
+  <button class="btn" id="bDemo" title="auto pull-to-snap and re-nucleate on a loop" aria-label="toggle auto demo">▶ demo</button>
+  <button class="btn" id="bGhost" title="show the critical-separation outline (where the film snaps)" aria-label="toggle critical-separation outline">edge</button>
+  <button class="btn on" id="bMute" title="toggle the snap sound" aria-label="toggle sound">♪ sound</button>
+  <button class="btn" id="bReset" title="reset rings, tilt and state" aria-label="reset">reset</button>
+</div>
+
+<div id="bifWrap" class="panel">
+  <div class="cap">BIFURCATION · neck vs H/R</div>
+  <canvas id="bif" width="188" height="132"></canvas>
+</div>
+
+<div id="help" class="panel">
+  <b>drag ↕</b> pull rings apart · <b>drag ↔</b> orbit · <b>shift+drag ↕</b> tilt<br>
+  <b>wheel</b>/<b>pinch</b> ring radius · <kbd>space</kbd>/tap wobble · <kbd>d</kbd> demo · <kbd>m</kbd> mute · <kbd>r</kbd> reset
+</div>
+
+<script>
+"use strict";
+/* ===== constants of the fold ===== */
+const CRIT = 1.3254874,      // critical H/R where the two catenoid roots merge (Goldschmidt)
+      TSTAR = 1.1996786,     // t* minimizing cosh(t)/t
+      GMIN  = 1.5088795;     // min of cosh(t)/t  (=> R = GMIN*H/2 at fold)
+const TAU = Math.PI*2, clamp=(x,a,b)=>x<a?a:x>b?b:x, lerp=(a,b,t)=>a+(b-a)*t;
+/* honor prefers-reduced-motion: freeze perpetual band drift + near-fold shiver */
+const REDUCE = typeof matchMedia==='function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+const gf = t => Math.cosh(t)/t;
+
+/* solve g(t)=target on a monotone interval (dec=true => g decreasing) */
+function solveT(target, lo, hi, dec){
+  for(let i=0;i<64;i++){ const m=(lo+hi)*0.5, v=gf(m);
+    if(dec ? v>target : v<target) lo=m; else hi=m; }
+  return (lo+hi)*0.5;
+}
+/* stable (fat-neck) branch waist a for ring radius R & separation H; null past the fold */
+function waistA(R,H){
+  const target = 2*R/H;                       // g(t)=2R/H ; exists iff target>=GMIN
+  if(target < GMIN) return null;              // no catenoid — the film has snapped
+  const t = solveT(target, 1e-4, TSTAR, true);
+  return H/(2*t);
+}
+/* lateral area of catenoid, in world units (surface energy ∝ area) */
+const filmArea = (R,H,a)=> Math.PI*a*(H + a*Math.sinh(H/a));
+
+/* ===== state ===== */
+const S = { R:1.0, H:1.06, beta:0.44, orbit:0.0, damping:0.55 };
+let mode='bridge', snapT=0, aSnap=0.5, ghost=false, demo=false, demoDir=1;
+let wob=0, wobV=0, parts=[], t0=performance.now(), muted=false, ac=null;
+
+/* ===== url hash round-trip ===== */
+function writeHash(){
+  location.replace('#'+[S.R,S.H,S.beta,S.orbit,S.damping].map(x=>x.toFixed(3)).join('/'));
+}
+function readHash(){
+  const p=location.hash.slice(1).split('/').map(Number);
+  if(p.length>=5 && p.every(n=>isFinite(n))){
+    S.R=clamp(p[0],.35,1.6); S.H=clamp(p[1],.2,4); S.beta=clamp(p[2],0,1.35);
+    S.orbit=p[3]; S.damping=clamp(p[4],0,.95);
+  }
+}
+readHash();
+let hashTimer=0;
+const scheduleHash=()=>{ clearTimeout(hashTimer); hashTimer=setTimeout(writeHash,350); };
+
+/* ===== canvas ===== */
+const cv=document.getElementById('c'), ctx=cv.getContext('2d');
+let W,H2,DPR;
+function resize(){ DPR=Math.min(devicePixelRatio||1,2); W=innerWidth; H2=innerHeight;
+  cv.width=W*DPR; cv.height=H2*DPR; cv.style.width=W+'px'; cv.style.height=H2+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0); }
+addEventListener('resize',resize); resize();
+
+/* ===== iridescent thin-film palette (oil-slick) ===== */
+function irid(ph,bright){
+  const r=0.5+0.5*Math.sin(ph),
+        g=0.5+0.5*Math.sin(ph+2.094),
+        b=0.5+0.5*Math.sin(ph+4.188);
+  // tilt toward cool where film is thin, warm at pooled waist — reads as soap
+  return 'rgb('+(r*255*bright|0)+','+((0.35+0.65*g)*255*bright|0)+','+((0.55+0.45*b)*255*bright|0)+')';
+}
+
+/* projection: axis = Z (vertical-ish); tilt beta opens the rings into ellipses */
+function project(rho,theta,z,scale,cx,cy){
+  const X=rho*Math.cos(theta), Y=rho*Math.sin(theta), cb=Math.cos(S.beta), sb=Math.sin(S.beta);
+  return { x:cx+scale*X,
+           y:cy-scale*(z*cb - Y*sb),
+           depth:z*sb + Y*cb };            // larger depth => nearer the viewer
+}
+
+/* pinned film radius: rings held exactly at R, neck breathes with aeff */
+const rhoAt=(z,aeff)=> S.R*Math.cosh(z/aeff)/Math.cosh(S.H/(2*aeff));
+
+const NT=44, NZ=26;
+function drawFilm(aeff, alpha, collapse){
+  const scale=Math.min(W,H2)*0.30, cx=W/2, cy=H2/2, half=S.H/2, tnow=REDUCE?0:(performance.now()-t0)/1000;
+  const cb=Math.cos(S.beta), sb=Math.sin(S.beta);
+  const neck=rhoAt(0,aeff);
+  const quads=[];
+  const L=(()=>{ const l=[0.32,0.55,0.78],m=Math.hypot(...l); return l.map(v=>v/m); })();
+  for(let i=0;i<NT;i++){
+    const th0=S.orbit+i/NT*TAU, th1=S.orbit+(i+1)/NT*TAU, thm=(th0+th1)/2;
+    for(let j=0;j<NZ;j++){
+      const z0=lerp(-half,half,j/NZ), z1=lerp(-half,half,(j+1)/NZ), zm=(z0+z1)/2;
+      let r0=rhoAt(z0,aeff), r1=rhoAt(z1,aeff);
+      if(collapse>0){                          // pinch the middle to zero -> retracts to the rings
+        const pinch=z=>1-collapse*(1-(2*z/S.H)*(2*z/S.H));
+        r0*=pinch(z0); r1*=pinch(z1);
+      }
+      const a=project(r0,th0,z0,scale,cx,cy),  b=project(r1,th0,z1,scale,cx,cy),
+            cc=project(r1,th1,z1,scale,cx,cy), dd=project(r0,th1,z0,scale,cx,cy);
+      const depth=(a.depth+b.depth+cc.depth+dd.depth)/4;
+      // shading
+      const slope=Math.sinh(zm/aeff), nn=Math.hypot(1,slope);
+      const nx=Math.cos(thm)/nn, ny=Math.sin(thm)/nn, nz=-slope/nn;
+      const diff=Math.max(0, nx*L[0]+ny*L[1]+nz*L[2]);
+      const front=0.5+0.5*clamp(depth/(S.R*1.05),-1,1);
+      const rho_m=rhoAt(zm,aeff);
+      const neckFac=clamp(1-(rho_m-neck)/(S.R-neck+1e-6),0,1);   // 1 at the waist
+      // gravity-drained thickness: thinner (bluer) toward the top of the film
+      const up=(zm*cb - rho_m*Math.sin(thm)*sb);
+      const upN=clamp((up/half+1)/2,0,1);      // 0 bottom .. 1 top
+      const thick=1.0 - 0.6*upN + 1.1*Math.abs(slope)/nn + 0.5*neckFac;
+      const ph=thick*7.0 + tnow*0.55 + 0.35*upN*Math.sin(tnow*0.4);   // bands drift slowly
+      const bright=(0.30 + 0.5*diff + 0.55*neckFac*front)*(0.45+0.55*front);
+      quads.push({p:[a,b,cc,dd], depth, col:irid(ph, clamp(bright,0,1.3)) });
+    }
+  }
+  quads.sort((p,q)=>p.depth-q.depth);           // painter's: far first
+  ctx.globalAlpha=alpha; ctx.lineWidth=0.4;
+  for(const q of quads){
+    ctx.beginPath();
+    ctx.moveTo(q.p[0].x,q.p[0].y); ctx.lineTo(q.p[1].x,q.p[1].y);
+    ctx.lineTo(q.p[2].x,q.p[2].y); ctx.lineTo(q.p[3].x,q.p[3].y); ctx.closePath();
+    ctx.fillStyle=q.col; ctx.strokeStyle=q.col; ctx.fill(); ctx.stroke();
+  }
+  ctx.globalAlpha=1;
+}
+
+function ringPath(z,scale,cx,cy,rr){
+  ctx.beginPath();
+  for(let i=0;i<=48;i++){ const th=S.orbit+i/48*TAU, p=project(rr,th,z,scale,cx,cy);
+    i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y); }
+}
+function drawRings(front){
+  const scale=Math.min(W,H2)*0.30, cx=W/2, cy=H2/2, half=S.H/2;
+  for(const z of [-half,half]){
+    const near=(z*Math.sin(S.beta))>0;         // crude front/back for the two rings
+    if(near!==front) continue;
+    ringPath(z,scale,cx,cy,S.R);
+    ctx.lineWidth=near?3.2:1.6; ctx.strokeStyle=near?'rgba(180,235,255,.95)':'rgba(120,160,210,.4)';
+    ctx.stroke();
+  }
+}
+function drawDisks(){    // Goldschmidt end-state: a flat film capping each ring
+  const scale=Math.min(W,H2)*0.30, cx=W/2, cy=H2/2, half=S.H/2, tnow=REDUCE?0:(performance.now()-t0)/1000;
+  for(const z of [-half,half]){
+    ringPath(z,scale,cx,cy,S.R);
+    const g=ctx.createRadialGradient(cx,cy-scale*z*Math.cos(S.beta),0,cx,cy-scale*z*Math.cos(S.beta),scale*S.R);
+    g.addColorStop(0,irid(tnow*0.5,0.55)); g.addColorStop(1,irid(tnow*0.5+2,0.25));
+    ctx.globalAlpha=0.5; ctx.fillStyle=g; ctx.fill(); ctx.globalAlpha=1;
+  }
+}
+function drawGhost(){    // ghosted outline at exactly the critical separation
+  const scale=Math.min(W,H2)*0.30, cx=W/2, cy=H2/2, hc=CRIT*S.R/2;
+  ctx.setLineDash([5,5]); ctx.lineWidth=1.3; ctx.strokeStyle='rgba(255,159,107,.55)';
+  for(const z of [-hc,hc]){ ringPath(z,scale,cx,cy,S.R); ctx.stroke(); }
+  ctx.setLineDash([]);
+}
+
+/* ===== bifurcation inset ===== */
+const bif=document.getElementById('bif'), bx=bif.getContext('2d');
+const bifPts=(()=>{ const st=[],un=[];
+  for(let k=1;k<=140;k++){ const r=CRIT*k/140, tgt=2/r;
+    const tS=solveT(tgt,1e-4,TSTAR,true), tU=solveT(tgt,TSTAR,26,false);
+    st.push([r, r/(2*tS)]); un.push([r, r/(2*tU)]); }
+  return {st,un}; })();
+function drawBif(){
+  const w=188,h=132, mx=24,my=12, pw=w-mx-6, ph=h-my-16;
+  const X=r=>mx+ (r/1.42)*pw, Y=v=>my+ (1-clamp(v,0,1))*ph;
+  bx.clearRect(0,0,w,h);
+  bx.strokeStyle='rgba(120,150,200,.35)'; bx.lineWidth=1;
+  bx.beginPath(); bx.moveTo(mx,my); bx.lineTo(mx,my+ph); bx.lineTo(mx+pw,my+ph); bx.stroke();
+  bx.fillStyle='rgba(150,170,210,.7)'; bx.font='9px monospace';
+  bx.fillText('a/R',2,my+6); bx.fillText('H/R',mx+pw-22,h-3); bx.fillText('1.0',4,my+4);
+  // critical ghost line
+  bx.strokeStyle='rgba(255,159,107,.6)'; bx.setLineDash([3,3]); bx.beginPath();
+  bx.moveTo(X(CRIT),my); bx.lineTo(X(CRIT),my+ph); bx.stroke(); bx.setLineDash([]);
+  bx.fillStyle='rgba(255,159,107,.85)'; bx.fillText('1.325',X(CRIT)-14,h-3);
+  const line=(pts,style,dash)=>{ bx.strokeStyle=style; bx.setLineDash(dash||[]); bx.lineWidth=1.6;
+    bx.beginPath(); pts.forEach((p,i)=> i?bx.lineTo(X(p[0]),Y(p[1])):bx.moveTo(X(p[0]),Y(p[1]))); bx.stroke(); bx.setLineDash([]); };
+  line(bifPts.st,'rgba(143,227,255,.95)');        // stable fat-neck
+  line(bifPts.un,'rgba(120,150,200,.6)',[3,3]);   // unstable thin-neck
+  // fold point
+  bx.fillStyle='#ff9f6b'; bx.beginPath(); bx.arc(X(CRIT),Y(CRIT/(2*TSTAR)),3,0,TAU); bx.fill();
+  // current state dot
+  const r=S.H/S.R, a=waistA(S.R,S.H);
+  const cr=X(clamp(r,0,1.42)), cyv=a?Y(a/S.R):my+ph;
+  bx.fillStyle=a?'#7dff9e':'#ff5a5a'; bx.beginPath(); bx.arc(cr,cyv,3.6,0,TAU); bx.fill();
+  bx.strokeStyle='rgba(255,255,255,.6)'; bx.lineWidth=1; bx.stroke();
+}
+
+/* ===== physics tick ===== */
+function tick(dt){
+  const r=S.H/S.R, prox=clamp(r/CRIT,0,1), exists=(2*S.R/S.H>=GMIN);
+  // demo auto-play: creep past critical then re-nucleate, on a loop
+  if(demo){
+    S.H += demoDir*0.10*S.R*dt*4;
+    if(mode==='bare' && demoDir>0) demoDir=-1;
+    if(mode==='bridge' && r>CRIT+0.04) demoDir=1;
+    if(S.H<0.35*S.R) demoDir=1;
+    scheduleHash();
+  }
+  // wobble: damped oscillator; soft-mode slows & trembles near the fold
+  const omega=6.2*(1-0.72*prox), k=omega*omega, zeta=0.12+0.85*S.damping;
+  wobV += (-k*wob - 2*zeta*omega*wobV)*dt; wob += wobV*dt;
+  if(!REDUCE && exists && prox>0.8) wob += (Math.random()-0.5)*0.035*(prox-0.8)/0.2; // shiver
+  wob=clamp(wob,-0.6,0.6);
+  // state machine
+  if(mode==='bridge' && !exists){ mode='snap'; snapT=0; aSnap=waistA(S.R,S.H*0.999)||0.4; burst(); }
+  else if(mode==='snap'){ snapT+=dt/0.45; if(snapT>=1){ mode='bare'; snapT=1; } }
+  else if(mode==='bare' && r<=CRIT-0.05){ mode='bridge'; wob=0.35; wobV=0; }  // re-nucleate with a pop
+  // particles
+  for(const p of parts){ p.vy+=0.9*dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.life-=dt; }
+  parts=parts.filter(p=>p.life>0);
+}
+function burst(){
+  const scale=Math.min(W,H2)*0.30, cx=W/2, cy=H2/2;
+  for(let i=0;i<46;i++){ const th=Math.random()*TAU, sp=(40+Math.random()*140);
+    parts.push({ x:cx+(Math.random()-0.5)*scale*S.R*0.5, y:cy+(Math.random()-0.5)*40,
+                 vx:Math.cos(th)*sp, vy:Math.sin(th)*sp-40, life:0.5+Math.random()*0.5, c:irid(Math.random()*6,1) }); }
+  pop();
+}
+
+/* ===== render ===== */
+function frame(now){
+  const dt=Math.min(0.05,(now-(frame.l||now))/1000); frame.l=now;
+  tick(dt);
+  // backdrop
+  const g=ctx.createRadialGradient(W/2,H2*0.5,20,W/2,H2*0.5,Math.max(W,H2)*0.75);
+  g.addColorStop(0,'#0c1220'); g.addColorStop(1,'#04060c');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H2);
+
+  if(ghost) drawGhost();
+  drawRings(false);                 // back ring
+  const a=waistA(S.R,S.H);
+  if(mode==='bridge' && a){ drawFilm(a*(1+0.5*wob),1,0); }
+  else if(mode==='snap'){ drawFilm(aSnap*(1+0.5*wob), 1-snapT*0.6, snapT); if(snapT>0.5) drawDisks(); }
+  else if(mode==='bare'){ drawDisks(); }
+  drawRings(true);                  // front ring
+  // particles
+  for(const p of parts){ ctx.globalAlpha=clamp(p.life,0,1); ctx.fillStyle=p.c;
+    ctx.beginPath(); ctx.arc(p.x,p.y,2.2,0,TAU); ctx.fill(); }
+  ctx.globalAlpha=1;
+
+  updateHUD(); drawBif();
+  requestAnimationFrame(frame);
+}
+
+/* ===== HUD ===== */
+const $=id=>document.getElementById(id);
+function updateHUD(){
+  const r=S.H/S.R, a=waistA(S.R,S.H), prox=clamp(r/CRIT,0,1), pct=Math.round(prox*100);
+  $('vRatio').textContent=r.toFixed(4);
+  $('vWaist').textContent=a?(a/S.R).toFixed(3):'—';
+  const d=CRIT-r; const vd=$('vDelta'); vd.textContent=(d>=0?'+':'')+d.toFixed(4);
+  vd.className='v '+(d<0?'bad':d<0.08?'warn':'hi');
+  $('vArea').textContent=a?filmArea(S.R,S.H,a).toFixed(3):'∅';
+  $('vPct').textContent=pct+'%';
+  const f=$('meterFill'); f.style.width=Math.min(100,pct)+'%';
+  f.style.background = prox>0.97?'var(--bad)':prox>0.88?'var(--warn)':'linear-gradient(90deg,#3fd,#8fe3ff)';
+  const st=$('state');
+  if(mode==='bare'){ st.textContent='FILM SNAPPED'; st.className='bare'; }
+  else if(mode==='snap'){ st.textContent='COLLAPSING'; st.className='snap'; }
+  else if(prox>0.92){ st.textContent='NEAR SNAP — SHIVERING'; st.className='snap'; }
+  else { st.textContent='BRIDGE STABLE'; st.className=''; }
+}
+
+/* ===== audio (created on first gesture) ===== */
+function ensureAudio(){ if(!ac){ try{ ac=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } }
+function pop(){
+  if(muted||!ac) return;
+  const n=ac.currentTime;
+  const o=ac.createOscillator(), g=ac.createGain();
+  o.type='triangle'; o.frequency.setValueAtTime(520,n); o.frequency.exponentialRampToValueAtTime(90,n+0.14);
+  g.gain.setValueAtTime(0.34,n); g.gain.exponentialRampToValueAtTime(0.001,n+0.18);
+  o.connect(g).connect(ac.destination); o.start(n); o.stop(n+0.2);
+  const b=ac.createBuffer(1,1200,ac.sampleRate), d=b.getChannelData(0);
+  for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/d.length,3);
+  const src=ac.createBufferSource(), gg=ac.createGain(); src.buffer=b; gg.gain.value=0.25;
+  src.connect(gg).connect(ac.destination); src.start(n);
+}
+
+/* ===== interaction ===== */
+let drag=null;
+const pointers=new Map();                              // active touches/pointers for pinch
+let pinchD=0;                                          // last two-finger distance
+function pinchDist(){ const p=[...pointers.values()]; return Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y); }
+cv.addEventListener('pointerdown',e=>{ ensureAudio(); if(ac&&ac.state==='suspended')ac.resume();
+  pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  cv.setPointerCapture(e.pointerId); cv.classList.add('drag');
+  if(pointers.size>=2){ drag=null; pinchD=pinchDist(); }          // enter pinch: no single-drag
+  else { drag={x:e.clientX,y:e.clientY,moved:0,shift:e.shiftKey}; }
+});
+cv.addEventListener('pointermove',e=>{
+  if(pointers.has(e.pointerId)) pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pointers.size>=2){                                // two-finger pinch drives ring radius R
+    const d=pinchDist();
+    if(pinchD>0 && d>0){ S.R=clamp(S.R*(d/pinchD),0.4,1.6); scheduleHash(); }
+    pinchD=d; return;
+  }
+  if(!drag)return;
+  const dx=e.clientX-drag.x, dy=e.clientY-drag.y; drag.x=e.clientX; drag.y=e.clientY;
+  drag.moved+=Math.abs(dx)+Math.abs(dy);
+  if(drag.shift){ S.beta=clamp(S.beta - dy*0.006,0.03,1.32); }
+  else if(Math.abs(dy)>=Math.abs(dx)){
+    const prox=clamp(S.H/S.R/CRIT,0,1);
+    const resist=1/(1+7*Math.pow(prox,5));           // drag fights back near the fold
+    S.H=clamp(S.H + (-dy)/(Math.min(W,H2)*0.30)*2*resist, 0.2, 4);
+  } else { S.orbit += dx*0.01; }
+  scheduleHash();
+});
+function endDrag(e){
+  const wasDrag=drag;
+  pointers.delete(e.pointerId);
+  if(pointers.size===1){                               // lifting one finger of a pinch -> resume orbit/pull
+    const [p]=[...pointers.values()]; drag={x:p.x,y:p.y,moved:99,shift:false}; pinchD=0;
+  } else if(pointers.size===0){
+    if(wasDrag && wasDrag.moved<4){ wobV+=0.45; ensureAudio(); }   // tap = wobble
+    drag=null; pinchD=0; cv.classList.remove('drag');
+  }
+}
+cv.addEventListener('pointerup',endDrag); cv.addEventListener('pointercancel',endDrag);
+cv.addEventListener('wheel',e=>{ e.preventDefault();
+  S.R=clamp(S.R*(1-Math.sign(e.deltaY)*0.05),0.4,1.6); scheduleHash(); },{passive:false});
+addEventListener('keydown',e=>{
+  if(e.code==='Space'){ e.preventDefault(); ensureAudio(); wobV+=0.5; }
+  else if(e.key==='d'){ demo=!demo; $('bDemo').classList.toggle('on',demo); $('bDemo').textContent=demo?'■ demo':'▶ demo'; }
+  else if(e.key==='m'){ setMute(!muted); }
+  else if(e.key==='r'){ reset(); }
+});
+/* mute: .on = sound audible (mirrors the demo toggle pattern) */
+function setMute(v){ muted=v; const b=$('bMute');
+  b.classList.toggle('on',!muted); b.textContent=muted?'♪ muted':'♪ sound'; }
+function reset(){ S.R=1.0; S.H=1.06; S.beta=0.44; S.orbit=0; S.damping=0.55;
+  mode='bridge'; wob=0; wobV=0; parts=[]; demo=false; demoDir=1;
+  $('bDemo').classList.remove('on'); $('bDemo').textContent='▶ demo'; scheduleHash(); }
+$('bDemo').onclick=()=>{ ensureAudio(); if(ac&&ac.state==='suspended')ac.resume();
+  demo=!demo; $('bDemo').classList.toggle('on',demo); $('bDemo').textContent=demo?'■ demo':'▶ demo'; };
+$('bGhost').onclick=()=>{ ghost=!ghost; $('bGhost').classList.toggle('on',ghost); };
+$('bMute').onclick=()=>{ ensureAudio(); if(ac&&ac.state==='suspended')ac.resume(); setMute(!muted); };
+$('bReset').onclick=reset;
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

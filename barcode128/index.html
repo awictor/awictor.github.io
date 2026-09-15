@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Barcode — Code 128 barcode generator (SVG)</title>
+<meta name="description" content="Free offline Code 128 barcode generator. Type any text and get a scannable Code 128 (subset B) barcode as crisp SVG you can download or copy. Correct checksum. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/barcode128/">
+<style>
+  :root{
+    --c:#0f172a; --bg:#f8f8f9; --fg:#18181b; --muted:#52525b;
+    --card:#ffffff; --border:#e4e4e7; --code:#efeff1; --bad:#dc2626; --accent:#2563eb;
+  }
+  [data-theme="dark"]{
+    --bg:#09090b; --fg:#e7e7ea; --muted:#8b8b93; --card:#151518;
+    --border:#27272a; --code:#1c1c20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:760px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#334155);display:grid;place-items:center;color:#fff;font-size:15px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:760px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  input[type=text]{width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:1.05rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  input:focus{outline:2px solid var(--accent);border-color:var(--accent)}
+  input.bad{border-color:var(--bad)}
+  .opts{display:flex;gap:16px;align-items:center;margin-top:14px;flex-wrap:wrap}
+  .opts label{margin:0;display:flex;align-items:center;gap:8px;font-weight:400;font-size:.85rem}
+  .opts input[type=range]{accent-color:var(--accent)}
+  .opts label.chk{cursor:pointer}
+  .stage{margin-top:18px;background:#fff;border:1px solid var(--border);border-radius:12px;padding:20px;text-align:center;overflow:auto}
+  .stage svg{max-width:100%;height:auto}
+  .actions{display:flex;gap:8px;margin-top:12px}
+  .actions button{background:var(--code);border:1px solid var(--border);color:var(--fg);border-radius:9px;padding:8px 14px;cursor:pointer;font-size:.85rem}
+  .err{color:var(--bad);font-size:.86rem;margin-top:10px;min-height:20px}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:760px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--accent)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('bc.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">▌▏▌</div>
+  <div>
+    <h1>Barcode</h1>
+    <p class="sub">Code 128 barcode generator</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <label for="in">Text to encode <small style="font-weight:400;color:var(--muted)">(printable ASCII)</small></label>
+    <input type="text" id="in" spellcheck="false" value="TOOLKIT-2024">
+    <div class="opts">
+      <label>Bar width <input id="mw" type="range" min="1" max="5" step="1" value="2"></label>
+      <label>Height <input id="ht" type="range" min="40" max="160" step="10" value="90"></label>
+      <label class="chk"><input id="showText" type="checkbox" checked> Show text</label>
+    </div>
+    <div class="stage" id="stage"></div>
+    <div class="actions">
+      <button id="dl">Download SVG</button>
+      <button id="copy">Copy SVG</button>
+    </div>
+    <div class="err" id="err"></div>
+    <p class="hint">Code 128 subset B covers all printable ASCII (space through <code>~</code>). The check digit is
+      computed automatically. Output is vector SVG, so it stays crisp at any size for labels and print. 100% local.</p>
+  </div>
+</main>
+<footer>
+  Barcode is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/barcode128">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+// Code 128 pattern table: index -> bar/space widths (sum 11; stop=13).
+var CODE128 = ['212222','222122','222221','121223','121322','131222','122213','122312','132212','221213',
+'221312','231212','112232','122132','122231','113222','123122','123221','223211','221132','221231','213212',
+'223112','312131','311222','321122','321221','312212','322112','322211','212123','212321','232121','111323',
+'131123','131321','112313','132113','132311','211313','231113','231311','112133','112331','132131','113123',
+'113321','133121','313121','211331','231131','213113','213311','213131','311123','311321','331121','312113',
+'312311','332111','314111','221411','431111','111224','111422','121124','121421','141122','141221','112214',
+'112412','122114','122411','142112','142211','241211','221114','413111','241112','134111','111242','121142',
+'121241','114212','124112','124211','411212','421112','421211','212141','214121','412121','111143','111341',
+'131141','114113','114311','411113','411311','113141','114131','311141','411131','211412','211214','211232','2331112'];
+
+function isEncodable(text){
+  text = String(text);
+  for(var i = 0; i < text.length; i++){
+    var c = text.charCodeAt(i);
+    if(c < 32 || c > 126) return false;
+  }
+  return true;
+}
+function check128(text){
+  text = String(text);
+  var sum = 104; // Start Code B value
+  for(var i = 0; i < text.length; i++){
+    sum += (text.charCodeAt(i) - 32) * (i + 1);
+  }
+  return sum % 103;
+}
+function encode128B(text){
+  text = String(text);
+  var codes = [104];
+  for(var i = 0; i < text.length; i++) codes.push(text.charCodeAt(i) - 32);
+  codes.push(check128(text));
+  codes.push(106);
+  return codes;
+}
+function barModules(text){
+  var codes = encode128B(text);
+  var out = '';
+  for(var i = 0; i < codes.length; i++){
+    var w = CODE128[codes[i]];
+    for(var k = 0; k < w.length; k++){
+      var bit = (k % 2 === 0) ? '1' : '0';   // even index = bar
+      out += bit.repeat(+w[k]);
+    }
+  }
+  return out;
+}
+
+if(typeof module !== 'undefined') module.exports = { CODE128, isEncodable, check128, encode128B, barModules };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var inEl = document.getElementById('in');
+  var mwEl = document.getElementById('mw');
+  var htEl = document.getElementById('ht');
+  var showTextEl = document.getElementById('showText');
+  var stageEl = document.getElementById('stage');
+  var errEl = document.getElementById('err');
+  var QUIET = 10;
+
+  function buildSVG(text){
+    var mods = barModules(text);
+    var mw = +mwEl.value, h = +htEl.value;
+    var showText = showTextEl.checked;
+    var textH = showText ? 22 : 0;
+    var totalMods = mods.length + QUIET * 2;
+    var w = totalMods * mw;
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + (h + textH) +
+      '" viewBox="0 0 ' + w + ' ' + (h + textH) + '">';
+    svg += '<rect width="' + w + '" height="' + (h + textH) + '" fill="#ffffff"/>';
+    var x = QUIET * mw, run = 0;
+    for(var i = 0; i <= mods.length; i++){
+      if(mods[i] === '1'){ run++; }
+      else {
+        if(run > 0){ svg += '<rect x="' + x + '" y="0" width="' + (run * mw) + '" height="' + h + '" fill="#000000"/>'; x += run * mw; run = 0; }
+        x += mw;
+      }
+    }
+    if(showText){
+      svg += '<text x="' + (w / 2) + '" y="' + (h + 17) + '" text-anchor="middle" font-family="monospace" font-size="16" fill="#000000">' +
+        String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</text>';
+    }
+    svg += '</svg>';
+    return svg;
+  }
+  function render(){
+    var text = inEl.value;
+    inEl.classList.remove('bad'); errEl.textContent = '';
+    if(text === ''){ stageEl.innerHTML = ''; return; }
+    if(!isEncodable(text)){ inEl.classList.add('bad'); errEl.textContent = 'Only printable ASCII (space to ~) is supported in Code 128-B.'; stageEl.innerHTML = ''; return; }
+    stageEl.innerHTML = buildSVG(text);
+    try{ localStorage.setItem('bc.in', text); localStorage.setItem('bc.mw', mwEl.value); localStorage.setItem('bc.ht', htEl.value); }catch(e){}
+  }
+  [inEl, mwEl, htEl, showTextEl].forEach(function(x){ x.addEventListener('input', render); });
+  document.getElementById('dl').addEventListener('click', function(){
+    var svg = stageEl.innerHTML; if(!svg) return;
+    var blob = new Blob([svg], { type: 'image/svg+xml' });
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = (inEl.value || 'barcode').replace(/[^\w.-]/g, '_') + '.svg'; a.click();
+  });
+  document.getElementById('copy').addEventListener('click', function(){
+    if(stageEl.innerHTML && navigator.clipboard) navigator.clipboard.writeText(stageEl.innerHTML);
+  });
+  try{ var s = localStorage.getItem('bc.in'); if(s !== null) inEl.value = s;
+       var mw = localStorage.getItem('bc.mw'); if(mw) mwEl.value = mw;
+       var ht = localStorage.getItem('bc.ht'); if(ht) htEl.value = ht; }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('bc.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('bc.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

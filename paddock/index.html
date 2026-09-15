@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Paddock — a pocket Suguru puzzle</title>
+<style>
+  :root{
+    --paper:#f5f1e8; --ink:#33372c; --edge:#4a4a3f; --accent:#7a9a5e;
+    --sel:#f4c95d; --err:#d76b6b; --hint:#8fb8de; --panel:#fffdf7;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    font-family:"Iowan Old Style","Palatino Linotype",Georgia,serif;
+    background:radial-gradient(circle at 50% 0%,#faf6ec,#ece5d4);
+    color:var(--ink); display:flex; flex-direction:column; align-items:center;
+    min-height:100%; padding:18px 12px 40px;
+  }
+  h1{font-size:34px; margin:0; letter-spacing:.5px; font-weight:700}
+  .tag{max-width:560px; text-align:center; font-size:14px; opacity:.72; margin:6px 0 14px; font-style:italic}
+  .bar{display:flex; gap:8px; flex-wrap:wrap; justify-content:center; align-items:center; margin-bottom:12px; max-width:640px}
+  button,select,label.chk{
+    font-family:inherit; font-size:13px; border:1px solid #cfc6ae; background:var(--panel);
+    color:var(--ink); padding:7px 12px; border-radius:9px; cursor:pointer;
+    transition:transform .1s, background .15s, box-shadow .15s;
+    box-shadow:0 1px 2px rgba(0,0,0,.06);
+  }
+  button:hover,select:hover{background:#fff; transform:translateY(-1px)}
+  button:active{transform:translateY(0)}
+  button.primary{background:var(--accent); color:#fff; border-color:#6a8a4e}
+  button.primary:hover{background:#86a86a}
+  label.chk{display:inline-flex; align-items:center; gap:6px; cursor:pointer}
+  label.chk input{margin:0}
+  button.on{background:var(--sel); border-color:#d8ab3f}
+  .meta{display:flex; gap:16px; align-items:center; margin-bottom:10px; font-size:15px}
+  .badge{padding:4px 12px; border-radius:20px; font-weight:700; font-size:13px; letter-spacing:.5px}
+  .Easy{background:#dbead0; color:#456b32}
+  .Medium{background:#f4e6c8; color:#9c7626}
+  .Hard{background:#f0d3d0; color:#a44a44}
+  #timer{font-variant-numeric:tabular-nums; font-weight:700}
+  .streak{font-size:13px; opacity:.75}
+  .boardwrap{position:relative; background:var(--panel); padding:14px; border-radius:18px;
+    box-shadow:0 8px 30px rgba(60,50,20,.16), inset 0 0 0 1px #ece3cd;}
+  .board{position:relative; display:grid; gap:0}
+  .board.solved .cell{animation:bloom .7s ease both}
+  @keyframes bloom{0%{transform:scale(1)}40%{transform:scale(1.12)}100%{transform:scale(1)}}
+  .cell{position:relative; display:flex; align-items:center; justify-content:center;
+    cursor:pointer; user-select:none; transition:background .2s;}
+  .cell .num{font-size:calc(var(--cs) * .5px); font-weight:600; line-height:1;
+    transition:transform .16s cubic-bezier(.34,1.56,.64,1), opacity .16s; transform-origin:center;}
+  .cell.pop .num{animation:pop .22s ease}
+  @keyframes pop{0%{transform:scale(.4);opacity:0}100%{transform:scale(1);opacity:1}}
+  .cell.given .num{color:var(--edge); font-weight:800}
+  .cell.user .num{color:var(--accent); font-weight:500}
+  .cell.sel{outline:3px solid var(--sel); outline-offset:-3px; z-index:3; border-radius:4px}
+  .cell.err .num{color:var(--err)}
+  .cell.err{background:rgba(215,107,107,.16)!important}
+  .cell.hintcell{animation:glow 1.2s ease-in-out 2}
+  @keyframes glow{0%,100%{box-shadow:inset 0 0 0 0 rgba(143,184,222,0)}50%{box-shadow:inset 0 0 0 4px var(--hint)}}
+  .cell.hintsrc{background:rgba(143,184,222,.28)!important}
+  .pm{position:absolute; inset:8%; display:grid; grid-template-columns:repeat(3,1fr);
+    font-size:calc(var(--cs)*.16px); color:#9a927c; pointer-events:none; line-height:1}
+  .pm span{display:flex; align-items:center; justify-content:center}
+  svg.edges{position:absolute; top:0; left:0; pointer-events:none; overflow:visible}
+  .pad{display:flex; gap:6px; margin-top:14px; flex-wrap:wrap; justify-content:center}
+  .pad button{width:46px; height:46px; font-size:20px; padding:0}
+  .msg{margin-top:12px; min-height:22px; font-size:14px; text-align:center; max-width:560px; opacity:.9}
+  .msg.win{color:var(--accent); font-weight:700; font-size:16px}
+  .foot{margin-top:16px; font-size:12px; opacity:.55; text-align:center; max-width:560px}
+</style>
+</head>
+<body>
+  <h1>Paddock</h1>
+  <p class="tag">A pocket Suguru. Fill each field with 1 up to its own size (fields hold 4 or 5 cells), and no two alike may touch — not even diagonally. Every board is machine-proven to have exactly one solution.</p>
+  <div class="bar">
+    <button class="primary" id="newBtn">New Puzzle</button>
+    <button id="dailyBtn">Daily</button>
+    <select id="sizeSel" title="Board size">
+      <option value="5">5 × 5</option>
+      <option value="6" selected>6 × 6</option>
+      <option value="7">7 × 7</option>
+    </select>
+    <select id="diffSel" title="Difficulty">
+      <option value="0" selected>Any</option>
+      <option value="1">Easy</option>
+      <option value="2">Medium</option>
+      <option value="3">Hard</option>
+    </select>
+    <button id="hintBtn">Hint</button>
+    <button id="checkBtn">Check</button>
+    <button id="undoBtn">Undo</button>
+    <button id="redoBtn">Redo</button>
+    <button id="restartBtn">Restart</button>
+    <button id="pencilBtn" title="Toggle pencil-mark entry">Pencil</button>
+    <label class="chk"><input type="checkbox" id="autoPm"> Auto marks</label>
+  </div>
+  <div class="meta">
+    <span>Difficulty: <span id="diff" class="badge Easy">Easy</span></span>
+    <span id="timer">0:00</span>
+    <span class="streak" id="streak"></span>
+  </div>
+  <div class="boardwrap">
+    <div class="board" id="board"></div>
+    <svg class="edges" id="edges"></svg>
+  </div>
+  <div class="pad" id="pad"></div>
+  <div class="msg" id="msg"></div>
+  <div class="foot">Click a cell to cycle its number, or select and use arrow keys to move, 1–5 to fill, 0/Backspace or right-click to erase. Pencil mode drops candidate marks. Share the URL to hand off this exact board and your progress.</div>
+
+<script>
+"use strict";
+/* ---------- seeded RNG (mulberry32) ---------- */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+/* ---------- geometry helpers ---------- */
+function king(c,N){const r=(c/N)|0,x=c%N,out=[];for(let dr=-1;dr<=1;dr++)for(let dx=-1;dx<=1;dx++){if(!dr&&!dx)continue;const nr=r+dr,nx=x+dx;if(nr>=0&&nr<N&&nx>=0&&nx<N)out.push(nr*N+nx);}return out;}
+function orth(c,N){const r=(c/N)|0,x=c%N,out=[];if(r>0)out.push(c-N);if(r<N-1)out.push(c+N);if(x>0)out.push(c-1);if(x<N-1)out.push(c+1);return out;}
+
+/* ---------- cage partition via seeded flood-growth (large cages, orphan merge) ---------- */
+function partition(N,rng){
+  const cells=N*N,cage=new Array(cells).fill(-1),pool=[4,4,5,5,5];let id=0;
+  for(let s=0;s<cells;s++){
+    if(cage[s]!==-1)continue;
+    const target=pool[Math.floor(rng()*pool.length)];
+    const region=[s];cage[s]=id;
+    while(region.length<target){
+      const front=[];
+      for(const c of region)for(const nb of orth(c,N))if(cage[nb]===-1)front.push(nb);
+      if(!front.length)break;
+      const pick=front[Math.floor(rng()*front.length)];
+      cage[pick]=id;region.push(pick);
+    }
+    id++;
+  }
+  let sizes=new Array(id).fill(0);for(let c=0;c<cells;c++)sizes[cage[c]]++;
+  // merge tiny leftover cages (size<=2) into an adjacent cage that still has room
+  for(let pass=0;pass<3;pass++)for(let c=0;c<cells;c++){
+    const a=cage[c];if(sizes[a]>2)continue;
+    for(const nb of orth(c,N)){const b=cage[nb];if(b!==a&&sizes[a]+sizes[b]<=5){for(let k=0;k<cells;k++)if(cage[k]===a)cage[k]=b;sizes[b]+=sizes[a];sizes[a]=0;break;}}
+  }
+  const map={};let nid=0;for(let c=0;c<cells;c++){if(!(cage[c]in map))map[cage[c]]=nid++;cage[c]=map[cage[c]];}
+  sizes=new Array(nid).fill(0);for(let c=0;c<cells;c++)sizes[cage[c]]++;
+  return {cage,sizes,count:nid,ok:sizes.filter(s=>s===1).length===0};
+}
+
+/* ---------- constraint context ---------- */
+function buildCtx(N,cage,sizes){
+  const cells=N*N,cageCells=[],kn=[];
+  for(let i=0;i<sizes.length;i++)cageCells.push([]);
+  for(let c=0;c<cells;c++){cageCells[cage[c]].push(c);kn.push(king(c,N));}
+  return {N,cage,sizes,cageCells,king:kn};
+}
+function candidates(c,g,ctx){
+  const size=ctx.sizes[ctx.cage[c]],used=new Set();
+  for(const m of ctx.cageCells[ctx.cage[c]])if(g[m])used.add(g[m]);
+  for(const nb of ctx.king[c])if(g[nb])used.add(g[nb]);
+  const out=[];for(let v=1;v<=size;v++)if(!used.has(v))out.push(v);return out;
+}
+
+/* ---------- backtracking solver: fill one (randomised) / count (capped) ---------- */
+function solveFirst(g0,ctx,rng,budget){
+  budget=budget||8000;const g=g0.slice();let steps=0,dead=false;
+  function rec(){
+    if(dead)return false;if(++steps>budget){dead=true;return false;}
+    let best=-1,bc=null;
+    for(let c=0;c<g.length;c++){if(g[c])continue;const cs=candidates(c,g,ctx);if(!cs.length)return false;if(best<0||cs.length<bc.length){best=c;bc=cs;}if(cs.length===1)break;}
+    if(best<0)return true;
+    const order=bc.slice();for(let i=order.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[order[i],order[j]]=[order[j],order[i]];}
+    for(const v of order){g[best]=v;if(rec())return true;g[best]=0;if(dead)return false;}
+    return false;
+  }
+  return rec()?g:null;
+}
+function countSolutions(g0,ctx,limit){
+  const g=g0.slice();let n=0,steps=0,budget=30000;
+  function rec(){
+    if(n>=limit||steps>budget)return;steps++;
+    let best=-1,bc=null;
+    for(let c=0;c<g.length;c++){if(g[c])continue;const cs=candidates(c,g,ctx);if(!cs.length)return;if(best<0||cs.length<bc.length){best=c;bc=cs;}if(cs.length===1)break;}
+    if(best<0){n++;return;}
+    for(const v of bc){g[best]=v;rec();g[best]=0;if(n>=limit||steps>budget)return;}
+  }
+  rec();
+  return steps>budget?limit:n; // if verification was cut off, treat as non-unique (conservative: keep the clue)
+}
+
+/* ---------- human-style deductive solver (technique-aware) ---------- */
+function step(g,ctx){
+  // naked single (level 1)
+  for(let c=0;c<g.length;c++){if(g[c])continue;const cs=candidates(c,g,ctx);if(cs.length===1)return {cell:c,val:cs[0],lvl:1};}
+  // hidden single in field (level 2)
+  for(let id=0;id<ctx.sizes.length;id++){
+    const size=ctx.sizes[id],cells=ctx.cageCells[id];
+    const placed=new Set();for(const c of cells)if(g[c])placed.add(g[c]);
+    for(let v=1;v<=size;v++){
+      if(placed.has(v))continue;
+      let spot=-1,cnt=0;
+      for(const c of cells)if(!g[c]&&candidates(c,g,ctx).includes(v)){spot=c;cnt++;}
+      if(cnt===1)return {cell:spot,val:v,lvl:2,cage:id};
+    }
+  }
+  return null;
+}
+function rate(puzzle,ctx){
+  const g=puzzle.slice();let max=0;
+  while(true){
+    if(g.every(v=>v))break;
+    const s=step(g,ctx);
+    if(!s)return "Hard";           // needs guessing / advanced technique
+    g[s.cell]=s.val;if(s.lvl>max)max=s.lvl;
+  }
+  return max<=1?"Easy":"Medium";
+}
+// can this board be solved using only techniques up to maxLvl (1=naked single, 2=+hidden single)?
+function humanSolve(puzzle,ctx,maxLvl){
+  const g=puzzle.slice();
+  while(!g.every(v=>v)){const s=step(g,ctx);if(!s||s.lvl>maxLvl)return false;g[s.cell]=s.val;}
+  return true;
+}
+
+/* ---------- full generator (generate + prove-unique + dig + rate) ---------- */
+function generate(N,seed,want){
+  // want: 0 = any (tier derived from seed, reproducible); 1/2/3 = force Easy/Medium/Hard
+  want=want||0;
+  const wantLabel=want?["Easy","Medium","Hard"][want-1]:null;
+  const rng=mulberry32(seed);
+  let fallback=null;
+  for(let attempt=0;attempt<600;attempt++){
+    const p=partition(N,rng);if(!p.ok)continue;
+    const ctx=buildCtx(N,p.cage,p.sizes);
+    const sol=solveFirst(new Array(N*N).fill(0),ctx,rng);
+    if(!sol)continue;
+    // dig target tier (1 Easy / 2 Medium / 3 Hard): forced by the picker, else derived from the seed
+    const target=want||((seed%3)+1);
+    // dig greedily: for Easy/Medium keep only while a human can still solve at that level;
+    // for Hard keep only while the board stays uniquely solvable (advanced deduction allowed)
+    const puzzle=sol.slice();
+    const order=[...Array(N*N).keys()];
+    for(let i=order.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[order[i],order[j]]=[order[j],order[i]];}
+    for(const c of order){
+      const keep=puzzle[c];puzzle[c]=0;
+      const good=target<3?humanSolve(puzzle,ctx,target):(countSolutions(puzzle,ctx,2)===1);
+      if(!good)puzzle[c]=keep;
+    }
+    const given=puzzle.filter(v=>v).length;
+    if(given>=N*N-1)continue; // barely dug — try again
+    if(countSolutions(puzzle,ctx,2)!==1)continue; // final safety: must be unique
+    const difficulty=rate(puzzle,ctx);
+    const board={N,seed,want,cage:p.cage,sizes:p.sizes,ctx,solution:sol,givens:puzzle,difficulty};
+    // when a tier is forced, only accept a board whose honest rating matches; keep the first
+    // valid board as a fallback so we always return something within the attempt budget.
+    if(wantLabel&&difficulty!==wantLabel){if(!fallback)fallback=board;continue;}
+    return board;
+  }
+  if(fallback)return fallback;
+  // extremely unlikely fallback: solved board with a few dug cells
+  const p=partition(N,rng),ctx=buildCtx(N,p.cage,p.sizes);
+  const sol=solveFirst(new Array(N*N).fill(0),ctx,mulberry32(seed+1))||new Array(N*N).fill(1);
+  return {N,seed,want,cage:p.cage,sizes:p.sizes,ctx,solution:sol,givens:sol.slice(),difficulty:"Easy"};
+}
+
+/* ---------- app state ---------- */
+let G=null, sel=-1, pencilMode=false, autoPm=false, undoStack=[], redoStack=[];
+let timerId=null, elapsed=0, running=false, isDaily=false, dailySeed=0;
+const $=id=>document.getElementById(id);
+
+// UTC-based so every player worldwide gets the same Daily board (and streak boundary) per UTC day
+function dateSeed(){const d=new Date();return d.getUTCFullYear()*10000+(d.getUTCMonth()+1)*100+d.getUTCDate();}
+
+/* ---------- rendering ---------- */
+function cellSize(N){
+  const base=N<=5?66:N===6?58:50;
+  // shrink to fit narrow viewports: board padding (28) + boardwrap margins (~28)
+  const avail=Math.floor((Math.min(window.innerWidth,660)-56)/N);
+  return Math.max(30,Math.min(base,avail));
+}
+function build(){
+  const N=G.N, cs=cellSize(N), px=cs*N;
+  const board=$("board"), edges=$("edges");
+  board.style.setProperty("--cs",cs);
+  board.style.gridTemplateColumns=`repeat(${N},${cs}px)`;
+  board.style.width=px+"px";board.style.height=px+"px";
+  board.innerHTML="";
+  for(let c=0;c<N*N;c++){
+    const div=document.createElement("div");
+    div.className="cell";div.dataset.c=c;
+    const hue=(G.cage[c]*47)%360;
+    div.style.background=`hsl(${hue},48%,90%)`;
+    div.style.animationDelay=(((c/N)|0)+(c%N))*30+"ms";
+    const num=document.createElement("span");num.className="num";
+    const pm=document.createElement("div");pm.className="pm";
+    div.appendChild(num);div.appendChild(pm);
+    div.addEventListener("click",()=>onCellClick(c));
+    div.addEventListener("contextmenu",e=>{e.preventDefault();onCellErase(c);});
+    board.appendChild(div);
+  }
+  // cage edges
+  edges.setAttribute("width",px);edges.setAttribute("height",px);
+  edges.style.width=px+"px";edges.style.height=px+"px";
+  let paths="";
+  const line=(x1,y1,x2,y2,w)=>`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--edge)" stroke-width="${w}" stroke-linecap="round"/>`;
+  for(let c=0;c<N*N;c++){
+    const r=(c/N)|0,x=c%N,X=x*cs,Y=r*cs;
+    const diff=(a,b)=>b<0||G.cage[a]!==G.cage[b];
+    if(r===0||diff(c,c-N))paths+=line(X,Y,X+cs,Y,r===0?4:2.6);
+    if(r===N-1)paths+=line(X,Y+cs,X+cs,Y+cs,4);
+    if(x===0||diff(c,c-1))paths+=line(X,Y,X,Y+cs,x===0?4:2.6);
+    if(x===N-1)paths+=line(X+cs,Y,X+cs,Y+cs,4);
+  }
+  edges.innerHTML=paths;
+  renderAll();
+}
+function autoCandidates(c){return candidates(c,G.grid,G.ctx);}
+function renderCell(c,animate){
+  const div=$("board").children[c];
+  const num=div.querySelector(".num"), pm=div.querySelector(".pm");
+  const v=G.grid[c];
+  div.classList.remove("given","user","sel","err","hintcell","hintsrc");
+  if(G.givens[c])div.classList.add("given");else if(v)div.classList.add("user");
+  if(c===sel)div.classList.add("sel");
+  if(num.textContent!==(v?String(v):"")){num.textContent=v?String(v):"";if(animate){div.classList.remove("pop");void div.offsetWidth;div.classList.add("pop");}}
+  // pencil marks
+  let marks=[];
+  if(!v){
+    if(autoPm)marks=autoCandidates(c);
+    else marks=[...(G.pencils[c]||[])].sort();
+  }
+  pm.innerHTML="";
+  if(marks.length){const size=G.sizes[G.cage[c]];for(let d=1;d<=size;d++){const s=document.createElement("span");s.textContent=marks.includes(d)?d:"";pm.appendChild(s);}}
+}
+function conflicts(){
+  const bad=new Set(),g=G.grid;
+  for(let c=0;c<g.length;c++){const v=g[c];if(!v)continue;
+    if(v>G.sizes[G.cage[c]]){bad.add(c);}
+    for(const m of G.ctx.cageCells[G.cage[c]])if(m!==c&&g[m]===v){bad.add(c);bad.add(m);}
+    for(const nb of G.ctx.king[c])if(g[nb]===v){bad.add(c);bad.add(nb);}
+  }return bad;
+}
+function renderAll(){
+  for(let c=0;c<G.grid.length;c++)renderCell(c,false);
+  const bad=conflicts();
+  bad.forEach(c=>$("board").children[c].classList.add("err"));
+  $("diff").className="badge "+G.difficulty;$("diff").textContent=G.difficulty;
+  checkWin(bad);
+}
+function checkWin(bad){
+  const full=G.grid.every(v=>v);
+  if(full&&bad.size===0){
+    stopTimer();
+    $("board").classList.add("solved");
+    setTimeout(()=>$("board").classList.remove("solved"),900);
+    msg("Solved in "+fmt(elapsed)+"! Every field is complete and nothing alike touches.",true);
+    if(isDaily)recordDaily();
+    return true;
+  }
+  return false;
+}
+
+/* ---------- interaction ---------- */
+function pushUndo(){undoStack.push({grid:G.grid.slice(),pencils:clonePm()});if(undoStack.length>200)undoStack.shift();redoStack=[];}
+function clonePm(){const o={};for(const k in G.pencils)o[k]=new Set(G.pencils[k]);return o;}
+function onCellClick(c){
+  sel=c;
+  if(G.givens[c]){renderAll();return;}
+  if(pencilMode){renderAll();return;}
+  // cycle value forward
+  const size=G.sizes[G.cage[c]];
+  pushUndo();
+  G.grid[c]=(G.grid[c]+1)%(size+1);
+  startTimer();syncHash();renderAll();
+}
+// right-click erases a cell (quick correction without cycling all the way around)
+function onCellErase(c){
+  sel=c;
+  if(G.givens[c]){renderAll();return;}
+  if(G.grid[c]||(G.pencils[c]&&G.pencils[c].size)){pushUndo();G.grid[c]=0;G.pencils[c]=new Set();syncHash();}
+  renderAll();
+}
+function setValue(c,v){
+  if(c<0||G.givens[c])return;
+  const size=G.sizes[G.cage[c]];
+  if(v>size)return;
+  if(pencilMode&&v>0){
+    pushUndo();
+    if(!G.pencils[c])G.pencils[c]=new Set();
+    if(G.pencils[c].has(v))G.pencils[c].delete(v);else G.pencils[c].add(v);
+    syncHash();renderAll();return;
+  }
+  pushUndo();
+  G.grid[c]=v; if(v)G.pencils[c]=new Set();
+  startTimer();syncHash();renderAll();
+}
+document.addEventListener("keydown",e=>{
+  if(sel<0)return;
+  if(e.key>="1"&&e.key<="9"){setValue(sel,+e.key);e.preventDefault();}
+  else if(e.key==="0"||e.key==="Backspace"||e.key==="Delete"){setValue(sel,0);e.preventDefault();}
+  else if(e.key==="ArrowRight"){sel=(sel+1)%(G.N*G.N);e.preventDefault();renderAll();}
+  else if(e.key==="ArrowLeft"){sel=(sel-1+G.N*G.N)%(G.N*G.N);e.preventDefault();renderAll();}
+  else if(e.key==="ArrowDown"){sel=(sel+G.N)%(G.N*G.N);e.preventDefault();renderAll();}
+  else if(e.key==="ArrowUp"){sel=(sel-G.N+G.N*G.N)%(G.N*G.N);e.preventDefault();renderAll();}
+});
+
+/* ---------- hint (explained) ---------- */
+function doHint(){
+  const bad=conflicts();
+  if(bad.size){msg("First fix the highlighted clash — a number is repeating in a field or touching its twin.");return;}
+  const s=step(G.grid,G.ctx);
+  if(!s){
+    // no simple deduction: reveal a correct cell from the solution
+    for(let c=0;c<G.grid.length;c++)if(!G.grid[c]){pushUndo();G.grid[c]=G.solution[c];G.pencils[c]=new Set();flash([c]);msg("No plain single-step deduction here — placed a "+G.solution[c]+" from the verified solution.");startTimer();syncHash();renderAll();return;}
+    msg("The board is already complete.");return;
+  }
+  pushUndo();
+  G.grid[s.cell]=s.val;G.pencils[s.cell]=new Set();
+  let reason,hl;
+  if(s.lvl===1){
+    hl=[s.cell,...G.ctx.king[s.cell].filter(n=>G.grid[n]),...G.ctx.cageCells[G.cage[s.cell]].filter(n=>n!==s.cell&&G.grid[n])];
+    reason=s.val+" is the only number that fits this cell — every other value is already used in its field or touches this cell.";
+  }else{
+    hl=[s.cell,...G.ctx.cageCells[s.cage]];
+    reason="Only this cell in the field can hold "+s.val+" — the other empty cells in the field are all blocked from a "+s.val+".";
+  }
+  flash(hl);msg("Hint: "+reason);
+  startTimer();syncHash();renderAll();
+}
+function flash(cells){
+  const board=$("board");
+  cells.forEach((c,i)=>{const d=board.children[c];d.classList.add(i===0?"hintcell":"hintsrc");});
+  setTimeout(()=>cells.forEach(c=>{const d=board.children[c];d.classList.remove("hintcell","hintsrc");}),2400);
+}
+
+/* ---------- check / restart ---------- */
+function doCheck(){
+  const bad=conflicts();
+  if(bad.size){msg(bad.size+" cell(s) clash — highlighted in red.");return;}
+  const wrong=[];for(let c=0;c<G.grid.length;c++)if(G.grid[c]&&G.grid[c]!==G.solution[c])wrong.push(c);
+  if(wrong.length){flash(wrong.slice(0,8));msg(wrong.length+" filled cell(s) don't match the unique solution.");}
+  else if(G.grid.every(v=>v))checkWin(bad);
+  else msg("So far so good — no conflicts and everything matches. Keep going!");
+}
+function restart(){pushUndo();G.grid=G.givens.slice();G.pencils={};sel=-1;msg("Board reset to its clues.");syncHash();renderAll();}
+
+/* ---------- timer ---------- */
+function fmt(s){const m=(s/60)|0;return m+":"+String(s%60).padStart(2,"0");}
+function startTimer(){if(running)return;running=true;timerId=setInterval(()=>{elapsed++;$("timer").textContent=fmt(elapsed);},1000);}
+function stopTimer(){running=false;if(timerId)clearInterval(timerId);}
+function resetTimer(){stopTimer();elapsed=0;$("timer").textContent="0:00";}
+
+/* ---------- daily progression (localStorage, storage-safe) ---------- */
+function lsGet(k){try{return localStorage.getItem(k);}catch(e){return null;}}
+function lsSet(k,v){try{localStorage.setItem(k,v);}catch(e){}}
+function recordDaily(){
+  const ds=dailySeed,key="paddock.daily."+ds;
+  const prev=+lsGet(key)||0;
+  if(!prev||elapsed<prev)lsSet(key,elapsed);
+  // streak
+  let st;try{st=JSON.parse(lsGet("paddock.streak")||"{}");}catch(e){st={};}
+  const today=""+ds;
+  if(st.last!==today){
+    const y=new Date();y.setUTCDate(y.getUTCDate()-1);
+    const yc=y.getUTCFullYear()*10000+(y.getUTCMonth()+1)*100+y.getUTCDate();
+    st.count=(st.last==""+yc)?(st.count||0)+1:1;st.last=today;
+    lsSet("paddock.streak",JSON.stringify(st));
+  }
+  showStreak();
+}
+function showStreak(){
+  let st;try{st=JSON.parse(lsGet("paddock.streak")||"{}");}catch(e){st={};}
+  const best=+lsGet("paddock.daily."+dailySeed)||0;
+  let s="";
+  if(isDaily){s="Daily #"+dailySeed;if(best)s+=" · best "+fmt(best);}
+  if(st.count)s+=(s?" · ":"")+"🔥 "+st.count+"-day streak";
+  $("streak").textContent=s;
+}
+
+/* ---------- URL hash (shareable / resumable) ---------- */
+function syncHash(){
+  const state=G.grid.map((v,c)=>G.givens[c]?".":String(v)).join("");
+  location.replace("#n="+G.N+"&s="+G.seed+(isDaily?"&d=1":"")+(G.want?"&t="+G.want:"")+"&g="+state);
+}
+function loadHash(){
+  const h=location.hash.slice(1);if(!h)return false;
+  const p=new URLSearchParams(h);
+  const N=+p.get("n"),seed=+p.get("s");if(!N||isNaN(seed))return false;
+  const daily=p.get("d")==="1";
+  const want=+p.get("t")||0;
+  const g=p.get("g");
+  // Restore progress + daily flag AFTER the (async) board is generated — G is null until then.
+  newGame(N,seed,daily,want,()=>{
+    if(g&&g.length===N*N){
+      for(let c=0;c<N*N;c++){const ch=g[c];if(ch!=="."&&ch!=="0"){const v=+ch;if(v&&v<=G.sizes[G.cage[c]])G.grid[c]=v;}}
+    }
+  });
+  return true;
+}
+
+/* ---------- lifecycle ---------- */
+function newGame(N,seed,daily,want,onReady){
+  msg("Generating and proving a unique board…");
+  // generation is bounded but not instant; defer so the "Generating…" message paints first
+  setTimeout(()=>{
+    G=generate(N,seed,want||0);
+    G.grid=G.givens.slice();G.pencils={};
+    undoStack=[];redoStack=[];
+    isDaily=!!daily;if(daily)dailySeed=seed;
+    resetTimer();
+    if(onReady)onReady();            // restore any saved progress into G.grid before we render
+    // auto-select the first empty, non-given cell so keyboard play works immediately
+    sel=-1;
+    for(let c=0;c<G.grid.length;c++)if(!G.givens[c]&&!G.grid[c]){sel=c;break;}
+    build();showStreak();
+    const given=G.givens.filter(v=>v).length;
+    msg((daily?"Daily Paddock · ":"")+"Rated "+G.difficulty+" · "+given+" clues on a "+N+"×"+N+" board, proven to have exactly one solution. Timer starts on your first move.");
+    syncHash();                       // timer intentionally NOT started here — it starts on first move
+  },10);
+}
+function msg(t,win){const m=$("msg");m.textContent=t;m.className="msg"+(win?" win":"");}
+
+/* ---------- pad + buttons ---------- */
+function buildPad(){
+  const pad=$("pad");pad.innerHTML="";
+  for(let v=1;v<=5;v++){const b=document.createElement("button");b.textContent=v;b.onclick=()=>setValue(sel,v);pad.appendChild(b);}
+  const e=document.createElement("button");e.textContent="⌫";e.title="Erase";e.onclick=()=>setValue(sel,0);pad.appendChild(e);
+}
+$("newBtn").onclick=()=>newGame(+$("sizeSel").value,(Math.random()*4294967296)>>>0,false,+$("diffSel").value);
+$("dailyBtn").onclick=()=>{dailySeed=dateSeed();newGame(6,dailySeed,true,0);};
+$("hintBtn").onclick=doHint;
+$("checkBtn").onclick=doCheck;
+$("restartBtn").onclick=restart;
+$("undoBtn").onclick=()=>{if(!undoStack.length)return;redoStack.push({grid:G.grid.slice(),pencils:clonePm()});const s=undoStack.pop();G.grid=s.grid;G.pencils=s.pencils;renderAll();syncHash();};
+$("redoBtn").onclick=()=>{if(!redoStack.length)return;undoStack.push({grid:G.grid.slice(),pencils:clonePm()});const s=redoStack.pop();G.grid=s.grid;G.pencils=s.pencils;renderAll();syncHash();};
+$("pencilBtn").onclick=function(){pencilMode=!pencilMode;this.classList.toggle("on",pencilMode);msg(pencilMode?"Pencil mode: type 1–5 to drop or clear candidate marks.":"Pen mode: type or click to enter final numbers.");};
+$("autoPm").onchange=function(){autoPm=this.checked;renderAll();};
+
+/* ---------- responsive: re-fit cells on viewport resize ---------- */
+let rzTimer=null;
+window.addEventListener("resize",()=>{if(!G)return;clearTimeout(rzTimer);rzTimer=setTimeout(build,150);});
+
+/* ---------- boot ---------- */
+buildPad();
+if(!loadHash())newGame(6,(Math.random()*4294967296)>>>0,false,0);
+</script>
+</body>
+</html>

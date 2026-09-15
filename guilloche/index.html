@@ -1,0 +1,1442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#06120c">
+<title>Guilloché — a living engine-turning lathe</title>
+<style>
+  :root {
+    --panel-bg: rgba(10, 12, 14, 0.82);
+    --panel-border: rgba(255, 255, 255, 0.10);
+    --ink: #e9eef0;
+    --ink-dim: #9aa4a8;
+    --accent: #d8f3e0;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; width: 100%;
+    background: #06120c; color: var(--ink);
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    overflow: hidden; -webkit-font-smoothing: antialiased;
+  }
+  #stage { position: fixed; inset: 0; }
+  canvas#c { display: block; width: 100%; height: 100%; }
+
+  /* ---- Control panel ---- */
+  #panel {
+    position: fixed; top: 14px; left: 14px; z-index: 20;
+    width: 288px; max-width: calc(100vw - 28px);
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 14px;
+    padding: 14px 16px 16px;
+    backdrop-filter: blur(14px) saturate(1.2);
+    -webkit-backdrop-filter: blur(14px) saturate(1.2);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+    transition: opacity .5s ease, transform .5s ease;
+    font-size: 13px; user-select: none;
+  }
+  #panel.hidden { opacity: 0; transform: translateY(-8px); pointer-events: none; }
+  .title-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; }
+  .title-row h1 {
+    font-size: 17px; margin: 0; letter-spacing: .5px; font-weight: 600;
+    color: var(--accent);
+  }
+  .title-row .sub { font-size: 10.5px; color: var(--ink-dim); letter-spacing: .3px; }
+  .tagline { font-size: 11px; color: var(--ink-dim); margin: 0 0 12px; line-height: 1.4; }
+
+  .row { margin: 10px 0; }
+  .row label {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11.5px; color: var(--ink-dim); margin-bottom: 5px; letter-spacing: .3px;
+  }
+  .row label .val { color: var(--ink); font-variant-numeric: tabular-nums; }
+  input[type=range] {
+    width: 100%; height: 4px; -webkit-appearance: none; appearance: none;
+    background: rgba(255,255,255,0.14); border-radius: 3px; outline: none; margin: 0;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 15px; height: 15px; border-radius: 50%;
+    background: var(--accent); cursor: pointer; border: 2px solid rgba(0,0,0,0.4);
+    box-shadow: 0 0 6px rgba(255,255,255,0.3);
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 15px; height: 15px; border-radius: 50%; background: var(--accent);
+    cursor: pointer; border: 2px solid rgba(0,0,0,0.4);
+  }
+  .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 4px; }
+  button {
+    font-family: inherit; font-size: 11.5px; color: var(--ink);
+    background: rgba(255,255,255,0.06); border: 1px solid var(--panel-border);
+    border-radius: 9px; padding: 8px 6px; cursor: pointer; letter-spacing: .3px;
+    transition: background .15s ease, border-color .15s ease, transform .06s ease;
+  }
+  button:hover { background: rgba(255,255,255,0.13); border-color: rgba(255,255,255,0.22); }
+  button:active { transform: scale(0.97); }
+  button.on { background: rgba(216,243,224,0.18); border-color: rgba(216,243,224,0.4); color: #fff; }
+  .divider { height: 1px; background: var(--panel-border); margin: 13px 0 3px; }
+
+  /* visible keyboard focus for all interactive controls */
+  button:focus-visible, .swatch:focus-visible,
+  input[type=text]:focus-visible, input[type=range]:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  input[type=range]:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 3px rgba(216,243,224,0.55), 0 0 6px rgba(255,255,255,0.3);
+  }
+  input[type=range]:focus-visible::-moz-range-thumb {
+    box-shadow: 0 0 0 3px rgba(216,243,224,0.55);
+  }
+
+  .palette-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+  .swatch {
+    width: 30px; height: 22px; border-radius: 6px; cursor: pointer;
+    border: 2px solid transparent; transition: border-color .15s ease, transform .1s ease;
+    position: relative; overflow: hidden;
+  }
+  .swatch:hover { transform: translateY(-1px); }
+  .swatch.active { border-color: #fff; }
+
+  .seed-row { display: flex; gap: 7px; align-items: center; margin-top: 2px; }
+  .seed-row input[type=text] {
+    flex: 1; min-width: 0; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px; color: var(--ink); background: rgba(0,0,0,0.35);
+    border: 1px solid var(--panel-border); border-radius: 8px; padding: 7px 9px; outline: none;
+  }
+  .seed-row input:focus { border-color: rgba(216,243,224,0.4); }
+
+  .hint { font-size: 10px; color: var(--ink-dim); margin-top: 10px; line-height: 1.5; }
+  .hint kbd {
+    font-family: ui-monospace, monospace; background: rgba(255,255,255,0.08);
+    border: 1px solid var(--panel-border); border-radius: 4px; padding: 0 4px; font-size: 9.5px;
+  }
+
+  /* ---- Toast ---- */
+  #toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: rgba(10,12,14,0.92); border: 1px solid var(--panel-border);
+    color: var(--ink); padding: 10px 18px; border-radius: 10px; font-size: 12.5px;
+    z-index: 40; opacity: 0; pointer-events: none; transition: opacity .3s ease, transform .3s ease;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); letter-spacing: .3px;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  /* lift the toast clear of the gallery rail when it is visible */
+  #toast.above-gallery { bottom: 110px; }
+
+  /* ---- Gallery strip ---- */
+  #gallery {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 15;
+    display: flex; gap: 8px; padding: 10px 12px 12px;
+    overflow-x: auto; overflow-y: hidden;
+    background: linear-gradient(to top, rgba(0,0,0,0.55), rgba(0,0,0,0));
+    transition: opacity .5s ease, transform .5s ease;
+    scrollbar-width: thin;
+  }
+  #gallery.hidden { opacity: 0; transform: translateY(20px); pointer-events: none; }
+  .thumb {
+    flex: 0 0 auto; width: 116px; height: 74px; border-radius: 8px; overflow: hidden;
+    cursor: pointer; border: 1.5px solid rgba(255,255,255,0.14); position: relative;
+    transition: border-color .15s ease, transform .12s ease; background: #000;
+  }
+  .thumb:hover { border-color: rgba(255,255,255,0.5); transform: translateY(-3px); }
+  .thumb canvas { display: block; width: 100%; height: 100%; }
+  .thumb .name {
+    position: absolute; bottom: 0; left: 0; right: 0; font-size: 9px; letter-spacing: .3px;
+    color: #fff; background: linear-gradient(to top, rgba(0,0,0,0.75), rgba(0,0,0,0));
+    padding: 8px 6px 3px; pointer-events: none; text-shadow: 0 1px 2px #000;
+  }
+
+  /* ---- Idle / reduced-motion badge ---- */
+  #idleBadge {
+    position: fixed; top: 14px; right: 14px; z-index: 18;
+    font-size: 10.5px; color: var(--ink-dim); background: var(--panel-bg);
+    border: 1px solid var(--panel-border); border-radius: 20px; padding: 5px 12px;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    opacity: 0; transition: opacity .4s ease; letter-spacing: .4px;
+  }
+  #idleBadge.show { opacity: 1; }
+  #idleBadge .dot { color: var(--accent); }
+
+  @media (max-width: 560px) {
+    #panel { width: calc(100vw - 28px); }
+    .thumb { width: 96px; height: 62px; }
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="c"></canvas>
+</div>
+
+<div id="idleBadge"><span class="dot">◇</span> <span id="idleText">auto-evolving</span></div>
+
+<aside id="panel">
+  <div class="title-row">
+    <h1>Guilloché</h1>
+    <span class="sub">engine-turning lathe</span>
+  </div>
+  <p class="tagline">Banknote-grade guilloché that endlessly re-weaves itself. Pure trochoid math, zero dependencies.</p>
+
+  <div class="row">
+    <label>Symmetry (petals) <span class="val" id="symVal">7</span></label>
+    <input type="range" id="sym" min="3" max="13" step="1" value="7">
+  </div>
+  <div class="row">
+    <label>Density <span class="val" id="denVal">60%</span></label>
+    <input type="range" id="den" min="10" max="100" step="1" value="60">
+  </div>
+  <div class="row">
+    <label>Speed <span class="val" id="spdVal">1.0×</span></label>
+    <input type="range" id="spd" min="0" max="250" step="1" value="100">
+  </div>
+  <div class="row">
+    <label>Quality / performance <span class="val" id="qVal">balanced</span></label>
+    <input type="range" id="q" min="0" max="4" step="1" value="2">
+  </div>
+
+  <div class="divider"></div>
+  <div class="row">
+    <label>Palette <span class="val" id="palName">banknote-green</span></label>
+    <div class="palette-row" id="palettes"></div>
+  </div>
+
+  <div class="divider"></div>
+  <div class="row">
+    <label>Seed</label>
+    <div class="seed-row">
+      <input type="text" id="seedInput" spellcheck="false" autocomplete="off">
+      <button id="reseedBtn" title="Random new design" style="flex:0 0 auto;width:38px;">↻</button>
+    </div>
+  </div>
+
+  <div class="btn-grid">
+    <button id="pauseBtn">Pause</button>
+    <button id="lockBtn">Lock palette</button>
+    <button id="frameBtn">Banknote frame</button>
+    <button id="fsBtn">Fullscreen</button>
+    <button id="pngBtn">Export PNG</button>
+    <button id="svgBtn">Export SVG</button>
+    <button id="linkBtn">Copy link</button>
+    <button id="galBtn">Gallery</button>
+  </div>
+
+  <p class="hint">
+    <kbd>Space</kbd> pause · <kbd>H</kbd> hide UI · <kbd>F</kbd> fullscreen ·
+    <kbd>N</kbd> new seed · <kbd>G</kbd> gallery · <kbd>B</kbd> frame ·
+    <kbd>S</kbd> save PNG · <kbd>V</kbd> save SVG.
+    Idle a moment and it auto-evolves toward a fresh design.
+  </p>
+</aside>
+
+<div id="gallery"></div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+(function () {
+
+/* ============================================================
+   Guilloché — a living engine-turning lathe.
+   Single-file generative guilloché engine. No dependencies.
+   ============================================================ */
+
+/* ---------- Deterministic PRNG ---------- */
+function xmur3(str) {
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i++) {
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  return function () {
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    h ^= h >>> 16;
+    return h >>> 0;
+  };
+}
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function makeRng(seed) {
+  const s = xmur3(String(seed));
+  return mulberry32(s());
+}
+function randomSeed() {
+  // short, readable, shareable
+  const words = ["rose","lathe","weave","band","spiral","orbit","gilt","moire",
+                 "petal","gear","intaglio","cyan","copper","amethyst","silver","node",
+                 "ripple","engrave","dial","crest","vault","seal","filet","facet"];
+  const r = Math.random;
+  return words[(r()*words.length)|0] + "-" + words[(r()*words.length)|0] + "-" +
+         (1000 + ((r()*9000)|0));
+}
+
+/* ---------- Palettes (metallic inks on dark intaglio ground) ---------- */
+const PALETTES = [
+  { name: "banknote-green", bg: [6,18,12],
+    inks: [[31,111,74],[63,160,106],[143,214,168]], hi: [216,243,224] },
+  { name: "rose-gold", bg: [23,13,12],
+    inks: [[183,110,90],[224,168,143],[246,203,176]], hi: [255,233,220] },
+  { name: "cyanotype-steel", bg: [6,16,28],
+    inks: [[46,95,143],[79,143,192],[159,208,234]], hi: [223,240,251] },
+  { name: "aged-copper", bg: [18,11,6],
+    inks: [[122,74,36],[181,116,51],[224,164,95]], hi: [246,220,174] },
+  { name: "amethyst", bg: [16,6,22],
+    inks: [[106,63,158],[154,111,206],[198,163,239]], hi: [238,224,255] },
+  { name: "monochrome-silver", bg: [10,11,13],
+    inks: [[107,112,118],[154,160,168],[201,206,212]], hi: [242,244,246] },
+];
+function lerpRGB(a, b, t) {
+  return [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t];
+}
+function rgbStr(c, a) {
+  return "rgba(" + (c[0]|0) + "," + (c[1]|0) + "," + (c[2]|0) + "," + a + ")";
+}
+
+/* ---------- Design generation (seed -> parameters) ---------- */
+const MAX_LAYERS = 6;
+
+function makeDesign(seed) {
+  const rng = makeRng(seed);
+  const rand = (a, b) => a + (b - a) * rng();
+  const irand = (a, b) => Math.floor(rand(a, b + 1));
+
+  const symmetry = irand(3, 13);
+  const layerCount = irand(3, MAX_LAYERS);
+  const layers = [];
+
+  for (let i = 0; i < MAX_LAYERS; i++) {
+    const enabled = i < layerCount ? 1 : 0;
+    const harmCount = irand(1, 3);
+    const harmonics = [];
+    for (let h = 0; h < harmCount; h++) {
+      harmonics.push({
+        mult: irand(1, 3),                 // petal-frequency multiplier of symmetry
+        amp: rand(0.04, 0.24),             // radial amplitude (fraction of radius)
+        phase: rand(0, Math.PI * 2),
+        rate: rand(0.05, 0.35) * (rng() < 0.5 ? -1 : 1), // LFO phase drift rate
+      });
+    }
+    layers.push({
+      enabled,
+      rBase: rand(0.20, 0.82),             // mean radius fraction
+      harmonics,
+      angAmp: rand(0.0, 0.22),             // angular (spirograph) modulation
+      angMult: irand(2, 5),
+      angPhase: rand(0, Math.PI * 2),
+      rotation: rand(0, Math.PI * 2),
+      rotRate: rand(-0.06, 0.06),          // per-layer slow spin
+      copies: irand(10, 26),               // nested woven strokes
+      spread: rand(0.03, 0.13),            // radial thickness of the band
+      twist: rand(0.04, 0.5),              // per-copy angular offset -> moiré
+      breathRate: rand(0.04, 0.14),        // amplitude breathing LFO
+      breathDepth: rand(0.15, 0.5),
+      breathPhase: rand(0, Math.PI * 2),
+      inkIndex: irand(0, 2),
+      lineScale: rand(0.7, 1.35),
+    });
+  }
+
+  const waveCount = rng() < 0.7 ? irand(2, 5) : 0;
+  const waves = {
+    count: waveCount,
+    amp: rand(0.02, 0.06),
+    freq: irand(3, 9),
+    phase: rand(0, Math.PI * 2),
+    rate: rand(0.05, 0.2) * (rng() < 0.5 ? -1 : 1),
+    band: rand(0.72, 0.95),                // radial position of the wave ring
+  };
+
+  return {
+    seed: String(seed),
+    symmetry,
+    layerCount,
+    layers,
+    waves,
+    paletteIndex: irand(0, PALETTES.length - 1),
+    globalRotRate: rand(-0.03, 0.03),
+  };
+}
+
+/* ---------- Design interpolation (silky seed-to-seed morphs) ---------- */
+function lerp(a, b, t) { return a + (b - a) * t; }
+function lerpDesign(A, B, t) {
+  const D = {
+    seed: t < 0.5 ? A.seed : B.seed,
+    symmetry: lerp(A.symmetry, B.symmetry, t),
+    layerCount: B.layerCount,
+    layers: [],
+    waves: {
+      count: t < 0.5 ? A.waves.count : B.waves.count,
+      amp: lerp(A.waves.amp, B.waves.amp, t),
+      freq: lerp(A.waves.freq, B.waves.freq, t),
+      phase: lerp(A.waves.phase, B.waves.phase, t),
+      rate: lerp(A.waves.rate, B.waves.rate, t),
+      band: lerp(A.waves.band, B.waves.band, t),
+    },
+    paletteIndex: t < 0.5 ? A.paletteIndex : B.paletteIndex,
+    globalRotRate: lerp(A.globalRotRate, B.globalRotRate, t),
+  };
+  for (let i = 0; i < MAX_LAYERS; i++) {
+    const la = A.layers[i], lb = B.layers[i];
+    const nh = Math.max(la.harmonics.length, lb.harmonics.length);
+    const harmonics = [];
+    for (let h = 0; h < nh; h++) {
+      const ha = la.harmonics[h] || { mult: (lb.harmonics[h] || la.harmonics[0]).mult, amp: 0, phase: 0, rate: 0 };
+      const hb = lb.harmonics[h] || { mult: ha.mult, amp: 0, phase: ha.phase, rate: ha.rate };
+      harmonics.push({
+        mult: t < 0.5 ? ha.mult : hb.mult,
+        amp: lerp(ha.amp, hb.amp, t),
+        phase: lerp(ha.phase, hb.phase, t),
+        rate: lerp(ha.rate, hb.rate, t),
+      });
+    }
+    D.layers.push({
+      enabled: lerp(la.enabled, lb.enabled, t),
+      rBase: lerp(la.rBase, lb.rBase, t),
+      harmonics,
+      angAmp: lerp(la.angAmp, lb.angAmp, t),
+      angMult: t < 0.5 ? la.angMult : lb.angMult,
+      angPhase: lerp(la.angPhase, lb.angPhase, t),
+      rotation: lerp(la.rotation, lb.rotation, t),
+      rotRate: lerp(la.rotRate, lb.rotRate, t),
+      copies: Math.round(lerp(la.copies, lb.copies, t)),
+      spread: lerp(la.spread, lb.spread, t),
+      twist: lerp(la.twist, lb.twist, t),
+      breathRate: lerp(la.breathRate, lb.breathRate, t),
+      breathDepth: lerp(la.breathDepth, lb.breathDepth, t),
+      breathPhase: lerp(la.breathPhase, lb.breathPhase, t),
+      inkIndex: t < 0.5 ? la.inkIndex : lb.inkIndex,
+      lineScale: lerp(la.lineScale, lb.lineScale, t),
+    });
+  }
+  return D;
+}
+
+/* ============================================================
+   State
+   ============================================================ */
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d", { alpha: false });
+
+const state = {
+  design: null,
+  morphFrom: null,
+  morphTo: null,
+  morphT: 1,          // 1 = settled
+  morphDur: 6.5,      // seconds for a full seed morph
+  morphing: false,
+
+  paused: false,
+  reducedMotion: false,
+  time: 0,            // accumulated animation time (seconds)
+
+  // user overrides (multipliers / locks)
+  symOverride: null,  // number or null (use design symmetry)
+  density: 0.60,      // 0..1
+  speed: 1.0,         // multiplier
+  quality: 2,         // 0..4
+  paletteLock: null,  // palette index or null (auto-rotate)
+  frameMode: false,
+
+  // palette crossfade
+  palCurrent: 0,
+  palTarget: 0,
+  palMix: 1,          // 0..1 (1 = fully target)
+  palAutoTimer: 0,
+
+  // idle auto-evolve
+  lastInteract: 0,
+  idleThreshold: 18,  // seconds
+  autoEvolving: false,
+
+  dpr: 1,
+  W: 0, H: 0,         // css pixels
+  pw: 0, ph: 0,       // device pixels
+};
+
+/* quality presets: [samples, copyScale, budget, dprCap] */
+const QUALITY = [
+  { label: "eco",       samples: 260, copyScale: 0.55, budget: 16000,  dprCap: 1.0 },
+  { label: "low",       samples: 380, copyScale: 0.70, budget: 30000,  dprCap: 1.25 },
+  { label: "balanced",  samples: 560, copyScale: 1.00, budget: 55000,  dprCap: 1.5 },
+  { label: "high",      samples: 780, copyScale: 1.25, budget: 90000,  dprCap: 2.0 },
+  { label: "ultra",     samples: 1050, copyScale: 1.6, budget: 150000, dprCap: 2.5 },
+];
+
+/* ---------- Sizing (devicePixelRatio-aware) ---------- */
+function resize() {
+  const q = QUALITY[state.quality];
+  const dpr = Math.min(window.devicePixelRatio || 1, q.dprCap);
+  state.dpr = dpr;
+  state.W = window.innerWidth;
+  state.H = window.innerHeight;
+  state.pw = Math.max(1, Math.round(state.W * dpr));
+  state.ph = Math.max(1, Math.round(state.H * dpr));
+  canvas.width = state.pw;
+  canvas.height = state.ph;
+  canvas.style.width = state.W + "px";
+  canvas.style.height = state.H + "px";
+  clearGround(true);
+  // reduced-motion holds a still image (no loop), so repaint it after a resize
+  if (state.reducedMotion && state.design && !loopRunning) drawStatic();
+}
+
+function paletteBg(i) { return PALETTES[i].bg; }
+
+function clearGround(hard) {
+  const bg = curBgColor();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = rgbStr(bg, 1);
+  ctx.fillRect(0, 0, state.pw, state.ph);
+}
+
+function curBgColor() {
+  const a = paletteBg(state.palCurrent), b = paletteBg(state.palTarget);
+  return lerpRGB(a, b, state.palMix);
+}
+function curInks() {
+  const A = PALETTES[state.palCurrent], B = PALETTES[state.palTarget];
+  const inks = [];
+  for (let i = 0; i < 3; i++) inks.push(lerpRGB(A.inks[i], B.inks[i], state.palMix));
+  const hi = lerpRGB(A.hi, B.hi, state.palMix);
+  return { inks, hi };
+}
+
+/* ============================================================
+   Core: sample one rosette layer curve into an array of points
+   (reused by canvas render AND svg export AND thumbnails)
+   ============================================================ */
+function rosettePoints(layer, symmetry, cx, cy, baseScale, copyFrac, time, globalRot, out) {
+  // effective params with LFO breathing / drift
+  const breathe = 1 + layer.breathDepth * Math.sin(time * layer.breathRate * Math.PI * 2 + layer.breathPhase);
+  const rot = layer.rotation + globalRot + layer.rotRate * time + copyFrac * layer.twist;
+  const rBase = layer.rBase * (1 + layer.spread * (copyFrac - 0.5));
+  const N = out.length / 2;
+  for (let k = 0; k <= N - 1; k++) {
+    const t = (k / (N - 1)) * Math.PI * 2;
+    let radius = rBase;
+    for (let h = 0; h < layer.harmonics.length; h++) {
+      const hm = layer.harmonics[h];
+      const drift = hm.rate * time;
+      radius += hm.amp * breathe * Math.cos(hm.mult * symmetry * t + hm.phase + drift);
+    }
+    const ang = t + rot + layer.angAmp * Math.sin(layer.angMult * t + layer.angPhase + time * 0.15);
+    const rr = radius * baseScale;
+    out[k * 2] = cx + rr * Math.cos(ang);
+    out[k * 2 + 1] = cy + rr * Math.sin(ang);
+  }
+}
+
+/* ---------- Plan the frame within a stroke budget ---------- */
+function planFrame(design, quality, density) {
+  const q = QUALITY[quality];
+  const layers = [];
+  let planned = 0;
+  for (let i = 0; i < MAX_LAYERS; i++) {
+    const L = design.layers[i];
+    if (L.enabled <= 0.01) continue;
+    const copies = Math.max(1, Math.round(L.copies * q.copyScale * (0.4 + 0.6 * density)));
+    const samples = Math.max(80, Math.round(q.samples * (0.75 + 0.25 * Math.min(1, design.symmetry / 8))));
+    planned += copies * samples;
+    layers.push({ L, i, copies, samples });
+  }
+  // wave ring
+  let waveSamples = 0;
+  if (design.waves.count > 0) {
+    waveSamples = Math.max(120, Math.round(q.samples * 1.0));
+    planned += design.waves.count * waveSamples;
+  }
+  // enforce budget by scaling samples
+  let scale = 1;
+  if (planned > q.budget) scale = q.budget / planned;
+  return { layers, waveSamples, sampleScale: scale };
+}
+
+/* ---------- Render one full frame onto a context ---------- */
+function renderPattern(context, design, opts) {
+  const {
+    W, H, pw, ph, dpr, time, globalRot, inks, hi, quality, density,
+    lineBoost, alphaBoost, additive,
+  } = opts;
+
+  const cx = pw / 2, cy = ph / 2;
+  const baseScale = Math.min(pw, ph) * 0.46;
+  const plan = planFrame(design, quality, density);
+
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.globalCompositeOperation = additive ? "lighter" : "source-over";
+
+  // reusable buffer, sized to the biggest sample count we will use
+  let maxN = 2;
+  for (const it of plan.layers) maxN = Math.max(maxN, Math.round(it.samples * plan.sampleScale));
+  maxN = Math.max(maxN, Math.round(plan.waveSamples * plan.sampleScale));
+  const buf = new Float64Array(Math.max(4, maxN * 2));
+
+  for (const it of plan.layers) {
+    const L = it.L;
+    const N = Math.max(40, Math.round(it.samples * plan.sampleScale));
+    const view = buf.subarray(0, N * 2);
+    const ink = inks[L.inkIndex % inks.length];
+    const copies = it.copies;
+    const lw = Math.max(0.35, L.lineScale * lineBoost * dpr);
+    context.lineWidth = lw;
+
+    for (let c = 0; c < copies; c++) {
+      const copyFrac = copies > 1 ? c / (copies - 1) : 0.5;
+      rosettePoints(L, design.symmetry, cx, cy, baseScale, copyFrac, time, globalRot, view);
+
+      // occasional highlight strand for the "engraved metal" glint
+      const isHi = (c % Math.max(3, Math.round(copies / 3))) === 0 && c > 0;
+      const col = isHi ? hi : ink;
+      const a = (isHi ? 0.10 : 0.075) * alphaBoost * L.enabled;
+      context.strokeStyle = rgbStr(col, a);
+
+      context.beginPath();
+      context.moveTo(view[0], view[1]);
+      for (let k = 1; k < N; k++) context.lineTo(view[k * 2], view[k * 2 + 1]);
+      context.closePath();
+      context.stroke();
+    }
+  }
+
+  // ---- concentric wave-band ring (sinusoidal offset guilloché) ----
+  if (design.waves.count > 0) {
+    const w = design.waves;
+    const N = Math.max(120, Math.round(plan.waveSamples * plan.sampleScale));
+    const view = buf.subarray(0, N * 2);
+    const ink = inks[1];
+    context.lineWidth = Math.max(0.35, 0.85 * lineBoost * dpr);
+    for (let b = 0; b < w.count; b++) {
+      const bandFrac = w.count > 1 ? b / (w.count - 1) : 0.5;
+      const ringR = baseScale * (w.band + (bandFrac - 0.5) * 0.04);
+      const amp = baseScale * w.amp;
+      const phase = w.phase + w.rate * time + bandFrac * 0.6;
+      for (let k = 0; k < N; k++) {
+        const t = (k / (N - 1)) * Math.PI * 2;
+        const rr = ringR + amp * Math.sin(w.freq * t + phase);
+        view[k * 2] = cx + rr * Math.cos(t + globalRot);
+        view[k * 2 + 1] = cy + rr * Math.sin(t + globalRot);
+      }
+      context.strokeStyle = rgbStr(ink, 0.07 * alphaBoost);
+      context.beginPath();
+      context.moveTo(view[0], view[1]);
+      for (let k = 1; k < N; k++) context.lineTo(view[k * 2], view[k * 2 + 1]);
+      context.closePath();
+      context.stroke();
+    }
+  }
+
+  context.globalCompositeOperation = "source-over";
+}
+
+/* ============================================================
+   Banknote / passport framing overlay
+   ============================================================ */
+function drawTextArc(context, text, cx, cy, radius, startAngle, endAngle, fontPx, color, dprLocal) {
+  context.save();
+  context.fillStyle = color;
+  context.font = "600 " + fontPx + "px ui-monospace, Menlo, Consolas, monospace";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  const chars = text.split("");
+  const span = endAngle - startAngle;
+  for (let i = 0; i < chars.length; i++) {
+    const frac = chars.length > 1 ? i / (chars.length - 1) : 0.5;
+    const a = startAngle + span * frac;
+    context.save();
+    context.translate(cx + radius * Math.cos(a), cy + radius * Math.sin(a));
+    context.rotate(a + Math.PI / 2);
+    context.fillText(chars[i], 0, 0);
+    context.restore();
+  }
+  context.restore();
+}
+
+function drawFrame(context, opts) {
+  const { pw, ph, dpr, inks, hi, time, design } = opts;
+  const margin = Math.min(pw, ph) * 0.045;
+  const x0 = margin, y0 = margin, x1 = pw - margin, y1 = ph - margin;
+  const w = x1 - x0, h = y1 - y0;
+
+  context.save();
+  context.setTransform(1, 0, 0, 1, 0, 0);
+
+  // corner vignette darkening to lift the border
+  const grad = context.createRadialGradient(pw/2, ph/2, Math.min(pw,ph)*0.2, pw/2, ph/2, Math.max(pw,ph)*0.62);
+  grad.addColorStop(0, "rgba(0,0,0,0)");
+  grad.addColorStop(1, "rgba(0,0,0,0.55)");
+  context.fillStyle = grad;
+  context.fillRect(0, 0, pw, ph);
+
+  context.globalCompositeOperation = "lighter";
+
+  // --- guilloché wave border: several nested rectangular sine ribbons ---
+  const bands = 5;
+  const per = Math.max(300, Math.round(2 * (w + h) / (6 * dpr)));
+  for (let b = 0; b < bands; b++) {
+    const off = (b - (bands - 1) / 2) * 3.2 * dpr;
+    const amp = 5 * dpr;
+    const freq = 46;
+    const phase = time * 0.4 + b * 0.9;
+    context.strokeStyle = rgbStr(b === 2 ? hi : inks[1], 0.5);
+    context.lineWidth = Math.max(0.5, 0.7 * dpr);
+    context.beginPath();
+    // trace the rectangle perimeter with a sinusoidal normal offset
+    const total = 2 * (w + h);
+    let started = false;
+    for (let s = 0; s <= per; s++) {
+      const d = (s / per) * total;
+      let px, py, nx, ny;
+      if (d < w) { px = x0 + d; py = y0; nx = 0; ny = -1; }
+      else if (d < w + h) { const t = d - w; px = x1; py = y0 + t; nx = 1; ny = 0; }
+      else if (d < 2 * w + h) { const t = d - w - h; px = x1 - t; py = y1; nx = 0; ny = 1; }
+      else { const t = d - 2 * w - h; px = x0; py = y1 - t; nx = -1; ny = 0; }
+      const wave = Math.sin((d / total) * freq * Math.PI * 2 + phase) * amp;
+      const X = px + nx * (off + wave);
+      const Y = py + ny * (off + wave);
+      if (!started) { context.moveTo(X, Y); started = true; } else context.lineTo(X, Y);
+    }
+    context.closePath();
+    context.stroke();
+  }
+
+  // inner keyline
+  context.strokeStyle = rgbStr(hi, 0.5);
+  context.lineWidth = Math.max(0.6, 0.9 * dpr);
+  context.strokeRect(x0 + 16 * dpr, y0 + 16 * dpr, w - 32 * dpr, h - 32 * dpr);
+
+  // --- corner denomination medallions (tiny live rosettes + numeral) ---
+  const denom = String(((parseInt(design.seed.replace(/\D/g, "").slice(-2) || "10", 10)) % 90) + 10);
+  const medR = Math.min(pw, ph) * 0.052;
+  const corners = [
+    [x0 + medR + 10 * dpr, y0 + medR + 10 * dpr],
+    [x1 - medR - 10 * dpr, y0 + medR + 10 * dpr],
+    [x0 + medR + 10 * dpr, y1 - medR - 10 * dpr],
+    [x1 - medR - 10 * dpr, y1 - medR - 10 * dpr],
+  ];
+  const petals = design.symmetry;
+  for (const [mx, my] of corners) {
+    context.strokeStyle = rgbStr(inks[2], 0.55);
+    context.lineWidth = Math.max(0.5, 0.7 * dpr);
+    for (let ring = 0; ring < 5; ring++) {
+      context.beginPath();
+      const rr = medR * (0.5 + ring * 0.1);
+      const nn = 220;
+      for (let k = 0; k <= nn; k++) {
+        const t = (k / nn) * Math.PI * 2;
+        const r = rr * (1 + 0.16 * Math.cos(petals * t + time * 0.5 + ring * 0.4));
+        const X = mx + r * Math.cos(t), Y = my + r * Math.sin(t);
+        if (k === 0) context.moveTo(X, Y); else context.lineTo(X, Y);
+      }
+      context.closePath();
+      context.stroke();
+    }
+    context.globalCompositeOperation = "source-over";
+    context.fillStyle = rgbStr(hi, 0.92);
+    context.font = "700 " + (medR * 0.62) + "px ui-serif, Georgia, 'Times New Roman', serif";
+    context.textAlign = "center"; context.textBaseline = "middle";
+    context.fillText(denom, mx, my + medR * 0.02);
+    context.globalCompositeOperation = "lighter";
+  }
+
+  // --- curved microtext ribbon (real repeating text on an arc) ---
+  context.globalCompositeOperation = "source-over";
+  const micro = ("GUILLOCHÉ · SEED " + design.seed.toUpperCase() + " · ENGINE-TURNED · SPECIMEN · ").repeat(4);
+  const fontPx = Math.max(6, Math.min(pw, ph) * 0.011);
+  // top arc
+  drawTextArc(context, micro.slice(0, 84), pw / 2, ph * 1.9, ph * 1.62, -Math.PI / 2 - 0.34, -Math.PI / 2 + 0.34, fontPx, rgbStr(hi, 0.72), dpr);
+  // bottom straight-ish ribbon rendered as arc (large radius)
+  drawTextArc(context, micro.slice(84, 168), pw / 2, -ph * 0.9, ph * 1.62, Math.PI / 2 - 0.34, Math.PI / 2 + 0.34, fontPx, rgbStr(inks[2], 0.7), dpr);
+
+  // center wordmark
+  context.fillStyle = rgbStr(hi, 0.85);
+  context.font = "700 " + (Math.min(pw,ph)*0.02) + "px ui-sans-serif, 'Segoe UI', Helvetica, Arial, sans-serif";
+  context.textAlign = "center"; context.textBaseline = "middle";
+  context.globalAlpha = 0.9;
+  context.fillText("SPECIMEN", pw / 2, ph - margin - 22 * dpr);
+  context.globalAlpha = 1;
+
+  context.restore();
+}
+
+/* ============================================================
+   Animation loop
+   ============================================================ */
+let lastTs = 0;
+let loopRunning = false;
+function startLoop() {
+  if (loopRunning) return;
+  loopRunning = true;
+  lastTs = 0;
+  requestAnimationFrame(frame);
+}
+function frame(ts) {
+  // reduced-motion: the rich static frame is drawn once (drawStatic); never
+  // burn CPU/GPU re-rendering a still image, so bail out of the rAF loop.
+  if (state.reducedMotion) { loopRunning = false; return; }
+
+  if (!lastTs) lastTs = ts;
+  let dt = (ts - lastTs) / 1000;
+  lastTs = ts;
+  if (dt > 0.1) dt = 0.1; // clamp after tab switch
+
+  // paused: freeze completely and keep the last good frame on the canvas.
+  // (Additive 'lighter' compositing would blow the image out to white if we
+  // kept re-drawing the same frozen strokes, so we simply stop re-compositing.)
+  if (state.paused) { requestAnimationFrame(frame); return; }
+
+  const q = QUALITY[state.quality];
+  const activeDesign = currentActiveDesign();
+
+  // advance time (paused / reduced-motion already returned above)
+  const speed = state.speed;
+  state.time += dt * speed;
+
+  // palette crossfade
+  if (state.palMix < 1) {
+    state.palMix = Math.min(1, state.palMix + dt / 3.0);
+    if (state.palMix >= 1) state.palCurrent = state.palTarget;
+  }
+  // auto palette rotation (unless locked)
+  if (state.paletteLock === null) {
+    state.palAutoTimer += dt * speed;
+    if (state.palAutoTimer > 26 && state.palMix >= 1) {
+      state.palAutoTimer = 0;
+      startPaletteFade((state.palCurrent + 1) % PALETTES.length);
+    }
+  }
+
+  // morph progression
+  if (state.morphing) {
+    state.morphT = Math.min(1, state.morphT + dt / state.morphDur);
+    if (state.morphT >= 1) {
+      state.morphing = false;
+      state.design = state.morphTo;
+      applyDesignPalette(state.design);
+      updateUIFromDesign(state.design, false);
+    }
+  }
+
+  // idle auto-evolve
+  const idle = (performance.now() - state.lastInteract) / 1000;
+  if (state.paletteLock === null) {
+    if (idle > state.idleThreshold && !state.morphing) {
+      autoEvolve();
+    }
+  }
+  const badge = document.getElementById("idleBadge");
+  if (state.autoEvolving && idle > state.idleThreshold - 2) badge.classList.add("show");
+  else badge.classList.remove("show");
+
+  // ---- draw ----
+  // fade prior frame toward background (silky trails)
+  const bg = curBgColor();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = 0.14;               // trail-fade prior frame toward background
+  ctx.fillStyle = rgbStr(bg, 1);
+  ctx.fillRect(0, 0, state.pw, state.ph);
+  ctx.globalAlpha = 1;
+
+  const { inks, hi } = curInks();
+  const globalRot = state.time * activeDesign.globalRotRate;
+
+  renderPattern(ctx, activeDesign, {
+    W: state.W, H: state.H, pw: state.pw, ph: state.ph, dpr: state.dpr,
+    time: state.time, globalRot, inks, hi,
+    quality: state.quality, density: state.density,
+    lineBoost: 1, alphaBoost: 1, additive: true,
+  });
+
+  if (state.frameMode) {
+    drawFrame(ctx, { pw: state.pw, ph: state.ph, dpr: state.dpr, inks, hi, time: state.time, design: activeDesign });
+  }
+
+  requestAnimationFrame(frame);
+}
+
+/* Draw a single rich, multi-pass static frame (prefers-reduced-motion).
+   Rendered once — no rAF loop runs, so a still image costs nothing to hold. */
+function drawStatic() {
+  clearGround(true);
+  const design = currentActiveDesign();
+  const { inks, hi } = curInks();
+  for (let p = 0; p < 8; p++) {
+    state.time = p * 0.6;
+    renderPattern(ctx, design, {
+      W: state.W, H: state.H, pw: state.pw, ph: state.ph, dpr: state.dpr,
+      time: state.time, globalRot: state.time * design.globalRotRate,
+      inks, hi, quality: state.quality, density: state.density,
+      lineBoost: 1, alphaBoost: 1.6, additive: true,
+    });
+  }
+  if (state.frameMode) {
+    drawFrame(ctx, { pw: state.pw, ph: state.ph, dpr: state.dpr, inks, hi, time: state.time, design });
+  }
+}
+
+/* The design that is actually drawn (accounts for morph + overrides) */
+function currentActiveDesign() {
+  let d = state.morphing ? lerpDesign(state.morphFrom, state.morphTo, easeInOut(state.morphT)) : state.design;
+  // symmetry override
+  if (state.symOverride !== null) {
+    d = Object.assign({}, d, { symmetry: state.symOverride });
+  }
+  return d;
+}
+function easeInOut(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+
+/* ============================================================
+   Palette handling
+   ============================================================ */
+function startPaletteFade(idx) {
+  if (idx === state.palCurrent && state.palMix >= 1) return;
+  state.palTarget = idx;
+  state.palMix = 0;
+  updatePaletteUI(idx);
+}
+function applyDesignPalette(design) {
+  if (state.paletteLock !== null) return;
+  startPaletteFade(design.paletteIndex);
+}
+
+/* ============================================================
+   Seed / morph control
+   ============================================================ */
+function loadSeed(seed, opts) {
+  opts = opts || {};
+  const next = makeDesign(seed);
+  if (opts.instant || !state.design) {
+    state.design = next;
+    state.morphing = false;
+    state.morphT = 1;
+    if (state.paletteLock === null) { state.palCurrent = next.paletteIndex; state.palTarget = next.paletteIndex; state.palMix = 1; }
+    updateUIFromDesign(next, true);
+  } else {
+    state.morphFrom = currentActiveDesign();
+    // rebuild a clean "from" without override for stable interpolation
+    state.morphFrom = state.symOverride !== null
+      ? Object.assign({}, state.morphFrom) : state.morphFrom;
+    state.morphTo = next;
+    state.morphT = 0;
+    state.morphing = true;
+    state.symOverride = null; // let symmetry morph to the new design's value
+    if (state.paletteLock === null) startPaletteFade(next.paletteIndex);
+    updateUIFromDesign(next, false);
+  }
+  syncHash();
+}
+
+function autoEvolve() {
+  state.autoEvolving = true;
+  const seed = randomSeed();
+  state.morphFrom = currentActiveDesign();
+  state.morphTo = makeDesign(seed);
+  state.morphT = 0;
+  state.morphing = true;
+  state.symOverride = null;
+  if (state.paletteLock === null) startPaletteFade(state.morphTo.paletteIndex);
+  updateUIFromDesign(state.morphTo, false);
+  syncHash();
+}
+
+/* ============================================================
+   URL hash sync (permalink)
+   ============================================================ */
+let hashTimer = null;
+function syncHash() {
+  if (hashTimer) clearTimeout(hashTimer);
+  hashTimer = setTimeout(() => {
+    const d = state.morphing ? state.morphTo : state.design;
+    const p = new URLSearchParams();
+    p.set("s", d.seed);
+    p.set("den", Math.round(state.density * 100));
+    p.set("spd", Math.round(state.speed * 100));
+    p.set("q", state.quality);
+    if (state.symOverride !== null) p.set("sym", state.symOverride);
+    if (state.paletteLock !== null) p.set("pal", state.paletteLock);
+    if (state.frameMode) p.set("frame", 1);
+    history.replaceState(null, "", "#" + p.toString());
+  }, 250);
+}
+function readHash() {
+  const h = location.hash.replace(/^#/, "");
+  if (!h) return null;
+  const p = new URLSearchParams(h);
+  const seed = p.get("s");
+  if (!seed) return null;
+  return {
+    seed,
+    density: p.has("den") ? clamp(+p.get("den") / 100, 0.1, 1) : 0.6,
+    speed: p.has("spd") ? clamp(+p.get("spd") / 100, 0, 2.5) : 1,
+    quality: p.has("q") ? clamp(+p.get("q") | 0, 0, 4) : 2,
+    sym: p.has("sym") ? clamp(+p.get("sym") | 0, 3, 13) : null,
+    pal: p.has("pal") ? clamp(+p.get("pal") | 0, 0, PALETTES.length - 1) : null,
+    frame: p.get("frame") === "1",
+  };
+}
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+/* ============================================================
+   Exports
+   ============================================================ */
+function download(blobOrUrl, filename) {
+  const a = document.createElement("a");
+  a.href = (blobOrUrl instanceof Blob) ? URL.createObjectURL(blobOrUrl) : blobOrUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  if (blobOrUrl instanceof Blob) setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+function exportPNG(multiplier) {
+  multiplier = multiplier || 2;
+  const design = currentActiveDesign();
+  const W = state.W, H = state.H;
+  let scale = state.dpr * multiplier;
+  // clamp to stay under browser canvas limits (Safari/iOS are the tightest):
+  // cap the longest edge at 8192px and total area at ~32 megapixels.
+  const MAX_EDGE = 8192, MAX_AREA = 32 * 1024 * 1024;
+  scale = Math.min(scale, MAX_EDGE / Math.max(W, H), Math.sqrt(MAX_AREA / (W * H)));
+  scale = Math.max(1, scale);
+  const pw = Math.round(W * scale), ph = Math.round(H * scale);
+  const off = document.createElement("canvas");
+  off.width = pw; off.height = ph;
+  const octx = off.getContext("2d");
+  const bg = curBgColor();
+  octx.fillStyle = rgbStr(bg, 1);
+  octx.fillRect(0, 0, pw, ph);
+  const { inks, hi } = curInks();
+  const globalRot = state.time * design.globalRotRate;
+  // build up density with a few accumulation passes for a rich still
+  const passes = 5;
+  for (let pIdx = 0; pIdx < passes; pIdx++) {
+    renderPattern(octx, design, {
+      W, H, pw, ph, dpr: scale,
+      time: state.time - pIdx * 0.02, globalRot, inks, hi,
+      quality: Math.min(4, state.quality + 1), density: state.density,
+      lineBoost: 1, alphaBoost: 1.15, additive: true,
+    });
+  }
+  if (state.frameMode) {
+    drawFrame(octx, { pw, ph, dpr: scale, inks, hi, time: state.time, design });
+  }
+  off.toBlob((blob) => {
+    if (!blob) { toast("Export too large for this browser"); return; }
+    download(blob, "guilloche-" + design.seed + "@" + multiplier + "x.png");
+    toast("Saved PNG at " + pw + "×" + ph);
+  }, "image/png");
+}
+
+/* SVG export: emit the current frame's strokes as vector paths */
+function exportSVG() {
+  const design = currentActiveDesign();
+  const W = 1600, H = Math.round(1600 * state.H / state.W);
+  const pw = W, ph = H;
+  const cx = pw / 2, cy = ph / 2;
+  const baseScale = Math.min(pw, ph) * 0.46;
+  const bg = curBgColor();
+  const { inks, hi } = curInks();
+  const globalRot = state.time * design.globalRotRate;
+
+  // cap complexity so files stay plotter-friendly
+  const plan = planFrame(design, Math.min(3, state.quality), state.density);
+  let out = [];
+  out.push('<?xml version="1.0" encoding="UTF-8"?>');
+  out.push('<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H +
+           '" viewBox="0 0 ' + W + ' ' + H + '">');
+  out.push('<rect width="100%" height="100%" fill="' + rgbHex(bg) + '"/>');
+  out.push('<g fill="none" stroke-linecap="round" stroke-linejoin="round">');
+
+  for (const it of plan.layers) {
+    const L = it.L;
+    const N = Math.max(60, Math.min(900, it.samples));
+    const buf = new Float64Array(N * 2);
+    const ink = inks[L.inkIndex % inks.length];
+    const copies = Math.min(it.copies, 22);
+    for (let c = 0; c < copies; c++) {
+      const copyFrac = copies > 1 ? c / (copies - 1) : 0.5;
+      rosettePoints(L, design.symmetry, cx, cy, baseScale, copyFrac, state.time, globalRot, buf);
+      const isHi = (c % Math.max(3, Math.round(copies / 3))) === 0 && c > 0;
+      const col = isHi ? hi : ink;
+      let d = "M" + fmt(buf[0]) + " " + fmt(buf[1]);
+      for (let k = 1; k < N; k++) d += "L" + fmt(buf[k * 2]) + " " + fmt(buf[k * 2 + 1]);
+      d += "Z";
+      out.push('<path d="' + d + '" stroke="' + rgbHex(col) + '" stroke-width="0.6" opacity="0.5"/>');
+    }
+  }
+  out.push('</g></svg>');
+  const blob = new Blob([out.join("\n")], { type: "image/svg+xml" });
+  download(blob, "guilloche-" + design.seed + ".svg");
+  toast("Saved SVG (vector / plottable)");
+}
+function fmt(n) { return (Math.round(n * 100) / 100); }
+function rgbHex(c) {
+  const h = (x) => ("0" + Math.max(0, Math.min(255, x | 0)).toString(16)).slice(-2);
+  return "#" + h(c[0]) + h(c[1]) + h(c[2]);
+}
+
+/* ============================================================
+   Gallery strip (curated seeds, live thumbnails)
+   ============================================================ */
+const GALLERY_SEEDS = [
+  "intaglio-vault-4210", "rose-spiral-7781", "cyan-orbit-3355",
+  "copper-weave-9024", "amethyst-dial-1620", "silver-moire-5540",
+  "petal-crest-8890", "gear-ripple-2071", "engrave-seal-6614",
+  "band-facet-4488", "gilt-node-3307", "lathe-filet-9952",
+];
+function buildGallery() {
+  const gal = document.getElementById("gallery");
+  gal.innerHTML = "";
+  for (const seed of GALLERY_SEEDS) {
+    const design = makeDesign(seed);
+    const el = document.createElement("div");
+    el.className = "thumb";
+    el.title = seed;
+    const cv = document.createElement("canvas");
+    const scale = 2;
+    cv.width = 116 * scale; cv.height = 74 * scale;
+    el.appendChild(cv);
+    const label = document.createElement("div");
+    label.className = "name";
+    label.textContent = seed;
+    el.appendChild(label);
+    gal.appendChild(el);
+    renderThumb(cv, design);
+    el.addEventListener("click", () => {
+      state.paletteLock = null;
+      updateLockUI();
+      loadSeed(seed, {});
+      markInteract();
+      toast("Loading " + seed);
+    });
+  }
+}
+function renderThumb(cv, design) {
+  const tctx = cv.getContext("2d");
+  const pw = cv.width, ph = cv.height;
+  const palIdx = design.paletteIndex;
+  const bg = PALETTES[palIdx].bg;
+  tctx.fillStyle = rgbStr(bg, 1);
+  tctx.fillRect(0, 0, pw, ph);
+  const inks = PALETTES[palIdx].inks, hi = PALETTES[palIdx].hi;
+  // accumulate a few time slices for a dense static preview
+  for (let p = 0; p < 6; p++) {
+    renderPattern(tctx, design, {
+      W: pw, H: ph, pw, ph, dpr: 1,
+      time: p * 0.9, globalRot: p * 0.9 * design.globalRotRate,
+      inks, hi, quality: 1, density: 0.7,
+      lineBoost: 0.7, alphaBoost: 1.6, additive: true,
+    });
+  }
+}
+
+/* ============================================================
+   UI wiring
+   ============================================================ */
+const el = (id) => document.getElementById(id);
+
+function buildPaletteSwatches() {
+  const wrap = el("palettes");
+  wrap.innerHTML = "";
+  PALETTES.forEach((p, i) => {
+    const s = document.createElement("div");
+    s.className = "swatch";
+    s.title = p.name;
+    s.tabIndex = 0;
+    s.setAttribute("role", "button");
+    s.setAttribute("aria-label", "Palette " + p.name);
+    s.style.background = "linear-gradient(135deg, " +
+      rgbStr(p.bg, 1) + " 0%, " + rgbStr(p.inks[0], 1) + " 40%, " +
+      rgbStr(p.inks[2], 1) + " 75%, " + rgbStr(p.hi, 1) + " 100%)";
+    const pick = () => {
+      state.paletteLock = i;
+      updateLockUI();
+      startPaletteFade(i);
+      updatePaletteUI(i);
+      markInteract();
+      syncHash();
+    };
+    s.addEventListener("click", pick);
+    s.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); }
+    });
+    wrap.appendChild(s);
+  });
+}
+function updatePaletteUI(idx) {
+  el("palName").textContent = PALETTES[idx].name;
+  const sw = el("palettes").children;
+  for (let i = 0; i < sw.length; i++) sw[i].classList.toggle("active", i === idx);
+}
+
+function updateUIFromDesign(design, syncSlider) {
+  if (syncSlider && state.symOverride === null) {
+    el("sym").value = design.symmetry;
+    el("symVal").textContent = design.symmetry;
+  }
+  el("seedInput").value = design.seed;
+  if (state.paletteLock === null) updatePaletteUI(state.palTarget);
+}
+
+function updateLockUI() {
+  const btn = el("lockBtn");
+  const locked = state.paletteLock !== null;
+  btn.classList.toggle("on", locked);
+  btn.textContent = locked ? "Palette locked" : "Lock palette";
+}
+
+function toast(msg) {
+  const t = el("toast");
+  t.textContent = msg;
+  t.classList.toggle("above-gallery", galleryVisible && !uiHidden);
+  t.classList.add("show");
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+/* ---- controls ---- */
+function wireControls() {
+  el("sym").addEventListener("input", (e) => {
+    state.symOverride = +e.target.value;
+    el("symVal").textContent = e.target.value;
+    markInteract(); syncHash();
+  });
+  el("den").addEventListener("input", (e) => {
+    state.density = +e.target.value / 100;
+    el("denVal").textContent = e.target.value + "%";
+    markInteract(); syncHash();
+  });
+  el("spd").addEventListener("input", (e) => {
+    state.speed = +e.target.value / 100;
+    el("spdVal").textContent = (state.speed).toFixed(1) + "×";
+    markInteract(); syncHash();
+  });
+  el("q").addEventListener("input", (e) => {
+    state.quality = +e.target.value;
+    el("qVal").textContent = QUALITY[state.quality].label;
+    resize();
+    markInteract(); syncHash();
+  });
+  el("reseedBtn").addEventListener("click", () => { newSeed(); });
+  el("seedInput").addEventListener("change", (e) => {
+    const v = e.target.value.trim();
+    if (v) { state.paletteLock = null; updateLockUI(); loadSeed(v, {}); markInteract(); }
+  });
+  el("seedInput").addEventListener("keydown", (e) => { if (e.key === "Enter") e.target.blur(); });
+
+  el("pauseBtn").addEventListener("click", togglePause);
+  el("lockBtn").addEventListener("click", () => {
+    if (state.paletteLock === null) { state.paletteLock = state.palTarget; }
+    else { state.paletteLock = null; }
+    updateLockUI(); markInteract(); syncHash();
+  });
+  el("frameBtn").addEventListener("click", () => {
+    state.frameMode = !state.frameMode;
+    el("frameBtn").classList.toggle("on", state.frameMode);
+    clearGround(true);
+    if (state.reducedMotion) drawStatic();
+    markInteract(); syncHash();
+  });
+  el("fsBtn").addEventListener("click", toggleFullscreen);
+  el("pngBtn").addEventListener("click", () => exportPNG(2));
+  el("svgBtn").addEventListener("click", exportSVG);
+  el("linkBtn").addEventListener("click", copyLink);
+  el("galBtn").addEventListener("click", toggleGallery);
+}
+
+function togglePause() {
+  state.paused = !state.paused;
+  el("pauseBtn").classList.toggle("on", state.paused);
+  el("pauseBtn").textContent = state.paused ? "Play" : "Pause";
+  markInteract();
+}
+function newSeed() {
+  state.paletteLock = null; updateLockUI();
+  loadSeed(randomSeed(), {});
+  markInteract();
+  toast("New design");
+}
+function toggleFullscreen() {
+  const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+  if (!fsEl) {
+    const de = document.documentElement;
+    const req = de.requestFullscreen || de.webkitRequestFullscreen;
+    if (req) Promise.resolve(req.call(de)).catch(() => {});
+    else toast("Fullscreen not supported here");
+  } else {
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    if (exit) Promise.resolve(exit.call(document)).catch(() => {});
+  }
+}
+function copyLink() {
+  syncHash();
+  setTimeout(() => {
+    const url = location.href;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(() => toast("Permalink copied"),
+        () => fallbackCopy(url));
+    } else fallbackCopy(url);
+  }, 300);
+}
+function fallbackCopy(url) {
+  const ta = document.createElement("textarea");
+  ta.value = url; document.body.appendChild(ta); ta.select();
+  try { document.execCommand("copy"); toast("Permalink copied"); }
+  catch (e) { toast("Copy failed — select the URL bar"); }
+  document.body.removeChild(ta);
+}
+let galleryVisible = true;
+function toggleGallery() {
+  galleryVisible = !galleryVisible;
+  el("gallery").classList.toggle("hidden", !galleryVisible);
+  el("galBtn").classList.toggle("on", galleryVisible);
+  markInteract();
+}
+
+/* ---- auto-hide UI on idle mouse ---- */
+let uiHideTimer = null;
+let uiHidden = false;
+function showUI() {
+  if (uiHidden) {
+    el("panel").classList.remove("hidden");
+    if (galleryVisible) el("gallery").classList.remove("hidden");
+    uiHidden = false;
+  }
+  clearTimeout(uiHideTimer);
+  uiHideTimer = setTimeout(hideUI, 3200);
+}
+function hideUI() {
+  el("panel").classList.add("hidden");
+  el("gallery").classList.add("hidden");
+  uiHidden = true;
+}
+function toggleUI() {
+  if (uiHidden) showUI();
+  else hideUI();
+}
+
+/* ---- interaction tracking (resets idle timer) ---- */
+function markInteract() {
+  state.lastInteract = performance.now();
+  if (state.autoEvolving) {
+    state.autoEvolving = false;
+    // let the current morph finish gracefully; just stop chaining new ones
+  }
+}
+
+/* ============================================================
+   Keyboard
+   ============================================================ */
+window.addEventListener("keydown", (e) => {
+  if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
+  switch (e.key.toLowerCase()) {
+    case " ": e.preventDefault(); togglePause(); break;
+    case "h": toggleUI(); break;
+    case "f": toggleFullscreen(); break;
+    case "n": newSeed(); break;
+    case "g": toggleGallery(); break;
+    case "s": exportPNG(2); break;
+    case "v": exportSVG(); break;
+    case "b":
+      state.frameMode = !state.frameMode;
+      el("frameBtn").classList.toggle("on", state.frameMode);
+      clearGround(true);
+      if (state.reducedMotion) drawStatic();
+      syncHash(); break;
+  }
+  markInteract();
+});
+window.addEventListener("mousemove", () => { showUI(); markInteract(); });
+window.addEventListener("mousedown", markInteract);
+window.addEventListener("touchstart", () => { showUI(); markInteract(); }, { passive: true });
+window.addEventListener("resize", resize);
+document.addEventListener("fullscreenchange", () => setTimeout(resize, 60));
+
+/* ============================================================
+   Boot
+   ============================================================ */
+function init() {
+  // reduced motion
+  const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+  state.reducedMotion = mq.matches;
+  if (mq.addEventListener) mq.addEventListener("change", (e) => {
+    state.reducedMotion = e.matches;
+    el("idleText").textContent = e.matches ? "reduced motion" : "auto-evolving";
+    if (e.matches) {
+      drawStatic();          // running loop stops itself on its next tick
+    } else {
+      startLoop();           // resume the animation
+    }
+  });
+  if (state.reducedMotion) el("idleText").textContent = "reduced motion";
+
+  buildPaletteSwatches();
+  wireControls();
+  buildGallery();
+
+  // load from hash or fresh seed
+  const h = readHash();
+  if (h) {
+    state.density = h.density;
+    state.speed = h.speed;
+    state.quality = h.quality;
+    state.symOverride = h.sym;
+    state.paletteLock = h.pal;
+    state.frameMode = h.frame;
+  }
+  el("den").value = Math.round(state.density * 100);
+  el("denVal").textContent = Math.round(state.density * 100) + "%";
+  el("spd").value = Math.round(state.speed * 100);
+  el("spdVal").textContent = state.speed.toFixed(1) + "×";
+  el("q").value = state.quality;
+  el("qVal").textContent = QUALITY[state.quality].label;
+  el("frameBtn").classList.toggle("on", state.frameMode);
+
+  resize();
+
+  const seed = h ? h.seed : randomSeed();
+  loadSeed(seed, { instant: true });
+
+  if (state.symOverride !== null) {
+    el("sym").value = state.symOverride;
+    el("symVal").textContent = state.symOverride;
+  }
+  if (state.paletteLock !== null) {
+    state.palCurrent = state.palTarget = state.paletteLock;
+    state.palMix = 1;
+    updatePaletteUI(state.paletteLock);
+  }
+  updateLockUI();
+  el("galBtn").classList.toggle("on", galleryVisible);
+  el("pauseBtn").classList.toggle("on", state.paused);
+
+  state.lastInteract = performance.now();
+  showUI();
+
+  if (state.reducedMotion) {
+    drawStatic();          // one rich still frame; no animation loop
+  } else {
+    startLoop();
+  }
+}
+
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+else init();
+
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Repoussé — pin-art desk toy</title>
+<style>
+  :root{ --bg:#0c0d10; --panel:rgba(18,20,26,.82); --ink:#e8e6df; --dim:#8b8f99; --accent:#ff8a3c; }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{ height:100%; }
+  body{ background:var(--bg); color:var(--ink); font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+        overflow:hidden; -webkit-user-select:none; user-select:none; touch-action:none; }
+  #c{ position:fixed; inset:0; display:block; cursor:crosshair; }
+  #ui{ position:fixed; left:50%; bottom:16px; transform:translateX(-50%); display:flex; flex-wrap:wrap; gap:8px;
+       align-items:center; justify-content:center; padding:10px 14px; max-width:min(94vw,880px);
+       background:var(--panel); border:1px solid rgba(255,255,255,.08); border-radius:14px;
+       -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); box-shadow:0 8px 40px rgba(0,0,0,.5); }
+  #ui input[type=text]{ width:160px; }
+  input[type=text],select{ background:#1c1f27; color:var(--ink); border:1px solid rgba(255,255,255,.12);
+       border-radius:8px; padding:7px 9px; font:inherit; outline:none; }
+  input[type=text]:focus,select:focus{ border-color:var(--accent); }
+  button{ background:#232733; color:var(--ink); border:1px solid rgba(255,255,255,.12); border-radius:8px;
+       padding:7px 12px; font:inherit; cursor:pointer; transition:.12s; }
+  button:hover{ background:#2e3342; border-color:rgba(255,255,255,.25); }
+  button.on{ background:var(--accent); color:#1a1206; border-color:var(--accent); font-weight:600; }
+  .slider{ display:flex; align-items:center; gap:6px; color:var(--dim); }
+  .slider input{ width:78px; accent-color:var(--accent); }
+  .slider .val{ font:11px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; color:var(--dim); min-width:30px; text-align:right; }
+  #title{ position:fixed; left:18px; top:14px; pointer-events:none; }
+  #title h1{ font-size:15px; letter-spacing:.14em; text-transform:uppercase; font-weight:600; color:var(--accent); }
+  #title p{ font-size:11px; color:var(--dim); margin-top:2px; max-width:260px; }
+  #hint{ position:fixed; right:18px; top:14px; text-align:right; color:var(--dim); font-size:11px; pointer-events:none; line-height:1.6; }
+  kbd{ background:#232733; border:1px solid rgba(255,255,255,.14); border-radius:4px; padding:1px 5px; color:var(--ink); font-size:10px; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="title">
+  <h1>Repoussé</h1>
+  <p>Press a raised metal relief into a field of shimmering pins. The board holds what you push.</p>
+</div>
+<div id="hint">
+  <kbd>drag</kbd> press relief up · <kbd>alt/right-drag</kbd> push in<br>
+  drag the <span style="color:var(--accent)">glow</span> to rake the light · <kbd>dbl-click</kbd> shake flat
+</div>
+<div id="ui">
+  <input type="text" id="word" placeholder="type to emboss…" maxlength="14" autocomplete="off" spellcheck="false">
+  <button id="embossBtn">Emboss</button>
+  <button id="dirBtn" title="press direction (or hold Alt / right-drag)">Raise ↑</button>
+  <button id="rndBtn">Randomize</button>
+  <button id="invBtn">Invert</button>
+  <button id="flatBtn">Flatten</button>
+  <select id="mat" title="material">
+    <option value="brass">Brushed Brass</option>
+    <option value="chrome">Chrome</option>
+    <option value="steel">Black Steel</option>
+    <option value="copper">Copper</option>
+  </select>
+  <label class="slider">R<input type="range" id="rad" min="1.5" max="9" step="0.5" value="4"><span id="radVal" class="val">4.0</span></label>
+  <label class="slider">Force<input type="range" id="str" min="0.05" max="0.6" step="0.05" value="0.28"><span id="strVal" class="val">0.28</span></label>
+  <button id="recBtn">● Record loop</button>
+  <button id="pngBtn">PNG</button>
+</div>
+<script>
+"use strict";
+const cv=document.getElementById('c'), ctx=cv.getContext('2d');
+const GW=90, GH=54, N=GW*GH;
+const HG=8;            // height→cell-units gain (how tall a full pin stands)
+const target=new Float32Array(N), disp=new Float32Array(N), vel=new Float32Array(N);
+let cell=10, bx=0, by=0, dpr=1;
+
+// materials: base color, specular color, specular exponent, ambient, specular strength
+const MATS={
+  brass:{ base:[181,140,58], spec:[255,244,196], exp:9,  amb:0.16, ss:0.9 },
+  chrome:{ base:[172,178,188], spec:[255,255,255], exp:34, amb:0.20, ss:1.25 },
+  steel:{ base:[70,76,86],   spec:[196,214,240], exp:20, amb:0.12, ss:1.0 },
+  copper:{ base:[176,104,66], spec:[255,214,176], exp:12, amb:0.16, ss:0.95 }
+};
+let mat=MATS.brass;
+
+// light in grid coordinates (i,j) plus height Lz (in cell units)
+let Lgx=GW*0.28, Lgy=GH*0.24, Lz=26;
+
+// --- interaction state ---
+let dragging=false, dragLight=false, pressDir=1, dirDefault=1, exporting=false, recording=false, orbiting=false, orbT=0;
+let recorder=null, chunks=[];
+
+function resize(){
+  dpr=Math.min(window.devicePixelRatio||1,2);
+  cv.width=innerWidth*dpr; cv.height=innerHeight*dpr;
+  cv.style.width=innerWidth+'px'; cv.style.height=innerHeight+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  cell=Math.min(innerWidth/(GW+2), innerHeight/(GH+2));
+  bx=(innerWidth-cell*GW)/2; by=(innerHeight-cell*GH)/2;
+  requestRender();
+}
+addEventListener('resize',resize);
+
+// --- rendering: shade each pin by the local height-gradient normal ---
+function render(){
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  // dark board with a soft vignette
+  const g=ctx.createRadialGradient(innerWidth/2,innerHeight/2,60, innerWidth/2,innerHeight/2, Math.max(innerWidth,innerHeight)*0.75);
+  g.addColorStop(0,'#15171d'); g.addColorStop(1,'#070809');
+  ctx.fillStyle=g; ctx.fillRect(0,0,innerWidth,innerHeight);
+
+  const [br,bg,bb]=mat.base,[sr,sg,sb]=mat.spec, amb=mat.amb, ss=mat.ss, sexp=mat.exp;
+  const r0=cell*0.44;
+  for(let j=0;j<GH;j++){
+    for(let i=0;i<GW;i++){
+      const idx=j*GW+i, h=disp[idx];
+      // neighbours (clamped)
+      const hl=disp[idx-(i>0?1:0)], hr=disp[idx+(i<GW-1?1:0)];
+      const hu=disp[idx-(j>0?GW:0)], hd=disp[idx+(j<GH-1?GW:0)];
+      // surface normal in grid space
+      let nx=-(hr-hl)*0.5*HG, ny=-(hd-hu)*0.5*HG, nz=1;
+      let nl=Math.hypot(nx,ny,nz); nx/=nl; ny/=nl; nz/=nl;
+      // light vector from this pin toward the light
+      let lx=Lgx-(i+0.5), ly=Lgy-(j+0.5), lz=Lz-h*HG;
+      let ll=Math.hypot(lx,ly,lz); lx/=ll; ly/=ll; lz/=ll;
+      let diff=nx*lx+ny*ly+nz*lz; if(diff<0)diff=0;
+      // specular via half-vector (view straight down: 0,0,1)
+      let hx=lx, hy=ly, hz=lz+1, hn=Math.hypot(hx,hy,hz); hx/=hn; hy/=hn; hz/=hn;
+      let sp=nx*hx+ny*hy+nz*hz; sp=sp>0?Math.pow(sp,sexp)*ss:0;
+      // valley ambient occlusion: darker when sitting below neighbours' average
+      const navg=(hl+hr+hu+hd)*0.25;
+      let ao=1-Math.max(0,navg-h)*1.6; if(ao<0.35)ao=0.35;
+      const shade=(amb+diff*(1-amb))*ao;
+      const R=(br*shade+sr*sp)|0, G=(bg*shade+sg*sp)|0, B=(bb*shade+sb*sp)|0;
+      const cx=bx+(i+0.5)*cell, cy=by+(j+0.5)*cell;
+      const rad=Math.max(cell*0.16, r0*(1+h*0.55));
+      // contact shadow: a faint dark dot cast opposite the light, deeper for raised pins
+      if(h>0.03){
+        ctx.fillStyle='rgba(0,0,0,'+Math.min(0.5,h*0.5)+')';
+        ctx.beginPath(); ctx.arc(cx-lx*rad*0.5, cy-ly*rad*0.5, rad*0.92, 0, 6.2832); ctx.fill();
+      }
+      ctx.fillStyle='rgb('+clamp255(R)+','+clamp255(G)+','+clamp255(B)+')';
+      ctx.beginPath(); ctx.arc(cx,cy,rad,0,6.2832); ctx.fill();
+      // tiny specular glint offset toward the light — the metallic sheen
+      if(sp>0.12){
+        ctx.fillStyle='rgba('+sr+','+sg+','+sb+','+Math.min(0.85,sp)+')';
+        ctx.beginPath(); ctx.arc(cx+lx*rad*0.38, cy+ly*rad*0.38, rad*0.34,0,6.2832); ctx.fill();
+      }
+    }
+  }
+  // the draggable light handle (skipped for a clean still-frame PNG export)
+  if(!exporting){
+    const px=bx+Lgx*cell, py=by+Lgy*cell;
+    const lg=ctx.createRadialGradient(px,py,0,px,py,26);
+    lg.addColorStop(0,'rgba(255,236,190,.95)'); lg.addColorStop(1,'rgba(255,190,90,0)');
+    ctx.fillStyle=lg; ctx.beginPath(); ctx.arc(px,py,26,0,6.2832); ctx.fill();
+  }
+}
+function clamp255(v){ return v<0?0:v>255?255:v; }
+
+// --- spring settle so pressing feels physical (with a little jiggle) ---
+function step(){
+  let moving=false;
+  for(let k=0;k<N;k++){
+    const f=(target[k]-disp[k])*0.35;      // stiffness
+    vel[k]=(vel[k]+f)*0.72;                 // damping → slight overshoot / jiggle
+    disp[k]+=vel[k];
+    if(Math.abs(vel[k])>1e-4||Math.abs(target[k]-disp[k])>1e-4) moving=true;
+  }
+  if(!moving){ disp.set(target); vel.fill(0); }
+  return moving;
+}
+let renderQueued=false;
+function requestRender(){ if(!renderQueued){ renderQueued=true; requestAnimationFrame(frame); } }
+function frame(){
+  renderQueued=false;
+  if(orbiting) advanceOrbit();
+  const moving=step();
+  render();
+  if(moving||dragging||orbiting) requestRender();
+}
+
+// --- pressing a smooth Gaussian relief into the field ---
+function stamp(gi,gj,dir){
+  const R=parseFloat(rad.value), s=parseFloat(str.value)*dir, s2=R*R*0.5;
+  const i0=Math.max(0,(gi-R-1)|0), i1=Math.min(GW-1,(gi+R+1)|0);
+  const j0=Math.max(0,(gj-R-1)|0), j1=Math.min(GH-1,(gj+R+1)|0);
+  for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){
+    const d2=(i-gi)*(i-gi)+(j-gj)*(j-gj);
+    let v=target[j*GW+i]+s*Math.exp(-d2/s2);
+    target[j*GW+i]=v>1.25?1.25:v<-1.25?-1.25:v;
+  }
+}
+
+// --- pointer handling: grab the glow to move light, otherwise press ---
+function evPos(e){ return {x:(e.touches?e.touches[0].clientX:e.clientX), y:(e.touches?e.touches[0].clientY:e.clientY)}; }
+function overLight(p){ return Math.hypot(p.x-(bx+Lgx*cell),p.y-(by+Lgy*cell))<28; }
+function down(e){
+  if(e.touches) e.preventDefault();   // suppress the synthetic mousedown mobile browsers emulate
+  const p=evPos(e);
+  if(overLight(p)){ dragLight=true; }
+  // a held modifier flips whichever direction the Raise/Carve toggle is set to
+  else { dragging=true; pressDir=(e.button===2||e.altKey||e.shiftKey)?-dirDefault:dirDefault; press(p); }
+  requestRender();
+}
+function move(e){
+  if(!dragging&&!dragLight){
+    // discoverability: grab cursor when hovering the light glow
+    if(!e.touches) cv.style.cursor=overLight(evPos(e))?'grab':'crosshair';
+    return;
+  }
+  const p=evPos(e); e.preventDefault();
+  if(dragLight){ cv.style.cursor='grabbing'; Lgx=Math.max(-6,Math.min(GW+6,(p.x-bx)/cell)); Lgy=Math.max(-6,Math.min(GH+6,(p.y-by)/cell)); }
+  else press(p);
+  requestRender();
+}
+function press(p){ stamp((p.x-bx)/cell-0.5, (p.y-by)/cell-0.5, pressDir); }
+function up(){ dragging=false; dragLight=false; }
+cv.addEventListener('mousedown',down); addEventListener('mousemove',move); addEventListener('mouseup',up);
+cv.addEventListener('touchstart',down,{passive:false}); addEventListener('touchmove',move,{passive:false}); addEventListener('touchend',up);
+cv.addEventListener('contextmenu',e=>e.preventDefault());
+cv.addEventListener('dblclick',()=>shakeFlat());
+
+// --- content generators -------------------------------------------------
+function embossText(word){
+  const w=word.trim().toUpperCase(); if(!w) return;
+  const t=document.createElement('canvas'); t.width=GW; t.height=GH;
+  const tc=t.getContext('2d'); tc.fillStyle='#000'; tc.fillRect(0,0,GW,GH);
+  tc.fillStyle='#fff'; tc.textAlign='center'; tc.textBaseline='middle';
+  let fs=GH*0.78; tc.font='900 '+fs+'px Arial Black,Arial,sans-serif';
+  while(tc.measureText(w).width>GW*0.9 && fs>6){ fs-=1; tc.font='900 '+fs+'px Arial Black,Arial,sans-serif'; }
+  tc.fillText(w, GW/2, GH/2+1);
+  const d=tc.getImageData(0,0,GW,GH).data;
+  for(let k=0;k<N;k++) target[k]=(d[k*4]/255)*1.0;
+  writeHash({t:w});
+}
+function randomize(seed){
+  const s=seed===undefined?(Math.random()*1e9|0):seed;
+  const hash=(x,y)=>{ let n=(x*374761393+y*668265263+s*1442695041)>>>0; n=(n^(n>>13))*1274126177; return ((n^(n>>16))>>>0)/4294967295; };
+  const vn=(x,y)=>{ const xi=Math.floor(x),yi=Math.floor(y),fx=x-xi,fy=y-yi;
+    const u=fx*fx*(3-2*fx),v=fy*fy*(3-2*fy);
+    const a=hash(xi,yi),b=hash(xi+1,yi),c=hash(xi,yi+1),d=hash(xi+1,yi+1);
+    return a*(1-u)*(1-v)+b*u*(1-v)+c*(1-u)*v+d*u*v; };
+  for(let j=0;j<GH;j++)for(let i=0;i<GW;i++){
+    let f=0.09, amp=1, sum=0, tot=0;
+    for(let o=0;o<4;o++){ sum+=vn(i*f,j*f)*amp; tot+=amp; amp*=0.5; f*=2.1; }
+    target[j*GW+i]=(sum/tot-0.35)*1.9;
+  }
+  writeHash({n:s});
+}
+function invert(){ for(let k=0;k<N;k++) target[k]=-target[k]; }
+function flatten(){ target.fill(0); clearHashContent(); }
+function shakeFlat(){ target.fill(0); for(let k=0;k<N;k++) vel[k]=(Math.random()-0.5)*0.9; clearHashContent(); requestRender(); }
+
+// --- material + persistence --------------------------------------------
+function setMat(name){ mat=MATS[name]||MATS.brass; document.getElementById('mat').value=name in MATS?name:'brass'; requestRender(); }
+let curHash={m:'brass'};
+function writeHash(content){ curHash={m:document.getElementById('mat').value, ...content}; syncHash(); }
+function clearHashContent(){ curHash={m:document.getElementById('mat').value}; syncHash(); }
+function syncHash(){
+  const p=new URLSearchParams(); for(const k in curHash) if(curHash[k]!==undefined) p.set(k,curHash[k]);
+  history.replaceState(null,'','#'+p.toString());
+}
+function loadHash(){
+  const p=new URLSearchParams(location.hash.slice(1));
+  if(p.get('m')) setMat(p.get('m'));
+  if(p.get('t')){ document.getElementById('word').value=p.get('t'); embossText(p.get('t')); }
+  else if(p.get('n')!==null && p.get('n')!==''){ randomize(parseInt(p.get('n'),10)|0); }
+  else randomize();
+  disp.set(target); // start settled on load
+}
+
+// --- animated light-orbit record loop → WebM ---------------------------
+function advanceOrbit(){
+  orbT+=0.02;
+  Lgx=GW/2 + Math.cos(orbT)*GW*0.42;
+  Lgy=GH/2 + Math.sin(orbT)*GH*0.42;
+  if(orbT>=6.2832){ stopRecord(); }
+}
+function toggleRecord(){
+  if(recording){ stopRecord(); return; }
+  if(typeof MediaRecorder==='undefined' || !cv.captureStream || !MediaRecorder.isTypeSupported('video/webm')){
+    alert('WebM recording is not supported in this browser (try Chrome, Edge, or Firefox).'); return;
+  }
+  chunks=[]; const stream=cv.captureStream(30);
+  const mime=MediaRecorder.isTypeSupported('video/webm;codecs=vp9')?'video/webm;codecs=vp9':'video/webm';
+  try{
+    recorder=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:8e6});
+  }catch(err){
+    alert('Could not start recording: '+err.message); return;
+  }
+  recorder.ondataavailable=e=>{ if(e.data.size)chunks.push(e.data); };
+  recorder.onstop=()=>{ const blob=new Blob(chunks,{type:'video/webm'}); dl(URL.createObjectURL(blob),'repousse-loop.webm',true); };
+  recording=true; orbiting=true; orbT=0;
+  document.getElementById('recBtn').classList.add('on');
+  document.getElementById('recBtn').textContent='■ Recording…';
+  recorder.start(); requestRender();
+}
+function stopRecord(){
+  orbiting=false; recording=false;
+  if(recorder&&recorder.state!=='inactive') recorder.stop();
+  const b=document.getElementById('recBtn'); b.classList.remove('on'); b.textContent='● Record loop';
+}
+function dl(url,name,revoke){ const a=document.createElement('a'); a.href=url; a.download=name; a.click(); if(revoke)setTimeout(()=>URL.revokeObjectURL(url),1000); }
+
+// --- wire up UI ---------------------------------------------------------
+const word=document.getElementById('word'), rad=document.getElementById('rad'), str=document.getElementById('str');
+const radVal=document.getElementById('radVal'), strVal=document.getElementById('strVal');
+document.getElementById('embossBtn').onclick=()=>{ embossText(word.value); requestRender(); };
+word.addEventListener('keydown',e=>{ if(e.key==='Enter'){ embossText(word.value); requestRender(); } });
+document.getElementById('rndBtn').onclick=()=>{ randomize(); requestRender(); };
+document.getElementById('invBtn').onclick=()=>{ invert(); requestRender(); };
+document.getElementById('flatBtn').onclick=()=>{ flatten(); requestRender(); };
+document.getElementById('mat').onchange=e=>{ setMat(e.target.value); curHash.m=e.target.value; syncHash(); };
+document.getElementById('recBtn').onclick=toggleRecord;
+// Raise / Carve direction toggle — makes the push-in mode reachable by touch and discoverable to mouse users
+const dirBtn=document.getElementById('dirBtn');
+dirBtn.onclick=()=>{ dirDefault=-dirDefault; dirBtn.textContent=dirDefault>0?'Raise ↑':'Carve ↓'; dirBtn.classList.toggle('on',dirDefault<0); };
+// live slider readouts
+rad.addEventListener('input',()=>{ radVal.textContent=parseFloat(rad.value).toFixed(1); });
+str.addEventListener('input',()=>{ strVal.textContent=parseFloat(str.value).toFixed(2); });
+// clean still-frame PNG: hide the light handle for one render, then restore
+document.getElementById('pngBtn').onclick=()=>{ exporting=true; render(); const url=cv.toDataURL('image/png'); exporting=false; render(); dl(url,'repousse.png'); };
+
+resize();
+loadHash();
+requestRender();
+</script>
+</body>
+</html>

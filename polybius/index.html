@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polybius Square Cipher — encode & decode</title>
+<meta name="description" content="Encode and decode with the Polybius square cipher — each letter becomes a row/column digit pair on a 5×5 grid, with an optional keyword. Offline, no tracking.">
+<style>
+  :root{
+    --c:#5b21b6;
+    --bg:#f6f4fc; --card:#ffffff; --fg:#181327; --muted:#67617e;
+    --line:#e7e2f3; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#120f1c; --card:#1c1729; --fg:#eeebf7; --muted:#a39bba;
+    --line:#2f2a44; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.4rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .mode{display:flex;gap:8px;margin-bottom:16px}
+  .mode button{flex:1;padding:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);
+    border-radius:10px;cursor:pointer;font-weight:600}
+  .mode button.on{background:var(--c);color:#fff;border-color:var(--c)}
+  label{display:block;font-size:.82rem;font-weight:600;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+  input[type=text],textarea{width:100%;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  textarea{min-height:80px;resize:vertical;font-family:ui-monospace,Menlo,Consolas,monospace}
+  input:focus,textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .out .txt{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:1.2rem;letter-spacing:.1em;word-break:break-all;
+    background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px;min-height:24px;margin-top:6px}
+  .copy{margin-top:10px;background:var(--c);color:#fff;border:0;border-radius:10px;padding:9px 16px;cursor:pointer;font-weight:600}
+  .layout{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;margin-top:6px}
+  .layout .left{flex:1 1 320px}
+  .square{border-collapse:collapse;flex:0 0 auto}
+  .square td,.square th{width:36px;height:36px;text-align:center;border:1px solid var(--line);font-family:ui-monospace,monospace}
+  .square th{color:var(--muted);font-weight:700;background:var(--bg)}
+  .square td{font-weight:700}
+  h2{font-size:1rem;margin:0 0 10px}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+  .note{color:var(--muted);font-size:.9rem}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🔢</div>
+  <div>
+    <h1>Polybius Square</h1>
+    <p>5×5 coordinate cipher — encode &amp; decode</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="mode">
+      <button id="mEnc" class="on">Encode</button>
+      <button id="mDec">Decode</button>
+    </div>
+    <label for="key">Keyword (optional — scrambles the square)</label>
+    <input type="text" id="key" spellcheck="false" placeholder="leave blank for A–Z">
+    <label for="msg" id="msgLabel" style="margin-top:14px">Message</label>
+    <textarea id="msg" spellcheck="false">HELLO</textarea>
+    <div class="out">
+      <label>Result</label>
+      <div class="txt" id="out"></div>
+      <button class="copy" id="copy">Copy</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="layout">
+      <div class="left">
+        <h2>The square (I/J share a cell)</h2>
+        <p class="note">Each letter is replaced by its <b>row</b> then <b>column</b> number (1–5). So on the standard grid A = 11, H = 23, Z = 55. A keyword fills the grid first, then the remaining letters.</p>
+      </div>
+      <table class="square" id="grid"></table>
+    </div>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function buildSquare(key){
+    var seen = {}, out = '';
+    var src = String(key || '').toUpperCase().replace(/J/g, 'I').replace(/[^A-Z]/g, '') + 'ABCDEFGHIKLMNOPQRSTUVWXYZ';
+    for(var i = 0; i < src.length; i++){
+      var ch = src[i];
+      if(ch === 'J') ch = 'I';
+      if(ch >= 'A' && ch <= 'Z' && !seen[ch]){ seen[ch] = 1; out += ch; }
+    }
+    return out; // 25 letters, row-major
+  }
+  function encode(text, key){
+    var sq = buildSquare(key), out = '';
+    String(text).toUpperCase().replace(/J/g, 'I').replace(/[A-Z]/g, function(ch){
+      var idx = sq.indexOf(ch);
+      out += (Math.floor(idx / 5) + 1).toString() + (idx % 5 + 1).toString();
+      return ch;
+    });
+    return out;
+  }
+  function decode(code, key){
+    var sq = buildSquare(key);
+    var digits = (String(code).match(/[1-5]/g) || []).join('');
+    var out = '';
+    for(var i = 0; i + 2 <= digits.length; i += 2){
+      var r = +digits[i] - 1, c = +digits[i + 1] - 1;
+      out += sq[r * 5 + c];
+    }
+    return out;
+  }
+
+  if(typeof module !== 'undefined') module.exports = { buildSquare:buildSquare, encode:encode, decode:decode };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var key=document.getElementById('key'), msg=document.getElementById('msg'), out=document.getElementById('out'), grid=document.getElementById('grid');
+    var mEnc=document.getElementById('mEnc'), mDec=document.getElementById('mDec'), msgLabel=document.getElementById('msgLabel');
+    var mode='enc';
+    function group(s){ return s.replace(/(\d\d)/g, '$1 ').trim(); }
+    function render(){
+      var sq = buildSquare(key.value);
+      var rowsHtml = '<tr><th></th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></tr>';
+      for(var r = 0; r < 5; r++){
+        rowsHtml += '<tr><th>' + (r + 1) + '</th>';
+        for(var c = 0; c < 5; c++){
+          var ch = sq[r * 5 + c];
+          rowsHtml += '<td>' + (ch === 'I' ? 'I/J' : ch) + '</td>';
+        }
+        rowsHtml += '</tr>';
+      }
+      grid.innerHTML = rowsHtml;
+      out.textContent = mode === 'enc' ? group(encode(msg.value, key.value)) : decode(msg.value, key.value);
+    }
+    [key,msg].forEach(function(el){ el.addEventListener('input', render); });
+    mEnc.addEventListener('click', function(){ mode='enc'; mEnc.classList.add('on'); mDec.classList.remove('on'); msgLabel.textContent='Message'; msg.value='HELLO'; render(); });
+    mDec.addEventListener('click', function(){ mode='dec'; mDec.classList.add('on'); mEnc.classList.remove('on'); msgLabel.textContent='Digits'; msg.value='23 15 31 31 34'; render(); });
+    document.getElementById('copy').addEventListener('click', function(){ if(navigator.clipboard) navigator.clipboard.writeText(out.textContent.replace(/ /g,'')); });
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('polybius-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('polybius-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+
+    render();
+  }
+</script>
+</body>
+</html>

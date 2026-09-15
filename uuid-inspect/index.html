@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UuidInspect — UUID Version, Variant & Timestamp Inspector</title>
+<meta name="description" content="Validate a UUID and reveal its version, variant, and embedded timestamp (v1 and v7). Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('uuid-inspect-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#7c3aed;
+    --bg:#f6f5f9; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e7e2ee; --shadow:0 1px 3px rgba(0,0,0,.08); --ok:#16a34a; --bad:#dc2626;
+  }
+  [data-theme="dark"]{
+    --bg:#120f17; --card:#1b1622; --fg:#f0ecf5; --muted:#a094ab; --line:#2d2738; --shadow:0 1px 3px rgba(0,0,0,.5); --ok:#4ade80; --bad:#f87171;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#5b21b6);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:720px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font-family:"SF Mono",Menlo,Consolas,monospace;font-size:1rem}
+  .status{margin-top:12px;font-weight:700}
+  .status.ok{color:var(--ok)} .status.bad{color:var(--bad)}
+  .rows{margin-top:8px}
+  .r{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line)}
+  .r span{color:var(--muted)}
+  .r b{font-family:"SF Mono",Menlo,Consolas,monospace}
+  .presets{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .presets button{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:999px;padding:5px 12px;cursor:pointer;font:inherit;font-size:.8rem}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🆔</div>
+    <div><h1>UuidInspect</h1><div class="sub">Version, variant &amp; embedded timestamp of a UUID</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="uuid">UUID</label>
+    <input id="uuid" value="017f22e2-79b0-7cc3-98c4-dc0c0c07398f" spellcheck="false" autocapitalize="off">
+    <div class="status" id="status"></div>
+    <div class="presets" id="presets"></div>
+  </div>
+  <div class="card">
+    <div class="rows" id="rows"></div>
+  </div>
+</main>
+<footer>
+  100% offline. Nothing leaves your browser. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/uuid-inspect">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  const GREGORIAN_OFFSET = 122192928000000000n; // 100-ns intervals from 1582-10-15 to 1970-01-01
+
+  function inspectUuid(uuid){
+    const s = String(uuid).trim();
+    if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return { valid: false };
+    const version = parseInt(s[14], 16);
+    const variantNibble = parseInt(s[19], 16);
+    let variant;
+    if(variantNibble >= 0x8 && variantNibble <= 0xb) variant = 'RFC 4122';
+    else if(variantNibble <= 0x7) variant = 'NCS (legacy)';
+    else if(variantNibble === 0xc || variantNibble === 0xd) variant = 'Microsoft GUID';
+    else variant = 'Reserved';
+
+    const res = { valid: true, version, variant };
+    if(/^0{8}-0{4}-0{4}-0{4}-0{12}$/i.test(s)) res.special = 'nil';
+    else if(/^f{8}-f{4}-f{4}-f{4}-f{12}$/i.test(s)) res.special = 'max';
+
+    const hex = s.replace(/-/g, '');
+    if(version === 1){
+      const timeLow = BigInt('0x' + hex.slice(0, 8));
+      const timeMid = BigInt('0x' + hex.slice(8, 12));
+      const timeHi = BigInt('0x' + hex.slice(12, 16)) & 0x0fffn;
+      const ticks = (timeHi << 48n) | (timeMid << 32n) | timeLow;
+      const unixMs = Number((ticks - GREGORIAN_OFFSET) / 10000n);
+      res.unixMs = unixMs;
+      res.timestamp = new Date(unixMs).toISOString();
+    } else if(version === 7){
+      const unixMs = parseInt(hex.slice(0, 12), 16);
+      res.unixMs = unixMs;
+      res.timestamp = new Date(unixMs).toISOString();
+    }
+    return res;
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('rows')){
+    const $ = id => document.getElementById(id);
+    const PRESETS = [
+      ['v1', '6ba7b810-9dad-11d1-80b4-00c04fd430c8'],
+      ['v4', '9b2e4d8f-1c3a-4b5e-8f6d-2a1b3c4d5e6f'],
+      ['v7', '017f22e2-79b0-7cc3-98c4-dc0c0c07398f'],
+      ['nil', '00000000-0000-0000-0000-000000000000']
+    ];
+
+    function render(){
+      const r = inspectUuid($('uuid').value);
+      if(!r.valid){
+        $('status').textContent = '✗ Not a valid UUID';
+        $('status').className = 'status bad';
+        $('rows').innerHTML = '';
+        return;
+      }
+      $('status').textContent = '✓ Valid UUID' + (r.special ? ` (${r.special} UUID)` : '');
+      $('status').className = 'status ok';
+      const rows = [
+        ['Version', r.version],
+        ['Variant', r.variant]
+      ];
+      if(r.timestamp){ rows.push(['Timestamp', r.timestamp]); rows.push(['Unix ms', r.unixMs.toLocaleString()]); }
+      $('rows').innerHTML = rows.map(([k, v]) => `<div class="r"><span>${k}</span><b>${v}</b></div>`).join('');
+    }
+
+    $('presets').innerHTML = PRESETS.map((p, i) => `<button type="button" data-i="${i}">${p[0]}</button>`).join('');
+    $('presets').addEventListener('click', e => {
+      const b = e.target.closest('button'); if(!b) return;
+      $('uuid').value = PRESETS[+b.dataset.i][1]; render();
+    });
+    $('uuid').addEventListener('input', render);
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('uuid-inspect-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { inspectUuid };
+</script>
+</body>
+</html>

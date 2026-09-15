@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tap Code — encode &amp; decode the Polybius tap cipher</title>
+<meta name="description" content="Translate text to and from Tap Code — the 5×5 Polybius-square knock cipher famously used by POWs. Each letter is two groups of taps (row, column). K shares C. Offline, no tracking.">
+<style>
+  :root{
+    --c:#db2777;
+    --bg:#fbecf3; --card:#ffffff; --fg:#1c0812; --muted:#6d4556;
+    --line:#f3d5e3; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#16060d; --card:#230d17; --fg:#f4e3ec; --muted:#c295a9;
+    --line:#3a1825; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:800px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto;font-weight:700}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:800px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  textarea{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.05rem;font-weight:600;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);min-height:74px;resize:vertical}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .out{margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--bg);font-family:ui-monospace,monospace;min-height:2.4em;word-break:break-word;font-size:1.15rem;letter-spacing:.05em}
+  .seg{display:flex;gap:8px;margin-bottom:14px}
+  .seg button{flex:1;padding:9px;border:1px solid var(--line);background:var(--bg);color:var(--muted);border-radius:10px;cursor:pointer;font-weight:600}
+  .seg button.on{background:var(--c);color:#fff;border-color:var(--c)}
+  .grid{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-top:14px;font-family:ui-monospace,monospace;font-size:.9rem;text-align:center}
+  .grid div{padding:6px;border:1px solid var(--line);border-radius:6px}
+  .grid .h{color:var(--muted);border:none}
+  .err{color:#dc2626;font-size:.86rem;margin-top:10px;text-align:center;min-height:1em}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">👆</div>
+  <div>
+    <h1>Tap Code</h1>
+    <p>the Polybius knock cipher</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="seg">
+      <button id="encBtn" class="on">Text → Taps</button>
+      <button id="decBtn">Taps → Text</button>
+    </div>
+    <label id="inLabel">Text</label>
+    <textarea id="input">WATER</textarea>
+    <div class="out" id="out">—</div>
+    <div class="err" id="err"></div>
+    <div class="grid" id="gridView"></div>
+  </div>
+
+  <div class="card">
+    <h2>About Tap Code</h2>
+    <p class="note">Tap Code arranges the alphabet in a <b>5×5 Polybius square</b> (with <b>K</b> sharing <b>C</b>'s cell) and sends each letter as two bursts of taps: first the <b>row</b>, then the <b>column</b>. So <b>A</b> is tap · pause · tap, and <b>Z</b> is five taps, pause, five taps. It needs nothing but a way to make noise, which is why American POWs in Vietnam used it to communicate through cell walls. It's slower than Morse but far easier to learn and to tap out. Here taps are shown as dots; decode by entering "row-col" pairs. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var GRID = 'ABCDEFGHIJLMNOPQRSTUVWXYZ'; // 25 letters, K omitted (shares C)
+  function letterToCoords(letter){
+    if(typeof letter !== 'string' || letter.length !== 1) throw new Error('expected a single letter');
+    var u = letter.toUpperCase();
+    if(u === 'K') u = 'C';
+    var i = GRID.indexOf(u);
+    if(i < 0) throw new Error('not a letter A-Z: ' + letter);
+    return [Math.floor(i / 5) + 1, (i % 5) + 1];
+  }
+  function coordsToLetter(row, col){
+    if(!Number.isInteger(row) || !Number.isInteger(col) || row < 1 || row > 5 || col < 1 || col > 5) throw new Error('row and column must be 1-5');
+    return GRID[(row - 1) * 5 + (col - 1)];
+  }
+  // Encode text to an array of [row, col] pairs (letters only).
+  function encode(text){
+    if(typeof text !== 'string') throw new Error('input must be a string');
+    var out = [];
+    for(var i = 0; i < text.length; i++){ var ch = text[i]; if(/[a-zA-Z]/.test(ch)) out.push(letterToCoords(ch)); }
+    return out;
+  }
+  // Decode an array of [row, col] pairs back to text.
+  function decode(pairs){
+    if(!Array.isArray(pairs)) throw new Error('expected an array of [row, col] pairs');
+    return pairs.map(function(p){ return coordsToLetter(p[0], p[1]); }).join('');
+  }
+  // Visual taps for one pair, e.g. [1,3] -> "• •••".
+  function toTaps(pair){ return '•'.repeat(pair[0]) + ' ' + '•'.repeat(pair[1]); }
+
+  if(typeof module !== 'undefined') module.exports = { letterToCoords:letterToCoords, coordsToLetter:coordsToLetter, encode:encode, decode:decode, toTaps:toTaps };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var $ = function(id){ return document.getElementById(id); }, mode = 'enc';
+    function drawGrid(){
+      var g = $('gridView'); g.innerHTML = '<div class="h"></div>';
+      for(var c = 1; c <= 5; c++) g.innerHTML += '<div class="h">' + c + '</div>';
+      for(var r = 1; r <= 5; r++){ g.innerHTML += '<div class="h">' + r + '</div>'; for(var cc = 1; cc <= 5; cc++) g.innerHTML += '<div>' + GRID[(r - 1) * 5 + (cc - 1)] + '</div>'; }
+    }
+    function render(){
+      $('err').textContent = '';
+      try{
+        if(mode === 'enc'){ $('out').textContent = encode($('input').value).map(toTaps).join('   /   ') || '—'; }
+        else {
+          var pairs = $('input').value.trim().split(/\s*\/\s*|\s{2,}|,/).map(function(s){ return s.trim(); }).filter(function(s){ return s.length; }).map(function(s){ var m = s.match(/[1-5]/g); return m && m.length >= 2 ? [Number(m[0]), Number(m[1])] : null; }).filter(Boolean);
+          $('out').textContent = decode(pairs) || '—';
+        }
+      }catch(e){ $('out').textContent = '—'; $('err').textContent = e.message; }
+    }
+    function setMode(m){ mode = m; $('encBtn').classList.toggle('on', m === 'enc'); $('decBtn').classList.toggle('on', m === 'dec'); $('inLabel').textContent = m === 'enc' ? 'Text' : 'Taps (e.g. "1-1 / 2-3" or "13")'; $('input').value = m === 'enc' ? 'WATER' : '5-2 / 1-1 / 4-4 / 1-5 / 4-2'; render(); }
+    $('encBtn').addEventListener('click', function(){ setMode('enc'); });
+    $('decBtn').addEventListener('click', function(){ setMode('dec'); });
+    $('input').addEventListener('input', render);
+    drawGrid(); render();
+
+    var root = document.documentElement, tb = $('theme');
+    function setTheme(t){ root.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? '☀️' : '🌙'; try{ localStorage.setItem('tap-theme', t); }catch(e){} }
+    var saved; try{ saved = localStorage.getItem('tap-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); });
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checksum — Adler-32 & Fletcher-16</title>
+<meta name="description" content="Compute Adler-32 and Fletcher-16 checksums of any text (UTF-8), in hex and decimal. Fast integrity checks. Offline, no tracking.">
+<style>
+  :root{
+    --c:#4f46e5;
+    --bg:#f5f5fb; --card:#ffffff; --fg:#161628; --muted:#63637e;
+    --line:#e4e3f1; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#0f0f1a; --card:#181827; --fg:#ececf7; --muted:#9797b6;
+    --line:#282840; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:780px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;font-weight:800;color:#fff;flex:0 0 auto;font-family:ui-monospace,monospace}
+  h1{font-size:1.4rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:780px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.82rem;font-weight:600;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+  textarea{width:100%;font:inherit;font-family:ui-monospace,Menlo,Consolas,monospace;padding:12px;
+    border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);min-height:120px;resize:vertical}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .out{margin-top:8px}
+  .sum{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+  .sum:last-child{border-bottom:0}
+  .sum .name{flex:0 0 130px;font-weight:700}
+  .sum .name small{display:block;color:var(--muted);font-weight:400;font-size:.78rem}
+  .sum .hex{flex:1;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:1.15rem;color:var(--c)}
+  .sum .dec{color:var(--muted);font-family:ui-monospace,monospace;font-size:.85rem}
+  .sum .copy{background:var(--bg);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:.8rem}
+  .meta{color:var(--muted);font-size:.85rem;margin-top:12px}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Σ</div>
+  <div>
+    <h1>Checksum</h1>
+    <p>Adler-32 &amp; Fletcher-16</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <label for="in">Input text (UTF-8)</label>
+    <textarea id="in" spellcheck="false">Wikipedia</textarea>
+    <div class="meta" id="bytes"></div>
+    <div class="out">
+      <div class="sum">
+        <div class="name">Adler-32<small>zlib, mod 65521</small></div>
+        <div><div class="hex" id="a32">—</div><div class="dec" id="a32d"></div></div>
+        <button class="copy" data-t="a32">Copy</button>
+      </div>
+      <div class="sum">
+        <div class="name">Fletcher-16<small>mod 255</small></div>
+        <div><div class="hex" id="f16">—</div><div class="dec" id="f16d"></div></div>
+        <button class="copy" data-t="f16">Copy</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>About</h2>
+    <p class="note">Checksums detect accidental data corruption. <b>Adler-32</b> (used in zlib) is faster than a CRC but weaker for short inputs; <b>Fletcher-16</b> is a lightweight position-sensitive checksum. Both run over the UTF-8 bytes of your text. For cryptographic integrity use a hash (SHA-256), not a checksum.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function utf8bytes(str){
+    if(typeof TextEncoder !== 'undefined') return new TextEncoder().encode(String(str));
+    // fallback
+    return Array.from(unescape(encodeURIComponent(String(str)))).map(function(c){ return c.charCodeAt(0); });
+  }
+  function adler32(str){
+    var MOD = 65521, a = 1, b = 0, bytes = utf8bytes(str);
+    for(var i = 0; i < bytes.length; i++){ a = (a + bytes[i]) % MOD; b = (b + a) % MOD; }
+    return ((b << 16) | a) >>> 0;
+  }
+  function fletcher16(str){
+    var s1 = 0, s2 = 0, bytes = utf8bytes(str);
+    for(var i = 0; i < bytes.length; i++){ s1 = (s1 + bytes[i]) % 255; s2 = (s2 + s1) % 255; }
+    return (s2 << 8) | s1;
+  }
+  function toHex(n, width){
+    var h = (n >>> 0).toString(16).toUpperCase();
+    while(h.length < (width || 0)) h = '0' + h;
+    return '0x' + h;
+  }
+
+  if(typeof module !== 'undefined') module.exports = { utf8bytes:utf8bytes, adler32:adler32, fletcher16:fletcher16, toHex:toHex };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var inp=document.getElementById('in');
+    function render(){
+      var a = adler32(inp.value), f = fletcher16(inp.value);
+      document.getElementById('a32').textContent = toHex(a, 8);
+      document.getElementById('a32d').textContent = a.toString();
+      document.getElementById('f16').textContent = toHex(f, 4);
+      document.getElementById('f16d').textContent = f.toString();
+      document.getElementById('bytes').textContent = utf8bytes(inp.value).length + ' bytes';
+    }
+    inp.addEventListener('input', render);
+    document.querySelectorAll('.copy').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var id = btn.getAttribute('data-t');
+        if(navigator.clipboard) navigator.clipboard.writeText(document.getElementById(id).textContent);
+        var old=btn.textContent; btn.textContent='✓'; setTimeout(function(){ btn.textContent=old; }, 900);
+      });
+    });
+
+    var root=document.documentElement, tb=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); tb.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('checksum-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('checksum-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+
+    render();
+  }
+</script>
+</body>
+</html>

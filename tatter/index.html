@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tatter — cloth you can shred</title>
+<style>
+  :root { --ink:#e8e6e0; --accent:#ff6100; --panel:rgba(18,20,26,.82); }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; overflow:hidden; background:#0a0c10; font-family:ui-monospace,Menlo,Consolas,monospace; color:var(--ink); }
+  #c { display:block; position:fixed; inset:0; cursor:crosshair; }
+  #bar {
+    position:fixed; left:12px; top:12px; z-index:5; display:flex; flex-wrap:wrap;
+    gap:8px 12px; align-items:center; max-width:calc(100vw - 24px);
+    background:var(--panel); border:1px solid #2a2f3a; border-radius:12px;
+    padding:10px 14px; -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); font-size:12px;
+    box-shadow:0 8px 30px rgba(0,0,0,.5); transition:opacity .3s;
+  }
+  #bar.hidden { opacity:0; pointer-events:none; }
+  #bar h1 { font-size:15px; margin:0 6px 0 0; letter-spacing:.5px; color:var(--accent); font-weight:800; }
+  #bar .sub { color:#7d8492; font-size:10px; margin-right:4px; }
+  label { display:flex; align-items:center; gap:5px; color:#aeb4bf; white-space:nowrap; }
+  input[type=range] { width:78px; accent-color:var(--accent); }
+  .val { color:var(--accent); font-size:11px; min-width:30px; text-align:right; font-variant-numeric:tabular-nums; }
+  select, button {
+    font:inherit; font-size:11px; color:var(--ink); background:#171b22;
+    border:1px solid #333a47; border-radius:7px; padding:5px 9px; cursor:pointer;
+  }
+  button:hover, select:hover { border-color:var(--accent); }
+  button:focus-visible, select:focus-visible, input[type=range]:focus-visible {
+    outline:2px solid var(--accent); outline-offset:2px;
+  }
+  button.on { background:var(--accent); color:#111; border-color:var(--accent); font-weight:700; }
+  button.hot { background:#3a1206; border-color:#c0440f; color:#ffb38a; }
+  .tools { display:flex; gap:4px; }
+  #hint {
+    position:fixed; left:50%; bottom:14px; transform:translateX(-50%); z-index:5;
+    color:#6b7280; font-size:11px; background:var(--panel); padding:5px 12px;
+    border-radius:20px; border:1px solid #23272f; transition:opacity .3s;
+    pointer-events:none;
+  }
+  #hint.hidden { opacity:0; }
+  kbd { color:var(--accent); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="bar">
+  <h1>TATTER</h1>
+  <span class="sub">cloth you can shred</span>
+  <div class="tools">
+    <button id="tGrab" class="on" title="Grab &amp; fling cloth">✊ Grab</button>
+    <button id="tSlice" title="Drag to slice threads">✂ Slice</button>
+    <button id="tPin" title="Click a node to pin/unpin">📌 Pin</button>
+    <button id="tBall" title="Drag-drop a heavy ball">● Ball</button>
+  </div>
+  <label>Preset
+    <select id="preset">
+      <option value="flag">Flag</option>
+      <option value="curtain">Curtain</option>
+      <option value="net">Net</option>
+      <option value="banner">Banner</option>
+    </select>
+  </label>
+  <label>Wind <input id="wind" type="range" min="0" max="100" value="20"><span id="windV" class="val">20</span></label>
+  <label>Gravity <input id="grav" type="range" min="0" max="100" value="35"><span id="gravV" class="val">35</span></label>
+  <label>Tear <input id="tear" type="range" min="105" max="220" value="150"><span id="tearV" class="val">150%</span></label>
+  <button id="gust" title="Wind gust (or press Space)">Gust</button>
+  <button id="shred" class="hot">Shred it</button>
+  <button id="heat" title="Toggle strain heatmap">Heatmap</button>
+  <button id="photo" title="Hide UI for clean captures">Photo</button>
+  <button id="reset">Reset</button>
+</div>
+<div id="hint"><kbd>Space</kbd> gust · <kbd>H</kbd> heatmap · <kbd>P</kbd> photo · drag to use the active tool</div>
+<script>
+(() => {
+"use strict";
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+let W, H, DPR;
+function resize(){
+  DPR = Math.min(devicePixelRatio||1, 2);
+  W = innerWidth; H = innerHeight;
+  cv.width = W*DPR; cv.height = H*DPR; ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+addEventListener("resize", resize); resize();
+
+// ---- config / state ----
+const PRESETS = {
+  flag:    { cols:38, rows:24, wind:35, grav:22, tear:150, pin:"tl-bl" },
+  curtain: { cols:34, rows:28, wind:8,  grav:45, tear:160, pin:"top" },
+  net:     { cols:30, rows:22, wind:5,  grav:40, tear:135, pin:"corners" },
+  banner:  { cols:40, rows:16, wind:28, grav:18, tear:145, pin:"tl-tr" },
+};
+const cfg = { cols:38, rows:24, wind:20, grav:35, tear:150, preset:"flag", pins:null };
+const ITER = 4;
+let points = [], constraints = [], particles = [], balls = [];
+let gustT = 0, showHeat = false, tool = "grab", frame = 0;
+
+// ---- audio: pitch-varied tear tick ----
+let AC = null;
+function tearSound(strainNorm){
+  try {
+    AC = AC || new (window.AudioContext||window.webkitAudioContext)();
+    if (AC.state === "suspended") AC.resume();
+    const o = AC.createOscillator(), g = AC.createGain(), t = AC.currentTime;
+    o.type = "triangle";
+    const f = 220 + Math.random()*680 + strainNorm*300;
+    o.frequency.setValueAtTime(f, t);
+    o.frequency.exponentialRampToValueAtTime(f*0.4, t+0.06);
+    g.gain.setValueAtTime(0.09, t);
+    g.gain.exponentialRampToValueAtTime(0.0008, t+0.09);
+    o.connect(g).connect(AC.destination); o.start(t); o.stop(t+0.1);
+  } catch(e){}
+}
+
+// ---- build cloth ----
+function pinType(r, c, mode){
+  const last = cfg.cols-1, top = r===0;
+  switch(mode){
+    case "top":     return top;
+    case "corners": return (r===0&&c===0)||(r===0&&c===last)||(r===cfg.rows-1&&c===0)||(r===cfg.rows-1&&c===last);
+    case "tl-bl":   return c===0 && (r%6===0 || r===cfg.rows-1);
+    case "tl-tr":   return top && (c===0 || c===last || c%10===0);
+    default:        return top && c%4===0;
+  }
+}
+function build(){
+  points = []; constraints = []; particles = []; balls = [];
+  const marginX = W*0.12, marginTop = H*0.14;
+  const spanW = W*0.76, spanH = H*0.62;
+  const gx = spanW/(cfg.cols-1), gy = spanH/(cfg.rows-1);
+  const pinMode = PRESETS[cfg.preset] ? PRESETS[cfg.preset].pin : "top";
+  for (let r=0;r<cfg.rows;r++) for (let c=0;c<cfg.cols;c++){
+    const x = marginX + c*gx, y = marginTop + r*gy;
+    const pinned = cfg.pins ? cfg.pins.has(r*cfg.cols+c) : pinType(r,c,pinMode);
+    points.push({ x, y, px:x, py:y, pinned });
+  }
+  const link = (a,b) => { const p=points[a],q=points[b]; constraints.push({ a,b, rest:Math.hypot(p.x-q.x,p.y-q.y), broken:false, strain:0, flash:0 }); };
+  for (let r=0;r<cfg.rows;r++) for (let c=0;c<cfg.cols;c++){
+    const i = r*cfg.cols+c;
+    if (c<cfg.cols-1) link(i, i+1);
+    if (r<cfg.rows-1) link(i, i+cfg.cols);
+  }
+}
+
+// ---- rip particles + flash ----
+function snap(k){
+  k.broken = true; k.flash = 1;
+  const a=points[k.a], b=points[k.b], mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
+  const strainNorm = Math.min(1, (k.strain-1)/1.2);
+  tearSound(strainNorm);
+  const n = 3 + (Math.random()*4|0);
+  for (let i=0;i<n;i++)
+    particles.push({ x:mx, y:my, vx:(Math.random()-.5)*3.2, vy:(Math.random()-.5)*3.2-0.6, life:1 });
+}
+
+// ---- physics ----
+function simulate(){
+  const g = cfg.grav/100 * 0.55;
+  const baseWind = cfg.wind/100 * 0.9;
+  const gust = gustT>0 ? gustT*2.6 : 0;
+  const windX = (baseWind+gust) * (0.6 + 0.4*Math.sin(frame*0.05));
+  const windY = Math.sin(frame*0.11)*0.05*(baseWind+gust);
+  if (gustT>0) gustT -= 0.02;
+
+  for (const p of points){
+    if (p.pinned) continue;
+    const vx=(p.x-p.px)*0.99, vy=(p.y-p.py)*0.99;
+    p.px=p.x; p.py=p.y;
+    p.x += vx + windX*(0.4+Math.random()*0.6);
+    p.y += vy + g + windY;
+    // ball collision — push cloth out of radius
+    for (const bl of balls){
+      const dx=p.x-bl.x, dy=p.y-bl.y, d=Math.hypot(dx,dy);
+      if (d < bl.r && d>0.01){ const f=(bl.r-d)/d; p.x+=dx*f; p.y+=dy*f; }
+    }
+  }
+  // grab drag — carry momentum so a flick actually flings the cloth
+  if (drag.active && tool==="grab"){
+    const M = 40; // clamp per-frame delta so very fast drags stay stable
+    let ddx = mouse.x - prevMouse.x, ddy = mouse.y - prevMouse.y;
+    ddx = Math.max(-M, Math.min(M, ddx)); ddy = Math.max(-M, Math.min(M, ddy));
+    for (const gp of drag.grabbed){
+      const p=points[gp.i];
+      const tx = mouse.x + gp.ox, ty = mouse.y + gp.oy;
+      p.x = tx; p.y = ty; p.px = tx - ddx; p.py = ty - ddy;
+    }
+  }
+  const tol = cfg.tear/100;
+  for (let it=0; it<ITER; it++){
+    for (const k of constraints){
+      if (k.broken) continue;
+      const p=points[k.a], q=points[k.b];
+      let dx=q.x-p.x, dy=q.y-p.y, d=Math.hypot(dx,dy)||0.0001;
+      const diff=(d-k.rest)/d, r=k.rest*tol;
+      if (it===ITER-1){
+        k.strain = d/k.rest;
+        if (d > r){ snap(k); continue; }
+      }
+      const ox=dx*0.5*diff, oy=dy*0.5*diff;
+      if(!p.pinned){ p.x+=ox; p.y+=oy; }
+      if(!q.pinned){ q.x-=ox; q.y-=oy; }
+    }
+  }
+  // ball settle / gravity
+  for (const bl of balls){ if(!bl.held){ bl.vy+=g*1.4; bl.y+=bl.vy; bl.x+=bl.vx; bl.vx*=0.99; if(bl.y-bl.r>H+80) bl.dead=true; } }
+  balls = balls.filter(b=>!b.dead);
+  for (const p of particles){ p.vy+=0.14; p.x+=p.vx; p.y+=p.vy; p.life-=0.03; }
+  particles = particles.filter(p=>p.life>0);
+}
+
+// strain -> heat color (cool cyan -> hot orange/white)
+function strainColor(s, flash){
+  if (flash>0.02) return `rgba(255,255,255,${flash})`;
+  const t = Math.max(0, Math.min(1,(s-1)/0.6)); // 0 slack .. 1 taut
+  const r = 40 + t*215, g = 120 + t*30 - t*t*90, b = 200 - t*180;
+  const a = 0.35 + t*0.55;
+  return `rgba(${r|0},${Math.max(20,g)|0},${Math.max(10,b)|0},${a})`;
+}
+
+function render(){
+  ctx.clearRect(0,0,W,H);
+  // threads
+  ctx.lineWidth = showHeat ? 2.2 : 1.4; ctx.lineCap="round";
+  for (const k of constraints){
+    if (k.broken){ if(k.flash>0) k.flash-=0.08; continue; }
+    const p=points[k.a], q=points[k.b];
+    ctx.strokeStyle = showHeat ? strainColor(k.strain, k.flash)
+      : (k.flash>0.02 ? `rgba(255,255,255,${k.flash})` : `rgba(180,190,205,${0.30+Math.min(0.5,(k.strain-1)*0.9)})`);
+    if (k.flash>0) k.flash-=0.08;
+    ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
+  }
+  // pinned nodes
+  ctx.fillStyle="#ff6100";
+  for (const p of points) if (p.pinned){ ctx.beginPath(); ctx.arc(p.x,p.y,3.2,0,7); ctx.fill(); }
+  // balls
+  for (const bl of balls){
+    const grd=ctx.createRadialGradient(bl.x-bl.r*0.3,bl.y-bl.r*0.3,bl.r*0.2,bl.x,bl.y,bl.r);
+    grd.addColorStop(0,"#5a6270"); grd.addColorStop(1,"#20242c");
+    ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(bl.x,bl.y,bl.r,0,7); ctx.fill();
+    ctx.strokeStyle="#0c0e12"; ctx.lineWidth=2; ctx.stroke();
+  }
+  // frayed particles
+  for (const p of particles){ ctx.fillStyle=`rgba(255,${150+p.life*80|0},120,${p.life})`; ctx.fillRect(p.x-1,p.y-1,2.4,2.4); }
+  // grab radius indicator
+  if (tool==="grab" && !drag.active && !photoMode){ ctx.strokeStyle="rgba(255,97,0,.25)"; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(mouse.x,mouse.y,GRAB_R,0,7); ctx.stroke(); }
+  // heatmap legend (slack -> taut), reuses the strain ramp
+  if (showHeat && !photoMode){
+    const lw=118, lh=8, lx=W-lw-16, ly=H-30;
+    for (let i=0;i<lw;i++){ const s=1+(i/lw)*0.6; ctx.fillStyle=strainColor(s,0); ctx.fillRect(lx+i,ly,1,lh); }
+    ctx.fillStyle="rgba(200,206,216,.85)"; ctx.font="10px ui-monospace,Menlo,Consolas,monospace";
+    ctx.textBaseline="alphabetic";
+    ctx.textAlign="left"; ctx.fillText("slack",lx,ly-4);
+    ctx.textAlign="right"; ctx.fillText("taut",lx+lw,ly-4);
+    ctx.textAlign="left";
+  }
+  // photo-mode vignette
+  if (photoMode){
+    const v=ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*0.35,W/2,H/2,Math.max(W,H)*0.7);
+    v.addColorStop(0,"rgba(0,0,0,0)"); v.addColorStop(1,"rgba(0,0,0,0.55)");
+    ctx.fillStyle=v; ctx.fillRect(0,0,W,H);
+  }
+}
+
+function loop(){ frame++; simulate(); render(); requestAnimationFrame(loop); }
+
+// ---- interaction ----
+const mouse = {x:W/2, y:H/2}, prevMouse = {x:W/2,y:H/2};
+const GRAB_R = 46;
+const drag = { active:false, grabbed:[] };
+let photoMode = false;
+
+function pos(e){ const t=e.touches?e.touches[0]:e; return {x:t.clientX, y:t.clientY}; }
+function nearestNode(x,y){
+  let best=-1, bd=1e9;
+  for (let i=0;i<points.length;i++){ const d=Math.hypot(points[i].x-x,points[i].y-y); if(d<bd){bd=d;best=i;} }
+  return {i:best, d:bd};
+}
+// segment intersection for slice
+function segInt(ax,ay,bx,by,cx,cy,dx,dy){
+  const d1=(bx-ax)*(cy-ay)-(by-ay)*(cx-ax), d2=(bx-ax)*(dy-ay)-(by-ay)*(dx-ax);
+  const d3=(dx-cx)*(ay-cy)-(dy-cy)*(ax-cx), d4=(dx-cx)*(by-cy)-(dy-cy)*(bx-cx);
+  return (d1*d2<0)&&(d3*d4<0);
+}
+function sliceAt(x0,y0,x1,y1){
+  for (const k of constraints){
+    if (k.broken) continue;
+    const p=points[k.a], q=points[k.b];
+    if (segInt(x0,y0,x1,y1,p.x,p.y,q.x,q.y)) snap(k);
+  }
+}
+
+cv.addEventListener("mousedown", start); cv.addEventListener("touchstart", start, {passive:false});
+addEventListener("mousemove", move); addEventListener("touchmove", move, {passive:false});
+addEventListener("mouseup", end); addEventListener("touchend", end);
+
+function start(e){
+  e.preventDefault(); const m=pos(e); mouse.x=m.x; mouse.y=m.y; prevMouse.x=m.x; prevMouse.y=m.y;
+  if (tool==="pin"){ const n=nearestNode(m.x,m.y); if(n.d<28){ points[n.i].pinned=!points[n.i].pinned; syncHash(); } return; }
+  if (tool==="ball"){ balls.push({x:m.x,y:m.y,r:34,vx:0,vy:0,held:true}); drag.active=true; return; }
+  drag.active=true;
+  if (tool==="grab"){
+    drag.grabbed=[];
+    for (let i=0;i<points.length;i++){ const d=Math.hypot(points[i].x-m.x,points[i].y-m.y); if(d<GRAB_R) drag.grabbed.push({i, ox:points[i].x-m.x, oy:points[i].y-m.y}); }
+    cv.style.cursor="grabbing";
+  }
+}
+function move(e){
+  const m=pos(e); prevMouse.x=mouse.x; prevMouse.y=mouse.y; mouse.x=m.x; mouse.y=m.y;
+  if (!drag.active) return;
+  if (tool==="slice") sliceAt(prevMouse.x,prevMouse.y,mouse.x,mouse.y);
+  if (tool==="ball" && balls.length){ const b=balls[balls.length-1]; b.x=m.x; b.y=m.y; b.vx=mouse.x-prevMouse.x; b.vy=mouse.y-prevMouse.y; }
+}
+function end(){ if(tool==="ball" && balls.length){ balls[balls.length-1].held=false; } drag.active=false; drag.grabbed=[]; if(tool==="grab") cv.style.cursor="grab"; }
+
+addEventListener("keydown", e=>{
+  if (e.code==="Space"){ e.preventDefault(); gustT=1; document.activeElement && document.activeElement.blur && document.activeElement.blur(); }
+  else if (e.key==="h"||e.key==="H"){ toggleHeat(); }
+  else if (e.key==="p"||e.key==="P"){ togglePhoto(); }
+});
+
+// ---- controls ----
+function setTool(t){ tool=t; ["Grab","Slice","Pin","Ball"].forEach(n=>document.getElementById("t"+n).classList.toggle("on", n.toLowerCase()===t)); cv.style.cursor = t==="slice"?"crosshair":(t==="pin"?"pointer":"grab"); }
+document.getElementById("tGrab").onclick=()=>setTool("grab");
+document.getElementById("tSlice").onclick=()=>setTool("slice");
+document.getElementById("tPin").onclick=()=>setTool("pin");
+document.getElementById("tBall").onclick=()=>setTool("ball");
+
+const $wind=document.getElementById("wind"), $grav=document.getElementById("grav"), $tear=document.getElementById("tear"), $preset=document.getElementById("preset");
+const $windV=document.getElementById("windV"), $gravV=document.getElementById("gravV"), $tearV=document.getElementById("tearV");
+function syncVals(){ $windV.textContent=cfg.wind; $gravV.textContent=cfg.grav; $tearV.textContent=cfg.tear+"%"; }
+$wind.oninput=()=>{ cfg.wind=+$wind.value; syncVals(); syncHash(); };
+$grav.oninput=()=>{ cfg.grav=+$grav.value; syncVals(); syncHash(); };
+$tear.oninput=()=>{ cfg.tear=+$tear.value; syncVals(); syncHash(); };
+$preset.onchange=()=>applyPreset($preset.value);
+document.getElementById("gust").onclick=()=>{ gustT=1; };
+
+function applyPreset(name){
+  const p=PRESETS[name]; if(!p) return;
+  Object.assign(cfg,{cols:p.cols,rows:p.rows,wind:p.wind,grav:p.grav,tear:p.tear,preset:name,pins:null});
+  syncControls(); build(); syncHash();
+}
+function syncControls(){ $wind.value=cfg.wind; $grav.value=cfg.grav; $tear.value=cfg.tear; $preset.value=cfg.preset; syncVals(); }
+
+document.getElementById("shred").onclick=()=>{
+  const live=constraints.filter(k=>!k.broken);
+  let n=Math.min(live.length, 40+((live.length*0.12)|0)), i=0;
+  const step=()=>{ if(i++>=n) return; const k=live[Math.random()*live.length|0]; if(k&&!k.broken) snap(k); setTimeout(step, 12); };
+  step();
+};
+document.getElementById("reset").onclick=()=>applyPreset(cfg.preset);
+function toggleHeat(){ showHeat=!showHeat; document.getElementById("heat").classList.toggle("on",showHeat); }
+function togglePhoto(){ photoMode=!photoMode; document.getElementById("bar").classList.toggle("hidden",photoMode); document.getElementById("hint").classList.toggle("hidden",photoMode); }
+document.getElementById("heat").onclick=toggleHeat;
+document.getElementById("photo").onclick=togglePhoto;
+
+// ---- URL hash serialize / parse ----
+let hashLock=false;
+function syncHash(){
+  if (hashLock) return;
+  const pinList=[]; for(let i=0;i<points.length;i++) if(points[i].pinned) pinList.push(i);
+  const parts=[`p=${cfg.preset}`,`g=${cfg.cols}x${cfg.rows}`,`w=${cfg.wind}`,`gr=${cfg.grav}`,`t=${cfg.tear}`];
+  cfg.pins = new Set(pinList);
+  parts.push(`pn=${pinList.join(".")}`);
+  history.replaceState(null,"","#"+parts.join("&"));
+}
+function parseHash(){
+  const h=location.hash.slice(1); if(!h) return false;
+  const q={}; h.split("&").forEach(s=>{ const [k,v]=s.split("="); q[k]=v; });
+  if(q.p&&PRESETS[q.p]) cfg.preset=q.p;
+  if(q.g){ const [c,r]=q.g.split("x").map(Number); if(c&&r){ cfg.cols=Math.max(2,Math.min(48,c)); cfg.rows=Math.max(2,Math.min(36,r)); } }
+  if(q.w!=null) cfg.wind=+q.w||0;
+  if(q.gr!=null) cfg.grav=+q.gr||0;
+  if(q.t!=null) cfg.tear=+q.t||150;
+  // when pn is present, honor it even if empty (empty Set = deliberately nothing pinned)
+  if(q.pn!=null){ const arr=q.pn.split(".").filter(x=>x!=="").map(Number); cfg.pins=new Set(arr); }
+  return true;
+}
+
+// ---- init ----
+hashLock=true;
+if (parseHash()){ syncControls(); build(); }
+else { applyPreset("flag"); }
+hashLock=false;
+if (!location.hash) syncHash();
+loop();
+})();
+</script>
+</body>
+</html>

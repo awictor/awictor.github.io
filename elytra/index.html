@@ -1,0 +1,1458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Elytra — Procedural Beetle Generator</title>
+<style>
+  :root{
+    --paper:#efe7d3; --paper2:#e3d7bb; --ink:#2b2318; --ink2:#5a4c34;
+    --edge:#c8b78d; --accent:#7a5a2e; --panel:#211c14; --panel2:#2c261a;
+    --panelink:#e9dcc0; --panelink2:#b8a880; --line:#4a4130; --hi:#c79a4a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+    color:var(--ink);
+    background:#171310;
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+  }
+  #app{display:flex;height:100vh;width:100vw}
+
+  /* ---------- Control panel ---------- */
+  #panel{
+    width:320px;min-width:320px;height:100vh;overflow-y:auto;
+    background:linear-gradient(180deg,var(--panel),var(--panel2));
+    color:var(--panelink);border-right:1px solid #000;
+    padding:16px 16px 40px;
+    scrollbar-width:thin;scrollbar-color:#4a4130 #211c14;
+  }
+  #panel::-webkit-scrollbar{width:9px}
+  #panel::-webkit-scrollbar-thumb{background:#4a4130;border-radius:6px}
+  #panel h1{
+    font-size:26px;margin:2px 0 0;letter-spacing:2px;color:var(--hi);
+    font-variant:small-caps;font-weight:600;
+  }
+  #panel .sub{font-size:11.5px;color:var(--panelink2);margin:2px 0 14px;line-height:1.4;font-style:italic}
+  .group{border-top:1px solid var(--line);padding:12px 0 4px;margin-top:4px}
+  .group:first-of-type{border-top:none}
+  .glabel{font-size:10.5px;letter-spacing:2px;text-transform:uppercase;color:var(--hi);margin:0 0 10px;opacity:.9}
+  label.row{display:block;font-size:12px;margin:0 0 11px;color:var(--panelink)}
+  label.row .val{float:right;color:var(--hi);font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;margin:6px 0 0;accent-color:var(--hi);height:4px}
+  select,input[type=text]{
+    width:100%;background:#15110b;color:var(--panelink);border:1px solid var(--line);
+    border-radius:5px;padding:7px 8px;font-family:inherit;font-size:13px;margin-top:4px;
+  }
+  input[type=text]{font-family:"Courier New",monospace;letter-spacing:.5px}
+  .btnrow{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
+  button{
+    background:#15110b;color:var(--panelink);border:1px solid var(--line);
+    border-radius:5px;padding:8px 10px;font-family:inherit;font-size:12px;cursor:pointer;
+    flex:1;transition:all .15s;white-space:nowrap;
+  }
+  button:hover{background:#332b1c;border-color:var(--hi);color:#fff}
+  button:focus-visible,select:focus-visible,input:focus-visible{
+    outline:2px solid var(--hi);outline-offset:2px;border-color:var(--hi);
+  }
+  button.primary{background:var(--accent);border-color:#a67a3c;color:#fff}
+  button.primary:hover{background:#946a34}
+  button.tog[aria-pressed=true]{background:var(--hi);color:#1a150d;border-color:var(--hi);font-weight:600}
+  .seedrow{display:flex;gap:7px;align-items:center}
+  .seedrow input{flex:1}
+  .seedrow button{flex:0 0 auto;padding:8px 11px}
+  .hint{font-size:10.5px;color:var(--panelink2);margin-top:7px;line-height:1.45}
+  .two{display:flex;gap:8px}
+  .two>*{flex:1}
+
+  /* ---------- Stage ---------- */
+  #stage{
+    flex:1;height:100vh;overflow:auto;position:relative;
+    background:
+      radial-gradient(1200px 800px at 50% 30%, #2b2418 0%, #1a1610 70%, #120f0a 100%);
+    display:flex;align-items:center;justify-content:center;padding:26px;
+  }
+  #plateWrap{
+    filter:drop-shadow(0 24px 46px rgba(0,0,0,.6));
+    max-width:100%;max-height:100%;
+    transition:transform .2s;
+  }
+  #plateWrap svg{display:block;max-width:100%;max-height:calc(100vh - 60px);height:auto}
+  #cabinetWrap svg{display:block;max-width:100%;max-height:calc(100vh - 60px);height:auto}
+  #cabinetWrap{filter:drop-shadow(0 24px 46px rgba(0,0,0,.6));max-width:100%;max-height:100%}
+
+  #toast{
+    position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);
+    background:#15110b;color:var(--hi);border:1px solid var(--hi);border-radius:6px;
+    padding:9px 18px;font-size:13px;opacity:0;pointer-events:none;transition:all .25s;z-index:50;
+    letter-spacing:.5px;
+  }
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  .credit{position:fixed;right:12px;bottom:8px;font-size:10px;color:#6b5c40;letter-spacing:1px;font-style:italic}
+
+  @media (max-width:720px){
+    #app{flex-direction:column}
+    #panel{width:100%;min-width:0;height:auto;max-height:46vh;border-right:none;border-bottom:1px solid #000}
+    #stage{height:54vh}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="panel">
+    <h1>Elytra</h1>
+    <div class="sub">A deterministic cabinet of impossible Coleoptera. Every seed grows one specimen.</div>
+
+    <div class="group">
+      <div class="glabel">Specimen Seed</div>
+      <div class="seedrow">
+        <input type="text" id="seed" spellcheck="false" autocomplete="off" placeholder="enter a seed…">
+        <button id="lockBtn" class="tog" title="Lock seed against randomize" aria-pressed="false">Lock</button>
+      </div>
+      <div class="btnrow">
+        <button id="randBtn" class="primary">Randomize</button>
+        <button id="copyLink">Copy Link</button>
+      </div>
+      <div class="hint">The seed drives every puncture, hair and gleam. Same seed → same beetle, forever.</div>
+    </div>
+
+    <div class="group">
+      <div class="glabel">Morphology</div>
+      <label class="row">Archetype
+        <select id="archetype"></select>
+      </label>
+      <label class="row">Size <span class="val" id="sizeV"></span>
+        <input type="range" id="size" min="60" max="160" value="100">
+      </label>
+      <label class="row">Elongation <span class="val" id="elongV"></span>
+        <input type="range" id="elong" min="0" max="100" value="50">
+      </label>
+      <label class="row">Armament <span class="val" id="hornV"></span>
+        <input type="range" id="horn" min="0" max="100" value="60">
+      </label>
+      <label class="row">Iridescence <span class="val" id="iridV"></span>
+        <input type="range" id="irid" min="0" max="100" value="60">
+      </label>
+      <label class="row">Pattern density <span class="val" id="patV"></span>
+        <input type="range" id="pat" min="0" max="100" value="55">
+      </label>
+      <label class="row">Palette
+        <select id="palette"></select>
+      </label>
+    </div>
+
+    <div class="group">
+      <div class="glabel">Presentation</div>
+      <label class="row">Light direction <span class="val" id="lightV"></span>
+        <input type="range" id="light" min="0" max="360" value="300">
+      </label>
+      <div class="btnrow">
+        <button id="spreadBtn" class="tog" aria-pressed="false">Spread wings</button>
+        <button id="cabBtn" class="tog" aria-pressed="false">Cabinet mode</button>
+      </div>
+      <label class="row" id="cabCountRow" style="margin-top:10px">Drawer specimens <span class="val" id="cabV"></span>
+        <input type="range" id="cabCount" min="4" max="30" value="12">
+      </label>
+    </div>
+
+    <div class="group">
+      <div class="glabel">Hybridize (breed two seeds)</div>
+      <div class="two">
+        <input type="text" id="hybA" spellcheck="false" placeholder="parent A">
+        <input type="text" id="hybB" spellcheck="false" placeholder="parent B">
+      </div>
+      <div class="btnrow">
+        <button id="breedBtn" class="tog" aria-pressed="false">Breed hybrid</button>
+        <button id="fillParents" title="Fill parents from current + random">Seed</button>
+      </div>
+      <div class="hint">Crosses two morphology hashes into a blended specimen with a hybrid binomial name.</div>
+    </div>
+
+    <div class="group">
+      <div class="glabel">Export</div>
+      <div class="btnrow">
+        <button id="expSVG">SVG</button>
+        <button id="expPNG">PNG ×3</button>
+      </div>
+      <div class="btnrow">
+        <button id="expPoster">Whole-plate poster (PNG)</button>
+      </div>
+      <div class="hint">Vector SVG or high-res raster of the current specimen — or the whole expedition drawer as one print-ready poster.</div>
+    </div>
+  </aside>
+
+  <main id="stage">
+    <div id="plateWrap"></div>
+    <div id="cabinetWrap" style="display:none"></div>
+  </main>
+</div>
+<div id="toast"></div>
+<div class="credit">ELYTRA · zero-dependency procedural entomology</div>
+
+<script>
+"use strict";
+/* ============================================================================
+   Elytra — deterministic procedural beetle generator
+   Single file, zero dependencies. All morphology derived from a seed via a
+   small PRNG, drawn as bilaterally-symmetric SVG on a Victorian specimen plate.
+   ========================================================================== */
+
+/* ------------------------------- PRNG -------------------------------------- */
+function xmur3(str){
+  let h=1779033703 ^ str.length;
+  for(let i=0;i<str.length;i++){
+    h = Math.imul(h ^ str.charCodeAt(i),3432918353);
+    h = (h<<13)|(h>>>19);
+  }
+  return function(){
+    h = Math.imul(h ^ (h>>>16),2246822507);
+    h = Math.imul(h ^ (h>>>13),3266489909);
+    h ^= h>>>16;
+    return h>>>0;
+  };
+}
+function mulberry32(a){
+  return function(){
+    a|=0; a = (a+0x6D2B79F5)|0;
+    let t = Math.imul(a ^ (a>>>15), 1|a);
+    t = (t + Math.imul(t ^ (t>>>7), 61|t)) ^ t;
+    return ((t ^ (t>>>14))>>>0) / 4294967296;
+  };
+}
+/* Build an RNG bundle seeded deterministically from a string + salt so that
+   independent morphological aspects don't correlate. */
+function RNG(seedStr, salt){
+  const seedFn = xmur3(String(seedStr)+"::"+(salt||""));
+  const rng = mulberry32(seedFn());
+  const R = {
+    seed: seedStr,
+    f: rng,
+    range:(a,b)=>a+(b-a)*rng(),
+    int:(a,b)=>Math.floor(a+(b-a+1)*rng()),
+    pick:(arr)=>arr[Math.floor(rng()*arr.length)],
+    chance:(p)=>rng()<p,
+    // weighted pick: entries [item, weight]
+    weighted:(pairs)=>{
+      let tot=0; for(const p of pairs) tot+=p[1];
+      let r=rng()*tot;
+      for(const p of pairs){ r-=p[1]; if(r<=0) return p[0]; }
+      return pairs[pairs.length-1][0];
+    },
+    gauss:(m,s)=>{ // Box-Muller-ish clamp
+      const u=Math.max(1e-9,rng()), v=rng();
+      return m + s*Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
+    }
+  };
+  return R;
+}
+
+/* ---------------------------- Color helpers -------------------------------- */
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+function hexToRgb(h){h=h.replace('#','');if(h.length===3)h=h.split('').map(c=>c+c).join('');const n=parseInt(h,16);return{r:(n>>16)&255,g:(n>>8)&255,b:n&255};}
+function rgbToHex(r,g,b){const f=x=>clamp(Math.round(x),0,255).toString(16).padStart(2,'0');return '#'+f(r)+f(g)+f(b);}
+function shade(hex,pct){ // pct -100..100 (neg=darker)
+  const {r,g,b}=hexToRgb(hex);const t=pct/100;
+  const mix=(c)=> t<0 ? c*(1+t) : c+(255-c)*t;
+  return rgbToHex(mix(r),mix(g),mix(b));
+}
+function mixHex(a,b,t){const A=hexToRgb(a),B=hexToRgb(b);return rgbToHex(A.r+(B.r-A.r)*t,A.g+(B.g-A.g)*t,A.b+(B.b-A.b)*t);}
+function hslHex(h,s,l){
+  h=((h%360)+360)%360;s=clamp(s,0,1);l=clamp(l,0,1);
+  const c=(1-Math.abs(2*l-1))*s,x=c*(1-Math.abs((h/60)%2-1)),m=l-c/2;
+  let r=0,g=0,b=0;
+  if(h<60){r=c;g=x;}else if(h<120){r=x;g=c;}else if(h<180){g=c;b=x;}
+  else if(h<240){g=x;b=c;}else if(h<300){r=x;b=c;}else{r=c;b=x;}
+  return rgbToHex((r+m)*255,(g+m)*255,(b+m)*255);
+}
+
+/* ------------------------------ Archetypes --------------------------------- */
+const ARCHETYPES = {
+  stag:     {label:"Stag",              arm:"mandibles", ant:"geniculate", metal:[0.05,0.35], elong:[0.55,0.85], baseHue:[18,42], pal:"warmdark", pattern:"plain",   legs:1.15},
+  rhino:    {label:"Rhinoceros / Hercules", arm:"horn",  ant:"clubbed",    metal:[0.05,0.30], elong:[0.60,0.95], baseHue:[20,45], pal:"warmdark", pattern:"plain",   legs:1.05},
+  weevil:   {label:"Weevil",            arm:"rostrum",   ant:"geniculate", metal:[0.10,0.55], elong:[0.75,1.05], baseHue:[30,70], pal:"earth",    pattern:"speckle", legs:0.9},
+  longhorn: {label:"Longhorn",          arm:"none",      ant:"longhorn",   metal:[0.10,0.5],  elong:[0.9,1.25],  baseHue:[190,260],pal:"cool",    pattern:"bands",   legs:1.0},
+  ground:   {label:"Ground",            arm:"none",      ant:"filiform",   metal:[0.0,0.3],   elong:[0.75,1.05], baseHue:[210,300],pal:"dark",    pattern:"stria",   legs:1.25},
+  jewel:    {label:"Jewel / Buprestid", arm:"none",      ant:"serrate",    metal:[0.75,1.0],  elong:[0.85,1.15], baseHue:[120,300],pal:"jewel",   pattern:"stria",   legs:0.9},
+  ladybird: {label:"Ladybird",          arm:"none",      ant:"clubbed",    metal:[0.05,0.3],  elong:[0.35,0.55], baseHue:[0,25],   pal:"red",     pattern:"spots",   legs:0.85},
+  dung:     {label:"Dung",              arm:"horn",      ant:"clubbed",    metal:[0.15,0.6],  elong:[0.45,0.7],  baseHue:[210,280],pal:"jewel",   pattern:"stria",   legs:1.1}
+};
+const ARCHKEYS = Object.keys(ARCHETYPES);
+
+/* Named palettes for override. Returns fn(rng)->palette object. */
+const PALETTES = {
+  auto:      null,
+  emerald:   {hue:145, s:.9, l:.34, metal:.95, name:"Emerald Jewel"},
+  cobalt:    {hue:215, s:.85,l:.4,  metal:.9,  name:"Cobalt Sheen"},
+  amethyst:  {hue:280, s:.6, l:.4,  metal:.85, name:"Amethyst"},
+  copper:    {hue:24,  s:.75,l:.42, metal:.8,  name:"Copper"},
+  gold:      {hue:44,  s:.8, l:.45, metal:.85, name:"Golden Scarab"},
+  obsidian:  {hue:250, s:.15,l:.14, metal:.35, name:"Obsidian"},
+  crimson:   {hue:5,   s:.8, l:.42, metal:.25, name:"Crimson"},
+  bronze:    {hue:30,  s:.5, l:.32, metal:.6,  name:"Bronze"}
+};
+const PALKEYS = Object.keys(PALETTES);
+const PALLABELS = {auto:"Auto (from seed)",emerald:"Emerald Jewel",cobalt:"Cobalt Sheen",amethyst:"Amethyst",copper:"Copper",gold:"Golden Scarab",obsidian:"Obsidian",crimson:"Crimson",bronze:"Bronze"};
+
+/* --------------------------- Palette builder ------------------------------- */
+function buildPalette(rng, arch, metalTarget, hueHint, forced){
+  let hue, sat, lum, metal;
+  if(forced){
+    hue = forced.hue + rng.range(-12,12);
+    sat = forced.s + rng.range(-.08,.08);
+    lum = forced.l + rng.range(-.05,.05);
+    metal = forced.metal;
+  } else {
+    hue = rng.range(hueHint[0], hueHint[1]);
+    metal = metalTarget;
+    if(metal>0.6){ sat=rng.range(.6,.95); lum=rng.range(.32,.5); }
+    else { sat=rng.range(.25,.6); lum=rng.range(.16,.4); }
+  }
+  sat=clamp(sat,.08,1); lum=clamp(lum,.08,.62);
+  const base   = hslHex(hue, sat, lum);
+  const shadeC = hslHex(hue, clamp(sat+.05,0,1), clamp(lum-.14,.02,1));
+  const hiC    = hslHex(hue, clamp(sat-.1,0,1),  clamp(lum+.22,0,.9));
+  // iridescent triad — shifts hue across the shell
+  const dir = rng.chance(.5)?1:-1;
+  const iridA = hslHex(hue-40*dir, clamp(sat+.1,0,1), clamp(lum+.06,0,.7));
+  const iridB = hslHex(hue,        clamp(sat+.12,0,1), clamp(lum+.12,0,.72));
+  const iridC = hslHex(hue+55*dir, clamp(sat+.1,0,1), clamp(lum+.02,0,.66));
+  const iridD = hslHex(hue+120*dir,clamp(sat,0,1),    clamp(lum+.1,0,.7));
+  const legColor = shade(base, -34);
+  const bellyColor = shade(base, -46);
+  const accent = hslHex(hue+180, .5, .5);
+  return {hue,sat,lum,metal,base,shadeC,hiC,iridA,iridB,iridC,iridD,legColor,bellyColor,accent};
+}
+
+/* ----------------------- Pattern color chooser ----------------------------- */
+function patternColor(rng, pal, kind){
+  if(kind==="spots"||kind==="bands"){
+    // strong contrast (ladybird black spots, or pale bands)
+    return rng.chance(.6) ? "#1c1712" : hslHex(pal.hue, .1, .9);
+  }
+  if(kind==="chevron") return rng.chance(.5)? shade(pal.base,-55) : hslHex(pal.hue,.15,.85);
+  return shade(pal.base,-40);
+}
+
+/* --------------------------- Morphology model ------------------------------ */
+/* Turn a seed string + control state into a full specimen spec. */
+function buildMorphology(seedStr, state){
+  const uid = "b"+(xmur3(seedStr+"|"+(state.archetype||"")+"|"+(state.palette||""))()%1e9);
+  // choose archetype
+  let archKey = state.archetype && state.archetype!=="auto" ? state.archetype : null;
+  const aRng = RNG(seedStr,"arch");
+  if(!archKey){
+    archKey = aRng.weighted([
+      ["jewel",3],["stag",2.2],["rhino",2],["longhorn",2],["ground",2.2],
+      ["ladybird",1.6],["weevil",1.8],["dung",1.4]
+    ]);
+  }
+  const A = ARCHETYPES[archKey];
+  const r = RNG(seedStr, "morph");
+
+  // control scalars (0..1 or multipliers)
+  const sizeMul   = (state.size??100)/100;
+  const elongMul  = 0.6 + ((state.elong??50)/100)*0.9;   // 0.6..1.5 bias
+  const hornMul   = (state.horn??60)/100;                 // 0..1
+  const iridMul   = (state.irid??60)/100;                 // 0..1
+  const patMul    = (state.pat??55)/100;                  // 0..1
+
+  // base dimensions (local units)
+  const baseLen = r.range(300,360)*sizeMul;
+  let elong = r.range(A.elong[0],A.elong[1]) * elongMul;
+  elong = clamp(elong,0.34,1.4);
+
+  const bodyLen = baseLen;
+  const bodyHalfW = (baseLen*0.30)/elong;   // wider when short
+
+  const headR = bodyHalfW * r.range(0.42,0.56);
+  const pronotumHalfW = bodyHalfW * r.range(0.78,0.95);
+  const pronotumLen = bodyLen * r.range(0.17,0.24);
+  const scutellum = pronotumHalfW * r.range(0.18,0.3);
+  const elytraHalfW = bodyHalfW;
+  const elytraLen = bodyLen * r.range(0.52,0.62);
+  const shoulderSquare = r.range(0.55,0.95); // 1 = boxy longhorn shoulders
+
+  // metallic
+  let metal = r.range(A.metal[0],A.metal[1]);
+  metal = clamp(metal * (0.4+1.0*iridMul), 0, 1);
+
+  // palette
+  const forced = state.palette && state.palette!=="auto" ? PALETTES[state.palette] : null;
+  const pal = buildPalette(RNG(seedStr,"color"), archKey, metal, A.baseHue, forced);
+  pal.metal = clamp((forced?forced.metal:pal.metal) * (0.35+iridMul), 0, 1);
+  metal = pal.metal;
+
+  // surface sculpture
+  const striaCount = Math.round(r.int(5,9) * (0.5+patMul));
+  const punctureN  = Math.round(r.int(30,90) * patMul * (bodyLen/330));
+  // pattern type
+  let patternType = A.pattern;
+  if(patternType==="plain" && r.chance(.4*patMul)) patternType = r.pick(["stria","speckle"]);
+  if(patMul<0.12) patternType = "plain";
+  let patternCount=0, patCol="#000", spotRows=0;
+  if(patternType==="spots"){ patternCount = r.int(2,7); patCol=patternColor(r,pal,"spots"); }
+  else if(patternType==="bands"){ patternCount = r.int(2,4); patCol=patternColor(r,pal,"bands"); }
+  else if(patternType==="chevron"){ patternCount=r.int(2,4); patCol=patternColor(r,pal,"chevron"); }
+  else if(patternType==="speckle"){ patternCount = Math.round(r.int(20,60)*patMul); patCol=patternColor(r,pal,"speckle"); }
+  const hasSpots = patternType==="spots";
+
+  // armament
+  let arm = {type:A.arm, size:0};
+  if(A.arm!=="none"){
+    arm.size = clamp(r.range(0.4,1.0) * (0.35+1.15*hornMul), 0.12, 1.35);
+    arm.thoracicHorn = (archKey==="rhino"||archKey==="dung") && r.chance(0.6) && hornMul>0.2;
+    arm.mandibleTeeth = r.int(2,4);
+    arm.rostrumLen = r.range(0.7,1.3);
+  } else if((archKey==="stag") ) { arm={type:"mandibles",size:0.6*hornMul}; }
+
+  // antennae
+  const ant = {
+    type: A.ant,
+    len: bodyLen * (A.ant==="longhorn" ? r.range(0.85,1.35) : r.range(0.28,0.5)),
+    segs: A.ant==="longhorn" ? r.int(9,12) : r.int(7,11),
+    club: r.range(0.7,1.2)
+  };
+
+  // legs
+  const legLen = bodyHalfW * r.range(1.5,2.1) * A.legs;
+  const legThick = bodyHalfW * r.range(0.10,0.15);
+  const spiny = r.chance(0.5);
+
+  // tiny surface hairs (setae)
+  const hairs = r.chance(0.45) && patMul>0.2;
+
+  return {
+    seed:seedStr, uid, archetype:archKey, archLabel:A.label,
+    bodyLen, bodyHalfW, headR, pronotumHalfW, pronotumLen, scutellum,
+    elytraHalfW, elytraLen, shoulderSquare, elong,
+    metal, pal, striaCount, punctureN, patternType, patternCount, patCol, hasSpots,
+    arm, ant, legLen, legThick, spiny, hairs,
+    // seed-frozen decorative rng draws
+    rSpots: seedStr, rSeedNum: xmur3(seedStr)()
+  };
+}
+
+/* --------------------------- Name synthesizer ------------------------------ */
+const NAME = {
+  genusRoots:{
+    horn:["Cerat","Cornu","Taur","Xylotrupes","Dynast","Chalcosoma","Golofa"],
+    mand:["Luca","Dorc","Odont","Chiasogn","Cyclomm","Prosop","Hexarthr"],
+    metal:["Chrys","Buprest","Chalco","Iridot","Sternoc","Anthax","Agril"],
+    long:["Ceramb","Monocham","Batoc","Rosal","Callichrom","Sternot","Acanthoc"],
+    rost:["Curcul","Rhynch","Otiorhync","Lixus","Larin","Cyrtot","Rhinost"],
+    spot:["Stict","Coccinell","Gutta","Adal","Harmon","Anatis","Psyllobor"],
+    ground:["Carab","Cychr","Nebri","Scarit","Calos","Pterosti","Abax"],
+    dung:["Scarab","Copris","Onthophag","Geotrup","Phanae","Canthon","Gymnopleur"],
+    plain:["Coleopter","Melolonth","Anomal","Cetoni","Phyllopert","Popill","Rutel"]
+  },
+  genusSuffix:["us","es","a","ium","ellus","ophis","idus","ognathus","ornis","icus"],
+  spColor:{
+    green:["viridis","smaragdina","chlorotica","prasina"],
+    blue:["azurea","cyanea","caerulea","cobaltina"],
+    purple:["purpurea","violacea","amethystina"],
+    gold:["aurata","auricoma","chrysos","dorata"],
+    copper:["cuprea","aenea","ferruginea","rufina"],
+    red:["sanguinea","rubra","coccinea","ignita"],
+    dark:["nocturna","tenebrosa","atra","fusca","umbrina"],
+    pale:["pallida","argentata","nivea","cana"]
+  },
+  spTrait:{
+    horn:["cornuta","armata","bicornis","tridentata"],
+    mand:["mandibularis","dentata","forcipata"],
+    metal:["splendens","fulgida","micans","speculum"],
+    spots:["maculata","guttata","punctata","stellata"],
+    bands:["vittata","fasciata","zonata","cincta"],
+    stria:["sulcata","striata","costata"],
+    big:["gigantea","magnifica","imperialis","titania"],
+    small:["minuta","pygmaea","exigua"],
+    plain:["vulgaris","communis","modesta","elegans"]
+  }
+};
+function colorFamily(pal){
+  const h=((pal.hue%360)+360)%360;
+  if(pal.lum<0.2) return "dark";
+  if(pal.sat<0.2) return "pale";
+  if(h<18||h>340) return "red";
+  if(h<48) return pal.lum>0.4?"gold":"copper";
+  if(h<160) return "green";
+  if(h<255) return "blue";
+  if(h<320) return "purple";
+  return "red";
+}
+function synthName(spec){
+  const r = RNG(spec.seed,"name");
+  const a=spec.archetype, arm=spec.arm.type;
+  let rootKey="plain";
+  if(arm==="horn") rootKey="horn";
+  else if(arm==="mandibles") rootKey="mand";
+  else if(arm==="rostrum") rootKey="rost";
+  else if(a==="longhorn") rootKey="long";
+  else if(a==="ground") rootKey="ground";
+  else if(a==="dung") rootKey="dung";
+  else if(spec.hasSpots) rootKey="spot";
+  else if(spec.metal>0.6) rootKey="metal";
+  const gRoot=r.pick(NAME.genusRoots[rootKey]);
+  let genus = gRoot + r.pick(NAME.genusSuffix);
+  genus = genus.charAt(0).toUpperCase()+genus.slice(1).toLowerCase();
+
+  // species: colour-driven, sometimes trait-driven
+  let sp;
+  if(r.chance(0.55)){
+    sp = r.pick(NAME.spColor[colorFamily(spec.pal)]);
+  } else {
+    let tk="plain";
+    if(arm==="horn")tk="horn"; else if(arm==="mandibles")tk="mand";
+    else if(spec.metal>0.7)tk="metal";
+    else if(spec.patternType==="spots")tk="spots";
+    else if(spec.patternType==="bands")tk="bands";
+    else if(spec.patternType==="stria")tk="stria";
+    else if(spec.bodyLen>345)tk="big";
+    else if(spec.bodyLen<310)tk="small";
+    sp = r.pick(NAME.spTrait[tk]);
+  }
+  return {genus, species:sp, full:genus+" "+sp};
+}
+
+/* --------------------------- Label synthesizer ----------------------------- */
+const LOCALITIES=[
+  "Sarawak, Borneo","Pará, Brazil","Assam, India","New Guinea Highlands","Madagascar, Antananarivo",
+  "Cameroon, Mt. Kupé","Sulawesi, Celebes","Ecuador, Napo","Queensland, Australia","Congo Basin",
+  "Java, Dutch E. Indies","Kinabalu, N. Borneo","Amazonas, Peru","Sikkim, Himalaya","Ghana, Ashanti",
+  "Sumatra, Padang","Costa Rica, Cartago","Yunnan, China","Zanzibar, E. Africa","Panama, Chiriquí",
+  "Trinidad, W. Indies","Luzon, Philippines","Guiana, Demerara","Nyasaland","Bahia, Brazil"
+];
+const COLLECTORS=[
+  "A. R. Wallace","H. W. Bates","C. Darwin","J. O. Westwood","W. C. Hewitson","E. Doubleday",
+  "F. Sikora","G. van Lansberge","A. David","W. Doherty","T. Belt","J. Thomson",
+  "R. Oberthür","H. Fruhstorfer","L. Fea","A. Fry","P. Cameron","M. Maindron"
+];
+const MONTHS=["I","II","III","IV","V","VI","VII","VIII","IX","X","XI","XII"];
+function synthLabel(spec, name){
+  const r=RNG(spec.seed,"label");
+  const loc=r.pick(LOCALITIES);
+  const col=r.pick(COLLECTORS);
+  const year=r.int(1846,1911);
+  const day=r.int(1,28), mon=r.pick(MONTHS);
+  return {locality:loc, collector:col, date:day+"."+mon+"."+year, name, seed:spec.seed};
+}
+
+/* ============================================================================
+   SVG BEETLE BUILDER
+   Builds a beetle group in local coordinates centred at x=0, growing downward.
+   Returns { content, vb:{x,y,w,h} } for nesting into a plate or cabinet cell.
+   ========================================================================== */
+function P(pts){ // build "x,y x,y ..." for polyline points
+  return pts.map(p=>p[0].toFixed(2)+","+p[1].toFixed(2)).join(" ");
+}
+function seg(p,len,deg,side){const r=deg*Math.PI/180;return{x:p.x+side*len*Math.cos(r),y:p.y+len*Math.sin(r)};}
+
+function buildBeetleGroup(spec, opts){
+  opts=opts||{};
+  const spread = !!opts.spread;
+  const lightAngle = (opts.lightAngle==null?300:opts.lightAngle);
+  const animate = opts.animate!==false;
+  const uid = spec.uid + (opts.suffix||"");
+  const pal = spec.pal;
+  const La = lightAngle*Math.PI/180;
+  const Lv = {x:Math.cos(La), y:Math.sin(La)};
+
+  /* -- geometry layout (top -> bottom) -- */
+  const topPad = 120;                       // room for antennae / horns / pin bead
+  const headR  = spec.headR;
+  const headCY = topPad + headR;
+  const pronoTop = headCY + headR*0.35;
+  const pronoBot = pronoTop + spec.pronotumLen;
+  const scutY = pronoBot;
+  const elyTop = pronoBot - spec.pronotumLen*0.06;
+  const elyBot = elyTop + spec.elytraLen;
+  const ehw = spec.elytraHalfW;
+  const phw = spec.pronotumHalfW;
+
+  /* leg attachment points along the thorax (y) */
+  const legY = [pronoTop+spec.pronotumLen*0.25, pronoBot+8, elyTop+spec.elytraLen*0.22];
+  const legBaseDeg = [-22, 8, 34];   // femur angle from horizontal (downward positive)
+  const femLen = spec.legLen*0.5, tibLen=spec.legLen*0.55, tarLen=spec.legLen*0.32;
+
+  /* extents for viewBox */
+  let legReachX = phw*0.6 + (femLen*Math.cos(0)+tibLen*Math.cos(40*Math.PI/180))*0.95;
+  let legBottom = elyTop+spec.elytraLen*0.22 + (femLen*Math.sin(34*Math.PI/180)+tibLen*Math.sin(70*Math.PI/180)+tarLen*Math.sin(95*Math.PI/180));
+  let antReachX = spec.ant.type==="longhorn" ? ehw*0.4 + spec.ant.len*0.55 : headR + spec.ant.len*0.5;
+  let armTop = topPad;
+  if(spec.arm.type==="mandibles") armTop = headCY - headR - spec.arm.size*headR*2.4;
+  if(spec.arm.type==="horn") armTop = headCY - headR - spec.arm.size*headR*2.8;
+  if(spec.arm.type==="rostrum") armTop = headCY - headR - spec.arm.rostrumLen*headR*2.2;
+  armTop = Math.min(armTop, topPad-10);
+
+  const spreadPad = spread ? ehw*1.1 : 0;
+  const hindBottom = spread ? elyBot + spec.elytraLen*0.55 : elyBot;
+  const maxHalf = Math.max(phw, ehw, legReachX, antReachX) + spreadPad + 16;
+  const vbX = -maxHalf-8;
+  const vbW = (maxHalf+8)*2;
+  const vbY = Math.min(0, armTop-24);
+  const vbH = Math.max(legBottom, hindBottom, elyBot) + 34 - vbY;
+
+  /* -------- defs: gradients, filters, clips, styles -------- */
+  const g = (id)=>`url(#${id}_${uid})`;
+  let defs = `<defs>`;
+  // matte body gradient
+  defs += `<linearGradient id="body_${uid}" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="${shade(pal.base,14)}"/>
+    <stop offset="0.5" stop-color="${pal.base}"/>
+    <stop offset="1" stop-color="${pal.shadeC}"/></linearGradient>`;
+  // pronotum gradient
+  defs += `<radialGradient id="prono_${uid}" cx="0.5" cy="0.3" r="0.8">
+    <stop offset="0" stop-color="${pal.hiC}"/>
+    <stop offset="0.55" stop-color="${pal.base}"/>
+    <stop offset="1" stop-color="${pal.shadeC}"/></radialGradient>`;
+  // head gradient
+  defs += `<radialGradient id="head_${uid}" cx="0.5" cy="0.35" r="0.85">
+    <stop offset="0" stop-color="${shade(pal.base,20)}"/>
+    <stop offset="1" stop-color="${pal.shadeC}"/></radialGradient>`;
+  // iridescent shell gradient — angled by light
+  const gt = `rotate(${(lightAngle+40).toFixed(1)} 0.5 0.5)`;
+  defs += `<linearGradient id="irid_${uid}" x1="0" y1="0" x2="1" y2="1" gradientTransform="${gt}">
+    <stop offset="0" stop-color="${pal.iridA}"/>
+    <stop offset="0.32" stop-color="${pal.iridB}"/>
+    <stop offset="0.6" stop-color="${pal.iridC}"/>
+    <stop offset="1" stop-color="${pal.iridD}"/></linearGradient>`;
+  // specular highlight (radial), positioned toward the light
+  const specCX = 0.5 + Lv.x*0.34, specCY = 0.42 + Lv.y*0.34;
+  defs += `<radialGradient id="spec_${uid}" cx="${specCX.toFixed(3)}" cy="${specCY.toFixed(3)}" r="0.5">
+    <stop offset="0" stop-color="#ffffff" stop-opacity="${(0.55+0.4*pal.metal).toFixed(2)}"/>
+    <stop offset="0.35" stop-color="#ffffff" stop-opacity="${(0.12*pal.metal).toFixed(2)}"/>
+    <stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>`;
+  // moving shimmer band
+  defs += `<linearGradient id="shim_${uid}" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+    <stop offset="0.5" stop-color="#fff" stop-opacity="${(0.5*Math.max(0.25,pal.metal)).toFixed(2)}"/>
+    <stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>`;
+  // shadow blur
+  defs += `<filter id="soft_${uid}" x="-40%" y="-40%" width="180%" height="180%">
+    <feGaussianBlur stdDeviation="${(6+spec.bodyLen*0.02).toFixed(1)}"/></filter>`;
+  // hindwing gradient
+  defs += `<linearGradient id="wing_${uid}" x1="0" y1="0" x2="0.4" y2="1">
+    <stop offset="0" stop-color="#e8d9b8" stop-opacity="0.72"/>
+    <stop offset="1" stop-color="#b89a5e" stop-opacity="0.42"/></linearGradient>`;
+  // clip paths for each elytron (defined after we compute the paths)
+
+  /* -------- elytron path (right side, x>=0) -------- */
+  const sq = spec.shoulderSquare;
+  const shX = ehw*(0.72+0.23*sq);
+  const maxX = ehw;
+  const yMax = elyTop + spec.elytraLen*0.42;
+  const seamX = ehw*0.03+1.2;
+  const tipX = ehw*(0.16+0.06*(1-sq));
+  const elyPath =
+    `M ${seamX},${elyTop}
+     C ${shX*0.6},${elyTop-2} ${shX},${elyTop+spec.elytraLen*0.03} ${shX+ (maxX-shX)*0.4},${elyTop+spec.elytraLen*0.14}
+     C ${maxX},${elyTop+spec.elytraLen*0.26} ${maxX},${yMax} ${maxX*0.97},${yMax}
+     C ${maxX*0.9},${elyBot-spec.elytraLen*0.16} ${tipX*1.8},${elyBot-spec.elytraLen*0.02} ${tipX},${elyBot}
+     C ${tipX*0.5},${elyBot+2} ${seamX+1},${elyBot-4} ${seamX},${elyBot-spec.elytraLen*0.05}
+     L ${seamX},${elyTop} Z`;
+  defs += `<clipPath id="clipR_${uid}"><path d="${elyPath}"/></clipPath>`;
+  defs += `<clipPath id="clipL_${uid}"><path transform="scale(-1,1)" d="${elyPath}"/></clipPath>`;
+  defs += `</defs>`;
+
+  /* -------- animation style (self-contained inside this svg) -------- */
+  let style="";
+  if(animate){
+    const dur=(6+ (spec.rSeedNum%1000)/300).toFixed(1);
+    style = `<style>
+      .ely-shim-${uid}{animation:shim_${uid} ${dur}s ease-in-out infinite;}
+      @keyframes shim_${uid}{
+        0%{transform:translateX(-140%);opacity:0;}
+        18%{opacity:1;} 40%{opacity:1;}
+        58%{transform:translateX(140%);opacity:0;} 100%{transform:translateX(140%);opacity:0;}
+      }
+      .ant-tip-${uid}{transform-box:fill-box;transform-origin:50% 90%;animation:ant_${uid} ${(3.2).toFixed(1)}s ease-in-out infinite;}
+      @keyframes ant_${uid}{0%,100%{transform:rotate(-2.5deg);}50%{transform:rotate(2.5deg);}}
+      .tarsi-${uid}{transform-box:fill-box;transform-origin:50% 0%;animation:tar_${uid} ${(2.6).toFixed(1)}s ease-in-out infinite;}
+      @keyframes tar_${uid}{0%,100%{transform:rotate(-3deg) translateY(0);}50%{transform:rotate(3deg) translateY(1px);}}
+      .beetle-root-${uid}:hover .ant-tip-${uid}{animation-duration:1.4s;}
+      .beetle-root-${uid}:hover .tarsi-${uid}{animation-duration:1.1s;}
+    </style>`;
+  }
+
+  /* ---------------------------------------------------------------- layers */
+  let s = "";
+
+  /* soft cast shadow (offset opposite the light) */
+  const shDX = -Lv.x*(10+spec.bodyLen*0.02), shDY = -Lv.y*(6+spec.bodyLen*0.015)+8;
+  s += `<g transform="translate(${shDX.toFixed(1)},${shDY.toFixed(1)})" filter="${g('soft')}" opacity="0.34">
+    <ellipse cx="0" cy="${(elyTop+spec.elytraLen*0.45).toFixed(1)}" rx="${(ehw*1.02).toFixed(1)}" ry="${(spec.bodyLen*0.42).toFixed(1)}" fill="#000"/>
+  </g>`;
+
+  /* ---- legs (behind body) ---- */
+  function drawLeg(side, ay, baseDeg){
+    const coxa={x:side*(phw*0.55), y:ay};
+    const knee=seg(coxa,femLen,baseDeg,side);
+    const tibDeg=baseDeg+38+ (baseDeg>0?18:0);
+    const ankle=seg(knee,tibLen,tibDeg,side);
+    const tarDeg=tibDeg+30;
+    const toe=seg(ankle,tarLen,tarDeg,side);
+    const c=pal.legColor;
+    let spines="";
+    if(spec.spiny){
+      // little tibial spines
+      const midx=(knee.x+ankle.x)/2, midy=(knee.y+ankle.y)/2;
+      spines=`<line x1="${midx.toFixed(1)}" y1="${midy.toFixed(1)}" x2="${(midx+side*7).toFixed(1)}" y2="${(midy+9).toFixed(1)}" stroke="${shade(c,-20)}" stroke-width="${(spec.legThick*0.4).toFixed(1)}" stroke-linecap="round"/>`;
+    }
+    // tarsus claws
+    const claw1=seg(toe,7,tarDeg-14,side), claw2=seg(toe,7,tarDeg+6,side);
+    return `<g>
+      <line x1="${coxa.x.toFixed(1)}" y1="${coxa.y.toFixed(1)}" x2="${knee.x.toFixed(1)}" y2="${knee.y.toFixed(1)}" stroke="${c}" stroke-width="${(spec.legThick*1.15).toFixed(1)}" stroke-linecap="round"/>
+      <line x1="${knee.x.toFixed(1)}" y1="${knee.y.toFixed(1)}" x2="${ankle.x.toFixed(1)}" y2="${ankle.y.toFixed(1)}" stroke="${shade(c,6)}" stroke-width="${(spec.legThick*0.8).toFixed(1)}" stroke-linecap="round"/>
+      ${spines}
+      <g class="tarsi-${uid}">
+      <line x1="${ankle.x.toFixed(1)}" y1="${ankle.y.toFixed(1)}" x2="${toe.x.toFixed(1)}" y2="${toe.y.toFixed(1)}" stroke="${shade(c,10)}" stroke-width="${(spec.legThick*0.5).toFixed(1)}" stroke-linecap="round"/>
+      <line x1="${toe.x.toFixed(1)}" y1="${toe.y.toFixed(1)}" x2="${claw1.x.toFixed(1)}" y2="${claw1.y.toFixed(1)}" stroke="${shade(c,-10)}" stroke-width="${(spec.legThick*0.3).toFixed(1)}" stroke-linecap="round"/>
+      <line x1="${toe.x.toFixed(1)}" y1="${toe.y.toFixed(1)}" x2="${claw2.x.toFixed(1)}" y2="${claw2.y.toFixed(1)}" stroke="${shade(c,-10)}" stroke-width="${(spec.legThick*0.3).toFixed(1)}" stroke-linecap="round"/>
+      </g>
+    </g>`;
+  }
+  let legsSVG="";
+  for(let i=0;i<3;i++){ legsSVG+=drawLeg(1,legY[i],legBaseDeg[i]); legsSVG+=drawLeg(-1,legY[i],legBaseDeg[i]); }
+  s += `<g>${legsSVG}</g>`;
+
+  /* ---- abdomen / underbody (visible when spread) ---- */
+  const abW = ehw*0.82, abTop=pronoBot+2, abBot=elyBot+ (spread?spec.elytraLen*0.12:0);
+  let abdomen = `<g>
+    <path d="M 0,${abTop} C ${abW},${abTop+8} ${abW*0.95},${abBot-spec.elytraLen*0.2} 0,${abBot}
+             C ${-abW*0.95},${abBot-spec.elytraLen*0.2} ${-abW},${abTop+8} 0,${abTop} Z"
+          fill="${pal.bellyColor}"/>`;
+  // abdominal segment lines
+  const segN=5;
+  for(let i=1;i<segN;i++){
+    const yy=abTop+(abBot-abTop)*(i/segN);
+    const w=abW*(1-0.12*i)*Math.sin(Math.PI*(i/segN));
+    abdomen+=`<line x1="${-w.toFixed(1)}" y1="${yy.toFixed(1)}" x2="${w.toFixed(1)}" y2="${yy.toFixed(1)}" stroke="${shade(pal.bellyColor,-22)}" stroke-width="1.4" opacity="0.6"/>`;
+  }
+  abdomen+=`</g>`;
+  s += abdomen;
+
+  /* ---- hindwings (translucent, revealed when spread) ---- */
+  if(spread){
+    function hindwing(side){
+      const hx=side*ehw*0.34;
+      const top=elyTop+spec.elytraLen*0.1;
+      const tip={x:side*ehw*1.15, y:elyBot+spec.elytraLen*0.5};
+      const path=`M ${hx},${top}
+        C ${side*ehw*1.05},${top+spec.elytraLen*0.1} ${side*ehw*1.3},${elyBot} ${tip.x},${tip.y}
+        C ${side*ehw*0.7},${elyBot+spec.elytraLen*0.42} ${side*ehw*0.2},${elyBot+spec.elytraLen*0.1} ${hx*0.7},${elyBot-spec.elytraLen*0.05}
+        C ${hx*0.9},${elyBot-spec.elytraLen*0.2} ${hx},${top+spec.elytraLen*0.3} ${hx},${top} Z`;
+      // wing veins
+      let veins="";
+      for(let k=0;k<3;k++){
+        const t=0.3+k*0.22;
+        veins+=`<line x1="${(hx*0.8).toFixed(1)}" y1="${(top+spec.elytraLen*0.1).toFixed(1)}" x2="${(tip.x*(0.6+0.14*k)).toFixed(1)}" y2="${(elyBot+spec.elytraLen*(0.15+0.12*k)).toFixed(1)}" stroke="#7a6132" stroke-width="0.8" opacity="0.5"/>`;
+      }
+      // fold line
+      veins+=`<line x1="${hx.toFixed(1)}" y1="${(top+spec.elytraLen*0.15).toFixed(1)}" x2="${(tip.x*0.55).toFixed(1)}" y2="${(elyBot+spec.elytraLen*0.05).toFixed(1)}" stroke="#8a7038" stroke-width="0.6" opacity="0.4" stroke-dasharray="4 3"/>`;
+      return `<path d="${path}" fill="${g('wing')}" stroke="#8a6f38" stroke-width="0.7" stroke-opacity="0.5"/>${veins}`;
+    }
+    s += `<g opacity="0.9">${hindwing(1)}${hindwing(-1)}</g>`;
+  }
+
+  /* ---- surface detail generator (clipped to an elytron) ---- */
+  function elytronDetail(side){
+    const clip = side>0 ? g('clipR') : g('clipL');
+    const dr = RNG(spec.seed, "detail"+side);
+    let d="";
+    // striae (longitudinal ridges)
+    if(spec.patternType==="stria"||spec.striaCount){
+      const n=spec.striaCount;
+      for(let i=0;i<n;i++){
+        const fx=(i+0.6)/(n+0.4);
+        const x=side*ehw*fx;
+        d+=`<path d="M ${(x*0.5).toFixed(1)},${elyTop.toFixed(1)} C ${x.toFixed(1)},${(elyTop+spec.elytraLen*0.3).toFixed(1)} ${x.toFixed(1)},${(elyTop+spec.elytraLen*0.6).toFixed(1)} ${(x*0.6).toFixed(1)},${elyBot.toFixed(1)}"
+              fill="none" stroke="${shade(pal.base,-30)}" stroke-width="1" opacity="0.42"/>`;
+      }
+    }
+    // puncture field
+    for(let i=0;i<spec.punctureN;i++){
+      const px=side*dr.range(2,ehw*0.98);
+      const py=dr.range(elyTop+4,elyBot-4);
+      const rr=dr.range(0.7,1.6);
+      d+=`<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${rr.toFixed(1)}" fill="${shade(pal.base,-38)}" opacity="0.5"/>`;
+    }
+    // patterns
+    if(spec.patternType==="spots"){
+      const rows=spec.patternCount;
+      for(let i=0;i<rows;i++){
+        const py=elyTop+spec.elytraLen*(0.2+0.6*(i/(Math.max(1,rows-1)||1)));
+        const px=side*ehw*dr.range(0.35,0.72);
+        const rr=ehw*dr.range(0.14,0.22);
+        d+=`<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${rr.toFixed(1)}" fill="${spec.patCol}" opacity="0.92"/>`;
+      }
+      // shoulder spot near seam
+      if(dr.chance(0.7)) d+=`<circle cx="${(side*ehw*0.28).toFixed(1)}" cy="${(elyTop+spec.elytraLen*0.16).toFixed(1)}" r="${(ehw*0.12).toFixed(1)}" fill="${spec.patCol}" opacity="0.9"/>`;
+    } else if(spec.patternType==="bands"){
+      const n=spec.patternCount;
+      for(let i=0;i<n;i++){
+        const py=elyTop+spec.elytraLen*(0.18+0.66*(i/n));
+        const h=spec.elytraLen*0.09;
+        d+=`<rect x="0" y="${py.toFixed(1)}" width="${ehw.toFixed(1)}" height="${h.toFixed(1)}" transform="${side<0?'scale(-1,1)':''}" fill="${spec.patCol}" opacity="0.85"/>`;
+      }
+    } else if(spec.patternType==="chevron"){
+      const n=spec.patternCount;
+      for(let i=0;i<n;i++){
+        const py=elyTop+spec.elytraLen*(0.22+0.6*(i/n));
+        d+=`<path d="M 0,${py.toFixed(1)} L ${(side*ehw*0.7).toFixed(1)},${(py+spec.elytraLen*0.08).toFixed(1)}" stroke="${spec.patCol}" stroke-width="${(ehw*0.09).toFixed(1)}" fill="none" opacity="0.8"/>`;
+      }
+    } else if(spec.patternType==="speckle"){
+      for(let i=0;i<spec.patternCount;i++){
+        const px=side*dr.range(3,ehw*0.9), py=dr.range(elyTop+6,elyBot-6);
+        d+=`<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${dr.range(1.4,3).toFixed(1)}" fill="${spec.patCol}" opacity="0.55"/>`;
+      }
+    }
+    // setae / hairs
+    if(spec.hairs){
+      for(let i=0;i<20;i++){
+        const px=side*dr.range(4,ehw*0.9), py=dr.range(elyTop+8,elyBot-8);
+        d+=`<line x1="${px.toFixed(1)}" y1="${py.toFixed(1)}" x2="${(px+side*3).toFixed(1)}" y2="${(py-4).toFixed(1)}" stroke="${shade(pal.base,-45)}" stroke-width="0.6" opacity="0.4"/>`;
+      }
+    }
+    return `<g clip-path="${clip}">${d}</g>`;
+  }
+
+  /* ---- one elytron (fill + irid + detail + specular + shimmer) ---- */
+  function elytron(side){
+    const clip = side>0 ? g('clipR') : g('clipL');
+    const pathT = side<0 ? ' transform="scale(-1,1)"' : '';
+    let inner = `<path${pathT} d="${elyPath}" fill="${g('body')}" stroke="${pal.shadeC}" stroke-width="1.2"/>`;
+    if(spec.metal>0.08){
+      inner += `<path${pathT} d="${elyPath}" fill="${g('irid')}" opacity="${(spec.metal*0.8).toFixed(2)}" style="mix-blend-mode:overlay"/>`;
+    }
+    inner += elytronDetail(side);
+    // specular
+    inner += `<path${pathT} d="${elyPath}" fill="${g('spec')}"/>`;
+    // moving shimmer band clipped to elytron
+    inner += `<g clip-path="${clip}"><rect class="ely-shim-${uid}" x="${(side>0?0:-ehw).toFixed(1)}" y="${elyTop.toFixed(1)}" width="${ehw.toFixed(1)}" height="${spec.elytraLen.toFixed(1)}" fill="${g('shim')}"/></g>`;
+    // seam edge shading
+    inner += `<line x1="${(side*seamX).toFixed(1)}" y1="${elyTop.toFixed(1)}" x2="${(side*seamX).toFixed(1)}" y2="${(elyBot-spec.elytraLen*0.05).toFixed(1)}" stroke="${pal.shadeC}" stroke-width="1" opacity="0.6"/>`;
+
+    // spread rotation about hinge (top-inner near scutellum)
+    let transform="";
+    if(spread){
+      const angle = side>0 ? 62 : -62;
+      transform = ` transform="rotate(${angle} ${(side*seamX).toFixed(1)} ${elyTop.toFixed(1)})"`;
+    }
+    return `<g${transform} style="transition:transform .55s cubic-bezier(.4,1.4,.5,1)">${inner}</g>`;
+  }
+  // draw right then left (order irrelevant, they are symmetric)
+  s += elytron(1);
+  s += elytron(-1);
+
+  /* ---- scutellum (small triangle between elytra bases) ---- */
+  s += `<path d="M ${(-spec.scutellum).toFixed(1)},${scutY.toFixed(1)} L ${spec.scutellum.toFixed(1)},${scutY.toFixed(1)} L 0,${(scutY+spec.scutellum*1.4).toFixed(1)} Z" fill="${pal.shadeC}" stroke="${shade(pal.shadeC,-15)}" stroke-width="0.8"/>`;
+
+  /* ---- pronotum (thoracic shield) ---- */
+  const pTopW=phw*0.62, pBotW=phw;
+  const pronoPath=`M ${-pTopW},${pronoTop}
+    C ${-pTopW*1.05},${(pronoTop-6)} ${-pBotW*0.5},${(pronoTop-4)} 0,${(pronoTop-5)}
+    C ${pBotW*0.5},${(pronoTop-4)} ${pTopW*1.05},${(pronoTop-6)} ${pTopW},${pronoTop}
+    C ${pBotW*1.02},${(pronoTop+spec.pronotumLen*0.5)} ${pBotW},${pronoBot} ${pBotW*0.86},${(pronoBot+2)}
+    C ${pBotW*0.4},${(pronoBot+6)} ${-pBotW*0.4},${(pronoBot+6)} ${-pBotW*0.86},${(pronoBot+2)}
+    C ${-pBotW},${pronoBot} ${-pBotW*1.02},${(pronoTop+spec.pronotumLen*0.5)} ${-pTopW},${pronoTop} Z`;
+  s += `<path d="${pronoPath}" fill="${g('prono')}" stroke="${pal.shadeC}" stroke-width="1.2"/>`;
+  // pronotum sheen + light puncture
+  s += `<ellipse cx="${(-phw*0.22).toFixed(1)}" cy="${(pronoTop+spec.pronotumLen*0.4).toFixed(1)}" rx="${(phw*0.32).toFixed(1)}" ry="${(spec.pronotumLen*0.32).toFixed(1)}" fill="#fff" opacity="${(0.14+0.18*spec.metal).toFixed(2)}"/>`;
+
+  /* ---- head ---- */
+  s += `<ellipse cx="0" cy="${headCY.toFixed(1)}" rx="${(headR*1.02).toFixed(1)}" ry="${(headR).toFixed(1)}" fill="${g('head')}" stroke="${pal.shadeC}" stroke-width="1.1"/>`;
+  // compound eyes
+  const eyeX=headR*0.86, eyeY=headCY;
+  s += `<circle cx="${eyeX.toFixed(1)}" cy="${eyeY.toFixed(1)}" r="${(headR*0.28).toFixed(1)}" fill="#0d0a06"/>`;
+  s += `<circle cx="${(-eyeX).toFixed(1)}" cy="${eyeY.toFixed(1)}" r="${(headR*0.28).toFixed(1)}" fill="#0d0a06"/>`;
+  s += `<circle cx="${(eyeX-2).toFixed(1)}" cy="${(eyeY-2).toFixed(1)}" r="1.4" fill="#fff" opacity="0.5"/>`;
+  s += `<circle cx="${(-eyeX-2).toFixed(1)}" cy="${(eyeY-2).toFixed(1)}" r="1.4" fill="#fff" opacity="0.5"/>`;
+  // clypeus
+  const clyY=headCY-headR*0.75;
+  s += `<path d="M ${(-headR*0.5).toFixed(1)},${(headCY-headR*0.55).toFixed(1)} Q 0,${(clyY-6).toFixed(1)} ${(headR*0.5).toFixed(1)},${(headCY-headR*0.55).toFixed(1)}" fill="none" stroke="${pal.shadeC}" stroke-width="1" opacity="0.6"/>`;
+
+  /* ---- armament ---- */
+  const armC = shade(pal.base,-18);
+  const armEdge = shade(pal.base,-45);
+  if(spec.arm.type==="mandibles"){
+    const L=headR*(1.6+spec.arm.size*2.2);
+    const spreadA=headR*(0.6+spec.arm.size*0.8);
+    function mandible(side){
+      const base={x:side*headR*0.4, y:clyY};
+      const tip={x:side*(spreadA*0.4), y:clyY-L};
+      const mid={x:side*(spreadA), y:clyY-L*0.5};
+      let teeth="";
+      const tn=spec.arm.mandibleTeeth;
+      for(let i=1;i<=tn;i++){
+        const t=i/(tn+1);
+        const tx=base.x+(tip.x-base.x)*t + side*4;
+        const ty=base.y+(tip.y-base.y)*t;
+        teeth+=`<path d="M ${tx.toFixed(1)},${ty.toFixed(1)} l ${(-side*8).toFixed(1)},-3 l 2,7 Z" fill="${armEdge}"/>`;
+      }
+      return `<path d="M ${base.x.toFixed(1)},${base.y.toFixed(1)}
+        Q ${mid.x.toFixed(1)},${mid.y.toFixed(1)} ${tip.x.toFixed(1)},${tip.y.toFixed(1)}
+        Q ${(tip.x-side*6).toFixed(1)},${(tip.y+8).toFixed(1)} ${(base.x-side*7).toFixed(1)},${(base.y+2).toFixed(1)} Z"
+        fill="${armC}" stroke="${armEdge}" stroke-width="1.4" stroke-linejoin="round"/>${teeth}`;
+    }
+    s += `<g>${mandible(1)}${mandible(-1)}</g>`;
+  } else if(spec.arm.type==="horn"){
+    const L=headR*(1.8+spec.arm.size*2.6);
+    const baseW=headR*0.6;
+    const hornPath=`M ${-baseW},${clyY}
+      C ${-baseW*0.7},${(clyY-L*0.4)} ${-baseW*0.25},${(clyY-L*0.8)} ${-4},${(clyY-L)}
+      C ${(headR*0.15)},${(clyY-L*0.86)} ${(baseW*0.4)},${(clyY-L*0.5)} ${baseW},${clyY} Z`;
+    s += `<path d="${hornPath}" fill="${armC}" stroke="${armEdge}" stroke-width="1.4" stroke-linejoin="round"/>`;
+    // curved tip
+    s += `<path d="M ${-4},${(clyY-L).toFixed(1)} q ${(headR*0.6).toFixed(1)},${(-headR*0.3).toFixed(1)} ${(headR*0.3).toFixed(1)},${(-headR*0.6).toFixed(1)}" fill="none" stroke="${armEdge}" stroke-width="3" stroke-linecap="round"/>`;
+    if(spec.arm.thoracicHorn){
+      const TL=spec.pronotumLen*(1.1+spec.arm.size*1.2);
+      s += `<path d="M ${-phw*0.28},${(pronoTop+4).toFixed(1)} C ${-phw*0.2},${(pronoTop-TL*0.6).toFixed(1)} ${-6},${(pronoTop-TL).toFixed(1)} 0,${(pronoTop-TL).toFixed(1)} C ${(phw*0.2).toFixed(1)},${(pronoTop-TL).toFixed(1)} ${(phw*0.2).toFixed(1)},${(pronoTop-TL*0.6).toFixed(1)} ${(phw*0.28).toFixed(1)},${(pronoTop+4).toFixed(1)} Z" fill="${armC}" stroke="${armEdge}" stroke-width="1.2"/>`;
+    }
+  } else if(spec.arm.type==="rostrum"){
+    const L=headR*(1.6+spec.arm.rostrumLen*2.0);
+    const w=headR*0.34;
+    s += `<path d="M ${-w},${(headCY-headR*0.4).toFixed(1)} C ${-w*0.8},${(clyY-L*0.5).toFixed(1)} ${-w*0.5},${(clyY-L).toFixed(1)} 0,${(clyY-L).toFixed(1)} C ${(w*0.5).toFixed(1)},${(clyY-L).toFixed(1)} ${(w*0.8).toFixed(1)},${(clyY-L*0.5).toFixed(1)} ${w},${(headCY-headR*0.4).toFixed(1)} Z" fill="${g('head')}" stroke="${pal.shadeC}" stroke-width="1.1"/>`;
+    // little jaws at snout tip
+    s += `<circle cx="0" cy="${(clyY-L).toFixed(1)}" r="2.4" fill="${armEdge}"/>`;
+  }
+
+  /* ---- antennae ---- */
+  function antenna(side){
+    // origin: geniculate/rostrum antennae leave from the snout mid, others from head front
+    let ox, oy;
+    if(spec.arm.type==="rostrum"){ ox=side*headR*0.18; oy=clyY-headR*(0.8+spec.arm.rostrumLen*1.0); }
+    else { ox=side*headR*0.5; oy=clyY-2; }
+    const n=spec.ant.segs;
+    const total=spec.ant.len;
+    const pts=[{x:ox,y:oy}];
+    const type=spec.ant.type;
+    let dir; // heading in degrees (screen: 0=right,-90=up)
+    if(type==="longhorn"){ dir=-70; }
+    else if(type==="geniculate"){ dir=-40; }
+    else { dir=-58; }
+    let cur={x:ox,y:oy};
+    const perSeg=total/n;
+    let extras="";
+    for(let i=0;i<n;i++){
+      // geniculate elbow: sharp bend after first (scape) long segment
+      if(type==="geniculate" && i===1){ dir=-78; }
+      // longhorn gentle curve backward over body
+      if(type==="longhorn"){ dir += 9; }
+      else { dir += (type==="serrate"? (i%2? -6:6) : side* -1.5); }
+      const segLen = (type==="geniculate"&&i===0)? perSeg*1.8 : perSeg*(type==="longhorn"?1:1);
+      const nx=cur.x+side*segLen*Math.cos(dir*Math.PI/180);
+      const ny=cur.y+segLen*Math.sin(dir*Math.PI/180);
+      pts.push({x:nx,y:ny});
+      // clubbed: swell last 3
+      if(type==="clubbed" && i>=n-3){
+        const rr=2+(i-(n-4))*spec.ant.club*1.6;
+        extras+=`<ellipse cx="${nx.toFixed(1)}" cy="${ny.toFixed(1)}" rx="${rr.toFixed(1)}" ry="${(rr*1.3).toFixed(1)}" fill="${armC}"/>`;
+      }
+      // serrate teeth
+      if(type==="serrate" && i>0 && i<n-1){
+        extras+=`<path d="M ${nx.toFixed(1)},${ny.toFixed(1)} l ${(side*6).toFixed(1)},2 l ${(-side*2).toFixed(1)},4 Z" fill="${armC}"/>`;
+      }
+      cur={x:nx,y:ny};
+    }
+    const line=`<polyline points="${P(pts.map(p=>[p.x,p.y]))}" fill="none" stroke="${armC}" stroke-width="${(spec.legThick*0.55).toFixed(1)}" stroke-linecap="round" stroke-linejoin="round"/>`;
+    // last third animates
+    const tipStart=Math.max(1,Math.floor(n*0.55));
+    const tipPts=pts.slice(tipStart);
+    const tipLine=`<g class="ant-tip-${uid}"><polyline points="${P(tipPts.map(p=>[p.x,p.y]))}" fill="none" stroke="${armC}" stroke-width="${(spec.legThick*0.5).toFixed(1)}" stroke-linecap="round" stroke-linejoin="round"/>${extras}</g>`;
+    return `<g>${line}${tipLine}</g>`;
+  }
+  s += antenna(1);
+  s += antenna(-1);
+
+  /* ---- entomology pin ---- */
+  const pinTopY=vbY+10, pinThruY=pronoTop+spec.pronotumLen*0.5;
+  const px=phw*0.34;
+  s += `<g>
+    <line x1="${px.toFixed(1)}" y1="${pinTopY.toFixed(1)}" x2="${px.toFixed(1)}" y2="${(pinThruY+18).toFixed(1)}" stroke="#8f8f96" stroke-width="2.4" stroke-linecap="round"/>
+    <line x1="${(px-0.7).toFixed(1)}" y1="${pinTopY.toFixed(1)}" x2="${(px-0.7).toFixed(1)}" y2="${(pinThruY).toFixed(1)}" stroke="#e7e7ee" stroke-width="0.8" opacity="0.7"/>
+    <circle cx="${px.toFixed(1)}" cy="${pinTopY.toFixed(1)}" r="4" fill="#c9c9d2" stroke="#7a7a82" stroke-width="0.8"/>
+    <circle cx="${(px-1.3).toFixed(1)}" cy="${(pinTopY-1.3).toFixed(1)}" r="1.2" fill="#fff" opacity="0.8"/>
+  </g>`;
+
+  const content = style + defs + s;
+  return {content, vb:{x:vbX,y:vbY,w:vbW,h:vbH}, uid};
+}
+
+/* --------------------- nest a beetle group into a rect --------------------- */
+function nestBeetle(spec, opts, x,y,w,h){
+  const b=buildBeetleGroup(spec,opts);
+  const cls = opts && opts.animate!==false ? ` class="beetle-root-${b.uid}"` : "";
+  return `<svg${cls} x="${x}" y="${y}" width="${w}" height="${h}" viewBox="${b.vb.x.toFixed(1)} ${b.vb.y.toFixed(1)} ${b.vb.w.toFixed(1)} ${b.vb.h.toFixed(1)}" preserveAspectRatio="xMidYMid meet" overflow="visible">${b.content}</svg>`;
+}
+
+/* ------------------------------- Paper bg ---------------------------------- */
+function paperDefs(id){
+  return `
+    <radialGradient id="pg_${id}" cx="0.42" cy="0.36" r="0.85">
+      <stop offset="0" stop-color="#f3ecd8"/>
+      <stop offset="0.6" stop-color="#e8dcbf"/>
+      <stop offset="1" stop-color="#d8c8a0"/>
+    </radialGradient>
+    <filter id="grain_${id}"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" stitchTiles="stitch"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.3  0 0 0 0 0.24  0 0 0 0 0.14  0 0 0 0.05 0"/>
+      <feComposite operator="over" in2="SourceGraphic"/></filter>`;
+}
+function paperRect(id,x,y,w,h){
+  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="url(#pg_${id})"/>
+    <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#8a7038" opacity="0.06" filter="url(#grain_${id})"/>
+    <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="#b89f6e" stroke-width="1"/>`;
+}
+
+/* --------------------------- Single-specimen plate ------------------------- */
+function buildPlateSVG(spec, opts){
+  const W=560, H=760;
+  const label = synthLabel(spec, opts.name);
+  let svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`;
+  svg+=`<defs>${paperDefs('plate')}</defs>`;
+  svg+=paperRect('plate',0,0,W,H);
+  // subtle plate frame
+  svg+=`<rect x="16" y="16" width="${W-32}" height="${H-32}" fill="none" stroke="#a88f5e" stroke-width="1.5" opacity="0.5"/>`;
+  // beetle
+  svg+=nestBeetle(spec, opts, 60, 34, W-120, H-230);
+  // handwritten label card (bottom)
+  const lx=W/2-190, ly=H-176, lw=380, lh=140;
+  svg+=labelCard(lx,ly,lw,lh, label, spec, -1.2);
+  svg+=`</svg>`;
+  return svg;
+}
+
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function labelCard(x,y,w,h,label,spec,rot){
+  const cx=x+w/2, cy=y+h/2;
+  const hand=`font-family:'Segoe Script','Bradley Hand','Snell Roundhand','Comic Sans MS',cursive`;
+  return `<g transform="rotate(${rot} ${cx} ${cy})">
+    <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#f6efdc" stroke="#b49a63" stroke-width="1.4" rx="2"/>
+    <rect x="${x+5}" y="${y+5}" width="${w-10}" height="${h-10}" fill="none" stroke="#c9b280" stroke-width="0.8"/>
+    <text x="${cx}" y="${y+34}" text-anchor="middle" style="${hand}" font-size="24" font-style="italic" fill="#2a2213">${esc(label.name.full)}</text>
+    <text x="${cx}" y="${y+56}" text-anchor="middle" style="${hand}" font-size="13" fill="#5a4a2c">(${esc(spec.archLabel)})</text>
+    <line x1="${x+40}" y1="${y+66}" x2="${x+w-40}" y2="${y+66}" stroke="#c9b280" stroke-width="0.8"/>
+    <text x="${cx}" y="${y+90}" text-anchor="middle" style="${hand}" font-size="16" fill="#3a2f1a">${esc(label.locality)}</text>
+    <text x="${cx}" y="${y+112}" text-anchor="middle" style="${hand}" font-size="15" fill="#3a2f1a">${esc(label.collector)} &#183; ${esc(label.date)}</text>
+    ${spec.seed?`<text x="${cx}" y="${y+130}" text-anchor="middle" style="${hand}" font-size="11" fill="#8a744a">seed &#183; ${esc(spec.seed)}</text>`:''}
+  </g>`;
+}
+
+/* --------------------------------- Cabinet --------------------------------- */
+/* An "expedition drawer": N specimens from one master seed sharing a genus /
+   locality theme, tiled in a grid, exportable as one poster. */
+function buildCabinet(masterSeed, count, state){
+  // shared theme
+  const tRng=RNG(masterSeed,"theme");
+  const themeArch = state.archetype && state.archetype!=="auto" ? state.archetype
+      : tRng.weighted([["jewel",3],["stag",2],["longhorn",2],["rhino",1.6],["ground",2],["weevil",1.6],["ladybird",1.4],["dung",1.2]]);
+  const themeLoc = tRng.pick(LOCALITIES);
+  const themeColl = tRng.pick(COLLECTORS);
+  const themeYear = tRng.int(1852,1904);
+  // shared genus root theme: derive a genus stem from a representative spec
+  const specimens=[];
+  for(let i=0;i<count;i++){
+    const seed = masterSeed+"#"+(i+1);
+    const st = Object.assign({}, state, {archetype: themeArch});
+    const spec = buildMorphology(seed, st);
+    const name = synthName(spec);
+    specimens.push({spec,name,seed});
+  }
+  // shared genus: pick the most-common genus first-word? Instead force a themed genus stem.
+  // Use master genus for all, keep individual species -> reads as one genus expedition.
+  const masterName = synthName(specimens[0].spec);
+  const cols = Math.ceil(Math.sqrt(count* (16/11)));
+  const rows = Math.ceil(count/cols);
+  const cellW=300, cellH=340, pad=26, titleH=140;
+  const W = pad*2 + cols*cellW;
+  const H = titleH + pad + rows*cellH + pad;
+
+  let svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`;
+  svg+=`<defs>${paperDefs('cab')}
+    <radialGradient id="cart_cab" cx="0.5" cy="0.4" r="0.8">
+      <stop offset="0" stop-color="#f6efda"/><stop offset="1" stop-color="#e3d3ac"/></radialGradient></defs>`;
+  svg+=paperRect('cab',0,0,W,H);
+  // drawer wood frame
+  svg+=`<rect x="8" y="8" width="${W-16}" height="${H-16}" fill="none" stroke="#7a5a2e" stroke-width="6" opacity="0.5" rx="4"/>`;
+  // title cartouche
+  const cw=Math.min(760,W-120), cx=W/2-cw/2, cyT=30, ch=titleH-46;
+  const hand=`font-family:'Segoe Script','Snell Roundhand','Bradley Hand',cursive`;
+  const serif=`font-family:Palatino,Georgia,serif`;
+  svg+=`<g>
+    <rect x="${cx}" y="${cyT}" width="${cw}" height="${ch}" fill="url(#cart_cab)" stroke="#9c8047" stroke-width="2" rx="6"/>
+    <rect x="${cx+7}" y="${cyT+7}" width="${cw-14}" height="${ch-14}" fill="none" stroke="#c2a970" stroke-width="1"/>
+    <text x="${W/2}" y="${cyT+42}" text-anchor="middle" style="${serif}" font-size="30" letter-spacing="4" fill="#5a3f1e" font-style="italic">Cabinet of ${esc(ARCHETYPES[themeArch].label)} Coleoptera</text>
+    <text x="${W/2}" y="${cyT+70}" text-anchor="middle" style="${hand}" font-size="19" fill="#3a2c15">Genus ${esc(masterName.genus)} &#8212; ${esc(themeLoc)}</text>
+    <text x="${W/2}" y="${cyT+92}" text-anchor="middle" style="${hand}" font-size="15" fill="#6a562f">Expedition of ${esc(themeColl)}, ${themeYear} &#183; ${count} specimens &#183; master seed &#8220;${esc(masterSeed)}&#8221;</text>
+  </g>`;
+
+  // grid
+  for(let i=0;i<count;i++){
+    const r=Math.floor(i/cols), c=i%cols;
+    const gx=pad+c*cellW, gy=titleH+pad+r*cellH;
+    const sp=specimens[i];
+    // themed name: shared genus + own species
+    const shownName={genus:masterName.genus, species:sp.name.species, full:masterName.genus+" "+sp.name.species};
+    svg+=nestBeetle(sp.spec, {spread:false, lightAngle:state.light, animate:state.animate!==false && count<=16, suffix:"c"+i}, gx, gy, cellW, cellH-56);
+    // mini label
+    const lcy=gy+cellH-52;
+    svg+=`<g>
+      <text x="${gx+cellW/2}" y="${lcy}" text-anchor="middle" style="${hand}" font-size="15" font-style="italic" fill="#2a2213">${esc(shownName.full)}</text>
+      <text x="${gx+cellW/2}" y="${lcy+18}" text-anchor="middle" style="${hand}" font-size="11" fill="#6a562f">no. ${i+1} &#183; ${esc(sp.seed)}</text>
+    </g>`;
+  }
+  svg+=`</svg>`;
+  return {svg, W, H};
+}
+
+/* ============================================================================
+   Hybridization — breed two seeds into a blended specimen + hybrid name.
+   ========================================================================== */
+function buildHybrid(seedA, seedB, state){
+  const specA=buildMorphology(seedA, {archetype:"auto"});
+  const specB=buildMorphology(seedB, {archetype:"auto"});
+  // combined seed for anything not explicitly blended
+  const combSeed = seedA+"×"+seedB;
+  const spec=buildMorphology(combSeed, state);
+  // blend numeric morphology 50/50 with the two parents
+  const blendKeys=["bodyLen","bodyHalfW","headR","pronotumHalfW","pronotumLen","scutellum","elytraHalfW","elytraLen","legLen","legThick","striaCount","punctureN","elong"];
+  for(const k of blendKeys){
+    if(typeof specA[k]==="number" && typeof specB[k]==="number"){
+      spec[k]=(specA[k]+specB[k])/2;
+    }
+  }
+  spec.striaCount=Math.round(spec.striaCount);
+  spec.punctureN=Math.round(spec.punctureN);
+  // palette: blend the two parent palettes
+  const pa=specA.pal, pb=specB.pal;
+  const bl=(x,y,t)=>x+(y-x)*t;
+  const hueA=pa.hue, hueB=pb.hue;
+  const hue=(hueA+hueB)/2;
+  spec.metal=(pa.metal+pb.metal)/2;
+  const forced=state.palette && state.palette!=="auto" ? PALETTES[state.palette] : null;
+  if(forced){
+    spec.pal=buildPalette(RNG(combSeed,"color"),spec.archetype,spec.metal,ARCHETYPES[spec.archetype].baseHue,forced);
+  } else {
+    spec.pal.base=mixHex(pa.base,pb.base,0.5);
+    spec.pal.shadeC=mixHex(pa.shadeC,pb.shadeC,0.5);
+    spec.pal.hiC=mixHex(pa.hiC,pb.hiC,0.5);
+    spec.pal.iridA=mixHex(pa.iridA,pb.iridA,0.5);
+    spec.pal.iridB=mixHex(pa.iridB,pb.iridB,0.5);
+    spec.pal.iridC=mixHex(pa.iridC,pb.iridC,0.5);
+    spec.pal.iridD=mixHex(pa.iridD,pb.iridD,0.5);
+    spec.pal.legColor=mixHex(pa.legColor,pb.legColor,0.5);
+    spec.pal.bellyColor=mixHex(pa.bellyColor,pb.bellyColor,0.5);
+    spec.pal.hue=hue; spec.pal.metal=spec.metal;
+  }
+  // armament: take the larger-armed parent's type/size (dominant trait)
+  const aArm=specA.arm, bArm=specB.arm;
+  spec.arm = (aArm.size>=bArm.size)?Object.assign({},aArm):Object.assign({},bArm);
+  spec.arm.size=(aArm.size+bArm.size)/2 || spec.arm.size;
+  // antenna: parent B's antenna style
+  spec.ant=Object.assign({}, specB.ant);
+  spec.ant.len=(specA.ant.len+specB.ant.len)/2;
+  // hybrid binomial name: genus from A, species from B
+  const nA=synthName(specA), nB=synthName(specB);
+  const hybGenus=nA.genus;
+  // blended species epithet: root of A-species + ending of B-species
+  const sA=nA.species, sB=nB.species;
+  const cut=Math.max(3,Math.floor(sA.length*0.55));
+  let hybSp=(sA.slice(0,cut)+sB.slice(Math.floor(sB.length*0.45))).toLowerCase();
+  hybSp=hybSp.replace(/[^a-z]/g,'');
+  const name={genus:hybGenus, species:hybSp, full:hybGenus+" "+hybSp, hybrid:true, parents:[nA.full,nB.full]};
+  spec.seed=combSeed; spec._hybridName=name;
+  return {spec, name};
+}
+
+/* ============================================================================
+   APP STATE + UI
+   ========================================================================== */
+const el=(id)=>document.getElementById(id);
+const state={
+  seed:"", archetype:"auto", palette:"auto",
+  size:100, elong:50, horn:60, irid:60, pat:55,
+  light:300, spread:false, cabinet:false, cabCount:12,
+  lock:false, hybrid:null, animate:true
+};
+
+function randomSeed(){
+  const words=["azure","member","cardinal","umber","thornfield","dusk","gilt","harrow","celadon","vesper",
+    "kestrel","onyx","marrow","fennwick","glimmer","tundra","cobalt","sienna","wold","bramble",
+    "nocturne","verdigris","ochre","lantern","meridian","quill","stag","fen","hollow","zephyr"];
+  const r=Math.random;
+  return words[Math.floor(r()*words.length)]+"-"+words[Math.floor(r()*words.length)]+"-"+(Math.floor(r()*900)+100);
+}
+
+/* -------- hash state (de)serialize -------- */
+function encodeState(){
+  const o={
+    s:state.seed, a:state.archetype, p:state.palette,
+    sz:state.size, el:state.elong, ho:state.horn, ir:state.irid, pt:state.pat,
+    li:state.light, sp:state.spread?1:0, cb:state.cabinet?1:0, cc:state.cabCount,
+    hy: state.hybrid ? [state.hybrid.a, state.hybrid.b] : 0
+  };
+  try{ return btoa(unescape(encodeURIComponent(JSON.stringify(o)))); }
+  catch(e){ return encodeURIComponent(JSON.stringify(o)); }
+}
+function decodeState(h){
+  if(!h) return null;
+  try{
+    let json;
+    try{ json=decodeURIComponent(escape(atob(h))); }
+    catch(e){ json=decodeURIComponent(h); }
+    return JSON.parse(json);
+  }catch(e){ return null; }
+}
+function applyHash(){
+  const h=location.hash.replace(/^#/,'');
+  const o=decodeState(h);
+  if(!o) return false;
+  state.seed=o.s||randomSeed();
+  state.archetype=o.a||"auto"; state.palette=o.p||"auto";
+  state.size=o.sz??100; state.elong=o.el??50; state.horn=o.ho??60;
+  state.irid=o.ir??60; state.pat=o.pt??55; state.light=o.li??300;
+  state.spread=!!o.sp; state.cabinet=!!o.cb; state.cabCount=o.cc??12;
+  state.hybrid = (o.hy && o.hy.length===2) ? {a:o.hy[0], b:o.hy[1]} : null;
+  return true;
+}
+let hashTimer=null;
+function writeHash(){
+  clearTimeout(hashTimer);
+  hashTimer=setTimeout(()=>{
+    const enc=encodeState();
+    history.replaceState(null,"","#"+enc);
+  },120);
+}
+
+/* -------- UI sync -------- */
+function syncControlsFromState(){
+  el('seed').value=state.seed;
+  el('archetype').value=state.archetype;
+  el('palette').value=state.palette;
+  el('size').value=state.size; el('sizeV').textContent=state.size+"%";
+  el('elong').value=state.elong; el('elongV').textContent=labelElong(state.elong);
+  el('horn').value=state.horn; el('hornV').textContent=state.horn+"%";
+  el('irid').value=state.irid; el('iridV').textContent=state.irid+"%";
+  el('pat').value=state.pat; el('patV').textContent=state.pat+"%";
+  el('light').value=state.light; el('lightV').textContent=state.light+"°";
+  el('cabCount').value=state.cabCount; el('cabV').textContent=state.cabCount;
+  el('spreadBtn').setAttribute('aria-pressed', state.spread);
+  el('cabBtn').setAttribute('aria-pressed', state.cabinet);
+  el('lockBtn').setAttribute('aria-pressed', state.lock);
+  el('cabCountRow').style.display=state.cabinet?'block':'none';
+}
+function labelElong(v){ return v<35?"stout":v<50?"compact":v<66?"balanced":v<82?"elongate":"slender"; }
+
+/* -------- Render -------- */
+let currentSpec=null, currentName=null, currentLabel=null;
+function render(justGenerated){
+  const plateWrap=el('plateWrap'), cabWrap=el('cabinetWrap');
+  if(state.cabinet){
+    plateWrap.style.display='none'; cabWrap.style.display='block';
+    const master = state.seed||randomSeed();
+    const cab=buildCabinet(master, state.cabCount, state);
+    cabWrap.innerHTML=cab.svg;
+    currentSpec=null; currentName=null; currentLabel=null;
+  } else {
+    cabWrap.style.display='none'; plateWrap.style.display='block';
+    let spec, name;
+    if(state.hybrid){
+      const hb=buildHybrid(state.hybrid.a, state.hybrid.b, state);
+      spec=hb.spec; name=hb.name;
+    } else {
+      spec=buildMorphology(state.seed, state);
+      name=synthName(spec);
+    }
+    currentSpec=spec; currentName=name;
+    const svg=buildPlateSVG(spec, {name, spread:state.spread, lightAngle:state.light, animate:state.animate});
+    plateWrap.innerHTML=svg;
+    if(justGenerated){
+      plateWrap.style.transform='scale(0.9)'; plateWrap.style.opacity='0';
+      requestAnimationFrame(()=>{
+        plateWrap.style.transition='transform .5s cubic-bezier(.2,1.3,.4,1),opacity .4s';
+        plateWrap.style.transform='scale(1)'; plateWrap.style.opacity='1';
+        setTimeout(()=>{plateWrap.style.transition='transform .2s';},550);
+      });
+    }
+  }
+  // reflect hybrid mode: light the Breed hybrid toggle while a hybrid is shown,
+  // so it's clear why editing the seed box "resets" back to a single specimen.
+  const bb=el('breedBtn'); if(bb) bb.setAttribute('aria-pressed', !!(state.hybrid && !state.cabinet));
+  writeHash();
+}
+
+/* Cheap single-specimen edits render immediately; cabinet mode rebuilds up to
+   30 procedural beetles, so coalesce rapid slider input to one render per frame. */
+let renderScheduled=false;
+function scheduleRender(){
+  if(!state.cabinet){ render(); return; }
+  if(renderScheduled) return;
+  renderScheduled=true;
+  requestAnimationFrame(()=>{ renderScheduled=false; render(); });
+}
+
+/* -------- toast -------- */
+let toastT=null;
+function toast(msg){
+  const t=el('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),1900);
+}
+
+/* ============================================================================
+   EXPORT
+   ========================================================================== */
+function currentSVGString(){
+  if(state.cabinet) return el('cabinetWrap').querySelector('svg').outerHTML;
+  return el('plateWrap').querySelector('svg').outerHTML;
+}
+function download(name, blob){
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
+function exportSVG(){
+  const svg=currentSVGString();
+  const doc='<?xml version="1.0" encoding="UTF-8"?>\n'+svg;
+  const nm=(currentName?currentName.full.replace(/\s+/g,'_'):'elytra_cabinet');
+  download(nm+'.svg', new Blob([doc],{type:'image/svg+xml'}));
+  toast('SVG exported');
+}
+function rasterize(svgString, scale, cb){
+  // parse width/height from the root svg
+  const m=svgString.match(/viewBox="([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+)"/);
+  let w=800,h=1000;
+  if(m){ w=parseFloat(m[3]); h=parseFloat(m[4]); }
+  // Clamp scale so neither side exceeds a canvas dimension every browser supports.
+  // Safari/mobile reject very large canvases (toBlob returns null → silent blank).
+  const MAX_SIDE=4096;
+  const fit=MAX_SIDE/Math.max(w,h);
+  if(scale>fit){ scale=fit; toast('Scaled down to fit canvas limits'); }
+  const canvas=document.createElement('canvas');
+  canvas.width=Math.round(w*scale); canvas.height=Math.round(h*scale);
+  const ctx=canvas.getContext('2d');
+  const img=new Image();
+  const blob=new Blob([svgString],{type:'image/svg+xml;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  img.onload=()=>{
+    ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
+    ctx.drawImage(img,0,0,canvas.width,canvas.height);
+    URL.revokeObjectURL(url);
+    canvas.toBlob(b=>cb(b),'image/png');
+  };
+  img.onerror=()=>{ URL.revokeObjectURL(url); toast('Export failed'); };
+  img.src=url;
+}
+function exportPNG(scale, poster){
+  let svg;
+  if(poster){
+    const master=state.seed||randomSeed();
+    // build a static (non-animated) cabinet for a clean poster frame
+    const cab=buildCabinet(master, state.cabinet?state.cabCount:12, Object.assign({},state,{animate:false,cabinet:true}));
+    svg=cab.svg;
+  } else {
+    svg=currentSVGString();
+  }
+  const nm=poster?'elytra_expedition_poster':(currentName?currentName.full.replace(/\s+/g,'_'):'elytra');
+  toast('Rendering PNG…');
+  rasterize(svg, scale, (blob)=>{
+    if(!blob){ toast('Export failed'); return; }
+    download(nm+'.png', blob);
+    toast(poster?'Poster exported':'PNG exported');
+  });
+}
+
+/* ============================================================================
+   WIRING
+   ========================================================================== */
+function populateSelects(){
+  const arch=el('archetype');
+  arch.innerHTML='<option value="auto">Auto (from seed)</option>'+
+    ARCHKEYS.map(k=>`<option value="${k}">${ARCHETYPES[k].label}</option>`).join('');
+  const pal=el('palette');
+  pal.innerHTML=PALKEYS.map(k=>`<option value="${k}">${PALLABELS[k]}</option>`).join('');
+}
+
+function bind(){
+  el('seed').addEventListener('input',e=>{ state.seed=e.target.value; state.hybrid=null; render(); });
+  el('seed').addEventListener('change',e=>{ state.seed=e.target.value; state.hybrid=null; render(true); });
+  el('randBtn').addEventListener('click',()=>{
+    if(state.lock){ toast('Seed is locked'); return; }
+    state.seed=randomSeed(); state.hybrid=null; syncControlsFromState(); render(true);
+  });
+  el('lockBtn').addEventListener('click',()=>{ state.lock=!state.lock; el('lockBtn').setAttribute('aria-pressed',state.lock); });
+  el('copyLink').addEventListener('click',async()=>{
+    const url=location.href.split('#')[0]+'#'+encodeState();
+    try{ await navigator.clipboard.writeText(url); toast('Shareable link copied'); }
+    catch(e){
+      const ta=document.createElement('textarea'); ta.value=url; document.body.appendChild(ta); ta.select();
+      try{document.execCommand('copy'); toast('Link copied');}catch(_){toast('Copy failed');}
+      ta.remove();
+    }
+  });
+
+  el('archetype').addEventListener('change',e=>{ state.archetype=e.target.value; render(); });
+  el('palette').addEventListener('change',e=>{ state.palette=e.target.value; render(); });
+
+  const slider=(id,key,fmt)=>{
+    el(id).addEventListener('input',e=>{
+      state[key]=+e.target.value;
+      const vId={size:'sizeV',elong:'elongV',horn:'hornV',irid:'iridV',pat:'patV',light:'lightV',cabCount:'cabV'}[id];
+      if(vId) el(vId).textContent=fmt?fmt(state[key]):(state[key]+ (id==='light'?'°':(id==='cabCount'?'':'%')) );
+      scheduleRender();
+    });
+  };
+  slider('size','size'); slider('elong','elong',labelElong); slider('horn','horn');
+  slider('irid','irid'); slider('pat','pat'); slider('light','light',v=>v+'°'); slider('cabCount','cabCount',v=>''+v);
+
+  el('spreadBtn').addEventListener('click',()=>{ state.spread=!state.spread; el('spreadBtn').setAttribute('aria-pressed',state.spread); render(); });
+  el('cabBtn').addEventListener('click',()=>{
+    state.cabinet=!state.cabinet; el('cabBtn').setAttribute('aria-pressed',state.cabinet);
+    el('cabCountRow').style.display=state.cabinet?'block':'none';
+    render(!state.cabinet);
+  });
+
+  el('breedBtn').addEventListener('click',()=>{
+    let a=el('hybA').value.trim(), b=el('hybB').value.trim();
+    if(!a) a=state.seed||randomSeed();
+    if(!b) b=randomSeed();
+    el('hybA').value=a; el('hybB').value=b;
+    state.hybrid={a,b}; state.cabinet=false;
+    el('cabBtn').setAttribute('aria-pressed',false); el('cabCountRow').style.display='none';
+    render(true);
+    const hb=buildHybrid(a,b,state);
+    toast('Bred '+hb.name.full);
+  });
+  el('fillParents').addEventListener('click',()=>{
+    el('hybA').value=state.seed||randomSeed();
+    el('hybB').value=randomSeed();
+  });
+
+  el('expSVG').addEventListener('click',exportSVG);
+  el('expPNG').addEventListener('click',()=>exportPNG(3,false));
+  el('expPoster').addEventListener('click',()=>exportPNG(2,true));
+
+  window.addEventListener('hashchange',()=>{
+    // only react to external hash changes (not our own writes handled via replaceState)
+    const o=decodeState(location.hash.replace(/^#/,''));
+    if(o){ applyHash(); syncControlsFromState(); render(); }
+  });
+}
+
+/* ------------------------------- Boot -------------------------------------- */
+function boot(){
+  populateSelects();
+  if(!applyHash()){
+    state.seed=randomSeed();
+  }
+  if(state.hybrid){ el('hybA').value=state.hybrid.a; el('hybB').value=state.hybrid.b; }
+  syncControlsFromState();
+  bind();
+  render(true);
+}
+boot();
+</script>
+</body>
+</html>

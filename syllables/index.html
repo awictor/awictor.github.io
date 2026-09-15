@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Syllables — Syllable Counter & Haiku Checker</title>
+<meta name="description" content="Count syllables per word and per line, and check whether your poem is a 5-7-5 haiku. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('syllables-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#6d28d9;
+    --bg:#f6f5f9; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e6e2ec; --shadow:0 1px 3px rgba(0,0,0,.08); --ok:#16a34a; --bad:#dc2626;
+  }
+  [data-theme="dark"]{
+    --bg:#131017; --card:#1c1722; --fg:#f1ecf5; --muted:#a294ab; --line:#2f2738; --shadow:0 1px 3px rgba(0,0,0,.5); --ok:#4ade80; --bad:#f87171;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:760px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#5b21b6);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:760px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  textarea{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem;min-height:130px;resize:vertical;line-height:1.9}
+  .lines{margin-top:4px}
+  .ln{display:flex;gap:12px;padding:6px 0;border-bottom:1px solid var(--line)}
+  .ln .txt{flex:1;word-break:break-word}
+  .ln .n{font-variant-numeric:tabular-nums;font-weight:700;color:var(--c);min-width:2ch;text-align:right}
+  .totals{display:flex;gap:18px;margin-top:12px;color:var(--muted);font-size:.9rem}
+  .haiku{display:inline-block;margin-top:14px;padding:6px 16px;border-radius:999px;font-weight:700}
+  .haiku.yes{background:var(--ok);color:#fff}
+  .haiku.no{background:var(--line);color:var(--muted)}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:760px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🎏</div>
+    <div><h1>Syllables</h1><div class="sub">Syllable counter &amp; 5-7-5 haiku checker</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="input">Your text or poem</label>
+    <textarea id="input" spellcheck="false">An old silent pond
+A frog jumps into the pond
+splash again and again</textarea>
+    <div class="totals"><span id="tWords"></span><span id="tSyl"></span></div>
+    <span class="haiku no" id="haiku">—</span>
+  </div>
+  <div class="card">
+    <label>Per-line syllables</label>
+    <div class="lines" id="lines"></div>
+  </div>
+</main>
+<footer>
+  Syllable counts use an English heuristic — great for haiku, not perfect on every word. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/syllables">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  // English syllable heuristic (vowel-group counting with common adjustments)
+  function syllables(word){
+    word = String(word).toLowerCase().replace(/[^a-z]/g, '');
+    if(!word) return 0;
+    if(word.length <= 3) return 1;
+    word = word.replace(/(?:[^laeiouy]es|ed|[^laeiouy]e)$/, '');
+    word = word.replace(/^y/, '');
+    const m = word.match(/[aeiouy]{1,2}/g);
+    return m ? m.length : 1;
+  }
+
+  function words(text){
+    const m = String(text).match(/[A-Za-z]+(?:'[A-Za-z]+)?/g);
+    return m || [];
+  }
+
+  function countText(text){
+    return words(text).reduce((sum, w) => sum + syllables(w), 0);
+  }
+
+  function lineSyllables(text){
+    return String(text).split(/\r?\n/).map(line => countText(line));
+  }
+
+  function isHaiku(text){
+    const counts = lineSyllables(text).filter((c, i, arr) => {
+      // drop leading/trailing blank lines (0 syllables) but keep internal structure
+      return true;
+    }).filter(c => c > 0);
+    return counts.length === 3 && counts[0] === 5 && counts[1] === 7 && counts[2] === 5;
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('lines')){
+    const $ = id => document.getElementById(id);
+
+    function render(){
+      const text = $('input').value;
+      const rawLines = text.split(/\r?\n/);
+      $('lines').innerHTML = rawLines.map(line => {
+        const c = countText(line);
+        return `<div class="ln"><div class="txt">${(line || '&nbsp;').replace(/</g, '&lt;')}</div><div class="n">${c}</div></div>`;
+      }).join('');
+      const w = words(text).length;
+      const s = countText(text);
+      $('tWords').textContent = `${w} word${w === 1 ? '' : 's'}`;
+      $('tSyl').textContent = `${s} syllable${s === 1 ? '' : 's'}`;
+      const h = isHaiku(text);
+      $('haiku').textContent = h ? '✓ This is a haiku (5-7-5)' : 'Not a 5-7-5 haiku';
+      $('haiku').className = 'haiku ' + (h ? 'yes' : 'no');
+    }
+
+    $('input').addEventListener('input', render);
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('syllables-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { syllables, words, countText, lineSyllables, isHaiku };
+</script>
+</body>
+</html>

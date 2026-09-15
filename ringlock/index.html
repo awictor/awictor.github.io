@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ringlock — GPS Trilateration & GDOP explorer</title>
+<style>
+  :root{
+    --bg:#0b1020; --panel:#131a30; --panel2:#0f1526; --ink:#e8ecf7; --dim:#8a94b3;
+    --line:#26304f; --accent:#ff9f43; --good:#31d18a; --fair:#ffcc4d; --poor:#ff5d6c;
+    --b0:#4fd1ff; --b1:#c084fc; --b2:#f472b6; --b3:#a3e635; --fix:#ff9f43; --truth:#31d18a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:radial-gradient(1200px 700px at 70% -10%,#16204a 0%,var(--bg) 60%);
+    color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    display:flex;justify-content:center;padding:18px;min-height:100%}
+  .wrap{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:18px;max-width:1080px;width:100%}
+  @media (max-width:720px){.wrap{grid-template-columns:1fr}}
+  header{grid-column:1/-1;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  h1{font-size:22px;margin:0;letter-spacing:.5px}
+  h1 span{color:var(--accent)}
+  .tag{color:var(--dim);font-size:13px}
+  .stage{position:relative;background:linear-gradient(180deg,#0d1526,#0c1224);border:1px solid var(--line);
+    border-radius:14px;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.4)}
+  canvas#c{display:block;width:100%;height:auto;touch-action:none;cursor:default}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 15px;margin-bottom:14px}
+  .panel h2{font-size:12px;text-transform:uppercase;letter-spacing:1.2px;color:var(--dim);margin:0 0 10px}
+  .row{display:flex;align-items:center;gap:8px;margin:8px 0}
+  .seg{display:flex;background:var(--panel2);border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .seg button{flex:1;background:none;border:0;color:var(--dim);padding:7px 0;cursor:pointer;font:inherit;font-weight:600}
+  .seg button.on{background:var(--accent);color:#231400}
+  .presets{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px}
+  .presets button{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:9px;
+    padding:8px 4px;cursor:pointer;font:inherit;font-size:12px;font-weight:600;transition:.15s}
+  .presets button:hover{border-color:var(--accent);color:var(--accent)}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .kv{display:flex;justify-content:space-between;font-variant-numeric:tabular-nums}
+  .kv b{color:var(--ink);font-weight:600}
+  .muted{color:var(--dim)}
+  #gauge{display:block;margin:2px auto 4px}
+  .verdict{text-align:center;font-weight:700;font-size:15px;margin-top:2px}
+  .mult{text-align:center;color:var(--dim);font-size:12.5px;margin-top:1px}
+  .note{font-size:12.5px;color:var(--dim);margin-top:8px;min-height:34px}
+  .note b{color:var(--accent)}
+  .foot{grid-column:1/-1;color:var(--dim);font-size:12px;display:flex;gap:16px;flex-wrap:wrap;align-items:center}
+  .foot button{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:6px 11px;cursor:pointer;font:inherit}
+  .foot button:hover{border-color:var(--accent);color:var(--accent)}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--dim);grid-column:1/-1}
+  .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  .chk{display:flex;align-items:center;gap:7px;font-size:13px;cursor:pointer}
+  code{background:var(--panel2);padding:1px 5px;border-radius:5px;color:var(--accent)}
+  .seg button:focus-visible,.presets button:focus-visible,.foot button:focus-visible,
+  .chk input:focus-visible,input[type=range]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .presets button.active{border-color:var(--accent);color:var(--accent);background:rgba(255,159,67,.12)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Ring<span>lock</span></h1>
+    <div class="tag">Drag the beacons and the receiver. Watch geometry — not just noise — decide the fix.</div>
+  </header>
+
+  <div class="stage">
+    <canvas id="c" width="720" height="540" role="img" aria-label="Interactive trilateration diagram: draggable beacons and a receiver with range rings, a least-squares position fix, a Monte-Carlo uncertainty cloud and a 2-sigma error ellipse."></canvas>
+  </div>
+
+  <div>
+    <div class="panel">
+      <h2>Scenario presets</h2>
+      <div class="presets">
+        <button data-preset="open">Open sky</button>
+        <button data-preset="urban">Urban canyon</button>
+        <button data-preset="line">Collinear</button>
+      </div>
+      <div class="note" id="presetNote">A <b>satellite</b> geometry problem: the same signal noise gives wildly different accuracy depending on where the beacons sit. Try the presets.</div>
+    </div>
+
+    <div class="panel">
+      <h2>Beacons</h2>
+      <div class="seg" id="countSeg">
+        <button data-n="2">2</button><button data-n="3">3</button><button data-n="4">4</button>
+      </div>
+      <div class="row"><span class="muted">Clock / signal noise</span><span style="margin-left:auto" id="noiseVal">6 m</span></div>
+      <input type="range" id="noise" min="0" max="24" step="0.5" value="6">
+    </div>
+
+    <div class="panel">
+      <h2>Geometric dilution (GDOP)</h2>
+      <canvas id="gauge" width="230" height="118" role="img" aria-label="GDOP quality gauge"></canvas>
+      <div id="readouts" aria-live="polite">
+      <div class="verdict" id="verdict">—</div>
+      <div class="mult" id="mult"></div>
+      <div class="kv" style="margin-top:10px"><span class="muted">GDOP</span><b id="gdopV">—</b></div>
+      <div class="kv"><span class="muted">Fix error (this sample)</span><b id="resV">—</b></div>
+      <div class="kv"><span class="muted">1σ error region</span><b id="ellV">—</b></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><i style="background:var(--truth)"></i>Receiver (truth)</span>
+    <span><i style="background:var(--fix)"></i>Least-squares fix</span>
+    <span><i style="background:#5b6b9e"></i>Monte-Carlo fixes (~200)</span>
+    <span><i style="background:none;border:2px dashed var(--accent);border-radius:50%;width:9px;height:9px"></i>Analytic 2σ ellipse</span>
+    <span><i style="background:var(--b0)"></i>Beacons + range rings</span>
+  </div>
+
+  <div class="foot">
+    <label class="chk"><input type="checkbox" id="showMC" checked> Monte-Carlo cloud</label>
+    <label class="chk"><input type="checkbox" id="showEll" checked> Analytic ellipse</label>
+    <button id="copyBtn">Copy shareable link</button>
+    <span id="copied" class="muted"></span>
+    <span class="muted">State lives in the URL — every drag is a bookmarkable scenario.</span>
+  </div>
+</div>
+
+<script>
+"use strict";
+const cv=document.getElementById("c"), ctx=cv.getContext("2d");
+const gv=document.getElementById("gauge"), gx=gv.getContext("2d");
+const W=720,H=540;
+function resize(){
+  const dpr=Math.min(2,window.devicePixelRatio||1);
+  [[cv,ctx,720,540],[gv,gx,230,118]].forEach(([el,g,w,h])=>{
+    el.width=Math.round(w*dpr);el.height=Math.round(h*dpr);el.style.width=w+"px";el.style.height=h+"px";
+    g.setTransform(dpr,0,0,dpr,0,0); // absolute (not compounding) so repeat calls stay crisp
+  });
+}
+resize();
+window.addEventListener("resize",resize);
+const BCOL=["#4fd1ff","#c084fc","#f472b6","#a3e635"];
+
+// ---- state ----
+const S={beacons:[{x:170,y:160},{x:545,y:185},{x:355,y:455},{x:180,y:445}],
+  rx:360,ry:300, noise:6, count:3, cand:0};
+let R={}, drag=null, gauge=1;
+
+// ---- math helpers ----
+const dist=(a,b,c,d)=>Math.hypot(a-c,b-d);
+function gauss(s){let u=0,v=0;while(u===0)u=Math.random();while(v===0)v=Math.random();return s*Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+function inv2(a,b,c,d){const det=a*d-b*c; if(Math.abs(det)<1e-9)return null; const i=1/det; return[d*i,-b*i,-c*i,a*i];}
+
+// linear least-squares trilateration from ranges (n>=3)
+function solve(bs,ranges){
+  const n=bs.length; if(n<3)return null;
+  const x0=bs[0].x,y0=bs[0].y,r0=ranges[0];
+  let a=0,b=0,c=0,p=0,q=0; // ATA=[a b; b c], ATb=[p q]
+  for(let i=1;i<n;i++){
+    const ax=2*(bs[i].x-x0), ay=2*(bs[i].y-y0);
+    const bi=bs[i].x*bs[i].x-x0*x0 + bs[i].y*bs[i].y-y0*y0 - ranges[i]*ranges[i] + r0*r0;
+    a+=ax*ax; b+=ax*ay; c+=ay*ay; p+=ax*bi; q+=ay*bi;
+  }
+  const m=inv2(a,b,b,c); if(!m)return null;
+  return {x:m[0]*p+m[1]*q, y:m[2]*p+m[3]*q};
+}
+
+// geometry (DOP) matrix at truth: rows are unit line-of-sight vectors
+function geometry(bs,rx,ry){
+  let a=0,b=0,c=0; // H^T H
+  for(const bn of bs){const d=dist(bn.x,bn.y,rx,ry)||1e-6;const ux=(rx-bn.x)/d,uy=(ry-bn.y)/d;a+=ux*ux;b+=ux*uy;c+=uy*uy;}
+  const m=inv2(a,b,b,c);
+  if(!m)return{gdop:Infinity,cov:null};
+  const gdop=Math.sqrt(Math.max(0,m[0]+m[3]));
+  return {gdop, cov:m}; // cov = (H^T H)^-1 ; multiply by sigma^2 for real covariance
+}
+// eigen-decomp of symmetric [[a,b],[b,c]] -> {ang, l1, l2}
+function eig(a,b,c){
+  const t=0.5*Math.atan2(2*b,a-c);
+  const cm=(a+c)/2, rt=Math.sqrt(((a-c)/2)**2+b*b);
+  return {ang:t, l1:cm+rt, l2:cm-rt};
+}
+// circle-circle intersection (2-beacon ambiguity)
+function circInt(b0,r0,b1,r1){
+  const d=dist(b0.x,b0.y,b1.x,b1.y);
+  if(d<1e-6||d>r0+r1||d<Math.abs(r0-r1))return null;
+  const a=(r0*r0-r1*r1+d*d)/(2*d), h=Math.sqrt(Math.max(0,r0*r0-a*a));
+  const mx=b0.x+a*(b1.x-b0.x)/d, my=b0.y+a*(b1.y-b0.y)/d;
+  const ox=h*(b1.y-b0.y)/d, oy=h*(b1.x-b0.x)/d;
+  return [{x:mx+ox,y:my-oy},{x:mx-ox,y:my+oy}];
+}
+
+// ---- recompute everything (on interaction only) ----
+function recompute(){
+  const bs=S.beacons.slice(0,S.count);
+  const trueR=bs.map(b=>dist(b.x,b.y,S.rx,S.ry));
+  R={bs,trueR,noisyR:trueR.map(r=>r+gauss(S.noise))};
+  if(S.count===2){
+    R.cands=circInt(bs[0],trueR[0],bs[1],trueR[1]);
+    R.fix=null;R.mc=[];R.gdop=Infinity;R.geo=null;return;
+  }
+  R.fix=solve(bs,R.noisyR);
+  if(!R.fix){ // collinear / coincident beacons -> singular normal matrix, no unique fix
+    R.degen=true;R.gdop=Infinity;R.cov=null;R.mc=[];return;
+  }
+  R.degen=false;
+  const g=geometry(bs,S.rx,S.ry); R.gdop=g.gdop; R.geo=g;
+  // analytic covariance ellipse: sigma^2 * (H^T H)^-1
+  if(g.cov){const s2=Math.max(S.noise,0.001)**2;R.cov=[g.cov[0]*s2,g.cov[1]*s2,g.cov[3]*s2];}
+  else R.cov=null;
+  // Monte-Carlo cloud (~200), recomputed here only
+  R.mc=[];
+  for(let k=0;k<200;k++){const nr=trueR.map(r=>r+gauss(S.noise));const p=solve(bs,nr);if(p&&isFinite(p.x)&&isFinite(p.y))R.mc.push(p);}
+}
+
+// ---- drawing ----
+function ring(b,r,col,idx){
+  const band=2*S.noise; // ±2σ
+  if(band>0.3){ctx.strokeStyle=col+"22";ctx.lineWidth=2*band;ctx.beginPath();ctx.arc(b.x,b.y,r,0,7);ctx.stroke();}
+  ctx.strokeStyle=col+"cc";ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(b.x,b.y,r,0,7);ctx.stroke();
+  // beacon
+  ctx.fillStyle=col;ctx.beginPath();ctx.arc(b.x,b.y,7,0,7);ctx.fill();
+  ctx.fillStyle="#08101f";ctx.font="bold 10px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle";
+  ctx.fillText("B"+(idx+1),b.x,b.y+.5);
+}
+function dot(x,y,r,col){ctx.fillStyle=col;ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.fill();}
+function cross(x,y,col,s){ctx.strokeStyle=col;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x-s,y);ctx.lineTo(x+s,y);ctx.moveTo(x,y-s);ctx.lineTo(x,y+s);ctx.stroke();ctx.beginPath();ctx.arc(x,y,s,0,7);ctx.stroke();}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  // grid
+  ctx.lineWidth=1;ctx.strokeStyle="rgba(255,255,255,.04)";
+  for(let x=0;x<=W;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+  for(let y=0;y<=H;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+
+  R.bs.forEach((b,i)=>ring(b,R.trueR[i],BCOL[i],i));
+
+  if(S.count===2){
+    if(R.cands){
+      R.cands.forEach((p,i)=>{
+        const on=i===S.cand;
+        ctx.globalAlpha=on?1:.9;
+        cross(p.x,p.y,on?"#ffde59":"#ff5d6c",on?11:9);
+        ctx.fillStyle=on?"#ffde59":"#ff8a95";ctx.font="12px sans-serif";ctx.textAlign="center";
+        ctx.fillText(on?"your pick":"phantom",p.x,p.y-16);
+        ctx.globalAlpha=1;
+      });
+    }
+  } else if(R.degen){
+    ctx.fillStyle="#ff5d6c";ctx.font="bold 15px sans-serif";ctx.textAlign="center";
+    ctx.fillText("Degenerate geometry — no unique fix",W/2,26);
+    ctx.fillStyle="#8a94b3";ctx.font="12px sans-serif";
+    ctx.fillText("Collinear beacons can't resolve which side of the line you're on.",W/2,44);
+  } else {
+    // Monte-Carlo cloud
+    if(showMC.checked){ctx.fillStyle="rgba(120,150,220,.5)";for(const p of R.mc){ctx.beginPath();ctx.arc(p.x,p.y,1.7,0,7);ctx.fill();}}
+    // analytic ellipse (2σ) from covariance
+    if(showEll.checked && R.cov && R.fix && isFinite(R.gdop)){
+      const e=eig(R.cov[0],R.cov[1],R.cov[2]);
+      const k=2; // ~2σ
+      ctx.save();ctx.translate(R.fix.x,R.fix.y);ctx.rotate(e.ang);
+      ctx.strokeStyle="#ff9f43";ctx.lineWidth=2;ctx.setLineDash([5,4]);
+      ctx.beginPath();ctx.ellipse(0,0,k*Math.sqrt(Math.max(0,e.l1)),k*Math.sqrt(Math.max(0,e.l2)),0,0,7);ctx.stroke();
+      ctx.setLineDash([]);ctx.restore();
+    }
+  }
+  // truth + fix
+  dot(S.rx,S.ry,6,"#31d18a");
+  ctx.strokeStyle="#0b1020";ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(S.rx,S.ry,6,0,7);ctx.stroke();
+  if(R.fix&&isFinite(R.fix.x)){
+    // residual line
+    ctx.strokeStyle="rgba(255,159,67,.5)";ctx.lineWidth=1;ctx.setLineDash([3,3]);
+    ctx.beginPath();ctx.moveTo(S.rx,S.ry);ctx.lineTo(R.fix.x,R.fix.y);ctx.stroke();ctx.setLineDash([]);
+    cross(R.fix.x,R.fix.y,"#ff9f43",9);
+  }
+}
+
+// ---- gauge + readouts ----
+function bandColor(g){return g<2?"#31d18a":g<5?"#ffcc4d":"#ff5d6c";}
+function drawGauge(){
+  gx.clearRect(0,0,230,118);
+  const cx=115,cy=104,rad=86;
+  // Upper-half arc: angles in [PI,2PI] so sin<=0 and the gauge faces up, inside the canvas.
+  // g=1 -> PI (left edge), g=8 -> 2PI (right edge), peak (g~4.5) at the top.
+  const map=g=>Math.PI+(Math.min(8,Math.max(1,g))-1)/7*Math.PI;
+  // bands
+  const segs=[[1,2,"#31d18a"],[2,5,"#ffcc4d"],[5,8,"#ff5d6c"]];
+  gx.lineWidth=13;gx.lineCap="butt";
+  for(const[s,e,col]of segs){gx.strokeStyle=col;gx.beginPath();gx.arc(cx,cy,rad,map(s),map(e));gx.stroke();}
+  // needle
+  const gg=Math.min(8,Math.max(1,gauge));const ang=map(gg);
+  gx.strokeStyle="#e8ecf7";gx.lineWidth=3;gx.beginPath();gx.moveTo(cx,cy);gx.lineTo(cx+Math.cos(ang)*(rad-6),cy+Math.sin(ang)*(rad-6));gx.stroke();
+  gx.fillStyle="#e8ecf7";gx.beginPath();gx.arc(cx,cy,5,0,7);gx.fill();
+  gx.fillStyle="#8a94b3";gx.font="10px sans-serif";gx.textAlign="left";gx.fillText("good",22,cy+2);gx.textAlign="right";gx.fillText("poor",208,cy+2);
+}
+function updateReadouts(){
+  const g=R.gdop;
+  const gv2=document.getElementById("gdopV"),vd=document.getElementById("verdict"),ml=document.getElementById("mult");
+  if(S.count===2){
+    gv2.textContent="∞ (ambiguous)";vd.textContent="Two possible fixes";vd.style.color="#ffcc4d";
+    ml.textContent="Two rings share two crossings — you can't tell which is real.";
+    document.getElementById("resV").textContent="—";document.getElementById("ellV").textContent="—";return;
+  }
+  if(!isFinite(g)){gv2.textContent="∞";vd.textContent="No fix — degenerate geometry";vd.style.color="#ff5d6c";ml.textContent="Beacons are collinear or coincident: the math has no unique answer.";document.getElementById("resV").textContent="—";document.getElementById("ellV").textContent="—";return;}
+  gv2.textContent=g.toFixed(2);
+  const lab=g<2?"Excellent geometry":g<5?"Fair geometry":"Poor geometry";
+  vd.textContent=lab;vd.style.color=bandColor(g);
+  ml.textContent="Geometry is multiplying your error ~"+g.toFixed(1)+"×";
+  document.getElementById("resV").textContent=R.fix?dist(R.fix.x,R.fix.y,S.rx,S.ry).toFixed(1)+" m":"—";
+  // 1σ region: semi-axes from covariance (k=1), report as ± range
+  if(R.cov){const e=eig(R.cov[0],R.cov[1],R.cov[2]);document.getElementById("ellV").textContent=Math.sqrt(Math.max(0,e.l1)).toFixed(1)+" × "+Math.sqrt(Math.max(0,e.l2)).toFixed(1)+" m";}
+  else document.getElementById("ellV").textContent="—";
+}
+
+// ---- animation loop ----
+function loop(){
+  const target=isFinite(R.gdop)?R.gdop:8;
+  gauge+=(target-gauge)*0.15;
+  draw();drawGauge();
+  requestAnimationFrame(loop);
+}
+
+// ---- interaction ----
+function evtPos(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*(W/r.width),y:(e.clientY-r.top)*(H/r.height)};}
+cv.addEventListener("pointerdown",e=>{
+  const p=evtPos(e);
+  if(dist(p.x,p.y,S.rx,S.ry)<14){drag={t:"rx"};clearPresetActive();cv.setPointerCapture(e.pointerId);cv.style.cursor="grabbing";return;}
+  for(let i=0;i<S.count;i++){if(dist(p.x,p.y,S.beacons[i].x,S.beacons[i].y)<15){drag={t:"b",i};clearPresetActive();cv.setPointerCapture(e.pointerId);cv.style.cursor="grabbing";return;}}
+  if(S.count===2&&R.cands){for(let i=0;i<2;i++){if(dist(p.x,p.y,R.cands[i].x,R.cands[i].y)<16){S.cand=i;updateReadouts();return;}}}
+});
+function overHandle(p){
+  if(dist(p.x,p.y,S.rx,S.ry)<14)return true;
+  for(let i=0;i<S.count;i++){if(dist(p.x,p.y,S.beacons[i].x,S.beacons[i].y)<15)return true;}
+  if(S.count===2&&R.cands){for(let i=0;i<2;i++){if(dist(p.x,p.y,R.cands[i].x,R.cands[i].y)<16)return true;}}
+  return false;
+}
+cv.addEventListener("pointermove",e=>{
+  if(!drag){cv.style.cursor=overHandle(evtPos(e))?"grab":"default";return;}
+  const p=evtPos(e);
+  p.x=Math.max(12,Math.min(W-12,p.x));p.y=Math.max(12,Math.min(H-12,p.y));
+  if(drag.t==="rx"){S.rx=p.x;S.ry=p.y;}else{S.beacons[drag.i].x=p.x;S.beacons[drag.i].y=p.y;}
+  recompute();updateReadouts();
+});
+function endDrag(){if(drag){drag=null;cv.style.cursor="grab";writeHash();}}
+cv.addEventListener("pointerup",endDrag);cv.addEventListener("pointercancel",endDrag);
+
+const noiseEl=document.getElementById("noise"),showMC=document.getElementById("showMC"),showEll=document.getElementById("showEll");
+noiseEl.addEventListener("input",()=>{S.noise=+noiseEl.value;document.getElementById("noiseVal").textContent=S.noise+" m";recompute();updateReadouts();writeHash();});
+document.getElementById("countSeg").addEventListener("click",e=>{const n=e.target.dataset.n;if(!n)return;S.count=+n;setCount();recompute();updateReadouts();writeHash();
+  const note=document.getElementById("presetNote");
+  if(S.count===2)note.innerHTML="Two rings cross at <b>two</b> points — a real fix and a phantom. Tap either crossing to pick it, then switch to <b>3</b> beacons to watch the phantom vanish.";
+  else if(S.count===4)note.innerHTML="Four beacons <b>over-determine</b> the fix: least-squares averages out noise and the error region shrinks.";
+  else note.innerHTML="Three rings pin a <b>unique</b> fix. Now drag them into a cluster or a line and watch GDOP explode at constant noise.";
+});
+function setCount(){[...document.querySelectorAll("#countSeg button")].forEach(b=>b.classList.toggle("on",+b.dataset.n===S.count));}
+
+function clearPresetActive(){document.querySelectorAll(".presets button.active").forEach(b=>b.classList.remove("active"));}
+document.querySelectorAll(".presets button").forEach(btn=>btn.addEventListener("click",()=>{
+  clearPresetActive();btn.classList.add("active");
+  const p=btn.dataset.preset,note=document.getElementById("presetNote");
+  if(p==="open"){S.beacons=[{x:130,y:130},{x:590,y:135},{x:150,y:430},{x:585,y:440}];S.rx=360;S.ry=290;S.count=4;
+    note.innerHTML="<b>Open sky:</b> beacons spread wide in every direction — the ideal case. GDOP near 1, error ≈ raw noise.";}
+  else if(p==="urban"){S.beacons=[{x:330,y:80},{x:370,y:72},{x:410,y:82}];S.rx=360;S.ry=470;S.count=3;
+    note.innerHTML="<b>Urban canyon:</b> buildings block all but a narrow strip of sky, so beacons crowd one direction. Same noise, but GDOP balloons ~7× — this is why your phone drifts downtown.";}
+  else{S.beacons=[{x:150,y:150},{x:360,y:150},{x:570,y:150}];S.rx=360;S.ry=330;S.count=3;
+    note.innerHTML="<b>Collinear:</b> beacons on one line are degenerate — geometry can't tell which side of the line you're on, so there's no unique fix even with 3 rings. Nudge one beacon off the line to recover.";}
+  setCount();recompute();updateReadouts();writeHash();
+}));
+
+// ---- URL hash serialize/restore ----
+function writeHash(){
+  const b=S.beacons.map(p=>Math.round(p.x)+","+Math.round(p.y)).join(";");
+  const h="#b="+b+"&r="+Math.round(S.rx)+","+Math.round(S.ry)+"&n="+S.noise+"&c="+S.count;
+  history.replaceState(null,"",h);
+}
+function readHash(){
+  const h=location.hash.slice(1);if(!h)return false;
+  const q=Object.fromEntries(h.split("&").map(s=>s.split("=")));
+  try{
+    if(q.b){const bs=q.b.split(";").map(s=>{const[x,y]=s.split(",").map(Number);return{x,y};});if(bs.length>=2&&bs.every(p=>isFinite(p.x)&&isFinite(p.y))){while(bs.length<4)bs.push({x:180+bs.length*40,y:445});S.beacons=bs.slice(0,4);}}
+    if(q.r){const[x,y]=q.r.split(",").map(Number);if(isFinite(x)&&isFinite(y)){S.rx=x;S.ry=y;}}
+    if(q.n!=null&&isFinite(+q.n))S.noise=Math.max(0,Math.min(24,+q.n));
+    if(q.c&&[2,3,4].includes(+q.c))S.count=+q.c;
+    return true;
+  }catch(_){return false;}
+}
+document.getElementById("copyBtn").addEventListener("click",()=>{
+  writeHash();const url=location.href;const el=document.getElementById("copied");
+  const ok=()=>{el.textContent="Link copied!";setTimeout(()=>el.textContent="",1800);};
+  const fallback=()=>{
+    try{
+      const ta=document.createElement("textarea");ta.value=url;ta.style.position="fixed";ta.style.opacity="0";
+      document.body.appendChild(ta);ta.focus();ta.select();
+      const done=document.execCommand("copy");document.body.removeChild(ta);
+      if(done)ok();else el.textContent="Copy from the address bar (Ctrl/Cmd+C)";
+    }catch(_){el.textContent="Copy from the address bar (Ctrl/Cmd+C)";}
+  };
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(url).then(ok,fallback);}
+  else fallback();
+});
+
+// ---- init ----
+readHash();
+noiseEl.value=S.noise;document.getElementById("noiseVal").textContent=S.noise+" m";
+setCount();recompute();updateReadouts();writeHash();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

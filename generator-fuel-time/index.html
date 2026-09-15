@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generator Fuel Time 🔌 — Run Hours on a Tank</title>
+<meta name="description" content="Estimate how long a generator runs on a tank of fuel from its rated power, load level, and tank size. Offline, private, single file.">
+<style>
+:root{
+  --c:#ca8a04;
+  --bg:#f6f8fa; --card:#fff; --fg:#1a1f24; --muted:#5a6470; --line:#e2e6ea;
+}
+[data-theme="dark"]{
+  --bg:#0b1016; --card:#141b23; --fg:#e6edf3; --muted:#8b98a6; --line:#232d38;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.55;transition:background .2s,color .2s}
+.wrap{max-width:640px;margin:0 auto;padding:24px 18px 60px}
+header{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.logo{font-size:2.2rem;line-height:1}
+h1{font-size:1.5rem;margin:0}
+.tag{color:var(--muted);margin:2px 0 22px;font-size:.98rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:18px}
+label{display:block;font-weight:600;margin:14px 0 6px;font-size:.92rem}
+input{width:100%;padding:11px 12px;font-size:1rem;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--fg)}
+input:focus{outline:2px solid var(--c);border-color:var(--c)}
+.row{display:flex;gap:12px}
+.row>div{flex:1}
+.out{margin-top:20px;padding:18px;border-radius:12px;background:linear-gradient(135deg,var(--c)20,transparent);border:1px solid var(--c)}
+.big{font-size:2rem;font-weight:700;color:#a16207}
+[data-theme="dark"] .big{color:#fde047}
+.sub{color:var(--muted);font-size:.9rem;margin-top:4px}
+table{width:100%;border-collapse:collapse;margin-top:8px;font-size:.95rem}
+th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:600}
+td:last-child{text-align:right;font-weight:700}
+.explain{font-size:.9rem;color:var(--muted)}
+.explain h2{font-size:1rem;color:var(--fg);margin:0 0 8px}
+.explain li{margin:4px 0}
+footer{text-align:center;color:var(--muted);font-size:.85rem;margin-top:30px}
+footer a{color:var(--c);text-decoration:none}
+.theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:7px 11px;cursor:pointer;font-size:1.1rem}
+.note{background:var(--bg);border:1px dashed var(--c);border-radius:9px;padding:10px 12px;font-size:.86rem;color:var(--muted);margin-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <span class="logo">🔌</span>
+  <h1>Generator Fuel Time</h1>
+  <button class="theme" id="themeBtn" title="Toggle theme">🌙</button>
+</header>
+<p class="tag">How long a generator runs on a tank at your load.</p>
+
+<div class="card">
+  <div class="row">
+    <div>
+      <label for="kw">Rated power (kW)</label>
+      <input type="number" id="kw" value="5" min="0.1" step="0.5">
+    </div>
+    <div>
+      <label for="load">Load (% of rated)</label>
+      <input type="number" id="load" value="50" min="1" max="100" step="5">
+    </div>
+  </div>
+  <label for="tank">Tank size (gallons)</label>
+  <input type="number" id="tank" value="5" min="0.1" step="0.5">
+
+  <div class="out">
+    <div class="big" id="runOut">—</div>
+    <div class="sub">Estimated run time on a full tank</div>
+    <table>
+      <tr><th>Detail</th><th>Value</th></tr>
+      <tr><td>Fuel burn</td><td id="gphOut">—</td></tr>
+      <tr><td>Power delivered</td><td id="pwrOut">—</td></tr>
+    </table>
+    <div class="note" id="note"></div>
+  </div>
+</div>
+
+<div class="card explain">
+  <h2>How it works</h2>
+  <ul>
+    <li>A gallon of gasoline yields roughly <strong>10 kWh</strong> of electricity through a generator, so burn &asymp; delivered kW &times; 0.11 gal per hour.</li>
+    <li>Delivered power = rated power &times; load fraction; run time = tank &divide; fuel burn.</li>
+    <li>Lighter loads stretch a tank, but running under ~25% for long invites wet-stacking on diesel units.</li>
+    <li>This is a gasoline estimate — propane and diesel differ; use your unit's published consumption when you have it.</li>
+  </ul>
+</div>
+
+<footer>Part of the <a href="https://awictor.github.io/toolkit/" target="_blank" rel="noopener">Toolkit</a> · offline &amp; private · no data leaves your device</footer>
+</div>
+
+<script>
+var GAL_PER_KWH = 0.11;
+
+function consumptionGph(ratedKw, loadFraction){
+  if(!(ratedKw > 0)) throw new Error("rated power must be positive");
+  if(!(loadFraction > 0 && loadFraction <= 1)) throw new Error("load fraction must be between 0 and 1");
+  return ratedKw * loadFraction * GAL_PER_KWH;
+}
+function runtimeHours(tankGallons, gph){
+  if(!(tankGallons > 0)) throw new Error("tank size must be positive");
+  if(!(gph > 0)) throw new Error("fuel burn must be positive");
+  return tankGallons / gph;
+}
+function runtimeForLoad(tankGallons, ratedKw, loadFraction){
+  return runtimeHours(tankGallons, consumptionGph(ratedKw, loadFraction));
+}
+
+function fmtHours(hrs){
+  var h = Math.floor(hrs), m = Math.round((hrs - h) * 60);
+  if(m === 60){ h += 1; m = 0; }
+  if(h === 0) return m + " min";
+  return h + " hr " + m + " min";
+}
+
+function render(){
+  var kw = parseFloat(document.getElementById("kw").value);
+  var loadPct = parseFloat(document.getElementById("load").value);
+  var tank = parseFloat(document.getElementById("tank").value);
+  var rO = document.getElementById("runOut"), gO = document.getElementById("gphOut"),
+      pO = document.getElementById("pwrOut"), note = document.getElementById("note");
+  try{
+    var frac = loadPct / 100;
+    var gph = consumptionGph(kw, frac);
+    rO.textContent = fmtHours(runtimeForLoad(tank, kw, frac));
+    gO.textContent = (Math.round(gph * 100) / 100) + " gal/hr";
+    pO.textContent = (Math.round(kw * frac * 100) / 100) + " kW";
+    note.textContent = "Gasoline estimate — use your unit's published rate when you have it.";
+  }catch(e){
+    rO.textContent = "—"; gO.textContent = "—"; pO.textContent = "—";
+    note.textContent = "Enter positive power and tank, with load between 1 and 100%.";
+  }
+}
+
+(function(){
+  if(typeof document === "undefined") return;
+  var th = localStorage.getItem("genFuelTheme") || "dark";
+  document.documentElement.setAttribute("data-theme", th);
+  var btn = document.getElementById("themeBtn");
+  btn.textContent = th === "dark" ? "☀️" : "🌙";
+  btn.addEventListener("click", function(){
+    var cur = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", cur);
+    localStorage.setItem("genFuelTheme", cur);
+    btn.textContent = cur === "dark" ? "☀️" : "🌙";
+  });
+  ["kw", "load", "tank"].forEach(function(id){ document.getElementById(id).addEventListener("input", render); });
+  render();
+})();
+
+if(typeof module !== 'undefined') module.exports = { consumptionGph, runtimeHours, runtimeForLoad, GAL_PER_KWH };
+</script>
+</body>
+</html>

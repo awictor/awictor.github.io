@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Credit Card Validator — Luhn check &amp; card brand detection</title>
+<meta name="description" content="Check a card number with the Luhn algorithm and detect the brand (Visa, Mastercard, Amex, Discover, Diners, JCB). Nothing is sent anywhere. Offline, no tracking.">
+<style>
+  :root{
+    --c:#7c3aed;
+    --bg:#f4f1fc; --card:#ffffff; --fg:#170f28; --muted:#5e5178;
+    --line:#e4dcf5; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#0e0a1a; --card:#171129; --fg:#ece7f8; --muted:#a89ac6;
+    --line:#292142; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:800px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:800px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  input{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.35rem;letter-spacing:.06em;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .verdict{margin-top:16px;padding:14px 16px;border-radius:12px;font-weight:600;display:none;align-items:center;gap:10px}
+  .verdict.ok{display:flex;background:rgba(22,163,74,.12);color:#15803d;border:1px solid rgba(22,163,74,.3)}
+  .verdict.bad{display:flex;background:rgba(220,38,38,.1);color:#dc2626;border:1px solid rgba(220,38,38,.3)}
+  [data-theme="dark"] .verdict.ok{color:#86efac}
+  [data-theme="dark"] .verdict.bad{color:#fca5a5}
+  .brand{margin-top:16px;font-size:1.3rem;font-weight:700}
+  .brand .lbl{font-size:.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600;display:block}
+  .ex{background:transparent;border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:.82rem;margin:8px 6px 0 0}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">💳</div>
+  <div>
+    <h1>Credit Card Validator</h1>
+    <p>Luhn check &amp; brand detection</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <label>Card number (spaces and dashes are fine)</label>
+    <input id="in" spellcheck="false" inputmode="numeric" value="4111 1111 1111 1111">
+    <div class="verdict" id="verdict"></div>
+    <div class="brand"><span class="lbl">Brand</span><span id="brand">—</span></div>
+    <div>
+      <span class="note">Test numbers:</span>
+      <button class="ex" data-v="4111 1111 1111 1111">Visa</button>
+      <button class="ex" data-v="5555 5555 5555 4444">Mastercard</button>
+      <button class="ex" data-v="3782 822463 10005">Amex</button>
+      <button class="ex" data-v="6011 1111 1111 1117">Discover</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>How validation works</h2>
+    <p class="note">Card numbers carry a built-in <b>Luhn</b> check digit: double every second digit from the right, sum the digits, and a valid number totals a multiple of 10. That catches typos but does <em>not</em> mean the card exists or has funds. The <b>brand</b> is read from the leading digits (the IIN/BIN range): 4 → Visa, 51–55 and 2221–2720 → Mastercard, 34/37 → American Express, and so on. These are the industry <b>test numbers</b> — safe, non-real. Nothing you type is sent anywhere; it all runs locally.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function cleanNumber(s){ return String(s == null ? '' : s).replace(/[\s-]/g, ''); }
+  // Luhn checksum: valid iff the total is a multiple of 10.
+  function luhnValid(num){
+    var s = cleanNumber(num);
+    if(!/^\d+$/.test(s)) return false;
+    var sum = 0, alt = false;
+    for(var i = s.length - 1; i >= 0; i--){
+      var d = +s[i];
+      if(alt){ d *= 2; if(d > 9) d -= 9; }
+      sum += d; alt = !alt;
+    }
+    return sum % 10 === 0;
+  }
+  var BRANDS = [
+    { name: 'Visa', re: /^4/, lengths: [13, 16, 19] },
+    { name: 'Mastercard', re: /^(5[1-5]|222[1-9]|22[3-9]\d|2[3-6]\d{2}|27[01]\d|2720)/, lengths: [16] },
+    { name: 'American Express', re: /^3[47]/, lengths: [15] },
+    { name: 'Discover', re: /^(6011|65|64[4-9]|622(12[6-9]|1[3-9]\d|[2-8]\d{2}|9[01]\d|92[0-5]))/, lengths: [16, 17, 18, 19] },
+    { name: 'Diners Club', re: /^(30[0-5]|36|38|39)/, lengths: [14] },
+    { name: 'JCB', re: /^35(2[89]|[3-8]\d)/, lengths: [16, 17, 18, 19] }
+  ];
+  // Detect the card brand from the leading digits; 'Unknown' if none match.
+  function detectBrand(num){
+    var s = cleanNumber(num);
+    for(var i = 0; i < BRANDS.length; i++){ if(BRANDS[i].re.test(s)) return BRANDS[i].name; }
+    return 'Unknown';
+  }
+  // Full report: {clean, brand, luhnValid, lengthValid, valid}.
+  function validate(num){
+    var s = cleanNumber(num);
+    var brand = detectBrand(s);
+    var b = BRANDS.filter(function(x){ return x.name === brand; })[0];
+    var lengthValid = /^\d+$/.test(s) && !!b && b.lengths.indexOf(s.length) !== -1;
+    var luhn = luhnValid(s);
+    return { clean: s, brand: brand, luhnValid: luhn, lengthValid: lengthValid, valid: luhn && lengthValid };
+  }
+
+  if(typeof module !== 'undefined') module.exports = { cleanNumber:cleanNumber, luhnValid:luhnValid, detectBrand:detectBrand, validate:validate, BRANDS:BRANDS };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    function render(){
+      var r = validate(document.getElementById('in').value);
+      var v = document.getElementById('verdict');
+      document.getElementById('brand').textContent = r.clean === '' ? '—' : r.brand;
+      if(r.clean === ''){ v.className = 'verdict'; v.textContent = ''; return; }
+      if(r.valid){ v.className = 'verdict ok'; v.textContent = '✓ Passes Luhn check and matches ' + r.brand + ' length'; }
+      else if(r.luhnValid && !r.lengthValid){ v.className = 'verdict bad'; v.textContent = '⚠ Luhn passes but the length is unusual for ' + r.brand; }
+      else { v.className = 'verdict bad'; v.textContent = '✗ Fails the Luhn check'; }
+    }
+    document.getElementById('in').addEventListener('input', render);
+    Array.prototype.forEach.call(document.querySelectorAll('.ex'), function(b){
+      b.addEventListener('click', function(){ document.getElementById('in').value = this.getAttribute('data-v'); render(); });
+    });
+    render();
+
+    var root=document.documentElement, tb=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); tb.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('creditcard-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('creditcard-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

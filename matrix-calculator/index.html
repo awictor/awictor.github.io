@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Matrix Calculator — determinant, inverse, multiply &amp; transpose</title>
+<meta name="description" content="Matrix operations in the browser: determinant, inverse, transpose, and multiplication for any size square/rectangular matrices. Exact cofactor expansion. Offline, no tracking.">
+<style>
+  :root{
+    --c:#4338ca;
+    --bg:#eef0fb; --card:#ffffff; --fg:#0e1024; --muted:#565575;
+    --line:#dcdef4; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#0a0a18; --card:#141428; --fg:#e8e8f6; --muted:#a3a2c4;
+    --line:#242440; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:860px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto;font-weight:700}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:860px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  textarea{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1rem;font-weight:600;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);min-height:88px;resize:vertical}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .ops{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
+  .ops button{padding:8px 14px;border:1px solid var(--line);background:var(--bg);color:var(--muted);border-radius:10px;cursor:pointer;font-weight:600;font-size:.9rem}
+  .ops button:hover{border-color:var(--c);color:var(--c)}
+  .out{margin-top:8px;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--bg);font-family:ui-monospace,monospace;white-space:pre;overflow-x:auto;font-size:1rem;min-height:2em;color:var(--c);font-weight:700}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:640px){.two{grid-template-columns:1fr}}
+  .err{color:#dc2626;font-size:.86rem;margin-top:10px;min-height:1em}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">▦</div>
+  <div>
+    <h1>Matrix Calculator</h1>
+    <p>determinant · inverse · multiply · transpose</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="two">
+      <div><label>Matrix A — rows on separate lines, values space/comma separated</label><textarea id="a">1 2
+3 4</textarea></div>
+      <div><label>Matrix B (for A × B)</label><textarea id="b">5 6
+7 8</textarea></div>
+    </div>
+    <div class="ops">
+      <button data-op="detA">det(A)</button>
+      <button data-op="invA">A⁻¹</button>
+      <button data-op="transA">Aᵀ</button>
+      <button data-op="mul">A × B</button>
+      <button data-op="detB">det(B)</button>
+      <button data-op="invB">B⁻¹</button>
+    </div>
+    <div class="out" id="out">—</div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>About matrix operations</h2>
+    <p class="note">The <b>determinant</b> tells you whether a square matrix is invertible (non-zero) and how it scales volume; it's computed here by exact cofactor expansion. The <b>inverse</b> A⁻¹ satisfies A·A⁻¹ = I and exists only when det ≠ 0 — found via the adjugate divided by the determinant. <b>Transpose</b> flips rows and columns. <b>Multiplication</b> A×B is defined when A's column count equals B's row count, and is famously non-commutative. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function parseMatrix(text){
+    var rows = text.trim().split(/\n/).map(function(l){ return l.trim(); }).filter(function(l){ return l.length; })
+      .map(function(l){ return l.split(/[\s,]+/).filter(function(x){ return x.length; }).map(Number); });
+    if(rows.length === 0) throw new Error('matrix is empty');
+    var cols = rows[0].length;
+    for(var i = 0; i < rows.length; i++){ if(rows[i].length !== cols) throw new Error('all rows must have the same length'); if(rows[i].some(function(x){ return !isFinite(x); })) throw new Error('all entries must be numbers'); }
+    return rows;
+  }
+  function isSquare(M){ return M.length === M[0].length; }
+  function transpose(M){ var r = []; for(var j = 0; j < M[0].length; j++){ r[j] = []; for(var i = 0; i < M.length; i++) r[j][i] = M[i][j]; } return r; }
+  function multiply(A, B){ if(A[0].length !== B.length) throw new Error('A columns (' + A[0].length + ') must equal B rows (' + B.length + ')'); var r = []; for(var i = 0; i < A.length; i++){ r[i] = []; for(var j = 0; j < B[0].length; j++){ var s = 0; for(var k = 0; k < B.length; k++) s += A[i][k] * B[k][j]; r[i][j] = s; } } return r; }
+  function minor(M, r, c){ return M.filter(function(_, i){ return i !== r; }).map(function(row){ return row.filter(function(_, j){ return j !== c; }); }); }
+  function determinant(M){ if(!isSquare(M)) throw new Error('determinant needs a square matrix'); var n = M.length; if(n === 1) return M[0][0]; if(n === 2) return M[0][0] * M[1][1] - M[0][1] * M[1][0]; var s = 0; for(var j = 0; j < n; j++) s += (j % 2 ? -1 : 1) * M[0][j] * determinant(minor(M, 0, j)); return s; }
+  function inverse(M){ if(!isSquare(M)) throw new Error('inverse needs a square matrix'); var d = determinant(M); if(d === 0) throw new Error('matrix is singular (determinant 0) — no inverse'); var n = M.length; if(n === 1) return [[1 / M[0][0]]]; var adj = []; for(var i = 0; i < n; i++){ adj[i] = []; for(var j = 0; j < n; j++) adj[i][j] = ((i + j) % 2 ? -1 : 1) * determinant(minor(M, j, i)) / d; } return adj; }
+  function identity(n){ if(!Number.isInteger(n) || n < 1) throw new Error('size must be a positive integer'); var r = []; for(var i = 0; i < n; i++){ r[i] = []; for(var j = 0; j < n; j++) r[i][j] = i === j ? 1 : 0; } return r; }
+
+  if(typeof module !== 'undefined') module.exports = { parseMatrix:parseMatrix, transpose:transpose, multiply:multiply, determinant:determinant, inverse:inverse, identity:identity };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var $ = function(id){ return document.getElementById(id); };
+    function fmt(x){ var v = Math.abs(x) < 1e-12 ? 0 : x; return Number(v.toPrecision(6)).toString(); }
+    function fmtMatrix(M){ var w = 0; var cells = M.map(function(row){ return row.map(function(x){ var s = fmt(x); if(s.length > w) w = s.length; return s; }); }); return cells.map(function(row){ return row.map(function(s){ return s.padStart(w); }).join('  '); }).join('\n'); }
+    function run(op){
+      $('err').textContent = '';
+      try{
+        var A = parseMatrix($('a').value);
+        if(op === 'detA'){ $('out').textContent = 'det(A) = ' + fmt(determinant(A)); }
+        else if(op === 'invA'){ $('out').textContent = fmtMatrix(inverse(A)); }
+        else if(op === 'transA'){ $('out').textContent = fmtMatrix(transpose(A)); }
+        else if(op === 'mul'){ $('out').textContent = fmtMatrix(multiply(A, parseMatrix($('b').value))); }
+        else if(op === 'detB'){ $('out').textContent = 'det(B) = ' + fmt(determinant(parseMatrix($('b').value))); }
+        else if(op === 'invB'){ $('out').textContent = fmtMatrix(inverse(parseMatrix($('b').value))); }
+      }catch(e){ $('out').textContent = '—'; $('err').textContent = e.message; }
+    }
+    document.querySelectorAll('.ops button').forEach(function(b){ b.addEventListener('click', function(){ run(b.getAttribute('data-op')); }); });
+    run('mul');
+
+    var root = document.documentElement, tb = $('theme');
+    function setTheme(t){ root.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? '☀️' : '🌙'; try{ localStorage.setItem('matrix-theme', t); }catch(e){} }
+    var saved; try{ saved = localStorage.getItem('matrix-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); });
+  }
+</script>
+</body>
+</html>

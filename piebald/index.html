@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Piebald — a two-color connectivity puzzle</title>
+<style>
+  :root{
+    --bg:#f5f3ef; --panel:#fffdf9; --ink:#232f3e; --accent:#ff6100; --accent2:#c94e00;
+    --line:#c9c2b2; --empty:#d7d0c0; --black:#232f3e; --white:#ffffff; --bad:#e23b3b;
+    --good:#2e9e5b; --muted:#7a7565;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);font:16px/1.4 "Segoe UI",system-ui,-apple-system,sans-serif;
+    display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:14px 12px 40px;-webkit-tap-highlight-color:transparent}
+  h1{font-size:26px;letter-spacing:.02em;margin:0;font-weight:800}
+  h1 .yy{color:var(--accent)}
+  header{text-align:center;margin-bottom:10px;max-width:560px}
+  .tag{color:var(--muted);font-size:13px;margin-top:3px}
+  .wrap{width:100%;max-width:560px}
+  .bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:center;margin:8px 0}
+  button.btn{font:inherit;font-size:13px;font-weight:600;padding:7px 11px;border:1px solid var(--line);
+    background:var(--panel);color:var(--ink);border-radius:9px;cursor:pointer;transition:.12s}
+  button.btn:hover{border-color:var(--accent);color:var(--accent2)}
+  button.btn:active{transform:translateY(1px)}
+  button.btn.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.btn:disabled{opacity:.4;cursor:default}
+  .hud{display:flex;flex-wrap:wrap;gap:10px 16px;justify-content:center;align-items:center;
+    background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:9px 12px;margin:6px 0}
+  .hud b{font-variant-numeric:tabular-nums;font-size:18px}
+  .hud .lbl{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em;display:block}
+  .stat{text-align:center;min-width:52px}
+  .badge{background:#fff2e8;border:1px solid #ffd0ab;color:var(--accent2);border-radius:20px;
+    padding:4px 12px;font-size:12px;font-weight:700}
+  #boardWrap{position:relative;margin:8px auto;width:100%;max-width:520px}
+  #board{display:grid;gap:3px;background:var(--line);border:3px solid var(--ink);border-radius:8px;padding:3px;
+    touch-action:manipulation;user-select:none}
+  .cell{aspect-ratio:1/1;border:none;border-radius:4px;background:var(--empty);cursor:pointer;position:relative;
+    display:flex;align-items:center;justify-content:center;font-size:min(4.4vw,22px);color:transparent;
+    transition:background .12s, box-shadow .12s;padding:0}
+  .cell.b{background:var(--black)}
+  .cell.w{background:var(--white);box-shadow:inset 0 0 0 1.5px var(--line)}
+  .cell.given{cursor:default}
+  .cell.given::before{content:"";position:absolute;inset:14%;border-radius:50%;
+    box-shadow:0 0 0 2.5px var(--accent);pointer-events:none}
+  .cell.given.b::before{box-shadow:0 0 0 2.5px #ffb27f}
+  .cell:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent2)}
+  .cell.bad{animation:buzz .3s;box-shadow:inset 0 0 0 3px var(--bad)!important}
+  .cell.wrong::after{content:"×";color:var(--bad);font-weight:900;font-size:1.3em;position:absolute}
+  .cell.hint{animation:pulse 1s ease-in-out infinite;z-index:3}
+  .cell.hintblock{box-shadow:inset 0 0 0 3px var(--accent)}
+  /* colorblind / pattern theme: glyphs + hatch */
+  body.pat .cell.b{color:#e9edf2;background-image:repeating-linear-gradient(45deg,#2b3849 0 5px,#232f3e 5px 10px)}
+  body.pat .cell.b::after{content:"\25CF"}
+  body.pat .cell.w{color:#8b8578}
+  body.pat .cell.w::after{content:"\25EF"}
+  @keyframes buzz{25%{transform:translateX(-2px)}75%{transform:translateX(2px)}}
+  @keyframes pulse{50%{box-shadow:0 0 0 5px rgba(255,97,0,.55)}}
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none!important;transition:none!important}
+    .cell.hint{box-shadow:0 0 0 4px rgba(255,97,0,.55);z-index:3}
+  }
+  #status{min-height:20px;text-align:center;font-size:13px;font-weight:600;margin:6px 0;color:var(--muted)}
+  #status.err{color:var(--bad)} #status.ok{color:var(--good)}
+  #callout{background:var(--ink);color:#fff;border-radius:10px;padding:10px 13px;margin:8px auto;max-width:520px;
+    font-size:13.5px;line-height:1.45;display:none;position:relative}
+  #callout.show{display:block;animation:rise .25s}
+  #callout b{color:var(--accent)}
+  #callout .cx{position:absolute;top:6px;right:9px;cursor:pointer;color:#9aa4b1;font-weight:700}
+  @keyframes rise{from{opacity:0;transform:translateY(6px)}}
+  .modal{position:fixed;inset:0;background:rgba(35,47,62,.55);display:none;align-items:center;justify-content:center;padding:16px;z-index:10}
+  .modal.show{display:flex}
+  .card{background:var(--panel);border-radius:16px;padding:22px;max-width:360px;width:100%;text-align:center;box-shadow:0 18px 50px rgba(0,0,0,.3)}
+  .card h2{margin:0 0 4px;color:var(--accent)}
+  .card .mini{font-size:11px;line-height:1;white-space:pre;font-family:ui-monospace,monospace;background:var(--bg);
+    padding:10px;border-radius:8px;margin:12px 0;display:inline-block;letter-spacing:1px}
+  .card .row{display:flex;justify-content:space-around;margin:10px 0}
+  .foot{margin-top:18px;color:var(--muted);font-size:12px;text-align:center;max-width:520px}
+  a{color:var(--accent2)}
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="yy">◐</span> Piebald</h1>
+  <div class="tag">Shade every cell black or white so each color forms one connected group — and no 2×2 is ever solid.</div>
+</header>
+
+<div class="wrap">
+  <div class="bar">
+    <button class="btn" id="daily">☀ Daily</button>
+    <button class="btn" data-sz="6">Gentle 6×6</button>
+    <button class="btn" data-sz="8">Tricky 8×8</button>
+    <button class="btn" data-sz="10">Fiendish 10×10</button>
+    <button class="btn" id="help">? How to play</button>
+  </div>
+
+  <div class="hud">
+    <div class="stat"><span class="lbl">Time</span><b id="time">0:00</b></div>
+    <div class="stat"><span class="lbl">Moves</span><b id="moves">0</b></div>
+    <div class="stat"><span class="lbl">Left</span><b id="left">0</b></div>
+    <div class="stat"><span class="lbl">Streak</span><b id="streak">0</b></div>
+    <span class="badge" id="badge">—</span>
+  </div>
+
+  <div id="boardWrap"><div id="board" role="grid" aria-label="Piebald puzzle grid"></div></div>
+  <div id="status" role="status" aria-live="polite">Loading…</div>
+  <div id="callout"><span class="cx" id="calx">✕</span><div id="calbody"></div></div>
+
+  <div class="bar">
+    <button class="btn" id="check">✓ Check</button>
+    <button class="btn" id="hint">💡 Hint</button>
+    <button class="btn" id="replay">▶ Replay logic</button>
+    <button class="btn" id="undo">↶ Undo</button>
+    <button class="btn" id="redo">↷ Redo</button>
+    <button class="btn" id="pat">◑ Symbols</button>
+  </div>
+  <div class="foot">
+    Tap / click a cell to cycle empty → black → white. Keyboard: arrow keys move, <b>Space</b>/<b>Enter</b> cycle.
+    Every puzzle is generated with a real solver and is provably solvable by logic alone.
+  </div>
+</div>
+
+<div class="modal" id="howto">
+  <div class="card" style="text-align:left;max-width:420px">
+    <h2 style="text-align:center">How to play</h2>
+    <p>Shade every cell one of two colors — <b>black</b> or <b>white</b> — so that:</p>
+    <ul style="padding-left:18px;margin:8px 0">
+      <li>All <b>black</b> cells form one connected group (touching edge-to-edge).</li>
+      <li>All <b>white</b> cells form one connected group.</li>
+      <li>No 2×2 area is entirely one color.</li>
+    </ul>
+    <p>Ringed cells are fixed clues you can't change. Tap or click a cell to cycle empty → black → white → empty; with the keyboard, arrow keys move and Space/Enter cycle.</p>
+    <p>Every puzzle has exactly one solution, reachable by logic alone. Stuck? <b>Hint</b> shows the next forced move and <b>Replay logic</b> walks the whole deduction chain.</p>
+    <button class="btn" id="howclose" style="display:block;margin:12px auto 0">Got it</button>
+  </div>
+</div>
+
+<div class="modal" id="win">
+  <div class="card">
+    <h2>Solved! 🎉</h2>
+    <div id="wsub"></div>
+    <div class="mini" id="wmini"></div>
+    <div class="row" id="wstats"></div>
+    <button class="btn" id="share">📋 Copy result card</button>
+    <button class="btn" id="next">Next puzzle →</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+//=========================== utils & PRNG ===========================
+const $=s=>document.querySelector(s);
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function hashStr(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
+function shuffle(a,rng){for(let i=a.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+//=========================== puzzle model ===========================
+let N=8;
+const idx=(r,c)=>r*N+c;
+function nbrs(i){const r=(i/N)|0,c=i%N,o=[];if(r>0)o.push(i-N);if(r<N-1)o.push(i+N);if(c>0)o.push(i-1);if(c<N-1)o.push(i+1);return o;}
+function labelComps(g,color){const lab=new Int32Array(g.length).fill(-1);let comp=0;const sizes=[];
+  for(let i=0;i<g.length;i++){if(g[i]===color&&lab[i]<0){const st=[i];lab[i]=comp;let sz=0;
+    while(st.length){const c=st.pop();sz++;for(const nb of nbrs(c))if(g[nb]===color&&lab[nb]<0){lab[nb]=comp;st.push(nb);}}
+    sizes.push(sz);comp++;}}return{comp,lab,sizes};}
+const components=(g,color)=>labelComps(g,color).comp;
+function colorConnectable(g,color){let start=-1,total=0;for(let i=0;i<g.length;i++){if(g[i]===color){total++;if(start<0)start=i;}}
+  if(total<=1)return true;const seen=new Uint8Array(g.length),st=[start];seen[start]=1;let cnt=0;
+  while(st.length){const c=st.pop();if(g[c]===color)cnt++;for(const nb of nbrs(c))if(!seen[nb]&&(g[nb]===color||g[nb]===-1)){seen[nb]=1;st.push(nb);}}
+  return cnt===total;}
+function monoBlocks(g){const res=[];for(let r=0;r<N-1;r++)for(let c=0;c<N-1;c++){const i=r*N+c,v=g[i];
+  if(v!==-1&&g[i+1]===v&&g[i+N]===v&&g[i+N+1]===v)res.push(i);}return res;}
+const feasible=g=>monoBlocks(g).length===0&&colorConnectable(g,0)&&colorConnectable(g,1);
+const isSolved=g=>!g.includes(-1)&&monoBlocks(g).length===0&&components(g,0)===1&&components(g,1)===1;
+
+//=========================== solvers ===========================
+// Rule A: a 2x2 with three cells one color forces the fourth to the opposite (no solid block).
+function find2x2force(g){for(let r=0;r<N-1;r++)for(let c=0;c<N-1;c++){const i=r*N+c,cells=[i,i+1,i+N,i+N+1];
+  let z=0,o=0,u=-1;for(const k of cells){if(g[k]===0)z++;else if(g[k]===1)o++;else u=k;}
+  if(u>=0&&(z===3||o===3))return{i:u,val:z===3?1:0,block:cells,rule:'2x2'};}return null;}
+// One sound logical deduction: Rule A, else single-cell connectivity trial.
+function logicalStep(g){const ra=find2x2force(g);if(ra)return ra;
+  for(let i=0;i<g.length;i++){if(g[i]!==-1)continue;
+    for(let val=0;val<2;val++){g[i]=val;const ok=feasible(g);
+      if(!ok){const bad=!colorConnectable(g,val)?val:1-val;g[i]=-1;return{i,val:1-val,rule:bad===val?'split':'conn',colorBad:bad};}
+      g[i]=-1;}}
+  return null;}
+// Pure-logic solver: apply deductions to fixpoint, recording the chain + techniques used.
+function logicalSolve(g0){const g=g0.slice(),chain=[],tech=new Set();
+  while(true){const st=logicalStep(g);if(!st)break;g[st.i]=st.val;chain.push(st);tech.add(st.rule);if(!feasible(g))return{g,chain,tech,solved:false};}
+  return{g,chain,tech,solved:!g.includes(-1)};}
+// Counting backtracking solver (Rule-A propagation + pruning) — verifies uniqueness up to `limit`.
+function propagate(g){while(true){const f=find2x2force(g);if(!f)break;g[f.i]=f.val;}
+  if(monoBlocks(g).length)return false;return colorConnectable(g,0)&&colorConnectable(g,1);}
+function countSolutions(g0,limit){let count=0;(function rec(g){if(count>=limit)return;if(!propagate(g))return;
+  const i=g.indexOf(-1);if(i<0){if(isSolved(g))count++;return;}
+  for(let v=0;v<2;v++){const h=g.slice();h[i]=v;rec(h);if(count>=limit)return;}})(g0.slice());return count;}
+
+//=========================== generator ===========================
+// Guaranteed-valid fallback board (a "comb": one color connected via a spine, the other via a shared edge).
+function baseBoard(){const g=new Int8Array(N*N).fill(0);for(let c=0;c<N;c++)g[c]=1;
+  for(let c=0;c<N;c+=2)for(let r=1;r<N-1;r++)g[r*N+c]=1;return g;}
+function scost(g){let c=monoBlocks(g).length*2;const c0=components(g,0),c1=components(g,1);
+  if(c0===0||c1===0)c+=30;else c+=(c0-1)+(c1-1);return c;}
+function candSet(g){const s=new Set();for(const i of monoBlocks(g)){s.add(i);s.add(i+1);s.add(i+N);s.add(i+N+1);}
+  for(const color of[0,1]){const{comp,lab,sizes}=labelComps(g,color);if(comp>1){let big=0;
+    for(let k=1;k<sizes.length;k++)if(sizes[k]>sizes[big])big=k;
+    for(let i=0;i<g.length;i++)if(g[i]===color&&lab[i]!==big){s.add(i);for(const nb of nbrs(i))s.add(nb);}}}
+  return[...s];}
+// Random valid full board via targeted min-conflicts local search (steepest descent + kicks).
+function randomFull(rng){const n=N*N;
+  for(let attempt=0;attempt<40;attempt++){const g=new Int8Array(n);for(let i=0;i<n;i++)g[i]=rng()<0.5?1:0;
+    let cur=scost(g),stale=0;
+    for(let it=0;it<400&&cur>0;it++){const cand=candSet(g);let bestI=-1,bestD=1;
+      for(const i of cand){g[i]^=1;const d=scost(g)-cur;g[i]^=1;if(d<bestD||(d===bestD&&rng()<0.25)){bestD=d;bestI=i;}}
+      if(bestI>=0&&bestD<0){g[bestI]^=1;cur+=bestD;stale=0;}
+      else{const k=cand.length?cand[Math.floor(rng()*cand.length)]:Math.floor(rng()*n);g[k]^=1;cur=scost(g);if(++stale>6)break;}}
+    if(cur===0)return Array.from(g);}
+  return Array.from(baseBoard());}
+// Carve givens down to a minimal set that logic alone still fully solves (=> unique).
+function generate(rng){const full=randomFull(rng);
+  const order=shuffle([...Array(N*N).keys()],rng);const puz=full.slice();
+  for(const i of order){const s=puz[i];puz[i]=-1;if(!logicalSolve(puz).solved)puz[i]=s;}
+  const res=logicalSolve(puz);let tech='2x2';
+  for(const st of res.chain){if(st.rule==='conn'&&tech==='2x2')tech='conn';if(st.rule==='split')tech='split';}
+  return{full,puz,chain:res.chain,tech,uniq:countSolutions(puz,2)};}
+
+//=========================== game state ===========================
+let S=null; // {full,puz,chain,tech, grid, given, seed, mode, size}
+let undoStk=[],redoStk=[],moves=0,startT=0,timer=null,done=false,replayIdx=-1,revealing=false;
+const CN=['white','black'];
+const techLabel=t=>t==='2x2'?'2×2 Chains':t==='conn'?'Connectivity Forcing':'Split Avoidance';
+const board=$('#board'),statusEl=$('#status'),callout=$('#callout'),calbody=$('#calbody');
+
+function newGame(mode,size,seed){
+  N=size;const rng=mulberry32(seed>>>0);
+  statusEl.textContent='Generating…';statusEl.className='';
+  setTimeout(()=>{
+    const p=generate(rng);
+    S={...p,size,mode,seed:seed>>>0,grid:p.puz.slice(),given:p.puz.map(v=>v!==-1)};
+    undoStk=[];redoStk=[];moves=0;done=false;replayIdx=-1;
+    hideCallout();$('#win').classList.remove('show');
+    startT=Date.now();clearInterval(timer);timer=setInterval(tick,500);tick();
+    location.hash=`${mode==='daily'?'d':'r'}-${size}-${S.seed.toString(36)}`;
+    $('#badge').textContent=techLabel(p.tech)+' · '+p.chain.length+' steps';
+    $('#daily').classList.toggle('on',mode==='daily');
+    document.querySelectorAll('[data-sz]').forEach(b=>b.classList.toggle('on',mode==='random'&&+b.dataset.sz===size));
+    buildBoard();render();
+    say(`New ${size}×${size} puzzle. ${p.puz.filter(v=>v!==-1).length} clues. Verified unique by the solver.`,'');
+  },20);
+}
+
+//=========================== rendering ===========================
+function buildBoard(){board.style.gridTemplateColumns=`repeat(${N},1fr)`;board.innerHTML='';
+  for(let i=0;i<N*N;i++){const b=document.createElement('button');b.className='cell';b.dataset.i=i;
+    b.setAttribute('role','gridcell');b.tabIndex=i===0?0:-1;board.appendChild(b);}}
+function cellLabel(i){const r=(i/N|0)+1,c=i%N+1,v=S.grid[i];
+  return `row ${r} column ${c}, ${v===-1?'empty':CN[v]}${S.given[i]?', clue':''}`;}
+function render(){const g=S.grid,bad=new Set();
+  for(const i of monoBlocks(g)){bad.add(i);bad.add(i+1);bad.add(i+N);bad.add(i+N+1);}
+  const cells=board.children;let left=0;
+  for(let i=0;i<cells.length;i++){const el=cells[i],v=g[i];if(v===-1)left++;
+    el.className='cell'+(v===1?' b':v===0?' w':'')+(S.given[i]?' given':'')+(bad.has(i)?' bad':'');
+    el.setAttribute('aria-label',cellLabel(i));}
+  $('#left').textContent=left;$('#moves').textContent=moves;
+  $('#undo').disabled=!undoStk.length;$('#redo').disabled=!redoStk.length;
+  // live violation status
+  const nb=monoBlocks(g).length;
+  if(nb){statusEl.textContent=`⚠ ${nb} solid 2×2 block${nb>1?'s':''} — not allowed.`;statusEl.className='err';}
+  else if(!left){checkWin();}
+  else if(statusEl.className!=='ok'){statusEl.className='';}
+  if(!done&&!left&&!nb&&!isSolved(g)){statusEl.textContent='Board full, but a color group is split. Keep adjusting.';statusEl.className='err';}
+}
+function tick(){if(!S)return;const s=Math.floor((Date.now()-startT)/1000);
+  $('#time').textContent=`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;}
+function say(t,cls){statusEl.textContent=t;statusEl.className=cls||'';}
+
+//=========================== input ===========================
+function setCell(i,v,record){if(S.given[i]||done)return;const prev=S.grid[i];if(prev===v)return;
+  if(record){undoStk.push({i,prev,next:v});redoStk=[];moves++;}
+  S.grid[i]=v;}
+function cycle(i){if(S.given[i]||done)return;const v=S.grid[i];const nv=v===-1?1:v===1?0:-1;// empty→black→white→empty
+  setCell(i,nv,true);hideCallout();clearHints();render();}
+board.addEventListener('click',e=>{const c=e.target.closest('.cell');if(c)cycle(+c.dataset.i);});
+let cur=0;
+board.addEventListener('keydown',e=>{const k=e.key;let nc=cur;const r=cur/N|0,c=cur%N;
+  if(k==='ArrowRight')nc=idx(r,Math.min(N-1,c+1));else if(k==='ArrowLeft')nc=idx(r,Math.max(0,c-1));
+  else if(k==='ArrowUp')nc=idx(Math.max(0,r-1),c);else if(k==='ArrowDown')nc=idx(Math.min(N-1,r+1),c);
+  else if(k===' '||k==='Enter'){e.preventDefault();cycle(cur);return;}else return;
+  e.preventDefault();focusCell(nc);});
+function focusCell(i){cur=i;const el=board.children[i];board.querySelectorAll('.cell').forEach(c=>c.tabIndex=-1);el.tabIndex=0;el.focus();}
+board.addEventListener('focusin',e=>{const c=e.target.closest('.cell');if(c)cur=+c.dataset.i;});
+
+//=========================== hint & replay ===========================
+function clearHints(){board.querySelectorAll('.hint,.hintblock').forEach(c=>c.classList.remove('hint','hintblock'));}
+function hideCallout(){callout.classList.remove('show');clearHints();}
+$('#calx').onclick=hideCallout;
+// Recompute the next forced deduction from the player's CURRENT board, so the
+// highlighted block/group and the explanation always match what's actually on screen.
+function nextDeduction(){return logicalStep(S.grid.slice());}
+function explain(st){const col=CN[st.val],opp=CN[1-st.val];
+  if(st.rule==='2x2')return`This cell must be <b>${col}</b>. The other three cells of a 2×2 block are already <b>${opp}</b> — a fourth ${opp} would make a solid 2×2, which the rules forbid.`;
+  if(st.rule==='conn')return`This cell must be <b>${col}</b>. Painting it ${opp} would seal off and disconnect the <b>${CN[st.colorBad]}</b> group, and every color must stay in one piece.`;
+  return`This cell must be <b>${col}</b>. Painting it ${opp} would strand part of the <b>${CN[st.colorBad]}</b> group, splitting it from the rest — so ${opp} is impossible here.`;}
+function showDeduction(st,teaching){clearHints();const el=board.children[st.i];el.classList.add('hint');
+  if(st.rule==='2x2')st.block.forEach(k=>{if(k!==st.i)board.children[k].classList.add('hintblock');});
+  calbody.innerHTML=(teaching?'<b>Hint · '+techLabel(st.rule)+'</b><br>':'')+explain(st)+
+    (teaching?'<br><br><button class="btn" id="applyh">Apply this move</button>':'');
+  callout.classList.add('show');
+  const ap=$('#applyh');if(ap)ap.onclick=()=>{setCell(st.i,st.val,true);hideCallout();render();};}
+$('#hint').onclick=()=>{if(!S||done)return;const st=nextDeduction();
+  if(!st){say('No forced move found from your current marks — try Check.','');return;}showDeduction(st,true);};
+$('#replay').onclick=()=>{if(!S||done)return;
+  // reset to givens and step through the whole logical solve path (a teaching walk — never counts as a win)
+  revealing=true;
+  if(replayIdx<0){S.grid=S.puz.slice();undoStk=[];redoStk=[];replayIdx=0;render();}
+  if(replayIdx>=S.chain.length){say('Deduction chain complete — that is the full logical path.','ok');replayIdx=-1;revealing=false;return;}
+  const st=S.chain[replayIdx++];S.grid[st.i]=st.val;render();
+  showDeduction(st,false);
+  calbody.innerHTML=`<b>Step ${replayIdx}/${S.chain.length} · ${techLabel(st.rule)}</b><br>`+explain(st);
+  revealing=false;};
+
+//=========================== check ===========================
+$('#check').onclick=()=>{if(!S)return;let wrong=0;board.querySelectorAll('.wrong').forEach(c=>c.classList.remove('wrong'));
+  for(let i=0;i<S.grid.length;i++){if(S.grid[i]!==-1&&!S.given[i]&&S.grid[i]!==S.full[i]){board.children[i].classList.add('wrong');wrong++;}}
+  const left=S.grid.filter(v=>v===-1).length;
+  if(wrong)say(`${wrong} cell${wrong>1?'s':''} conflict with the unique solution (marked ×).`,'err');
+  else if(left)say(`All ${S.grid.length-left} placed cells are correct — ${left} to go.`,'ok');
+  else checkWin();};
+$('#undo').onclick=()=>{if(done||!undoStk.length)return;const m=undoStk.pop();redoStk.push(m);
+  S.grid[m.i]=m.prev;moves=Math.max(0,moves-1);hideCallout();render();};
+$('#redo').onclick=()=>{if(done||!redoStk.length)return;const m=redoStk.pop();undoStk.push(m);
+  S.grid[m.i]=m.next;moves++;hideCallout();render();};
+
+//=========================== win / share / streak ===========================
+function checkWin(){if(done||revealing||!isSolved(S.grid))return;done=true;clearInterval(timer);
+  const secs=Math.floor((Date.now()-startT)/1000);const tstr=`${Math.floor(secs/60)}:${String(secs%60).padStart(2,'0')}`;
+  say('Solved! Every group connected, no solid blocks.','ok');
+  let streakTxt='';if(S.mode==='daily')streakTxt=recordDaily();
+  $('#wsub').textContent=`${S.size}×${S.size} · ${techLabel(S.tech)}`;
+  $('#wmini').textContent=miniGrid();
+  $('#wstats').innerHTML=`<div class="stat"><span class="lbl">Time</span><b>${tstr}</b></div>
+    <div class="stat"><span class="lbl">Moves</span><b>${moves}</b></div>
+    <div class="stat"><span class="lbl">Seed</span><b style="font-size:13px">${(S.mode==='daily'?'D':'R')+S.seed.toString(36)}</b></div>`;
+  S._share=`Piebald ${S.size}×${S.size} — ${techLabel(S.tech)}\n⏱ ${tstr} · ${moves} moves · seed ${(S.mode==='daily'?'D':'R')+S.seed.toString(36)}${streakTxt}\n${miniGrid()}\n${location.href}`;
+  setTimeout(()=>$('#win').classList.add('show'),350);}
+function miniGrid(){let o='';for(let r=0;r<N;r++){for(let c=0;c<N;c++)o+=S.full[idx(r,c)]===1?'⬛':'⬜';o+='\n';}return o.trim();}
+function recordDaily(){const key='piebald-streak';let d;try{d=JSON.parse(localStorage.getItem(key))||{};}catch{d={};}
+  const today=dateKey(),y=new Date(Date.now()-864e5),yk=`${y.getFullYear()}-${y.getMonth()+1}-${y.getDate()}`;
+  if(d.last===today){/*already*/}else{d.streak=(d.last===yk?(d.streak||0):0)+1;d.last=today;d.best=Math.max(d.best||0,d.streak);}
+  localStorage.setItem(key,JSON.stringify(d));$('#streak').textContent=d.streak;
+  return `\n🔥 Daily streak ${d.streak}${d.best>d.streak?` (best ${d.best})`:''}`;}
+function loadStreak(){try{const d=JSON.parse(localStorage.getItem('piebald-streak'));if(d){const t=dateKey(),y=new Date(Date.now()-864e5),yk=`${y.getFullYear()}-${y.getMonth()+1}-${y.getDate()}`;$('#streak').textContent=(d.last===t||d.last===yk)?(d.streak||0):0;}}catch{}}
+$('#share').onclick=async()=>{let ok=false;
+  try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(S._share);ok=true;}}catch{}
+  if(!ok){try{const ta=document.createElement('textarea');ta.value=S._share;ta.style.position='fixed';ta.style.opacity='0';
+    document.body.appendChild(ta);ta.focus();ta.select();ok=document.execCommand('copy');document.body.removeChild(ta);}catch{ok=false;}}
+  $('#share').textContent=ok?'✓ Copied!':'Copy failed';setTimeout(()=>$('#share').textContent='📋 Copy result card',1600);};
+$('#next').onclick=()=>{$('#win').classList.remove('show');if(S.mode==='daily')newRandom(8);else newRandom(S.size);};
+
+//=========================== theme / daily / random / init ===========================
+$('#pat').onclick=()=>{const on=document.body.classList.toggle('pat');localStorage.setItem('piebald-pat',on?'1':'0');
+  $('#pat').classList.toggle('on',on);say(on?'Symbol / colorblind-safe theme on.':'Classic black & white theme.','');};
+function dateKey(){const d=new Date();return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`;}
+function newDaily(){newGame('daily',8,hashStr('piebald-'+dateKey()));}
+function newRandom(size){newGame('random',size,(Math.random()*0xffffffff)>>>0);}
+$('#daily').onclick=newDaily;
+document.querySelectorAll('[data-sz]').forEach(b=>b.onclick=()=>newRandom(+b.dataset.sz));
+$('#help').onclick=()=>$('#howto').classList.add('show');
+$('#howclose').onclick=()=>$('#howto').classList.remove('show');
+$('#howto').onclick=e=>{if(e.target.id==='howto')$('#howto').classList.remove('show');};
+window.addEventListener('hashchange',()=>{const h=parseHash();if(h&&(!S||h.seed!==S.seed||h.size!==S.size))newGame(h.mode,h.size,h.seed);});
+function parseHash(){const m=/^#([dr])-(\d+)-([0-9a-z]+)$/.exec(location.hash);
+  if(!m)return null;return{mode:m[1]==='d'?'daily':'random',size:+m[2],seed:parseInt(m[3],36)>>>0};}
+function init(){if(localStorage.getItem('piebald-pat')==='1'){document.body.classList.add('pat');$('#pat').classList.add('on');}
+  loadStreak();
+  if(!localStorage.getItem('piebald-seen')){$('#howto').classList.add('show');localStorage.setItem('piebald-seen','1');}
+  const h=parseHash();if(h)newGame(h.mode,h.size,h.seed);else newDaily();}
+init();
+</script>
+</body>
+</html>

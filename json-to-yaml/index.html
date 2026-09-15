@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JsonToYaml — convert JSON to YAML</title>
+<meta name="description" content="Free offline JSON to YAML converter. Paste JSON and get clean block-style YAML with correct indentation, quoting, and nesting. Works offline, no signup — nothing leaves your browser.">
+<link rel="canonical" href="https://awictor.github.io/json-to-yaml/">
+<style>
+  :root{
+    --c:#1e40af; --bg:#f8f8f9; --fg:#18181b; --muted:#52525b;
+    --card:#ffffff; --border:#e4e4e7; --code:#efeff1; --bad:#dc2626;
+  }
+  [data-theme="dark"]{
+    --bg:#09090b; --fg:#e7e7ea; --muted:#8b8b93; --card:#151518;
+    --border:#27272a; --code:#1c1c20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:900px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#3b82f6);display:grid;place-items:center;color:#fff;font-size:13px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:900px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+  .copy{background:none;border:1px solid var(--border);color:var(--fg);border-radius:8px;padding:5px 10px;cursor:pointer;font-size:.8rem}
+  textarea,pre{width:100%;min-height:340px;padding:12px 14px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:.9rem;line-height:1.55;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  textarea{resize:vertical}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  pre{margin:0;background:var(--code);overflow:auto;white-space:pre;resize:vertical}
+  .err{color:var(--bad);font-size:.84rem;margin-top:8px;min-height:20px;font-family:ui-monospace,monospace}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:900px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+  @media(max-width:640px){.cols{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('j2y.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">→Y</div>
+  <div>
+    <h1>JsonToYaml</h1>
+    <p class="sub">Convert JSON to YAML</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <div class="cols">
+      <div>
+        <label for="in">JSON</label>
+        <textarea id="in" spellcheck="false">{
+  "name": "my-app",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": { "build": "tsc", "test": "node test.js" },
+  "keywords": ["cli", "yaml"],
+  "port": 8080,
+  "note": "value: with colon"
+}</textarea>
+      </div>
+      <div>
+        <div class="top"><label style="margin:0" for="out">YAML</label><button class="copy" id="copy">Copy</button></div>
+        <pre id="out"></pre>
+      </div>
+    </div>
+    <div class="err" id="err"></div>
+    <p class="hint">Emits block-style YAML with two-space indentation. Strings that could be mistaken for
+      numbers, booleans, <code style="font-family:ui-monospace">null</code>, or that contain YAML specials are quoted
+      automatically; nested objects and arrays are indented correctly. Runs 100% locally.</p>
+  </div>
+</main>
+<footer>
+  JsonToYaml is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/json-to-yaml">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function needsQuote(s){
+  if(s === '') return true;
+  if(/^\s|\s$/.test(s)) return true;                              // leading/trailing space
+  if(/[:#\[\]{}&*!|>'"%@`,]/.test(s)) return true;                // YAML special characters
+  if(/[\n\t]/.test(s)) return true;
+  if(/^[-?]/.test(s)) return true;                                // indicator start
+  if(/^(true|false|null|yes|no|on|off|~)$/i.test(s)) return true; // bool/null-like
+  if(/^[+-]?(\d|\.\d)/.test(s) && !isNaN(Number(s))) return true; // number-like
+  return false;
+}
+function scalarToYAML(v){
+  if(v === null) return 'null';
+  var t = typeof v;
+  if(t === 'boolean') return v ? 'true' : 'false';
+  if(t === 'number'){
+    if(Number.isNaN(v)) return '.nan';
+    if(!isFinite(v)) return v > 0 ? '.inf' : '-.inf';
+    return String(v);
+  }
+  if(t === 'string') return needsQuote(v) ? JSON.stringify(v) : v;
+  return JSON.stringify(v);
+}
+function keyToYAML(k){ return needsQuote(k) ? JSON.stringify(k) : k; }
+function isScalar(v){ return v === null || typeof v !== 'object'; }
+function isEmptyContainer(v){
+  return (Array.isArray(v) && v.length === 0) || (!Array.isArray(v) && typeof v === 'object' && v !== null && Object.keys(v).length === 0);
+}
+
+function emitLines(value, indent){
+  var pad = '  '.repeat(indent);
+  if(isScalar(value)) return [pad + scalarToYAML(value)];
+  if(Array.isArray(value)){
+    if(value.length === 0) return [pad + '[]'];
+    var out = [];
+    value.forEach(function(item){
+      if(isScalar(item)) out.push(pad + '- ' + scalarToYAML(item));
+      else if(isEmptyContainer(item)) out.push(pad + '- ' + (Array.isArray(item) ? '[]' : '{}'));
+      else {
+        var child = emitLines(item, indent + 1);
+        child[0] = pad + '- ' + child[0].slice((indent + 1) * 2);
+        out = out.concat(child);
+      }
+    });
+    return out;
+  }
+  var keys = Object.keys(value);
+  if(keys.length === 0) return [pad + '{}'];
+  var lines = [];
+  keys.forEach(function(k){
+    var kk = keyToYAML(k), v = value[k];
+    if(isScalar(v)) lines.push(pad + kk + ': ' + scalarToYAML(v));
+    else if(isEmptyContainer(v)) lines.push(pad + kk + ': ' + (Array.isArray(v) ? '[]' : '{}'));
+    else { lines.push(pad + kk + ':'); lines = lines.concat(emitLines(v, indent + 1)); }
+  });
+  return lines;
+}
+function toYAML(value){ return emitLines(value, 0).join('\n'); }
+function jsonToYAML(text){ return toYAML(JSON.parse(text)); }
+
+if(typeof module !== 'undefined') module.exports = { needsQuote, scalarToYAML, keyToYAML, toYAML, jsonToYAML };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var inEl = document.getElementById('in');
+  var outEl = document.getElementById('out');
+  var errEl = document.getElementById('err');
+
+  function render(){
+    try{
+      outEl.textContent = jsonToYAML(inEl.value);
+      errEl.textContent = '';
+    }catch(e){
+      errEl.textContent = 'Invalid JSON: ' + e.message;
+    }
+    try{ localStorage.setItem('j2y.in', inEl.value); }catch(e){}
+  }
+  inEl.addEventListener('input', render);
+  document.getElementById('copy').addEventListener('click', function(){
+    if(navigator.clipboard) navigator.clipboard.writeText(outEl.textContent);
+  });
+  try{ var s = localStorage.getItem('j2y.in'); if(s !== null) inEl.value = s; }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('j2y.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('j2y.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

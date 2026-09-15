@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BudgetSplit — 50/30/20 budget allocator</title>
+<meta name="description" content="Free offline budget calculator. Split your income across needs, wants and savings with the 50/30/20 rule or your own percentages — see the dollar amounts and any unallocated leftover. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/budget-split/">
+<style>
+  :root{
+    --c:#365314; --bg:#f8f8f9; --fg:#18181b; --muted:#52525b;
+    --card:#ffffff; --border:#e4e4e7; --code:#efeff1; --bad:#dc2626; --ok:#16a34a;
+  }
+  [data-theme="dark"]{
+    --bg:#09090b; --fg:#e7e7ea; --muted:#8b8b93; --card:#151518;
+    --border:#27272a; --code:#1c1c20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#65a30d);display:grid;place-items:center;color:#fff;font-size:14px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:720px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  input{padding:11px 13px;border:1px solid var(--border);border-radius:11px;background:var(--bg);color:var(--fg);
+    font-size:1.02rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .income{width:100%}
+  .presets{display:flex;gap:6px;margin:12px 0 4px;flex-wrap:wrap}
+  .presets button{background:var(--code);border:1px solid var(--border);color:var(--fg);border-radius:999px;padding:5px 11px;cursor:pointer;font-size:.8rem}
+  .presets button:hover{border-color:var(--c);color:var(--c)}
+  .cat{display:grid;grid-template-columns:1.3fr .7fr 1fr;gap:10px;align-items:center;margin-top:10px}
+  .cat input.lbl{width:100%}
+  .cat input.pct{width:100%;text-align:right}
+  .cat .amt{font-family:ui-monospace,monospace;font-weight:700;text-align:right;font-size:1.1rem}
+  .bar{display:flex;height:16px;border-radius:8px;overflow:hidden;margin-top:16px;border:1px solid var(--border)}
+  .bar span{display:block}
+  .summary{margin-top:14px;display:flex;justify-content:space-between;font-family:ui-monospace,monospace;font-size:.9rem}
+  .summary .lo.warn{color:var(--bad)} .summary .lo.ok{color:var(--ok)}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+  @media(max-width:520px){.cat{grid-template-columns:1fr .6fr .8fr}}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('bs.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">50/30</div>
+  <div>
+    <h1>BudgetSplit</h1>
+    <p class="sub">50/30/20 budget allocator</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <label for="income">Monthly income (after tax)</label>
+    <input id="income" class="income" type="number" min="0" step="any" value="4000">
+    <div class="presets" id="presets">
+      <button data-p="50,30,20">50 / 30 / 20</button>
+      <button data-p="60,20,20">60 / 20 / 20</button>
+      <button data-p="70,20,10">70 / 20 / 10</button>
+      <button data-p="80,10,10">80 / 10 / 10</button>
+    </div>
+    <div id="cats"></div>
+    <div class="bar" id="bar"></div>
+    <div class="summary">
+      <span>Total: <b id="totpct">—</b></span>
+      <span class="lo" id="leftover">—</span>
+    </div>
+    <p class="hint">The 50/30/20 rule splits after-tax income into ~50% needs, ~30% wants, ~20% savings/debt.
+      Edit the labels and percentages freely; if they don't add to 100%, the remainder shows as unallocated. Runs 100% locally.</p>
+  </div>
+</main>
+<footer>
+  BudgetSplit is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/budget-split">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function num(x){ var n = Number(x); return isFinite(n) ? n : NaN; }
+function allocate(income, categories){
+  income = num(income);
+  if(!(income >= 0) || !Array.isArray(categories)) return null;
+  var items = categories.map(function(c){
+    var pct = num(c.pct); if(!isFinite(pct)) pct = 0;
+    return { label: c.label, pct: pct, amount: income * pct / 100 };
+  });
+  var totalPct = items.reduce(function(a, c){ return a + c.pct; }, 0);
+  var allocated = items.reduce(function(a, c){ return a + c.amount; }, 0);
+  return { items: items, totalPct: totalPct, allocated: allocated, leftover: income - allocated };
+}
+
+if(typeof module !== 'undefined') module.exports = { num, allocate };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var incomeEl = document.getElementById('income');
+  var catsEl = document.getElementById('cats');
+  var barEl = document.getElementById('bar');
+  var COLORS = ['#365314', '#65a30d', '#a3e635'];
+  var cats = [{ label: 'Needs', pct: 50 }, { label: 'Wants', pct: 30 }, { label: 'Savings', pct: 20 }];
+
+  function buildRows(){
+    catsEl.innerHTML = cats.map(function(c, i){
+      return '<div class="cat"><input class="lbl" data-i="' + i + '" data-k="label" value="' + c.label.replace(/"/g, '&quot;') + '">' +
+        '<input class="pct" data-i="' + i + '" data-k="pct" type="number" min="0" step="any" value="' + c.pct + '">' +
+        '<div class="amt" id="amt' + i + '">—</div></div>';
+    }).join('');
+  }
+  function money(n){ return isFinite(n) ? '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'; }
+  function render(){
+    var r = allocate(incomeEl.value, cats);
+    if(!r) return;
+    r.items.forEach(function(it, i){ var a = document.getElementById('amt' + i); if(a) a.textContent = money(it.amount); });
+    document.getElementById('totpct').textContent = (Math.round(r.totalPct * 100) / 100) + '%';
+    var lo = document.getElementById('leftover');
+    if(Math.abs(r.leftover) < 0.005){ lo.textContent = 'Fully allocated'; lo.className = 'lo ok'; }
+    else if(r.leftover > 0){ lo.textContent = 'Unallocated: ' + money(r.leftover); lo.className = 'lo warn'; }
+    else { lo.textContent = 'Over-allocated: ' + money(-r.leftover); lo.className = 'lo warn'; }
+    barEl.innerHTML = r.items.map(function(it, i){
+      return '<span style="width:' + Math.max(0, Math.min(100, it.pct)) + '%;background:' + COLORS[i % COLORS.length] + '"></span>';
+    }).join('');
+    try{ localStorage.setItem('bs.income', incomeEl.value); localStorage.setItem('bs.cats', JSON.stringify(cats)); }catch(e){}
+  }
+  catsEl.addEventListener('input', function(e){
+    var i = e.target.getAttribute('data-i'), k = e.target.getAttribute('data-k');
+    if(i !== null && k){ cats[+i][k] = k === 'pct' ? e.target.value : e.target.value; render(); }
+  });
+  incomeEl.addEventListener('input', render);
+  document.getElementById('presets').addEventListener('click', function(e){
+    var b = e.target.closest ? e.target.closest('button') : null;
+    if(!b) return;
+    var p = b.getAttribute('data-p').split(',').map(Number);
+    cats.forEach(function(c, i){ c.pct = p[i] !== undefined ? p[i] : 0; });
+    buildRows(); render();
+  });
+  try{ var inc = localStorage.getItem('bs.income'); if(inc !== null) incomeEl.value = inc;
+       var cs = localStorage.getItem('bs.cats'); if(cs){ var p = JSON.parse(cs); if(Array.isArray(p) && p.length === 3) cats = p; } }catch(e){}
+  buildRows(); render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('bs.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('bs.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

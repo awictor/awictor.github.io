@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Linear Regression — least-squares fit, correlation &amp; prediction</title>
+<meta name="description" content="Fit a least-squares line to your data: slope, intercept, Pearson correlation r, R², and predictions. Paste x,y points and see the trend line plotted. Offline, no tracking.">
+<style>
+  :root{
+    --c:#1d4ed8;
+    --bg:#eaf0fb; --card:#ffffff; --fg:#0a1120; --muted:#4b5872;
+    --line:#d6e0f4; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#070c17; --card:#111827; --fg:#e6ecf8; --muted:#9aa6c2;
+    --line:#1c2740; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto;font-weight:700}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  textarea,input{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1rem;font-weight:600;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  textarea{min-height:100px;resize:vertical}
+  textarea:focus,input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .eq{margin-top:16px;text-align:center;font-size:1.6rem;font-weight:800;color:var(--c);font-family:ui-monospace,monospace;word-break:break-word}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:16px}
+  .stat{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:14px;text-align:center}
+  .stat .v{font-size:1.25rem;font-weight:800;color:var(--c);word-break:break-all}
+  .stat .k{font-size:.74rem;color:var(--muted);margin-top:4px}
+  canvas{width:100%;height:220px;margin-top:16px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+  .pred{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end;margin-top:16px}
+  .err{color:#dc2626;font-size:.86rem;margin-top:10px;text-align:center;min-height:1em}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">📈</div>
+  <div>
+    <h1>Linear Regression</h1>
+    <p>least-squares fit &amp; correlation</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <label>Data points — one "x, y" per line (or space/tab separated)</label>
+    <textarea id="data">1, 2
+2, 4
+3, 5
+4, 4
+5, 6</textarea>
+    <div class="eq" id="eq">—</div>
+    <div class="grid3">
+      <div class="stat"><div class="v" id="slope">—</div><div class="k">Slope (m)</div></div>
+      <div class="stat"><div class="v" id="intercept">—</div><div class="k">Intercept (b)</div></div>
+      <div class="stat"><div class="v" id="r">—</div><div class="k">Correlation (r)</div></div>
+    </div>
+    <div class="grid3">
+      <div class="stat"><div class="v" id="r2">—</div><div class="k">R² (fit quality)</div></div>
+      <div class="stat"><div class="v" id="n">—</div><div class="k">Points</div></div>
+      <div class="stat"><div class="v" id="dir">—</div><div class="k">Trend</div></div>
+    </div>
+    <canvas id="plot" width="760" height="220"></canvas>
+    <div class="pred">
+      <div><label>Predict y at x =</label><input id="px" inputmode="decimal" value="6"></div>
+      <div class="stat" style="min-width:130px"><div class="v" id="py">—</div><div class="k">predicted y</div></div>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>About least-squares regression</h2>
+    <p class="note">Linear regression finds the straight line <code>y = mx + b</code> that minimizes the total squared vertical distance to your points. The <b>slope</b> is <code>m = Σ(x−x̄)(y−ȳ) / Σ(x−x̄)²</code> and the <b>intercept</b> is <code>b = ȳ − m·x̄</code>. The <b>Pearson correlation r</b> (from −1 to +1) measures how tightly the points cluster around the line, and <b>R² = r²</b> is the fraction of variance the line explains — 1.0 is a perfect fit. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function checkPoints(pts){
+    if(!Array.isArray(pts) || pts.length < 2) throw new Error('need at least two points');
+    for(var i = 0; i < pts.length; i++){ var p = pts[i]; if(!Array.isArray(p) || p.length !== 2 || typeof p[0] !== 'number' || typeof p[1] !== 'number' || !isFinite(p[0]) || !isFinite(p[1])) throw new Error('each point must be a finite [x, y] pair'); }
+    return pts;
+  }
+  function mean(a){ var s = 0; for(var i = 0; i < a.length; i++) s += a[i]; return s / a.length; }
+  // Least-squares fit. Returns { slope, intercept, r, r2, n }.
+  function regression(points){
+    checkPoints(points);
+    var xs = points.map(function(p){ return p[0]; }), ys = points.map(function(p){ return p[1]; });
+    var mx = mean(xs), my = mean(ys), sxx = 0, syy = 0, sxy = 0;
+    for(var i = 0; i < points.length; i++){ var dx = xs[i] - mx, dy = ys[i] - my; sxx += dx * dx; syy += dy * dy; sxy += dx * dy; }
+    if(sxx === 0) throw new Error('all x values are identical — slope is undefined');
+    var slope = sxy / sxx, intercept = my - slope * mx;
+    var r = syy === 0 ? (sxy === 0 ? 0 : 0) : sxy / Math.sqrt(sxx * syy);
+    return { slope: slope, intercept: intercept, r: r, r2: r * r, n: points.length };
+  }
+  // Predict y for a given x from a fit (or points).
+  function predict(fitOrPoints, x){
+    var fit = Array.isArray(fitOrPoints) ? regression(fitOrPoints) : fitOrPoints;
+    if(typeof x !== 'number' || !isFinite(x)) throw new Error('x must be a finite number');
+    return fit.slope * x + fit.intercept;
+  }
+  // Parse "x, y" lines into a point array.
+  function parsePoints(text){
+    return text.split(/\n/).map(function(l){ return l.trim(); }).filter(function(l){ return l.length; }).map(function(l){ var p = l.split(/[\s,]+/).map(Number); return [p[0], p[1]]; });
+  }
+
+  if(typeof module !== 'undefined') module.exports = { mean:mean, regression:regression, predict:predict, parsePoints:parsePoints };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var $ = function(id){ return document.getElementById(id); };
+    var f = function(x){ return Number(x.toPrecision(6)).toLocaleString('en-US', { maximumFractionDigits: 5 }); };
+    var pts = [];
+    function draw(fit){
+      var cv = $('plot'), ctx = cv.getContext('2d'), W = cv.width, H = cv.height, pad = 24;
+      ctx.clearRect(0, 0, W, H);
+      var xs = pts.map(function(p){ return p[0]; }), ys = pts.map(function(p){ return p[1]; });
+      var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs), y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+      if(x1 === x0) x1 = x0 + 1; if(y1 === y0) y1 = y0 + 1;
+      var sx = function(x){ return pad + (x - x0) / (x1 - x0) * (W - 2 * pad); };
+      var sy = function(y){ return H - pad - (y - y0) / (y1 - y0) * (H - 2 * pad); };
+      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--c'); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(sx(x0), sy(fit.slope * x0 + fit.intercept)); ctx.lineTo(sx(x1), sy(fit.slope * x1 + fit.intercept)); ctx.stroke();
+      ctx.fillStyle = ctx.strokeStyle;
+      pts.forEach(function(p){ ctx.beginPath(); ctx.arc(sx(p[0]), sy(p[1]), 4, 0, 2 * Math.PI); ctx.fill(); });
+    }
+    function render(){
+      $('err').textContent = '';
+      try{
+        pts = parsePoints($('data').value);
+        var fit = regression(pts);
+        $('eq').textContent = 'y = ' + f(fit.slope) + 'x ' + (fit.intercept >= 0 ? '+ ' : '− ') + f(Math.abs(fit.intercept));
+        $('slope').textContent = f(fit.slope);
+        $('intercept').textContent = f(fit.intercept);
+        $('r').textContent = f(fit.r);
+        $('r2').textContent = f(fit.r2);
+        $('n').textContent = fit.n;
+        $('dir').textContent = fit.slope > 0 ? 'rising ↗' : fit.slope < 0 ? 'falling ↘' : 'flat →';
+        $('py').textContent = f(predict(fit, Number($('px').value)));
+        draw(fit);
+      }catch(e){ ['eq','slope','intercept','r','r2','n','dir','py'].forEach(function(id){ $(id).textContent = '—'; }); $('err').textContent = e.message; }
+    }
+    ['data','px'].forEach(function(id){ $(id).addEventListener('input', render); });
+    render();
+
+    var root = document.documentElement, tb = $('theme');
+    function setTheme(t){ root.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? '☀️' : '🌙'; try{ localStorage.setItem('linreg-theme', t); }catch(e){} render(); }
+    var saved; try{ saved = localStorage.getItem('linreg-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); });
+  }
+</script>
+</body>
+</html>

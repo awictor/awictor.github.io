@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IbanCheck — IBAN validator & formatter</title>
+<meta name="description" content="Free offline IBAN validator. Check an International Bank Account Number's mod-97 checksum and format, see the country and expected length, and get it formatted in groups of four. Works offline, no signup — nothing leaves your browser.">
+<link rel="canonical" href="https://awictor.github.io/iban-validator/">
+<style>
+  :root{
+    --c:#4c1d95; --bg:#f8f8f9; --fg:#18181b; --muted:#52525b;
+    --card:#ffffff; --border:#e4e4e7; --code:#efeff1; --ok:#16a34a; --bad:#dc2626;
+  }
+  [data-theme="dark"]{
+    --bg:#09090b; --fg:#e7e7ea; --muted:#8b8b93; --card:#151518;
+    --border:#27272a; --code:#1c1c20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#7c3aed);display:grid;place-items:center;color:#fff;font-size:15px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:720px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  input{width:100%;padding:13px 15px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:1.15rem;letter-spacing:.08em;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .verdict{margin-top:18px;display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:12px;border:1px solid var(--border)}
+  .verdict.ok{border-color:var(--ok)} .verdict.bad{border-color:var(--bad)}
+  .verdict .icon{font-size:1.6rem}
+  .verdict .msg{font-weight:700}
+  .verdict.ok .msg{color:var(--ok)} .verdict.bad .msg{color:var(--bad)}
+  .verdict .fmt{font-family:ui-monospace,monospace;color:var(--muted);font-size:.9rem;margin-top:2px}
+  .grid{margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:1px;
+    background:var(--border);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .cell{background:var(--card);padding:13px 15px}
+  .cell .k{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+  .cell .v{font-family:ui-monospace,monospace;font-weight:700;font-size:1.1rem;margin-top:2px}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+  @media(max-width:520px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('iban.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">IBAN</div>
+  <div>
+    <h1>IbanCheck</h1>
+    <p class="sub">IBAN validator &amp; formatter</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <label for="in">IBAN</label>
+    <input id="in" spellcheck="false" autocapitalize="characters" value="GB82 WEST 1234 5698 7654 32">
+    <div class="verdict" id="verdict">
+      <div class="icon" id="icon"></div>
+      <div><div class="msg" id="msg"></div><div class="fmt" id="fmt"></div></div>
+    </div>
+    <div class="grid">
+      <div class="cell"><div class="k">Country</div><div class="v" id="country">—</div></div>
+      <div class="cell"><div class="k">Check digits</div><div class="v" id="check">—</div></div>
+      <div class="cell"><div class="k">Length</div><div class="v" id="len">—</div></div>
+      <div class="cell"><div class="k">BBAN</div><div class="v" id="bban">—</div></div>
+    </div>
+    <p class="hint">Validation follows ISO&nbsp;13616: the checksum uses the mod-97 rule (a valid IBAN's rearranged
+      numeric form ≡ 1 mod 97). This checks structure and the check digits only — it can't confirm the account
+      actually exists. 100% local — <b>nothing is transmitted</b>.</p>
+  </div>
+</main>
+<footer>
+  IbanCheck is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/iban-validator">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+var COUNTRIES = {
+  AD:['Andorra',24], AT:['Austria',20], BE:['Belgium',16], CH:['Switzerland',21], CZ:['Czechia',24],
+  DE:['Germany',22], DK:['Denmark',18], ES:['Spain',24], FI:['Finland',18], FR:['France',27],
+  GB:['United Kingdom',22], GR:['Greece',27], IE:['Ireland',22], IT:['Italy',27], LU:['Luxembourg',20],
+  NL:['Netherlands',18], NO:['Norway',15], PL:['Poland',28], PT:['Portugal',25], SE:['Sweden',24]
+};
+
+function normalizeIban(str){ return String(str).toUpperCase().replace(/\s+/g, ''); }
+
+function mod97(numeric){
+  var remainder = 0;
+  for(var i = 0; i < numeric.length; i++){
+    remainder = (remainder * 10 + (numeric.charCodeAt(i) - 48)) % 97;
+  }
+  return remainder;
+}
+function ibanToCheckString(iban){
+  var rearranged = iban.slice(4) + iban.slice(0, 4);
+  var out = '';
+  for(var i = 0; i < rearranged.length; i++){
+    var c = rearranged.charCodeAt(i);
+    if(c >= 65 && c <= 90) out += (c - 55);   // A=10 .. Z=35
+    else out += rearranged[i];
+  }
+  return out;
+}
+function isValidIban(str){
+  var iban = normalizeIban(str);
+  if(!/^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$/.test(iban)) return false;
+  return mod97(ibanToCheckString(iban)) === 1;
+}
+function formatIban(str){
+  return normalizeIban(str).replace(/(.{4})/g, '$1 ').trim();
+}
+function ibanInfo(str){
+  var iban = normalizeIban(str);
+  var cc = iban.slice(0, 2);
+  var known = COUNTRIES[cc];
+  return {
+    country: cc,
+    countryName: known ? known[0] : null,
+    expectedLength: known ? known[1] : null,
+    length: iban.length,
+    checkDigits: iban.slice(2, 4),
+    bban: iban.slice(4),
+    lengthOk: known ? iban.length === known[1] : null,
+    valid: isValidIban(iban)
+  };
+}
+
+if(typeof module !== 'undefined') module.exports = { COUNTRIES, normalizeIban, mod97, ibanToCheckString, isValidIban, formatIban, ibanInfo };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var inEl = document.getElementById('in');
+  var verdict = document.getElementById('verdict');
+  var icon = document.getElementById('icon');
+  var msg = document.getElementById('msg');
+  var fmt = document.getElementById('fmt');
+  var out = {};
+  ['country', 'check', 'len', 'bban'].forEach(function(k){ out[k] = document.getElementById(k); });
+
+  function render(){
+    var raw = inEl.value;
+    var iban = normalizeIban(raw);
+    if(iban === ''){
+      verdict.className = 'verdict'; icon.textContent = ''; msg.textContent = 'Enter an IBAN'; fmt.textContent = '';
+      out.country.textContent = out.check.textContent = out.len.textContent = out.bban.textContent = '—';
+      return;
+    }
+    var info = ibanInfo(iban);
+    var ok = info.valid;
+    verdict.className = 'verdict ' + (ok ? 'ok' : 'bad');
+    icon.textContent = ok ? '✓' : '✕';
+    msg.textContent = ok ? 'Valid IBAN' : 'Invalid IBAN';
+    fmt.textContent = formatIban(iban);
+    var cname = info.countryName ? info.countryName + ' (' + info.country + ')' : info.country;
+    out.country.textContent = cname;
+    out.check.textContent = info.checkDigits;
+    out.len.textContent = info.length + (info.expectedLength ? ' / ' + info.expectedLength + (info.lengthOk ? ' ✓' : ' ✕') : '');
+    out.bban.textContent = info.bban || '—';
+    try{ localStorage.setItem('iban.in', raw); }catch(e){}
+  }
+  inEl.addEventListener('input', render);
+  try{ var s = localStorage.getItem('iban.in'); if(s !== null) inEl.value = s; }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('iban.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('iban.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

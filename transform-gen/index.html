@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TransformGen — CSS transform generator</title>
+<meta name="description" content="Free offline CSS transform generator. Combine translate, rotate, scale, and skew with a live preview, then copy the transform CSS. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/transform-gen/">
+<style>
+  :root{
+    --c:#7c3aed; --bg:#faf8fd; --fg:#1b1030; --muted:#655880;
+    --card:#ffffff; --border:#e8e0f2; --code:#f1eafa; --stage:#f1f0f6;
+  }
+  [data-theme="dark"]{
+    --bg:#120b1e; --fg:#ebe5f5; --muted:#9a90b6; --card:#1b142c;
+    --border:#2e2646; --code:#241d3a; --stage:#0c0a15;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:760px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#a855f7);display:grid;place-items:center;color:#fff;font-size:20px}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:760px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  .stage{background:var(--stage);border-radius:14px;height:220px;display:grid;place-items:center;margin-bottom:20px;overflow:hidden}
+  .box{width:120px;height:120px;border-radius:14px;background:linear-gradient(135deg,var(--c),#c4b5fd);
+    display:grid;place-items:center;color:#fff;font-weight:700;transition:transform .15s}
+  .sliders{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:560px){.sliders{grid-template-columns:1fr}}
+  .sl label{display:flex;justify-content:space-between;font-size:.76rem;color:var(--muted);margin-bottom:3px}
+  .sl label b{color:var(--fg);font-family:ui-monospace,monospace}
+  .sl input[type=range]{width:100%;accent-color:var(--c)}
+  .btns{display:flex;gap:10px;margin-top:16px}
+  .btns button{background:var(--code);border:1px solid var(--border);color:var(--fg);border-radius:9px;padding:8px 14px;cursor:pointer;font-size:.84rem}
+  .btns button:hover{border-color:var(--c);color:var(--c)}
+  .out-head{display:flex;align-items:center;margin-top:16px}
+  .copy{margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);
+    border-radius:8px;padding:5px 13px;cursor:pointer;font-size:.8rem}
+  .copy:hover{color:var(--c);border-color:var(--c)}
+  pre{background:var(--code);border-radius:12px;padding:14px 16px;margin:8px 0 0;overflow-x:auto;
+    font-family:ui-monospace,monospace;font-size:.9rem;white-space:pre-wrap;word-break:break-all}
+  footer{max-width:760px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('tfm.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">⟲</div>
+  <div>
+    <h1>TransformGen</h1>
+    <p class="sub">CSS transform generator</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <div class="stage"><div class="box" id="box">box</div></div>
+    <div class="sliders" id="sliders"></div>
+    <div class="btns"><button id="reset">Reset</button></div>
+    <div class="out-head">
+      <label style="margin:0;font-weight:600;font-size:.85rem">CSS</label>
+      <button class="copy" id="copy">Copy</button>
+    </div>
+    <pre id="css"></pre>
+  </div>
+</main>
+<footer>
+  TransformGen is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/transform-gen">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+var TRANSFORMS = [
+  ['translateX', 0, 'px', -200, 200, 1],
+  ['translateY', 0, 'px', -200, 200, 1],
+  ['rotate', 0, 'deg', -180, 180, 1],
+  ['scaleX', 1, '', 0, 3, 0.05],
+  ['scaleY', 1, '', 0, 3, 0.05],
+  ['skewX', 0, 'deg', -60, 60, 1],
+  ['skewY', 0, 'deg', -60, 60, 1]
+];
+function buildTransform(config){
+  config = config || {};
+  var parts = [];
+  TRANSFORMS.forEach(function(t){
+    var name = t[0], def = t[1], unit = t[2];
+    var raw = config[name];
+    var v = (raw === undefined || raw === null || raw === '') ? def : Number(raw);
+    if(!isFinite(v)) v = def;
+    if(v !== def) parts.push(name + '(' + v + unit + ')');
+  });
+  return parts.length ? parts.join(' ') : 'none';
+}
+function withProperty(css){ return 'transform: ' + css + ';'; }
+
+if(typeof module !== 'undefined') module.exports = { TRANSFORMS, buildTransform, withProperty };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var slidersEl = document.getElementById('sliders');
+  var boxEl = document.getElementById('box');
+  var cssEl = document.getElementById('css');
+  var state = {};
+  TRANSFORMS.forEach(function(t){ state[t[0]] = t[1]; });
+
+  function renderSliders(){
+    slidersEl.innerHTML = TRANSFORMS.map(function(t){
+      var name = t[0], unit = t[2], min = t[3], max = t[4], step = t[5];
+      return '<div class="sl"><label>' + name + ' <b><span data-v="' + name + '">' + state[name] + '</span>' + unit + '</b></label>' +
+        '<input type="range" data-n="' + name + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + state[name] + '"></div>';
+    }).join('');
+  }
+  function render(){
+    var css = buildTransform(state);
+    boxEl.style.transform = css === 'none' ? '' : css;
+    cssEl.textContent = withProperty(css);
+    try{ localStorage.setItem('tfm.state', JSON.stringify(state)); }catch(e){}
+  }
+  slidersEl.addEventListener('input', function(e){
+    var t = e.target, name = t.getAttribute('data-n');
+    if(!name) return;
+    state[name] = Number(t.value);
+    var span = slidersEl.querySelector('[data-v="' + name + '"]'); if(span) span.textContent = t.value;
+    render();
+  });
+  document.getElementById('reset').addEventListener('click', function(){
+    TRANSFORMS.forEach(function(t){ state[t[0]] = t[1]; });
+    renderSliders(); render();
+  });
+  document.getElementById('copy').addEventListener('click', function(){
+    if(navigator.clipboard) navigator.clipboard.writeText(cssEl.textContent);
+    this.textContent = 'Copied'; var b = this; setTimeout(function(){ b.textContent = 'Copy'; }, 1000);
+  });
+  try{ var s = JSON.parse(localStorage.getItem('tfm.state')); if(s) Object.keys(state).forEach(function(k){ if(k in s) state[k] = s[k]; }); }catch(e){}
+  renderSliders();
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('tfm.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('tfm.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

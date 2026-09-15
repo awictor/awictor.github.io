@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NumWords — number to words converter</title>
+<meta name="description" content="Free offline number-to-words converter. Turn any number into English words, plus check-writing / currency format (dollars and cents). Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/num-words/">
+<style>
+  :root{
+    --c:#0d9488; --bg:#f7faf9; --fg:#12201d; --muted:#5f7873;
+    --card:#ffffff; --border:#dde9e6; --code:#e9f5f2;
+  }
+  [data-theme="dark"]{
+    --bg:#0f1917; --fg:#e6f0ed; --muted:#8fa8a2; --card:#16241f;
+    --border:#26383300; --border:#263833; --code:#1a2b27;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:28px 20px 8px;
+    display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#2dd4bf);
+    display:grid;place-items:center;color:#fff;font-size:20px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);
+    color:var(--fg);border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:720px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);
+    border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.88rem;margin:0 0 6px}
+  input{width:100%;padding:13px 15px;border:1px solid var(--border);
+    border-radius:12px;background:var(--bg);color:var(--fg);font-size:1.3rem;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .err{color:#dc2626;font-size:.86rem;margin:10px 0 0;min-height:1.1em}
+  .out{margin-top:18px}
+  .out .k{font-size:.76rem;color:var(--muted);text-transform:uppercase;
+    letter-spacing:.04em;display:flex;align-items:center;gap:8px}
+  .out .v{background:var(--code);border-radius:12px;padding:14px 16px;
+    margin:6px 0 16px;font-size:1.08rem;line-height:1.5;min-height:1.4em;
+    word-break:break-word;position:relative}
+  .copy{margin-left:auto;background:none;border:1px solid var(--border);
+    color:var(--muted);border-radius:7px;padding:2px 9px;cursor:pointer;
+    font-size:.74rem}
+  .copy:hover{color:var(--c);border-color:var(--c)}
+  .hint{color:var(--muted);font-size:.82rem;margin:6px 0 0}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 40px;
+    color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('numwords.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">№</div>
+  <div>
+    <h1>NumWords</h1>
+    <p class="sub">Number to words converter</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <label for="num">Number</label>
+    <input id="num" value="1234.56" spellcheck="false" autocomplete="off"
+      inputmode="decimal" placeholder="e.g. 1234.56">
+    <p class="err" id="err"></p>
+    <div class="out" id="out"></div>
+    <p class="hint">Handles integers up to the quadrillions, negatives, and decimals.
+      Everything runs locally — nothing leaves your browser.</p>
+  </div>
+</main>
+<footer>
+  NumWords is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/num-words">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+var ONES = ['zero','one','two','three','four','five','six','seven','eight','nine',
+  'ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen',
+  'eighteen','nineteen'];
+var TENS = ['','','twenty','thirty','forty','fifty','sixty','seventy','eighty','ninety'];
+var SCALES = ['','thousand','million','billion','trillion','quadrillion'];
+
+function threeDigitsToWords(n){ // 0..999
+  var out = [];
+  var h = Math.floor(n / 100);
+  var r = n % 100;
+  if(h > 0) out.push(ONES[h] + ' hundred');
+  if(r > 0){
+    if(r < 20) out.push(ONES[r]);
+    else {
+      var t = Math.floor(r / 10), o = r % 10;
+      out.push(o > 0 ? TENS[t] + '-' + ONES[o] : TENS[t]);
+    }
+  }
+  return out.join(' ');
+}
+
+function integerToWords(n){
+  n = Math.trunc(Math.abs(n));
+  if(n === 0) return 'zero';
+  var groups = [];
+  while(n > 0){ groups.push(n % 1000); n = Math.floor(n / 1000); }
+  if(groups.length > SCALES.length) return null; // too large to name
+  var parts = [];
+  for(var i = groups.length - 1; i >= 0; i--){
+    if(groups[i] === 0) continue;
+    var words = threeDigitsToWords(groups[i]);
+    parts.push(SCALES[i] ? words + ' ' + SCALES[i] : words);
+  }
+  return parts.join(' ');
+}
+
+function numberToWords(input){
+  var s = String(input).trim().replace(/,/g, '');
+  if(s === '' || !/^-?\d+(\.\d+)?$/.test(s)) return null;
+  var neg = s[0] === '-';
+  if(neg) s = s.slice(1);
+  var dot = s.indexOf('.');
+  var intPart = dot === -1 ? s : s.slice(0, dot);
+  var fracPart = dot === -1 ? '' : s.slice(dot + 1);
+  var intNum = Number(intPart);
+  if(!Number.isSafeInteger(intNum)) return null;
+  var intWords = integerToWords(intNum);
+  if(intWords === null) return null;
+  var out = intWords;
+  if(fracPart.length){
+    var digits = fracPart.split('').map(function(d){ return ONES[Number(d)]; });
+    out += ' point ' + digits.join(' ');
+  }
+  return (neg ? 'negative ' : '') + out;
+}
+
+function currencyToWords(input){
+  var s = String(input).trim().replace(/[$,]/g, '');
+  if(s === '' || !/^-?\d+(\.\d+)?$/.test(s)) return null;
+  var neg = s[0] === '-';
+  if(neg) s = s.slice(1);
+  var num = Number(s);
+  if(!Number.isFinite(num)) return null;
+  var cents = Math.round(num * 100);
+  var dollars = Math.floor(cents / 100);
+  var rem = cents % 100;
+  if(!Number.isSafeInteger(dollars)) return null;
+  var dWords = integerToWords(dollars);
+  if(dWords === null) return null;
+  var dLabel = dollars === 1 ? 'dollar' : 'dollars';
+  var centStr = (rem < 10 ? '0' : '') + rem;
+  var out = cap(dWords) + ' ' + dLabel + ' and ' + centStr + '/100';
+  return (neg ? 'Negative ' : '') + out;
+}
+
+function cap(s){ return s.charAt(0).toUpperCase() + s.slice(1); }
+
+if(typeof module !== 'undefined') module.exports = {
+  threeDigitsToWords, integerToWords, numberToWords, currencyToWords, cap
+};
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var numEl = document.getElementById('num');
+  var errEl = document.getElementById('err');
+  var outEl = document.getElementById('out');
+
+  function block(k, v){
+    return '<div class="k">'+k+'<button class="copy" data-v="'+
+      encodeURIComponent(v)+'">Copy</button></div><div class="v">'+v+'</div>';
+  }
+  function render(){
+    var raw = numEl.value.trim();
+    var words = numberToWords(raw);
+    if(words === null){
+      errEl.textContent = raw === '' ? '' : 'Enter a valid number (digits, optional . and -).';
+      outEl.innerHTML = '';
+      return;
+    }
+    errEl.textContent = '';
+    var out = block('In words', cap(words));
+    var cur = currencyToWords(raw);
+    if(cur) out += block('Check / currency', cur);
+    outEl.innerHTML = out;
+    try{ localStorage.setItem('numwords.last', raw); }catch(e){}
+  }
+  outEl.addEventListener('click', function(e){
+    var b = e.target.closest ? e.target.closest('.copy') : null;
+    if(!b) return;
+    var v = decodeURIComponent(b.getAttribute('data-v'));
+    if(navigator.clipboard) navigator.clipboard.writeText(v);
+    var old = b.textContent; b.textContent = 'Copied';
+    setTimeout(function(){ b.textContent = old; }, 1000);
+  });
+  try{ var last = localStorage.getItem('numwords.last'); if(last) numEl.value = last; }catch(e){}
+  numEl.addEventListener('input', render);
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('numwords.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('numwords.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

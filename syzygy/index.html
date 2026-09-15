@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Syzygy — polymeter ring sequencer</title>
+<style>
+  :root{
+    --bg:#06070f; --panel:#0e1120; --ink:#e8ecff; --dim:#8790b8;
+    --line:#1e2340; --accent:#ff8a3d; --accent2:#5be0ff;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:
+    radial-gradient(1200px 800px at 70% -10%, #16183a 0%, transparent 60%),
+    radial-gradient(900px 700px at -10% 110%, #241033 0%, transparent 55%),
+    var(--bg);
+    color:var(--ink);font:14px/1.4 ui-sans-serif,-apple-system,Segoe UI,Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased;overflow:hidden}
+  #app{display:flex;height:100%}
+  #stagewrap{flex:1;position:relative;min-width:0}
+  #stage{display:block;width:100%;height:100%}
+  #title{position:absolute;top:16px;left:20px;pointer-events:none;user-select:none}
+  #title h1{margin:0;font-size:26px;letter-spacing:.32em;font-weight:600;
+    background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  #title p{margin:2px 0 0;color:var(--dim);font-size:11px;letter-spacing:.04em;max-width:520px}
+  #panel{width:340px;flex:none;background:linear-gradient(180deg,#0f1224,#0b0d1a);
+    border-left:1px solid var(--line);overflow-y:auto;padding:16px 16px 40px}
+  h2{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--dim);margin:20px 0 8px;font-weight:600}
+  h2:first-of-type{margin-top:4px}
+  .row{display:flex;align-items:center;gap:8px;margin:8px 0}
+  .row label{color:var(--dim);flex:none;width:52px;font-size:12px}
+  button,select{font:inherit;color:var(--ink);background:#171b32;border:1px solid var(--line);
+    border-radius:8px;padding:6px 9px;cursor:pointer;transition:.12s}
+  button:hover,select:hover{border-color:var(--accent);background:#1d2240}
+  button:active{transform:translateY(1px)}
+  button:focus-visible,select:focus-visible{outline:2px solid var(--accent2);outline-offset:2px}
+  #stage{outline:none}
+  #stage:focus-visible{outline:2px solid var(--accent2);outline-offset:-3px}
+  select{flex:1}
+  .big{flex:1;justify-content:center;font-weight:600}
+  #play{background:linear-gradient(90deg,var(--accent),#ff6a1a);border-color:transparent;color:#160a02;font-weight:700}
+  .stepper{display:inline-flex;align-items:center;gap:0;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .stepper button{border:0;border-radius:0;padding:5px 9px;background:#141830}
+  .stepper .v{min-width:30px;text-align:center;color:var(--ink);font-variant-numeric:tabular-nums;font-size:12px}
+  .grid{display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center}
+  .presets{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .presets button{font-size:12px;padding:7px 6px;text-align:left}
+  #syz{background:#0c1030;border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-top:6px}
+  #syz .m{display:flex;justify-content:space-between;font-variant-numeric:tabular-nums}
+  #syz .big2{font-size:22px;font-weight:700;color:var(--accent2)}
+  #bar{height:7px;border-radius:6px;background:#151a34;overflow:hidden;margin-top:9px}
+  #barfill{height:100%;width:0;background:linear-gradient(90deg,var(--accent2),var(--accent));transition:width .08s linear}
+  .ring{border:1px solid var(--line);border-radius:10px;padding:9px 10px;margin:8px 0;background:#0d1022}
+  .ring .hdr{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+  .dot{width:12px;height:12px;border-radius:50%;flex:none;box-shadow:0 0 8px currentColor}
+  .ring .name{font-weight:600;font-size:12px;flex:1}
+  .mini{padding:4px 7px;font-size:11px}
+  .mini.on{background:var(--accent);color:#160a02;border-color:transparent;font-weight:700}
+  .mini.solo.on{background:var(--accent2);color:#04141a}
+  .ctls{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
+  .ctls .cell{display:flex;align-items:center;gap:6px}
+  .ctls .cell>span{color:var(--dim);font-size:11px;width:26px}
+  .hint{color:var(--dim);font-size:11px;margin-top:8px;line-height:1.5}
+  a{color:var(--accent2)}
+  ::-webkit-scrollbar{width:10px}::-webkit-scrollbar-thumb{background:#1c2140;border-radius:8px}
+  @media (max-width:720px){
+    html,body{overflow:auto}
+    #app{flex-direction:column;height:auto;min-height:100%}
+    #stagewrap{min-height:52vh;flex:none}
+    #panel{width:100%;flex:none;border-left:0;border-top:1px solid var(--line)}
+  }
+  @media (prefers-reduced-motion: reduce){
+    #barfill{transition:none}
+    button,select{transition:none}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stagewrap">
+    <canvas id="stage" tabindex="0" aria-label="Ring sequencer stage. Click a ring to solo it."></canvas>
+    <div id="title">
+      <h1>SYZYGY</h1>
+      <p>Concentric rings of coprime length drift out of phase and only realign at the syzygy — LCM(lengths) steps away.</p>
+    </div>
+  </div>
+  <div id="panel">
+    <div class="row">
+      <button id="play" class="big" title="Play / pause (Space) — pausing keeps the drift position" aria-label="Play or pause">▶  Play</button>
+      <button id="rewind" title="Stop and rewind to step 0" aria-label="Stop and rewind to step 0">⏮</button>
+      <button id="share" title="Copy a shareable link to this exact patch">Share</button>
+    </div>
+
+    <h2>Transport</h2>
+    <div class="grid">
+      <span style="color:var(--dim)">Tempo</span><div id="bpmC"></div>
+      <span style="color:var(--dim)">Root</span><div id="rootC"></div>
+      <span style="color:var(--dim)">Scale</span><select id="scale"></select>
+      <span style="color:var(--dim)">FX send</span><div id="fxC"></div>
+    </div>
+
+    <h2>Syzygy meter</h2>
+    <div id="syz">
+      <div class="m"><span>next alignment</span><span class="big2" id="syzN">—</span></div>
+      <div class="m" style="color:var(--dim);font-size:12px"><span id="syzBeats">—</span><span id="syzPct">0%</span></div>
+      <div id="bar"><div id="barfill"></div></div>
+    </div>
+    <button id="drift" class="big" style="width:100%;margin-top:8px">✦ Maximize drift (coprime auto-pick)</button>
+
+    <h2>Rings</h2>
+    <div id="rings"></div>
+
+    <h2>Presets</h2>
+    <div class="presets" id="presets"></div>
+    <p class="hint">A single playhead points up (12 o'clock); the rings spin beneath it, each advancing one step per pulse of the clock. Coprime lengths keep them out of phase — watch the melody reshuffle until every ring snaps back to step 0 together.</p>
+    <p class="hint"><b>Controls:</b> <b>M</b> mutes a ring, <b>S</b> solos it (or click a ring on the stage to solo). <b>len</b> = steps in the loop, <b>fill</b> = Euclidean pulses spread across them, <b>rot</b> = rotate the pattern, <b>pitch</b> = scale degree. Steppers take scroll and press-and-hold; on Tempo, Shift = ±10. Hover any control for a tip. <b>Pause</b> keeps the drift position; <b>⏮</b> stops and rewinds to step 0.</p>
+  </div>
+</div>
+<script>
+"use strict";
+/* ---------- theory ---------- */
+const SCALES=[["Major",[0,2,4,5,7,9,11]],["Minor",[0,2,3,5,7,8,10]],
+  ["Pentatonic",[0,2,4,7,9]],["Dorian",[0,2,3,5,7,9,10]]];
+const WAVES={s:"sine",a:"sawtooth",q:"square",t:"triangle"};
+const NAMES=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+const COLORS=["#ff8a3d","#5be0ff","#c084fc","#7be08a","#ff6b9d"];
+const noteName=m=>NAMES[((m%12)+12)%12]+(Math.floor(m/12)-1);
+const gcd=(a,b)=>b?gcd(b,a%b):a, lcm=(a,b)=>a/gcd(a,b)*b;
+const clamp=(v,lo,hi)=>v<lo?lo:v>hi?hi:v;
+// Bjorklund euclidean: k pulses over n steps, then rotate
+function euclid(k,n,rot){
+  n=Math.floor(n); if(!(n>0))return [];   // defensive: never Array(negative|NaN)
+  k=Math.floor(k);
+  if(k<=0)return Array(n).fill(0); if(k>=n)return Array(n).fill(1);
+  let a=[],b=[];
+  for(let i=0;i<k;i++)a.push([1]);
+  for(let i=0;i<n-k;i++)b.push([0]);
+  while(b.length>1){
+    const m=Math.min(a.length,b.length),na=[];
+    for(let i=0;i<m;i++)na.push(a[i].concat(b[i]));
+    let nb=a.length>m?a.slice(m):b.slice(m);
+    a=na;b=nb;
+  }
+  let p=a.concat(b).reduce((x,y)=>x.concat(y),[]);
+  rot=((rot%n)+n)%n;
+  return p.slice(rot).concat(p.slice(0,rot));
+}
+function degToMidi(root,scale,deg){
+  const L=scale.length, oct=Math.floor(deg/L), idx=((deg%L)+L)%L;
+  return root+oct*12+scale[idx];
+}
+const freq=m=>440*Math.pow(2,(m-69)/12);
+
+/* ---------- state ---------- */
+let S={bpm:112,root:60,scale:1,fx:0.28,rings:[]};
+// ring: {len,k,rot,pitch,wave,timbre('p'|'k'),mute,solo,gain}
+function defRing(len,k,pitch,wave,timbre){
+  return {len,k,rot:0,pitch,wave,timbre,mute:false,solo:false,
+    gain:timbre==='k'?0.5:0.22};
+}
+const PRESETS={
+ "Prime Drift 3·5·7·11":"syz1|100|57|2|3.2.0.7.a.p|5.3.0.4.t.p|7.4.0.2.s.p|11.5.0.0.t.p|4.1.0.-5.q.k",
+ "Gamelan":"syz1|84|62|2|5.3.0.7.t.p|8.5.0.4.s.p|4.2.0.9.t.p|16.7.0.0.a.p|3.1.0.-5.s.k",
+ "Tresillo Stack":"syz1|110|53|1|8.3.0.0.a.p|8.3.3.4.t.p|16.5.0.7.s.p|4.1.0.-7.q.k|8.2.4.-3.s.k",
+ "Reich Phase":"syz1|132|64|0|12.5.0.0.t.p|12.5.1.2.t.p|12.5.3.4.a.p|8.2.0.-5.s.k|6.3.0.9.s.p",
+ "Techno Anchor":"syz1|126|48|1|4.1.0.0.q.k|8.2.0.-3.s.k|16.7.2.7.a.p|3.2.0.11.t.p|5.3.0.4.a.p",
+ "Syzygy Bloom":"syz1|118|60|2|3.2.0.7.t.p|4.3.0.4.a.p|6.3.0.9.t.p|2.1.0.0.q.k|12.5.0.-5.s.p"
+};
+
+/* ---------- audio ---------- */
+let ctx,master,fxSend,reverb,delay,noiseBuf,playing=false,timer=null;
+let curStep=0,nextTime=0,startTime=0,stepDur=0.25;
+let paused=false,pausedPhase=0;
+let bloomEvents=[];
+function initAudio(){
+  if(ctx)return;
+  ctx=new (window.AudioContext||window.webkitAudioContext)();
+  master=ctx.createGain();master.gain.value=0.9;
+  const lim=ctx.createDynamicsCompressor();lim.threshold.value=-8;lim.ratio.value=8;
+  master.connect(lim);lim.connect(ctx.destination);
+  // reverb (generated impulse)
+  reverb=ctx.createConvolver();
+  const len=ctx.sampleRate*2.2, imp=ctx.createBuffer(2,len,ctx.sampleRate);
+  for(let c=0;c<2;c++){const d=imp.getChannelData(c);
+    for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.6);}
+  reverb.buffer=imp;
+  const rG=ctx.createGain();rG.gain.value=0.9;reverb.connect(rG);rG.connect(master);
+  // tempo-ish delay
+  delay=ctx.createDelay(1.0);delay.delayTime.value=0.34;
+  const fb=ctx.createGain();fb.gain.value=0.33;const dG=ctx.createGain();dG.gain.value=0.6;
+  delay.connect(fb);fb.connect(delay);delay.connect(dG);dG.connect(master);
+  // shared FX send
+  fxSend=ctx.createGain();fxSend.gain.value=S.fx;fxSend.connect(reverb);fxSend.connect(delay);
+  // noise buffer for percussive voice
+  noiseBuf=ctx.createBuffer(1,ctx.sampleRate*0.35,ctx.sampleRate);
+  const nd=noiseBuf.getChannelData(0);for(let i=0;i<nd.length;i++)nd[i]=Math.random()*2-1;
+}
+function voice(r,f,t){
+  const out=ctx.createGain();out.connect(master);out.connect(fxSend);
+  if(r.timbre==='k'){
+    const src=ctx.createBufferSource();src.buffer=noiseBuf;
+    const bp=ctx.createBiquadFilter();bp.type='bandpass';bp.frequency.value=Math.min(f*2.2,7000);bp.Q.value=1.1;
+    src.connect(bp);bp.connect(out);
+    out.gain.setValueAtTime(0.0001,t);
+    out.gain.exponentialRampToValueAtTime(r.gain,t+0.002);
+    out.gain.exponentialRampToValueAtTime(0.0001,t+0.13);
+    src.start(t);src.stop(t+0.15);
+  }else{
+    const dur=stepDur*0.92, osc=ctx.createOscillator();osc.type=WAVES[r.wave];osc.frequency.value=f;
+    const lp=ctx.createBiquadFilter();lp.type='lowpass';
+    lp.frequency.setValueAtTime(Math.min(f*7,14000),t);
+    lp.frequency.exponentialRampToValueAtTime(Math.max(f*1.8,300),t+dur);
+    osc.connect(lp);lp.connect(out);
+    out.gain.setValueAtTime(0.0001,t);
+    out.gain.exponentialRampToValueAtTime(r.gain,t+0.01);
+    out.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    osc.start(t);osc.stop(t+dur+0.03);
+  }
+}
+function swell(t){ // consonant root+fifth+octave bloom chord
+  const scale=SCALES[S.scale][1];
+  [0,7,12].forEach((iv,i)=>{
+    const o=ctx.createGain();o.connect(master);o.connect(fxSend);
+    const osc=ctx.createOscillator();osc.type=i?'sine':'triangle';
+    osc.frequency.value=freq(degToMidi(S.root,scale,0)+iv);
+    osc.connect(o);
+    o.gain.setValueAtTime(0.0001,t);
+    o.gain.exponentialRampToValueAtTime(0.18,t+0.05);
+    o.gain.exponentialRampToValueAtTime(0.0001,t+1.6);
+    osc.start(t);osc.stop(t+1.7);
+  });
+}
+function activeRings(){
+  const solo=S.rings.some(r=>r.solo);
+  return S.rings.map((r,i)=>({r,i,live:solo?r.solo:!r.mute}));
+}
+function currentLcm(){
+  const live=activeRings().filter(x=>x.live).map(x=>x.r.len);
+  return live.length?live.reduce(lcm):1;
+}
+function scheduleStep(step,t){
+  const scale=SCALES[S.scale][1], ar=activeRings();
+  const L=ar.filter(x=>x.live).map(x=>x.r.len);
+  const period=L.length?L.reduce(lcm):1;
+  if(L.length&&step%period===0){swell(t);bloomEvents.push(t);}
+  for(const {r,live} of ar){
+    if(!live)continue;
+    const pat=euclid(r.k,r.len,r.rot);
+    if(pat[step%r.len]) voice(r,freq(degToMidi(S.root,scale,r.pitch)),t);
+  }
+}
+function scheduler(){
+  while(nextTime<ctx.currentTime+0.1){
+    scheduleStep(curStep,nextTime);
+    nextTime+=stepDur;curStep++;
+  }
+}
+function setTransport(){
+  document.getElementById('play').textContent=playing?'⏸  Pause':(paused?'▶  Resume':'▶  Play');
+}
+function play(){
+  initAudio();ctx.resume();
+  stepDur=(60/S.bpm)/2; // one step = eighth note
+  if(!paused){ curStep=0; bloomEvents=[]; }   // fresh start only when not resuming
+  nextTime=ctx.currentTime+0.06;
+  startTime=nextTime-curStep*stepDur;         // keep visual phase continuous with curStep
+  paused=false;playing=true;setTransport();
+  timer=setInterval(scheduler,25);
+}
+function pause(){ // real pause: keep accumulated phase/step, only stop the clock
+  if(!playing)return;
+  playing=false;clearInterval(timer);timer=null;paused=true;
+  pausedPhase=ctx?(ctx.currentTime-startTime)/stepDur:0;
+  setTransport();
+}
+function rewind(){ // explicit stop: reset to step 0
+  playing=false;clearInterval(timer);timer=null;paused=false;
+  curStep=0;pausedPhase=0;bloomEvents=[];
+  lastStep.fill(-1);
+  setTransport();
+}
+function toggle(){ if(playing)pause(); else play(); }
+
+/* ---------- hash ---------- */
+function serialize(){
+  return ['syz1',S.bpm,S.root,S.scale,
+    ...S.rings.map(r=>[r.len,r.k,r.rot,r.pitch,r.wave,r.timbre,r.mute?1:0,r.solo?1:0].join('.'))].join('|');
+}
+// Tolerant of hand-edited / truncated share links: validate everything, reject on bad
+// data (boot() then falls back to a default preset) rather than throwing during render.
+function deserialize(str){
+  const p=str.split('|'); if(p[0]!=='syz1'||p.length<9)return false;
+  const bpm=+p[1],root=+p[2],scale=+p[3];
+  if(![bpm,root,scale].every(Number.isFinite))return false;
+  const rings=[];
+  for(let i=4;i<9;i++){
+    const f=p[i].split('.');
+    if(f.length<6)return false;
+    let len=+f[0],k=+f[1],rot=+f[2],pitch=+f[3];
+    const wave=f[4],timbre=f[5];
+    if(![len,k,rot,pitch].every(Number.isFinite))return false;
+    if(!WAVES[wave]||(timbre!=='p'&&timbre!=='k'))return false;
+    len=clamp(Math.round(len),2,16);
+    k=clamp(Math.round(k),0,len);
+    pitch=clamp(Math.round(pitch),-14,14);
+    const r=defRing(len,k,pitch,wave,timbre);
+    r.rot=((Math.round(rot)%len)+len)%len;
+    r.mute=f[6]==='1'; r.solo=f[7]==='1';  // missing flags (old links) => false
+    rings.push(r);
+  }
+  if(rings.length!==5)return false;
+  // commit only after full validation so a bad patch can't half-corrupt state
+  S.bpm=clamp(Math.round(bpm),40,220);
+  S.root=clamp(Math.round(root),36,84);
+  S.scale=clamp(Math.round(scale),0,SCALES.length-1);
+  S.rings=rings;
+  return true;
+}
+function syncHash(){history.replaceState(null,'','#'+serialize());}
+function loadPreset(str){ if(deserialize(str)){buildRings();refreshGlobals();syncHash();} }
+
+/* ---------- UI ---------- */
+function stepper(get,set,min,max,fmt,opts){
+  opts=opts||{};
+  const coarse=opts.coarse||1;
+  const w=document.createElement('div');w.className='stepper';
+  if(opts.title){w.title=opts.title;w.setAttribute('aria-label',opts.title);}
+  const dn=document.createElement('button');dn.textContent='−';dn.setAttribute('aria-label','decrease'+(opts.title?' '+opts.title:''));
+  const v=document.createElement('span');v.className='v';
+  const up=document.createElement('button');up.textContent='+';up.setAttribute('aria-label','increase'+(opts.title?' '+opts.title:''));
+  const draw=()=>v.textContent=(fmt||String)(get());
+  const bump=d=>{set(clamp(get()+d,min,max));draw();};
+  dn.onclick=e=>bump(-(e.shiftKey?coarse:1));
+  up.onclick=e=>bump(+(e.shiftKey?coarse:1));
+  w.addEventListener('wheel',e=>{e.preventDefault();bump((e.deltaY<0?1:-1)*(e.shiftKey?coarse:1));},{passive:false});
+  const hold=(btn,dir)=>{ let to,iv;
+    const start=e=>{ if(e.button)return; const d=dir*(e.shiftKey?coarse:1);
+      to=setTimeout(()=>{iv=setInterval(()=>bump(d),60);},350); };
+    const end=()=>{clearTimeout(to);clearInterval(iv);};
+    btn.addEventListener('pointerdown',start);
+    ['pointerup','pointerleave','pointercancel'].forEach(ev=>btn.addEventListener(ev,end));
+  };
+  hold(dn,-1);hold(up,1);
+  w.append(dn,v,up);draw();w._draw=draw;return w;
+}
+function refreshGlobals(){
+  document.getElementById('scale').value=S.scale;
+  bpmC._draw&&bpmC._draw();rootC._draw&&rootC._draw();fxC._draw&&fxC._draw();
+  if(fxSend)fxSend.gain.value=S.fx;
+  if(playing)stepDur=(60/S.bpm)/2;
+}
+let bpmC,rootC,fxC;
+function buildGlobals(){
+  bpmC=stepper(()=>S.bpm,v=>{S.bpm=v;if(playing)stepDur=(60/S.bpm)/2;syncHash();},40,220,null,
+    {coarse:10,title:'Tempo (BPM) — scroll or hold to repeat; Shift = ±10'});
+  document.getElementById('bpmC').append(bpmC);
+  rootC=stepper(()=>S.root,v=>{S.root=v;syncHash();},36,84,noteName,{title:'Root note of the shared scale'});
+  document.getElementById('rootC').append(rootC);
+  fxC=stepper(()=>Math.round(S.fx*10),v=>{S.fx=v/10;if(fxSend)fxSend.gain.value=S.fx;syncHash();},0,9,
+    v=>Math.round(v)+'0%',{title:'Global reverb + delay send'});
+  document.getElementById('fxC').append(fxC);
+  const sel=document.getElementById('scale');
+  SCALES.forEach((s,i)=>{const o=document.createElement('option');o.value=i;o.textContent=s[0];sel.append(o);});
+  sel.onchange=()=>{S.scale=+sel.value;syncHash();};
+}
+function buildRings(){
+  const host=document.getElementById('rings');host.innerHTML='';
+  S.rings.forEach((r,i)=>{
+    const el=document.createElement('div');el.className='ring';
+    const hdr=document.createElement('div');hdr.className='hdr';
+    const dot=document.createElement('div');dot.className='dot';dot.style.color=COLORS[i];dot.style.background=COLORS[i];
+    const nm=document.createElement('div');nm.className='name';
+    const upd=()=>{nm.textContent='Ring '+(i+1)+' · '+r.len+' steps · '+noteName(degToMidi(S.root,SCALES[S.scale][1],r.pitch));};
+    const mute=document.createElement('button');mute.className='mini';mute.textContent='M';
+    mute.title='Mute this ring';mute.setAttribute('aria-label','Mute ring '+(i+1));
+    const solo=document.createElement('button');solo.className='mini solo';solo.textContent='S';
+    solo.title='Solo this ring (silence the others)';solo.setAttribute('aria-label','Solo ring '+(i+1));
+    const tmb=document.createElement('button');tmb.className='mini';
+    tmb.title='Voice: tone (pitched synth) or drum (percussive hit)';tmb.setAttribute('aria-label','Toggle voice for ring '+(i+1));
+    const setTmb=()=>{tmb.textContent=r.timbre==='k'?'drum':'tone';tmb.classList.toggle('on',r.timbre==='k');};
+    mute.classList.toggle('on',r.mute);solo.classList.toggle('on',r.solo);
+    mute.onclick=()=>{r.mute=!r.mute;mute.classList.toggle('on',r.mute);syncHash();};
+    solo.onclick=()=>{r.solo=!r.solo;solo.classList.toggle('on',r.solo);syncHash();};
+    tmb.onclick=()=>{r.timbre=r.timbre==='k'?'p':'k';r.gain=r.timbre==='k'?0.5:0.22;setTmb();syncHash();};
+    setTmb();
+    hdr.append(dot,nm,tmb,solo,mute);
+    const ctls=document.createElement('div');ctls.className='ctls';
+    const cell=(lbl,st)=>{const c=document.createElement('div');c.className='cell';
+      const s=document.createElement('span');s.textContent=lbl;c.append(s,st);return c;};
+    const lenS=stepper(()=>r.len,v=>{r.len=v;if(r.k>v)r.k=v;upd();updRow();syncHash();},2,16,null,
+      {title:"Steps in this ring's loop (coprime lengths drift longest)"});
+    const fillS=stepper(()=>r.k,v=>{r.k=Math.min(v,r.len);updRow();syncHash();},0,16,null,
+      {title:'Euclidean pulses spread as evenly as possible across the steps'});
+    const rotS=stepper(()=>r.rot,v=>{r.rot=((v%r.len)+r.len)%r.len;syncHash();},-16,32,null,
+      {title:'Rotate the pattern around the ring'});
+    const pitS=stepper(()=>r.pitch,v=>{r.pitch=v;upd();syncHash();},-14,14,null,
+      {title:'Scale degree (pitch) this ring plays'});
+    const updRow=()=>{lenS._draw();fillS._draw();};
+    ctls.append(cell('len',lenS),cell('fill',fillS),cell('rot',rotS),cell('pitch',pitS));
+    const wsel=document.createElement('select');
+    Object.entries(WAVES).forEach(([k,v])=>{const o=document.createElement('option');o.value=k;o.textContent=v;wsel.append(o);});
+    wsel.value=r.wave;wsel.onchange=()=>{r.wave=wsel.value;syncHash();};
+    const wrow=document.createElement('div');wrow.className='cell';wrow.style.gridColumn='1 / -1';
+    const ws=document.createElement('span');ws.textContent='wave';ws.style.width='26px';wrow.append(ws,wsel);
+    ctls.append(wrow);
+    el.append(hdr,ctls);host.append(el);
+    upd();el._upd=upd;
+  });
+}
+function buildPresets(){
+  const host=document.getElementById('presets');
+  Object.entries(PRESETS).forEach(([name,str])=>{
+    const b=document.createElement('button');b.textContent=name;
+    b.onclick=()=>loadPreset(str);host.append(b);
+  });
+}
+document.getElementById('play').onclick=toggle;
+document.getElementById('rewind').onclick=rewind;
+document.getElementById('share').onclick=()=>{
+  syncHash();
+  const b=document.getElementById('share'),link=location.href;
+  const flash=(txt)=>{b.textContent=txt;setTimeout(()=>b.textContent='Share',1600);};
+  if(navigator.clipboard&&window.isSecureContext){
+    navigator.clipboard.writeText(link).then(()=>flash('Copied!'),()=>fallback());
+  }else fallback();
+  function fallback(){ // insecure context (file://) or denied: hand the user the link
+    window.prompt('Copy this shareable link:',link);
+    flash('Link ready');
+  }
+};
+document.getElementById('drift').onclick=()=>{
+  const opt=[16,15,13,11,7]; // pairwise coprime, LCM=240240 steps
+  S.rings.forEach((r,i)=>{r.len=opt[i];if(r.k>r.len)r.k=r.len;if(r.k<1)r.k=Math.max(1,Math.round(r.len*0.4));r.rot=0;});
+  buildRings();syncHash();
+};
+window.addEventListener('keydown',e=>{
+  // don't hijack Space from a focused control (let it activate that button/select)
+  if(e.code==='Space'&&!['SELECT','BUTTON'].includes(e.target.tagName)){e.preventDefault();toggle();}
+});
+
+/* ---------- canvas render ---------- */
+const cv=document.getElementById('stage'),g=cv.getContext('2d');
+let W,H,CX,CY,DPR,maxR=0,hoverRing=-1;
+const rmq=matchMedia('(prefers-reduced-motion: reduce)');
+let reduceMotion=rmq.matches; rmq.addEventListener('change',e=>reduceMotion=e.matches);
+function resize(){
+  DPR=Math.min(devicePixelRatio||1,2);
+  const wrap=document.getElementById('stagewrap');
+  W=wrap.clientWidth;H=wrap.clientHeight;
+  cv.width=W*DPR;cv.height=H*DPR;cv.style.width=W+'px';cv.style.height=H+'px';
+  g.setTransform(DPR,0,0,DPR,0,0);CX=W/2;CY=H/2;
+}
+addEventListener('resize',()=>{resize();});
+// direct manipulation: nearest ring band within 22px is clickable to solo
+function ringAt(px,py){
+  if(!maxR)return -1;
+  const dist=Math.hypot(px-CX,py-CY);
+  let best=-1,bd=1e9;
+  for(let i=0;i<S.rings.length;i++){
+    const R=maxR*(0.34+0.66*i/4),d=Math.abs(dist-R);
+    if(d<bd){bd=d;best=i;}
+  }
+  return bd<=22?best:-1;
+}
+function evtPos(e){const rc=cv.getBoundingClientRect();return [e.clientX-rc.left,e.clientY-rc.top];}
+cv.addEventListener('pointermove',e=>{
+  hoverRing=ringAt(...evtPos(e));
+  cv.style.cursor=hoverRing>=0?'pointer':'default';
+});
+cv.addEventListener('pointerleave',()=>{hoverRing=-1;cv.style.cursor='default';});
+cv.addEventListener('click',e=>{
+  const i=ringAt(...evtPos(e));
+  if(i>=0){const r=S.rings[i];r.solo=!r.solo;buildRings();syncHash();}
+});
+const ripples=[];const lastStep=Array(5).fill(-1);
+function render(){
+  requestAnimationFrame(render);
+  g.clearRect(0,0,W,H);
+  maxR=Math.min(W,H)*0.5-70;
+  const now=ctx?ctx.currentTime:0;
+  const phase=playing?(now-startTime)/stepDur:(paused?pausedPhase:0);
+  const period=currentLcm();
+  const scale=SCALES[S.scale][1];
+  // bloom shockwave (suppressed for reduced-motion users)
+  if(!reduceMotion) for(let i=bloomEvents.length-1;i>=0;i--){
+    const age=now-bloomEvents[i];
+    if(age<0)continue; if(age>1.6){bloomEvents.splice(i,1);continue;}
+    const p=age/1.6, rr=p*Math.min(W,H)*0.8;
+    g.strokeStyle=`rgba(255,180,90,${(1-p)*0.9})`;g.lineWidth=(1-p)*14+1;
+    g.beginPath();g.arc(CX,CY,rr,0,7);g.stroke();
+    g.fillStyle=`rgba(120,220,255,${(1-p)*0.16})`;
+    g.beginPath();g.arc(CX,CY,rr*0.55,0,7);g.fill();
+  }
+  const ar=activeRings();
+  S.rings.forEach((r,i)=>{
+    const R=maxR*(0.34+0.66*i/4);
+    const live=(ar[i].live);
+    const pat=euclid(r.k,r.len,r.rot);
+    const moving=live&&(playing||paused);
+    const rot=moving?-(((phase%r.len)+r.len)%r.len)/r.len*Math.PI*2:0;
+    const active=moving?Math.floor(((phase%r.len)+r.len)%r.len):-1;
+    // detect strike -> ripple
+    const st=live&&playing?Math.floor(phase)%r.len:-1;
+    if(st!==lastStep[i]){lastStep[i]=st; if(st>=0&&pat[st]&&!reduceMotion){ripples.push({x:CX,y:CY-R,r0:R,age:0,c:COLORS[i]});}}
+    // track circle (brighter when hovered for click-to-solo affordance)
+    const hov=(i===hoverRing);
+    g.strokeStyle=hov?COLORS[i]:(live?'rgba(120,130,190,0.28)':'rgba(90,95,130,0.1)');
+    g.lineWidth=hov?2.5:1.5;g.globalAlpha=hov?0.7:1;
+    g.beginPath();g.arc(CX,CY,R,0,7);g.stroke();g.globalAlpha=1;
+    // slots
+    for(let j=0;j<r.len;j++){
+      const a=-Math.PI/2+rot+j/r.len*Math.PI*2;
+      const x=CX+Math.cos(a)*R,y=CY+Math.sin(a)*R;
+      const isAct=(j===active);
+      let sz=pat[j]?6:3;
+      if(pat[j]&&isAct){
+        const frac=1-(phase-Math.floor(phase));
+        sz=6+8*frac;
+        g.fillStyle=COLORS[i];g.shadowColor=COLORS[i];g.shadowBlur=22*frac;
+      }else if(pat[j]){
+        g.fillStyle=live?COLORS[i]:'rgba(140,150,190,.4)';g.shadowBlur=0;
+      }else{g.fillStyle='rgba(150,160,200,0.22)';g.shadowBlur=0;}
+      g.beginPath();g.arc(x,y,sz,0,7);g.fill();g.shadowBlur=0;
+    }
+  });
+  // ripples
+  if(!reduceMotion) for(let i=ripples.length-1;i>=0;i--){
+    const rp=ripples[i];rp.age+=0.02;
+    if(rp.age>1){ripples.splice(i,1);continue;}
+    g.globalAlpha=(1-rp.age)*0.8;g.strokeStyle=rp.c;g.lineWidth=2;
+    g.beginPath();g.arc(rp.x,rp.y,6+rp.age*26,0,7);g.stroke();g.globalAlpha=1;
+  }
+  // playhead (fixed, pointing up)
+  g.strokeStyle='rgba(255,255,255,0.85)';g.lineWidth=2;g.shadowColor='#fff';g.shadowBlur=10;
+  g.beginPath();g.moveTo(CX,CY);g.lineTo(CX,CY-maxR-14);g.stroke();g.shadowBlur=0;
+  g.fillStyle='#fff';g.beginPath();g.arc(CX,CY-maxR-14,4,0,7);g.fill();
+  // center hub
+  g.fillStyle='rgba(255,138,61,0.9)';g.beginPath();g.arc(CX,CY,5,0,7);g.fill();
+  // meter update
+  if(period>1){
+    const into=playing?((Math.floor(phase)%period)+period)%period:0;
+    const rem=period-into;
+    document.getElementById('syzN').textContent=rem+' st';
+    document.getElementById('syzBeats').textContent=(period/2)+' beats · '+(period/8).toFixed(period/8<10?1:0)+' bars';
+    const pct=Math.round(into/period*100);
+    document.getElementById('syzPct').textContent=pct+'%';
+    document.getElementById('barfill').style.width=pct+'%';
+  }else{ // no active rings (all muted) — honest empty state instead of a stale value
+    document.getElementById('syzN').textContent='—';
+    document.getElementById('syzBeats').textContent='all rings muted';
+    document.getElementById('syzPct').textContent='0%';
+    document.getElementById('barfill').style.width='0%';
+  }
+}
+
+/* ---------- boot ---------- */
+function boot(){
+  const h=decodeURIComponent(location.hash.slice(1));
+  if(!(h&&deserialize(h))) deserialize(PRESETS["Prime Drift 3·5·7·11"]);
+  buildGlobals();buildRings();buildPresets();refreshGlobals();syncHash();
+  resize();render();
+}
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redact — mask PII (emails, phones, cards, SSNs) in text</title>
+<meta name="description" content="Free offline PII redactor. Paste text and automatically mask emails, phone numbers, credit-card numbers, US SSNs and IP addresses before sharing logs or screenshots. Works offline — nothing leaves your browser.">
+<link rel="canonical" href="https://awictor.github.io/redact/">
+<style>
+  :root{
+    --c:#7f1d1d; --bg:#f8f8f9; --fg:#18181b; --muted:#52525b;
+    --card:#ffffff; --border:#e4e4e7; --code:#efeff1;
+  }
+  [data-theme="dark"]{
+    --bg:#09090b; --fg:#e7e7ea; --muted:#8b8b93; --card:#151518;
+    --border:#27272a; --code:#1c1c20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:800px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#b91c1c);display:grid;place-items:center;color:#fff;font-size:16px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:800px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+  .copy{background:none;border:1px solid var(--border);color:var(--fg);border-radius:8px;padding:5px 10px;cursor:pointer;font-size:.8rem}
+  textarea{width:100%;min-height:220px;padding:12px 14px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:.92rem;line-height:1.55;resize:vertical;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  textarea.ro{background:var(--code)}
+  .opts{margin-top:16px;display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:.85rem;background:var(--code);border:1px solid var(--border);
+    border-radius:999px;padding:5px 12px;cursor:pointer}
+  .chip input{accent-color:var(--c)}
+  .count{font-size:.78rem;color:var(--muted)}
+  .style{margin-left:auto;display:flex;gap:6px}
+  .style button{background:var(--code);border:1px solid var(--border);color:var(--fg);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:.82rem}
+  .style button.on{background:var(--c);color:#fff;border-color:var(--c)}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:800px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+  @media(max-width:640px){.cols{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('rdc.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">▮▮</div>
+  <div>
+    <h1>Redact</h1>
+    <p class="sub">Mask PII in text</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <div class="cols">
+      <div>
+        <label for="in">Input</label>
+        <textarea id="in" spellcheck="false">Email jane.doe@example.com or call (555) 123-4567.
+Card 4111 1111 1111 1111, SSN 123-45-6789, server 10.0.12.34.</textarea>
+      </div>
+      <div>
+        <div class="top"><label style="margin:0">Redacted</label><button class="copy" id="copy">Copy</button></div>
+        <textarea id="out" class="ro" readonly spellcheck="false"></textarea>
+      </div>
+    </div>
+    <div class="opts" id="opts">
+      <label class="chip"><input type="checkbox" data-cat="email" checked> Email <span class="count" id="c-email"></span></label>
+      <label class="chip"><input type="checkbox" data-cat="phone" checked> Phone <span class="count" id="c-phone"></span></label>
+      <label class="chip"><input type="checkbox" data-cat="creditcard" checked> Card <span class="count" id="c-creditcard"></span></label>
+      <label class="chip"><input type="checkbox" data-cat="ssn" checked> SSN <span class="count" id="c-ssn"></span></label>
+      <label class="chip"><input type="checkbox" data-cat="ipv4" checked> IP <span class="count" id="c-ipv4"></span></label>
+      <div class="style">
+        <button id="st-label" class="on">[LABEL]</button>
+        <button id="st-stars">••••</button>
+      </div>
+    </div>
+    <p class="hint">Pattern-based masking for sharing logs, tickets and screenshots. It catches common formats but is
+      <b>not a guarantee</b> — review the output before sharing anything sensitive. 100% local; nothing is uploaded.</p>
+  </div>
+</main>
+<footer>
+  Redact is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/redact">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+var PATTERNS = {
+  email:      /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
+  creditcard: /\b\d(?:[ -]?\d){12,15}\b/g,
+  ssn:        /\b\d{3}-\d{2}-\d{4}\b/g,
+  ipv4:       /\b(?:\d{1,3}\.){3}\d{1,3}\b/g,
+  phone:      /(?:\+?\d{1,2}[ .-]?)?(?:\(\d{3}\)|\d{3})[ .-]?\d{3}[ .-]?\d{4}/g
+};
+var ORDER = ['email', 'creditcard', 'ssn', 'ipv4', 'phone'];
+var LABELS = { email: '[EMAIL]', creditcard: '[CARD]', ssn: '[SSN]', ipv4: '[IP]', phone: '[PHONE]' };
+
+function reFor(cat){ return new RegExp(PATTERNS[cat].source, 'g'); }
+
+function redact(text, opts){
+  opts = opts || {};
+  var cats = opts.categories || ORDER.slice();
+  var style = opts.style || 'label';
+  var out = String(text);
+  ORDER.forEach(function(cat){
+    if(cats.indexOf(cat) < 0) return;
+    out = out.replace(reFor(cat), function(m){
+      if(style === 'stars') return '•'.repeat(m.replace(/\s/g, '').length);
+      return LABELS[cat];
+    });
+  });
+  return out;
+}
+
+function findPii(text){
+  var counts = {};
+  var s = String(text);
+  ORDER.forEach(function(cat){
+    var m = s.match(reFor(cat));
+    counts[cat] = m ? m.length : 0;
+  });
+  return counts;
+}
+
+if(typeof module !== 'undefined') module.exports = { PATTERNS, ORDER, LABELS, redact, findPii };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var inEl = document.getElementById('in');
+  var outEl = document.getElementById('out');
+  var style = 'label';
+  var stLabel = document.getElementById('st-label');
+  var stStars = document.getElementById('st-stars');
+
+  function selectedCats(){
+    return Array.prototype.slice.call(document.querySelectorAll('#opts input[data-cat]'))
+      .filter(function(x){ return x.checked; }).map(function(x){ return x.getAttribute('data-cat'); });
+  }
+  function render(){
+    var cats = selectedCats();
+    outEl.value = redact(inEl.value, { categories: cats, style: style });
+    var counts = findPii(inEl.value);
+    ORDER.forEach(function(cat){
+      var c = document.getElementById('c-' + cat);
+      if(c) c.textContent = counts[cat] ? '(' + counts[cat] + ')' : '';
+    });
+    try{ localStorage.setItem('rdc.in', inEl.value); localStorage.setItem('rdc.style', style); }catch(e){}
+  }
+  inEl.addEventListener('input', render);
+  document.getElementById('opts').addEventListener('change', render);
+  stLabel.addEventListener('click', function(){ style = 'label'; stLabel.classList.add('on'); stStars.classList.remove('on'); render(); });
+  stStars.addEventListener('click', function(){ style = 'stars'; stStars.classList.add('on'); stLabel.classList.remove('on'); render(); });
+  document.getElementById('copy').addEventListener('click', function(){
+    if(navigator.clipboard) navigator.clipboard.writeText(outEl.value);
+  });
+  try{ var s = localStorage.getItem('rdc.in'); if(s !== null) inEl.value = s;
+       var st = localStorage.getItem('rdc.style'); if(st === 'stars'){ style = 'stars'; stStars.classList.add('on'); stLabel.classList.remove('on'); } }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('rdc.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('rdc.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

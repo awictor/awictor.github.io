@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RaiseCalc — Salary Raise &amp; Real (Inflation-Adjusted) Raise</title>
+<meta name="description" content="Calculate a salary raise amount and new salary, and whether it beats inflation — the real (inflation-adjusted) raise. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('raise-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#059669;
+    --bg:#f1f8f4; --card:#ffffff; --fg:#12201a; --muted:#566b60; --line:#dcebe2; --shadow:0 1px 3px rgba(0,0,0,.08);
+    --ok:#16a34a; --no:#dc2626;
+  }
+  [data-theme="dark"]{
+    --bg:#08130d; --card:#0f1d15; --fg:#e7f4ec; --muted:#84a394; --line:#1a2c21; --shadow:0 1px 3px rgba(0,0,0,.5);
+    --ok:#4ade80; --no:#f87171;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:640px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#047857);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:640px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.78rem;color:var(--muted);margin-bottom:5px;font-weight:600}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .field{margin-bottom:14px}
+  input{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem}
+  .res{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .box{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px;text-align:center}
+  .box .v{font-size:1.5rem;font-weight:800;color:var(--c)}
+  .box .k{color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+  .verdict{margin-top:16px;text-align:center;font-size:1.05rem;padding:12px;border-radius:10px;border:1px solid var(--line)}
+  .verdict.ok{background:color-mix(in srgb,var(--ok) 12%,transparent)} .verdict.ok b{color:var(--ok)}
+  .verdict.no{background:color-mix(in srgb,var(--no) 12%,transparent)} .verdict.no b{color:var(--no)}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:640px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.8rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">📈</div>
+    <div><h1>RaiseCalc</h1><div class="sub">Does your raise beat inflation?</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div class="field"><label for="current">Current salary</label><input type="number" id="current" value="60000" min="0" step="1000"></div>
+      <div class="field"><label for="pct">Raise (%)</label><input type="number" id="pct" value="4" step="0.1"></div>
+    </div>
+    <div class="field"><label for="infl">Inflation over the same period (%)</label><input type="number" id="infl" value="3" step="0.1"></div>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card">
+    <div class="res">
+      <div class="box"><div class="v" id="amount">—</div><div class="k">Raise amount</div></div>
+      <div class="box"><div class="v" id="newsal">—</div><div class="k">New salary</div></div>
+    </div>
+    <div class="verdict" id="verdict"></div>
+  </div>
+</main>
+<footer>
+  Real raise = ((1 + raise) ÷ (1 + inflation) − 1). If it's negative, your buying power fell despite a nominal raise. Estimates only — <strong>not financial advice</strong>. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/raise-calc">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  function chk(current, pct){
+    const c = Number(current), p = Number(pct);
+    if(!Number.isFinite(c) || !Number.isFinite(p)) throw new Error('enter numbers');
+    if(c < 0) throw new Error('salary must be ≥ 0');
+    return [c, p];
+  }
+  const raiseAmount = (current, pct) => { const [c, p] = chk(current, pct); return c * p / 100; };
+  const newSalary   = (current, pct) => { const [c, p] = chk(current, pct); return c * (1 + p / 100); };
+  const pctFromNew  = (current, next) => { const [c] = chk(current, 0); if(c === 0) throw new Error('salary must be > 0'); return (Number(next) - c) / c * 100; };
+
+  // Inflation-adjusted (real) raise percent, via the Fisher relation.
+  function realRaisePct(nominalPct, inflationPct){
+    const n = Number(nominalPct), i = Number(inflationPct);
+    if(!Number.isFinite(n) || !Number.isFinite(i)) throw new Error('enter numbers');
+    if(i <= -100) throw new Error('inflation must be > -100%');
+    return ((1 + n / 100) / (1 + i / 100) - 1) * 100;
+  }
+
+  // New salary expressed in today's (pre-inflation) dollars.
+  function realNewSalary(current, pct, inflationPct){
+    return newSalary(current, pct) / (1 + Number(inflationPct) / 100);
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('amount')){
+    const $ = id => document.getElementById(id);
+    const money = n => '$' + Math.round(n).toLocaleString('en-US');
+
+    function render(){
+      try{
+        const c = $('current').value, p = $('pct').value, inf = $('infl').value;
+        $('amount').textContent = money(raiseAmount(c, p));
+        $('newsal').textContent = money(newSalary(c, p));
+        const real = realRaisePct(p, inf);
+        const beats = real > 0;
+        $('verdict').className = 'verdict ' + (beats ? 'ok' : 'no');
+        $('verdict').innerHTML = Math.abs(real) < 0.05
+          ? `Your raise <b>exactly matches</b> inflation — flat buying power.`
+          : beats
+            ? `Your raise <b>beats inflation</b> by ${real.toFixed(2)}% — real gain worth ${money(realNewSalary(c, p, inf) - Number(c))} in today's dollars.`
+            : `Your raise <b>trails inflation</b> by ${Math.abs(real).toFixed(2)}% — buying power fell despite the nominal raise.`;
+        $('err').textContent = '';
+      }catch(e){ $('amount').textContent = '—'; $('newsal').textContent = '—'; $('verdict').textContent = ''; $('err').textContent = e.message; }
+    }
+    [...document.querySelectorAll('input')].forEach(el => el.addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('raise-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { raiseAmount, newSalary, pctFromNew, realRaisePct, realNewSalary };
+</script>
+</body>
+</html>

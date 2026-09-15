@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fixate — fixation (bionic-style) reading formatter</title>
+<meta name="description" content="Free offline fixation reading formatter. Bold the leading part of every word to guide your eye and read faster. Adjustable strength, live preview, copy as HTML. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/fixate/">
+<style>
+  :root{
+    --c:#5b21b6; --bg:#f8f8f9; --fg:#18181b; --muted:#52525b;
+    --card:#ffffff; --border:#e4e4e7; --code:#efeff1;
+  }
+  [data-theme="dark"]{
+    --bg:#09090b; --fg:#e7e7ea; --muted:#8b8b93; --card:#151518;
+    --border:#27272a; --code:#1c1c20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:760px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#7c3aed);display:grid;place-items:center;color:#fff;font-size:16px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:760px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  textarea{width:100%;min-height:120px;padding:12px 14px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:.98rem;line-height:1.55;resize:vertical;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .controls{margin-top:16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .controls input[type=range]{flex:1;min-width:160px;accent-color:var(--c)}
+  .controls .val{font-family:ui-monospace,monospace;font-weight:700;color:var(--c);min-width:44px;text-align:right}
+  .top{display:flex;justify-content:space-between;align-items:center;margin:6px 0}
+  .copy{background:none;border:1px solid var(--border);color:var(--fg);border-radius:8px;padding:5px 10px;cursor:pointer;font-size:.8rem}
+  .preview{padding:16px 18px;border:1px solid var(--border);border-radius:11px;background:var(--code);
+    font-size:1.12rem;line-height:1.85;white-space:pre-wrap;word-break:break-word}
+  .preview b{color:var(--fg);font-weight:700}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:760px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('fix.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">Ab</div>
+  <div>
+    <h1>Fixate</h1>
+    <p class="sub">Fixation reading formatter</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <label for="in">Your text</label>
+    <textarea id="in" spellcheck="false">Reading faster is easier when the start of each word is bolded. Your eyes fixate on the first few letters and your brain fills in the rest.</textarea>
+    <div class="controls">
+      <label style="margin:0">Strength</label>
+      <input id="frac" type="range" min="0.3" max="0.7" step="0.05" value="0.5">
+      <span class="val" id="fracVal">50%</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="top"><label style="margin:0">Preview</label><button class="copy" id="copy">Copy HTML</button></div>
+    <div class="preview" id="preview"></div>
+    <p class="hint">Each word gets its leading letters bolded so your eyes latch onto the shape and skim the rest.
+      "Copy HTML" gives you markup you can paste into docs, email, or a CMS. This is a generic fixation formatter,
+      not affiliated with any trademarked product. Runs 100% locally.</p>
+  </div>
+</main>
+<footer>
+  Fixate is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/fixate">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function escapeHtml(s){
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function boldLen(word, fraction){
+  fraction = fraction === undefined ? 0.5 : fraction;
+  var len = word.length;
+  if(len <= 1) return len;      // 0 -> 0, 1 -> 1
+  if(len <= 3) return 1;        // short words: just the first letter
+  return Math.min(len, Math.max(1, Math.round(len * fraction)));
+}
+function splitWord(word, fraction){
+  var b = boldLen(word, fraction);
+  return [word.slice(0, b), word.slice(b)];
+}
+function fixateHTML(text, fraction){
+  var s = String(text), out = '', i = 0;
+  var re = /[A-Za-z0-9]+/g, m;
+  while((m = re.exec(s)) !== null){
+    out += escapeHtml(s.slice(i, m.index));           // gap (spaces/punctuation), escaped
+    var parts = splitWord(m[0], fraction);
+    out += '<b>' + escapeHtml(parts[0]) + '</b>' + escapeHtml(parts[1]);
+    i = m.index + m[0].length;
+  }
+  out += escapeHtml(s.slice(i));
+  return out;
+}
+
+if(typeof module !== 'undefined') module.exports = { escapeHtml, boldLen, splitWord, fixateHTML };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var inEl = document.getElementById('in');
+  var fracEl = document.getElementById('frac');
+  var fracVal = document.getElementById('fracVal');
+  var previewEl = document.getElementById('preview');
+
+  function render(){
+    var f = Number(fracEl.value);
+    fracVal.textContent = Math.round(f * 100) + '%';
+    var htmlOut = fixateHTML(inEl.value, f);
+    previewEl.innerHTML = htmlOut;
+    previewEl.setAttribute('data-html', htmlOut);
+    try{ localStorage.setItem('fix.in', inEl.value); localStorage.setItem('fix.frac', fracEl.value); }catch(e){}
+  }
+  inEl.addEventListener('input', render);
+  fracEl.addEventListener('input', render);
+  document.getElementById('copy').addEventListener('click', function(){
+    var h = previewEl.getAttribute('data-html') || '';
+    if(navigator.clipboard) navigator.clipboard.writeText(h);
+  });
+  try{ var s = localStorage.getItem('fix.in'); if(s !== null) inEl.value = s;
+       var fr = localStorage.getItem('fix.frac'); if(fr !== null) fracEl.value = fr; }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('fix.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('fix.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glucose — Blood Sugar Unit Converter (mg/dL ⇄ mmol/L)</title>
+<meta name="description" content="Convert blood glucose between mg/dL and mmol/L and see the fasting category (normal, prediabetes, diabetes). Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('glucose-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#ef4444;
+    --bg:#f8f5f5; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#ece2e2; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#161212; --card:#201818; --fg:#f2eaea; --muted:#a59696; --line:#332828; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:680px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#b91c1c);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:680px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem}
+  .toggle{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:14px}
+  .toggle button{padding:8px 16px;border:0;background:var(--bg);color:var(--fg);cursor:pointer;font:inherit}
+  .toggle button.on{background:var(--c);color:#fff;font-weight:700}
+  .out{text-align:center;margin-top:8px}
+  .big{font-size:2.8rem;font-weight:800;color:var(--c);letter-spacing:-1px}
+  .big small{font-size:1rem;color:var(--muted);font-weight:600}
+  .cat{display:inline-block;margin-top:10px;padding:5px 16px;border-radius:999px;font-weight:700;color:#fff}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:680px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🩸</div>
+    <div><h1>Glucose</h1><div class="sub">Blood sugar mg/dL ⇄ mmol/L</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="toggle" id="unitToggle">
+      <button type="button" data-u="mgdl">mg/dL</button>
+      <button type="button" data-u="mmol">mmol/L</button>
+    </div>
+    <label for="value">Blood glucose reading</label>
+    <input type="number" id="value" value="180" step="any" min="0">
+  </div>
+  <div class="card out">
+    <div class="big"><span id="result">—</span> <small id="resultUnit"></small></div>
+    <div><span class="cat" id="cat"></span></div>
+  </div>
+</main>
+<footer>
+  Fasting categories (ADA): &lt;70 low · 70–99 normal · 100–125 prediabetes · ≥126 diabetes (mg/dL). Not medical advice. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/glucose-convert">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  const FACTOR = 18.0182; // mg/dL per mmol/L (glucose)
+
+  function mgdlToMmol(mgdl){
+    if(!(mgdl >= 0)) throw new Error('value must be non-negative');
+    return mgdl / FACTOR;
+  }
+  function mmolToMgdl(mmol){
+    if(!(mmol >= 0)) throw new Error('value must be non-negative');
+    return mmol * FACTOR;
+  }
+
+  // fasting category from a mg/dL value (ADA thresholds)
+  function fastingCategory(mgdl){
+    if(!(mgdl >= 0)) throw new Error('value must be non-negative');
+    if(mgdl < 70) return 'Low';
+    if(mgdl < 100) return 'Normal';
+    if(mgdl < 126) return 'Prediabetes';
+    return 'Diabetes';
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('result')){
+    const $ = id => document.getElementById(id);
+    let unit = 'mgdl';
+    const color = { 'Low': '#0369a1', 'Normal': '#16a34a', 'Prediabetes': '#d97706', 'Diabetes': '#dc2626' };
+
+    function render(){
+      const v = +$('value').value;
+      try{
+        let mgdl, shown, shownUnit;
+        if(unit === 'mgdl'){ mgdl = v; shown = mgdlToMmol(v); shownUnit = 'mmol/L'; }
+        else { mgdl = mmolToMgdl(v); shown = mgdl; shownUnit = 'mg/dL'; }
+        $('result').textContent = shown.toFixed(unit === 'mgdl' ? 2 : 1);
+        $('resultUnit').textContent = shownUnit;
+        const cat = fastingCategory(mgdl);
+        $('cat').textContent = cat + ' (fasting)';
+        $('cat').style.background = color[cat];
+      }catch(e){ $('result').textContent = '—'; $('resultUnit').textContent = ''; $('cat').textContent = ''; }
+    }
+
+    $('unitToggle').addEventListener('click', e => {
+      const b = e.target.closest('button'); if(!b) return;
+      unit = b.dataset.u;
+      [...$('unitToggle').children].forEach(x => x.classList.toggle('on', x === b));
+      render();
+    });
+    $('unitToggle').querySelector('[data-u="mgdl"]').classList.add('on');
+    $('value').addEventListener('input', render);
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('glucose-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { FACTOR, mgdlToMmol, mmolToMgdl, fastingCategory };
+</script>
+</body>
+</html>

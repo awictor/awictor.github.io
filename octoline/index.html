@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Octoline — procedural transit maps</title>
+<style>
+  :root{ --panel:#1a1d24; --panelText:#e8e6e0; --accent:#e8622a; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; font-family:"Segoe UI",Helvetica,Arial,sans-serif; background:#0e1014; color:var(--panelText); }
+  #app{ display:flex; height:100vh; }
+  #stage{ flex:1; display:flex; align-items:center; justify-content:center; padding:16px; overflow:auto; }
+  #map{ background:#fff; border-radius:6px; box-shadow:0 12px 40px rgba(0,0,0,.55); max-width:100%; max-height:100%; cursor:default; }
+  #map.picking{ cursor:crosshair; }
+  #map.picking.overstation{ cursor:pointer; }
+  #panel{ width:270px; flex-shrink:0; background:var(--panel); padding:18px 18px 24px; overflow-y:auto; border-left:1px solid #2a2e37; }
+  #panel h1{ font-size:20px; margin:0 0 2px; letter-spacing:.5px; }
+  #panel .sub{ font-size:11px; color:#8b909c; margin-bottom:18px; line-height:1.4; }
+  .ctrl{ margin-bottom:16px; }
+  .ctrl label{ display:block; font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:#9aa0ac; margin-bottom:6px; }
+  .ctrl label span{ float:right; color:var(--accent); font-weight:600; }
+  input[type=range]{ width:100%; accent-color:var(--accent); }
+  select,button{ width:100%; padding:9px 10px; border-radius:6px; border:1px solid #3a3f4a; background:#23272f; color:var(--panelText); font-size:13px; cursor:pointer; }
+  button{ background:var(--accent); border:none; font-weight:600; letter-spacing:.4px; }
+  button:hover{ filter:brightness(1.08); }
+  button.sec{ background:#23272f; border:1px solid #3a3f4a; font-weight:500; margin-top:8px; }
+  button.active{ background:#3fae6b; }
+  .row{ display:flex; gap:8px; }
+  .hint{ font-size:11px; color:#8b909c; line-height:1.5; margin-top:6px; }
+  #journeyBox{ margin-top:12px; font-size:12px; line-height:1.5; background:#12151b; border:1px solid #2a2e37; border-radius:6px; padding:10px 12px; min-height:30px; color:#c7ccd6; }
+  #journeyBox b{ color:var(--panelText); }
+  code{ background:#12151b; padding:1px 5px; border-radius:4px; color:var(--accent); }
+  @media (max-width:720px){
+    #app{ flex-direction:column; height:auto; min-height:100vh; }
+    #stage{ padding:10px; }
+    #panel{ width:100%; border-left:none; border-top:1px solid #2a2e37; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage"><canvas id="map" width="1400" height="950"></canvas></div>
+  <div id="panel">
+    <h1>Octoline</h1>
+    <div class="sub">Procedural octolinear transit maps for cities that never existed. Every line runs at 0°/45°/90°.</div>
+
+    <div class="ctrl"><button id="reseed">↻ New City</button></div>
+    <div class="ctrl">
+      <label>Theme</label>
+      <select id="theme">
+        <option value="london">London — light</option>
+        <option value="nyc">New York — light</option>
+        <option value="tokyo">Tokyo — light</option>
+        <option value="moscow">Moscow — night</option>
+      </select>
+    </div>
+    <div class="ctrl"><label>Lines <span id="linesV">6</span></label><input id="lines" type="range" min="4" max="8" value="6"></div>
+    <div class="ctrl"><label>Grid size <span id="gridV">22</span></label><input id="grid" type="range" min="14" max="30" value="22"></div>
+    <div class="ctrl"><label>Station density <span id="densV">55</span></label><input id="dens" type="range" min="25" max="90" value="55"></div>
+
+    <div class="ctrl">
+      <button id="journey" class="sec">🧭 Plan a journey</button>
+      <button id="export" class="sec">⬇ Export PNG poster</button>
+      <button id="copy" class="sec">🔗 Copy share link</button>
+    </div>
+    <div id="journeyBox">Click <b>New City</b> for a fresh network. Tap <b>Plan a journey</b>, then click two stations to route between them.</div>
+    <div class="hint">Share a city by copying the URL — the seed &amp; settings live in the <code>#hash</code>.</div>
+  </div>
+</div>
+<script>
+"use strict";
+const canvas = document.getElementById('map'), ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+/* ---------- seeded RNG (mulberry32) ---------- */
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+let rng = mulberry32(1);
+const ri = n => Math.floor(rng()*n);
+const pick = arr => arr[ri(arr.length)];
+
+/* ---------- palettes (colorblind-conscious, distinct adjacents) ---------- */
+const PALETTES = {
+  london:{ bg:'#f7f4ec', ink:'#22242b', water:'#bfe0ef', ring:'#e4ddcd', dark:false,
+    lines:['#df2622','#0350a1','#00782a','#f3a9bb','#a1a5a8','#f9a825','#000000','#00a3a0'] },
+  nyc:{ bg:'#f2f0eb', ink:'#1d1f24', water:'#cfe6f2', ring:'#e2ddd2', dark:false,
+    lines:['#0039a6','#ff6319','#6cbe45','#ee352e','#996633','#a7a9ac','#fccc0a','#00add0'] },
+  tokyo:{ bg:'#fbfaf6', ink:'#2b2b30', water:'#c9e7e6', ring:'#ece7da', dark:false,
+    lines:['#e60012','#009944','#f39800','#0079c2','#8f76d6','#e4007f','#00a0a8','#9b7d3b'] },
+  moscow:{ bg:'#141821', ink:'#eef1f6', water:'#1d3a52', ring:'#20252f', dark:true,
+    lines:['#ee2b2b','#3fae6b','#3b7ddd','#37b6d3','#e8b23a','#c85fd0','#f08a3c','#9aa6b2'] }
+};
+
+/* ---------- name generation ---------- */
+const SYL_A=['bran','vor','kel','mira','ost','dun','sel','tan','fjor','ash','gro','lun','pol','vik','carn','sur','hel','rho','tor','wend'];
+const SYL_B=['dale','holm','vik','burg','stad','port','mouth','field','haven','grad','ton','by','ness','forth','gate','mere','wick','fell','stow','crest'];
+const LINE_ADJ=['North','Central','Grand','Old','Royal','Union','Harbour','Garden','Cross','East','Silver','Amber','Coastal','Inner','Metro','Park'];
+const LINE_NOUN=['Line','Loop','Express','Circle','Way','Link','Route','Radial'];
+const STN_PRE=['King','Queen','St. ','Market','Angel','Elm','Temple','Fort','Mill','Bay','Cross','High','Bishops','West','Green','Iron','Cathedral','Dock','Castle','New'];
+const STN_SUF=['s Cross','gate','field','bridge',' side','wick','borough',' mount','ham','stead','moor','park','wharf','row','court','hill','end','quay',' Square',' Central'];
+const cap = s => s.charAt(0).toUpperCase()+s.slice(1);
+const cityName = () => cap(pick(SYL_A))+pick(SYL_B);
+const stationName = () => pick(STN_PRE)+pick(STN_SUF);
+const lineName = () => pick(LINE_ADJ)+' '+pick(LINE_NOUN);
+const BRIDGES=['Iron','Kings','Stone','Union','Ferry','Trinity','Millers','Battle','Swan','Abbey'];
+
+/* ---------- geometry ---------- */
+const DIRS=[[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1],[0,-1],[1,-1]]; // 8 octolinear directions
+const key = (x,y) => x+','+y;
+
+let state = { seed:1, lines:6, grid:22, dens:55, theme:'london' };
+let model = null; // generated network
+let journeyMode=false, journeyPick=[], hoverK=null, currentRoute=null;
+const DEFAULT_MSG='Click <b>New City</b> for a fresh network. Tap <b>Plan a journey</b>, then click two stations to route between them.';
+
+/* ---------- network generation ---------- */
+function generate(){
+  rng = mulberry32(state.seed);
+  const gw = state.grid, gh = Math.round(state.grid*0.66);
+  const theme = PALETTES[state.theme];
+  const nLines = state.lines;
+  const step = Math.max(2, Math.round(9 - state.dens/12)); // stations spacing (lower dens => sparser)
+  const lines=[];
+  const nodeLines = new Map();  // "x,y" -> Set(lineIdx)
+  const edgeUse = new Map();    // canonical edge -> [lineIdx...]
+
+  for(let li=0; li<nLines; li++){
+    // start near a ring around centre so the network feels radial
+    let cx=gw/2, cy=gh/2;
+    let ang = (li/nLines)*Math.PI*2 + rng()*0.6;
+    let x = Math.round(cx + Math.cos(ang)*(gw*0.32));
+    let y = Math.round(cy + Math.sin(ang)*(gh*0.32));
+    x=Math.max(0,Math.min(gw-1,x)); y=Math.max(0,Math.min(gh-1,y));
+    let dir = ri(8);
+    const nodes=[{x,y}];
+    const segCount = 5 + ri(5);
+    for(let s=0; s<segCount; s++){
+      const r=rng();
+      if(r<0.55){/*straight*/}
+      else if(r<0.9) dir=(dir + (rng()<0.5?1:7))%8; // ±45°
+      else dir=(dir + (rng()<0.5?2:6))%8;            // ±90°
+      const len = 2 + ri(4);
+      const [dx,dy]=DIRS[dir];
+      for(let k=0;k<len;k++){
+        let nx=x+dx, ny=y+dy;
+        if(nx<0||nx>=gw||ny<0||ny>=gh){ dir=(dir+4)%8; break; } // bounce off edge
+        x=nx; y=ny; nodes.push({x,y});
+      }
+    }
+    // dedup consecutive duplicates
+    const clean=[nodes[0]];
+    for(let i=1;i<nodes.length;i++){ const p=nodes[i],q=clean[clean.length-1]; if(p.x!==q.x||p.y!==q.y) clean.push(p); }
+    if(clean.length<3) continue;
+    const line={ idx:lines.length, color:theme.lines[lines.length%theme.lines.length], name:lineName(), nodes:clean };
+    lines.push(line);
+  }
+
+  // register node membership + edge usage
+  lines.forEach(line=>{
+    line.nodes.forEach(n=>{ const k=key(n.x,n.y); if(!nodeLines.has(k)) nodeLines.set(k,new Set()); nodeLines.get(k).add(line.idx); });
+    for(let i=0;i+1<line.nodes.length;i++){
+      const a=line.nodes[i], b=line.nodes[i+1];
+      const ek = a.x<b.x||(a.x===b.x&&a.y<=b.y) ? key(a.x,a.y)+'|'+key(b.x,b.y) : key(b.x,b.y)+'|'+key(a.x,a.y);
+      if(!edgeUse.has(ek)) edgeUse.set(ek,[]);
+      const arr=edgeUse.get(ek); if(!arr.includes(line.idx)) arr.push(line.idx);
+    }
+  });
+
+  // interchanges: nodes shared by >=2 lines
+  const interchanges=[];
+  nodeLines.forEach((set,k)=>{ if(set.size>=2){ const [x,y]=k.split(',').map(Number); interchanges.push({x,y,lines:[...set],name:stationName()}); } });
+
+  // stations along each line + termini
+  lines.forEach(line=>{
+    line.stations=[];
+    const N=line.nodes.length;
+    for(let i=0;i<N;i++){
+      const isEnd = i===0||i===N-1;
+      if(isEnd || i%step===0){ const n=line.nodes[i]; if(nodeLines.get(key(n.x,n.y)).size<2) line.stations.push({x:n.x,y:n.y,term:isEnd,name:isEnd?stationName():null}); }
+    }
+  });
+
+  // adjacency for journey planning: node -> [{to,line}]
+  const adj=new Map();
+  const addAdj=(a,b,li)=>{ const ka=key(a.x,a.y); if(!adj.has(ka)) adj.set(ka,[]); adj.get(ka).push({to:key(b.x,b.y),line:li}); };
+  lines.forEach(line=>{ for(let i=0;i+1<line.nodes.length;i++){ addAdj(line.nodes[i],line.nodes[i+1],line.idx); addAdj(line.nodes[i+1],line.nodes[i],line.idx);} });
+
+  // river: a wavy path crossing the map (in grid coords), + bridge crossings
+  const vertical = rng()<0.5;
+  const river=[]; const segs=8;
+  const base = 0.3+rng()*0.4;
+  for(let i=0;i<=segs;i++){
+    const t=i/segs;
+    if(vertical){ river.push({x:(base+Math.sin(t*3+state.seed)*0.14)*gw, y:t*gh}); }
+    else { river.push({x:t*gw, y:(base+Math.sin(t*3+state.seed)*0.14)*gh}); }
+  }
+
+  model={ gw,gh,theme, lines, interchanges, edgeUse, adj,
+    city:cityName(), year:1863+ri(120), river,
+    bridges: findBridges(lines,river) };
+}
+
+function segInt(p1,p2,p3,p4){
+  const d=(p4.y-p3.y)*(p2.x-p1.x)-(p4.x-p3.x)*(p2.y-p1.y);
+  if(Math.abs(d)<1e-9) return null;
+  const ua=((p4.x-p3.x)*(p1.y-p3.y)-(p4.y-p3.y)*(p1.x-p3.x))/d;
+  const ub=((p2.x-p1.x)*(p1.y-p3.y)-(p2.y-p1.y)*(p1.x-p3.x))/d;
+  if(ua<0||ua>1||ub<0||ub>1) return null;
+  return { x:p1.x+ua*(p2.x-p1.x), y:p1.y+ua*(p2.y-p1.y) };
+}
+function findBridges(lines,river){
+  const out=[]; const seen=new Set();
+  lines.forEach(line=>{ for(let i=0;i+1<line.nodes.length;i++){
+    for(let r=0;r+1<river.length;r++){
+      const p=segInt(line.nodes[i],line.nodes[i+1],river[r],river[r+1]);
+      if(p){ const gk=Math.round(p.x)+','+Math.round(p.y); if(!seen.has(gk)&&out.length<4){ seen.add(gk); out.push({x:p.x,y:p.y,name:pick(BRIDGES)+' Bridge'}); } }
+    }
+  }});
+  return out;
+}
+
+/* ---------- rendering ---------- */
+let LAY=null;
+function computeLayout(){
+  const m={l:70,r:70,t:120,b:90};
+  const cell=Math.min((W-m.l-m.r)/(model.gw-1),(H-m.t-m.b)/(model.gh-1));
+  const ox=m.l+((W-m.l-m.r)-(model.gw-1)*cell)/2;
+  const oy=m.t+((H-m.t-m.b)-(model.gh-1)*cell)/2;
+  LAY={cell,ox,oy};
+}
+const P=(x,y)=>({x:LAY.ox+x*LAY.cell, y:LAY.oy+y*LAY.cell});
+
+function draw(highlight){
+  computeLayout();
+  const th=model.theme, cell=LAY.cell, LW=Math.max(5,cell*0.32), GAP=LW*0.85;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle=th.bg; ctx.fillRect(0,0,W,H);
+
+  // fare/zone rings
+  const c=P(model.gw/2,model.gh/2);
+  ctx.strokeStyle=th.ring; ctx.lineWidth=1.5;
+  for(let z=1;z<=4;z++){ ctx.beginPath(); ctx.arc(c.x,c.y,z*cell*2.4,0,Math.PI*2); ctx.stroke(); }
+
+  // river / coastline
+  ctx.strokeStyle=th.water; ctx.lineWidth=cell*0.9; ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.beginPath();
+  model.river.forEach((r,i)=>{ const p=P(r.x,r.y); i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y); });
+  ctx.stroke();
+
+  // line strokes with de-duplicated parallel corridors
+  ctx.lineCap='round'; ctx.lineJoin='round'; ctx.lineWidth=LW;
+  const dim = highlight? 0.18:1;
+  model.lines.forEach(line=>{
+    ctx.strokeStyle=line.color; ctx.globalAlpha = (highlight && !highlight.lineSet.has(line.idx))? dim : 1;
+    for(let i=0;i+1<line.nodes.length;i++){
+      const a=line.nodes[i], b=line.nodes[i+1];
+      const ek = a.x<b.x||(a.x===b.x&&a.y<=b.y) ? key(a.x,a.y)+'|'+key(b.x,b.y) : key(b.x,b.y)+'|'+key(a.x,a.y);
+      const users=model.edgeUse.get(ek); const rank=users.indexOf(line.idx), cnt=users.length;
+      const off=(rank-(cnt-1)/2)*GAP;
+      let dx=b.x-a.x, dy=b.y-a.y; const L=Math.hypot(dx,dy)||1; const px=-dy/L*off, py=dx/L*off;
+      const pa=P(a.x,a.y), pb=P(b.x,b.y);
+      ctx.beginPath(); ctx.moveTo(pa.x+px,pa.y+py); ctx.lineTo(pb.x+px,pb.y+py); ctx.stroke();
+    }
+  });
+  ctx.globalAlpha=1;
+
+  // journey highlight overlay
+  if(highlight){
+    ctx.lineWidth=LW*0.55; ctx.strokeStyle=th.dark?'#fff':'#111'; ctx.setLineDash([cell*0.5,cell*0.35]);
+    ctx.beginPath();
+    highlight.path.forEach((k,i)=>{ const [x,y]=k.split(',').map(Number); const p=P(x,y); i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y); });
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  // regular station ticks
+  model.lines.forEach(line=>{ line.stations.forEach(st=>{ if(!st.term) drawTick(st,line,LW); }); });
+
+  // termini caps (filled circles)
+  model.lines.forEach(line=>{ line.stations.forEach(st=>{ if(st.term){ const p=P(st.x,st.y);
+    ctx.fillStyle=line.color; ctx.beginPath(); ctx.arc(p.x,p.y,LW*0.62,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle=th.bg; ctx.beginPath(); ctx.arc(p.x,p.y,LW*0.3,0,Math.PI*2); ctx.fill(); } }); });
+
+  // interchange rings (white with dark outline)
+  model.interchanges.forEach(ic=>{ const p=P(ic.x,ic.y);
+    ctx.fillStyle=th.dark?'#e8e8e8':'#fff'; ctx.strokeStyle=th.ink; ctx.lineWidth=LW*0.28;
+    ctx.beginPath(); ctx.arc(p.x,p.y,LW*0.72,0,Math.PI*2); ctx.fill(); ctx.stroke(); });
+
+  // labels with collision avoidance
+  const boxes=[];
+  ctx.font='600 '+Math.round(cell*0.62)+'px "Segoe UI",Helvetica,sans-serif';
+  model.interchanges.forEach(ic=>placeLabel(ic.name,P(ic.x,ic.y),boxes,th.ink,LW));
+  model.lines.forEach(line=>line.stations.forEach(st=>{ if(st.term&&st.name) placeLabel(st.name,P(st.x,st.y),boxes,th.ink,LW); }));
+  // bridge labels
+  ctx.font='italic 600 '+Math.round(cell*0.5)+'px "Segoe UI",Helvetica,sans-serif';
+  model.bridges.forEach(br=>placeLabel(br.name,P(br.x,br.y),boxes,th.dark?'#8fc7e6':'#2a6b90',LW,true));
+
+  drawChrome(th,cell);
+}
+
+function drawTick(st,line,LW){
+  // perpendicular tick using local direction
+  const idx=line.nodes.findIndex(n=>n.x===st.x&&n.y===st.y);
+  const a=line.nodes[Math.max(0,idx-1)], b=line.nodes[Math.min(line.nodes.length-1,idx+1)];
+  let dx=b.x-a.x, dy=b.y-a.y; const L=Math.hypot(dx,dy)||1; const px=-dy/L, py=dx/L;
+  const p=P(st.x,st.y), t=LW*0.7;
+  ctx.strokeStyle=model.theme.dark?'#dfe3ea':'#2a2a2a'; ctx.lineWidth=Math.max(2,LW*0.28); ctx.lineCap='butt';
+  ctx.beginPath(); ctx.moveTo(p.x+px*t,p.y+py*t); ctx.lineTo(p.x-px*t,p.y-py*t); ctx.stroke();
+  ctx.lineCap='round';
+}
+
+function placeLabel(text,p,boxes,color,LW,center){
+  // ctx.font is a CSS shorthand ("600 13px ..." / "italic 600 11px ..."); parse the px size, not the leading weight token
+  const w=ctx.measureText(text).width, h=(parseInt((ctx.font.match(/(\d+(?:\.\d+)?)px/)||[])[1],10)||Math.round(LW))*1.1;
+  const cands = center
+    ? [[-w/2,-LW*1.4-h],[-w/2,LW*1.4]]
+    : [[LW,-h/2],[-w-LW,-h/2],[-w/2,-LW-h],[-w/2,LW*1.2]];
+  for(const [ox,oy] of cands){
+    const bx=p.x+ox, by=p.y+oy, box={x:bx,y:by,w,h};
+    if(bx<4||bx+w>W-4||by<4||by+h>H-4) continue;
+    let hit=false; for(const b of boxes){ if(bx<b.x+b.w&&bx+w>b.x&&by<b.y+b.h&&by+h>b.y){ hit=true; break; } }
+    if(hit) continue;
+    boxes.push(box);
+    ctx.fillStyle=color; ctx.textBaseline='top';
+    ctx.fillText(text,bx,by);
+    return;
+  }
+}
+
+function drawChrome(th,cell){
+  // title cartouche
+  ctx.fillStyle=th.dark?'#1c2531':'#fff'; ctx.strokeStyle=th.ink; ctx.lineWidth=3;
+  const cw=Math.min(560,W*0.45), cx0=40, cy0=32, chh=64;
+  roundRect(cx0,cy0,cw,chh,8); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='#e8622a'; ctx.fillRect(cx0,cy0,10,chh);
+  ctx.fillStyle=th.ink; ctx.textBaseline='middle';
+  ctx.font='700 34px "Segoe UI",Helvetica,sans-serif'; ctx.fillText(model.city+' Metro',cx0+26,cy0+chh/2-8);
+  ctx.font='500 15px "Segoe UI",Helvetica,sans-serif'; ctx.fillStyle=th.dark?'#9fb0c2':'#6a6a6a';
+  ctx.fillText('Est. '+model.year+' · '+model.lines.length+' lines · '+model.interchanges.length+' interchanges',cx0+26,cy0+chh/2+16);
+
+  // legend
+  const lx=40, ly=H-48-model.lines.length*24, sw=280;
+  ctx.fillStyle=th.dark?'#1c2531':'#fff'; ctx.strokeStyle=th.ink; ctx.lineWidth=2;
+  roundRect(lx,ly-14,sw,model.lines.length*24+24,8); ctx.fill(); ctx.stroke();
+  ctx.font='600 15px "Segoe UI",Helvetica,sans-serif'; ctx.textBaseline='middle';
+  model.lines.forEach((line,i)=>{ const yy=ly+10+i*24;
+    ctx.fillStyle=line.color; roundRect(lx+14,yy-6,26,12,6); ctx.fill();
+    ctx.fillStyle=th.ink; ctx.fillText(line.name,lx+52,yy);
+  });
+  // attribution
+  ctx.font='500 13px "Segoe UI",Helvetica,sans-serif'; ctx.fillStyle=th.dark?'#5f6b78':'#9a9a9a';
+  ctx.textBaseline='bottom'; ctx.fillText('octoline · seed '+state.seed,W-40-ctx.measureText('octoline · seed '+state.seed).width,H-18);
+}
+function roundRect(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+
+/* ---------- journey planning (Dijkstra over node+line states) ---------- */
+function plan(startK,endK){
+  const changePenalty=6;
+  const dist=new Map(), prev=new Map();
+  const startStates=[];
+  (model.adj.get(startK)||[]).forEach(e=>{ const s=startK+'#'+e.line; dist.set(s,0); prev.set(s,null); startStates.push(s); });
+  const pq=startStates.map(s=>({s,d:0}));
+  const done=new Set();
+  while(pq.length){
+    pq.sort((a,b)=>a.d-b.d); const {s,d}=pq.shift();
+    if(done.has(s)) continue; done.add(s);
+    const [nodeK,lineS]=s.split('#'); const line=+lineS;
+    if(nodeK===endK) return build(prev,s);
+    (model.adj.get(nodeK)||[]).forEach(e=>{
+      const ns=e.to+'#'+e.line; const nd=d+1+(e.line!==line?changePenalty:0);
+      if(nd<(dist.get(ns)??Infinity)){ dist.set(ns,nd); prev.set(ns,s); pq.push({s:ns,d:nd}); }
+    });
+  }
+  return null;
+}
+function build(prev,end){
+  const states=[]; let s=end; while(s){ states.unshift(s); s=prev.get(s); }
+  const path=states.map(st=>st.split('#')[0]);
+  const clean=[path[0]]; for(let i=1;i<path.length;i++) if(path[i]!==clean[clean.length-1]) clean.push(path[i]);
+  const usedLines=[]; states.forEach(st=>{ const l=+st.split('#')[1]; if(usedLines[usedLines.length-1]!==l) usedLines.push(l); });
+  return { path:clean, lineSet:new Set(usedLines), order:usedLines };
+}
+function nearestStation(px,py){
+  let best=null,bd=Infinity;
+  const test=(x,y)=>{ const p=P(x,y); const d=(p.x-px)**2+(p.y-py)**2; if(d<bd){bd=d;best=key(x,y);} };
+  model.interchanges.forEach(ic=>test(ic.x,ic.y));
+  model.lines.forEach(l=>l.stations.forEach(st=>test(st.x,st.y)));
+  return bd < (LAY.cell*1.6)**2 ? best : null;
+}
+function stationLabel(k){
+  const ic=model.interchanges.find(i=>key(i.x,i.y)===k); if(ic) return ic.name;
+  for(const l of model.lines){ const st=l.stations.find(s=>key(s.x,s.y)===k); if(st&&st.name) return st.name; }
+  return 'a local stop';
+}
+
+/* ---------- interaction ---------- */
+function evtToCanvas(e){ const r=canvas.getBoundingClientRect(); return { px:(e.clientX-r.left)*(W/r.width), py:(e.clientY-r.top)*(H/r.height) }; }
+// re-draw transient markers on top of the current frame: pending start pick + hover ring
+function drawOverlays(){
+  if(!LAY) return;
+  if(journeyPick.length===1){ const p=P(...journeyPick[0].split(',').map(Number));
+    ctx.fillStyle='#e8622a'; ctx.beginPath(); ctx.arc(p.x,p.y,LAY.cell*0.5,0,Math.PI*2); ctx.fill(); }
+  if(journeyMode&&hoverK&&hoverK!==journeyPick[0]){ const p=P(...hoverK.split(',').map(Number));
+    ctx.strokeStyle='#e8622a'; ctx.lineWidth=Math.max(2,LAY.cell*0.14);
+    ctx.beginPath(); ctx.arc(p.x,p.y,LAY.cell*0.58,0,Math.PI*2); ctx.stroke(); }
+}
+canvas.addEventListener('click',e=>{
+  if(!journeyMode||!model) return;
+  const {px,py}=evtToCanvas(e);
+  const k=nearestStation(px,py);
+  if(!k){ document.getElementById('journeyBox').innerHTML='No station there — click a tick mark, ring, or terminus.'; return; }
+  journeyPick.push(k);
+  if(journeyPick.length===2){
+    const res=plan(journeyPick[0],journeyPick[1]);
+    if(res){ currentRoute=res; draw(res); drawOverlays(); reportJourney(res); }
+    else { currentRoute=null; document.getElementById('journeyBox').innerHTML='No route between those stations — try two stops on the connected network.'; draw(null); }
+    journeyPick=[];
+  } else {
+    currentRoute=null;
+    document.getElementById('journeyBox').innerHTML='From <b>'+stationLabel(k)+'</b> — now click your destination.';
+    draw(null); drawOverlays();
+  }
+});
+canvas.addEventListener('mousemove',e=>{
+  if(!journeyMode||!model) return;
+  const {px,py}=evtToCanvas(e);
+  const k=nearestStation(px,py);
+  canvas.classList.toggle('overstation',!!k);
+  if(k!==hoverK){ hoverK=k; draw(currentRoute); drawOverlays(); }
+});
+canvas.addEventListener('mouseleave',()=>{
+  if(hoverK!==null){ hoverK=null; canvas.classList.remove('overstation'); if(journeyMode){ draw(currentRoute); drawOverlays(); } }
+});
+function reportJourney(res){
+  const names=res.order.map(li=>'<b style="color:'+model.lines[li].color+'">'+model.lines[li].name+'</b>');
+  const changes=res.order.length-1;
+  const from=stationLabel(res.path[0]), to=stationLabel(res.path[res.path.length-1]);
+  document.getElementById('journeyBox').innerHTML=
+    '<b>'+from+'</b> → <b>'+to+'</b><br>'+res.path.length+' stops · '+changes+' change'+(changes===1?'':'s')+
+    '<br>Ride: '+names.join(' → ');
+}
+
+/* ---------- controls + URL hash ---------- */
+let hashInternal=false;
+function syncHash(){
+  const h='s='+state.seed+'&l='+state.lines+'&g='+state.grid+'&d='+state.dens+'&t='+state.theme;
+  if(location.hash.slice(1)===h) return;      // no change -> no hashchange event, nothing to guard
+  hashInternal=true;                          // mark this assignment as self-triggered
+  location.hash=h;
+}
+function readHash(){
+  const h=location.hash.slice(1); if(!h) return false;
+  const q=Object.fromEntries(h.split('&').map(p=>p.split('=')));
+  if(q.s) state.seed=+q.s|0; if(q.l) state.lines=+q.l; if(q.g) state.grid=+q.g; if(q.d) state.dens=+q.d;
+  if(q.t&&PALETTES[q.t]) state.theme=q.t;
+  return true;
+}
+function pushToUI(){
+  lines.value=state.lines; grid.value=state.grid; dens.value=state.dens; theme.value=state.theme;
+  linesV.textContent=state.lines; gridV.textContent=state.grid; densV.textContent=state.dens;
+}
+function rebuild(){
+  generate(); currentRoute=null; hoverK=null; journeyPick=[];
+  draw(null); syncHash();
+  document.getElementById('journeyBox').innerHTML = journeyMode
+    ? 'Journey mode on — click a start station, then a destination.'
+    : DEFAULT_MSG;
+}
+
+const lines=document.getElementById('lines'), grid=document.getElementById('grid'), dens=document.getElementById('dens'), theme=document.getElementById('theme');
+const linesV=document.getElementById('linesV'), gridV=document.getElementById('gridV'), densV=document.getElementById('densV');
+lines.oninput=()=>{ state.lines=+lines.value; linesV.textContent=lines.value; rebuild(); };
+grid.oninput =()=>{ state.grid=+grid.value; gridV.textContent=grid.value; rebuild(); };
+dens.oninput =()=>{ state.dens=+dens.value; densV.textContent=dens.value; rebuild(); };
+theme.onchange=()=>{ state.theme=theme.value; rebuild(); };
+document.getElementById('reseed').onclick=()=>{ state.seed=(Math.random()*1e9)|0; rebuild(); resetJourney(); };
+document.getElementById('journey').onclick=(e)=>{
+  journeyMode=!journeyMode; journeyPick=[]; currentRoute=null; hoverK=null;
+  e.target.classList.toggle('active',journeyMode);
+  canvas.classList.toggle('picking',journeyMode);
+  canvas.classList.remove('overstation');
+  document.getElementById('journeyBox').innerHTML= journeyMode
+    ? 'Journey mode on — click a start station, then a destination.'
+    : DEFAULT_MSG;
+  draw(null);
+};
+document.getElementById('export').onclick=()=>{
+  draw(null);
+  const a=document.createElement('a'); a.download=model.city.toLowerCase()+'-metro-'+state.seed+'.png';
+  a.href=canvas.toDataURL('image/png'); a.click();
+  draw(currentRoute); if(journeyMode) drawOverlays();
+};
+document.getElementById('copy').onclick=()=>{
+  const box=document.getElementById('journeyBox');
+  const done=()=>{ box.innerHTML='Link copied — paste it anywhere to share this exact city.'; };
+  const fail=()=>{ box.innerHTML='Copy failed — grab the URL from the address bar to share.'; };
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(location.href).then(done).catch(fail); }
+  else fail();
+};
+function resetJourney(){
+  journeyMode=false; journeyPick=[]; currentRoute=null; hoverK=null;
+  document.getElementById('journey').classList.remove('active');
+  canvas.classList.remove('picking','overstation');
+  document.getElementById('journeyBox').innerHTML=DEFAULT_MSG;
+}
+
+/* ---------- boot ---------- */
+if(!readHash()) state.seed=(Math.random()*1e9)|0;
+pushToUI(); generate(); draw(null); syncHash();
+window.addEventListener('hashchange',()=>{
+  if(hashInternal){ hashInternal=false; return; }   // our own syncHash write -> already rendered, skip double work
+  if(readHash()){ pushToUI(); resetJourney(); generate(); draw(null); }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JsonPath — extract a value from JSON by path</title>
+<meta name="description" content="Free offline JSON path extractor. Pull a value out of a JSON document with a dot/bracket path like user.addresses[0].city. Great for digging into API responses. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/json-path/">
+<style>
+  :root{
+    --c:#0c4a6e; --bg:#f8f8f9; --fg:#18181b; --muted:#52525b;
+    --card:#ffffff; --border:#e4e4e7; --code:#efeff1; --bad:#dc2626; --accent:#0284c7;
+  }
+  [data-theme="dark"]{
+    --bg:#09090b; --fg:#e7e7ea; --muted:#8b8b93; --card:#151518;
+    --border:#27272a; --code:#1c1c20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#0369a1);display:grid;place-items:center;color:#fff;font-size:15px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  textarea{width:100%;min-height:180px;padding:12px 14px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:.9rem;line-height:1.5;resize:vertical;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  input{width:100%;padding:11px 13px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:1.05rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin-top:14px}
+  input.bad{border-color:var(--bad)}
+  textarea:focus,input:focus{outline:2px solid var(--accent);border-color:var(--accent)}
+  .top{display:flex;justify-content:space-between;align-items:center;margin:16px 0 6px}
+  .copy{background:none;border:1px solid var(--border);color:var(--fg);border-radius:8px;padding:5px 10px;cursor:pointer;font-size:.8rem}
+  pre{margin:0;padding:14px 16px;border:1px solid var(--border);border-radius:11px;background:var(--code);
+    font-family:ui-monospace,monospace;font-size:.92rem;line-height:1.55;white-space:pre-wrap;word-break:break-word;min-height:60px}
+  .type{font-size:.74rem;color:var(--muted);margin-top:6px;font-family:ui-monospace,monospace}
+  .err{color:var(--bad);font-size:.84rem;margin-top:8px;min-height:18px}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  .hint code{background:var(--code);padding:1px 5px;border-radius:5px}
+  footer{max-width:820px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--accent)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('jp.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">$.</div>
+  <div>
+    <h1>JsonPath</h1>
+    <p class="sub">Extract a value from JSON by path</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <label for="json">JSON</label>
+    <textarea id="json" spellcheck="false">{
+  "user": {
+    "name": "Alex",
+    "addresses": [
+      { "city": "Seattle", "zip": "98101" },
+      { "city": "Austin", "zip": "78701" }
+    ]
+  },
+  "tags": ["a", "b", "c"]
+}</textarea>
+    <label for="path" style="margin-top:14px">Path</label>
+    <input id="path" spellcheck="false" value="user.addresses[0].city">
+    <div class="top"><label style="margin:0">Value</label><button class="copy" id="copy">Copy</button></div>
+    <pre id="out"></pre>
+    <div class="type" id="type"></div>
+    <div class="err" id="err"></div>
+    <p class="hint">Path syntax: dots and brackets — <code>a.b</code>, <code>a[0]</code>, <code>a["key with spaces"]</code>,
+      optional leading <code>$</code>. An empty path returns the whole document. Runs 100% locally.</p>
+  </div>
+</main>
+<footer>
+  JsonPath is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/json-path">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function tokenizePath(path){
+  var s = String(path).trim();
+  if(s[0] === '$') s = s.slice(1);
+  var tokens = [];
+  if(s === '') return tokens;
+  var re = /\.?([A-Za-z_$][\w$-]*)|\[\s*(\d+)\s*\]|\[\s*'([^']*)'\s*\]|\[\s*"([^"]*)"\s*\]/g;
+  var m, last = 0;
+  while((m = re.exec(s)) !== null){
+    if(m.index !== last) throw new Error('invalid path at "' + s.slice(last) + '"');
+    if(m[1] !== undefined) tokens.push(m[1]);
+    else if(m[2] !== undefined) tokens.push(Number(m[2]));
+    else if(m[3] !== undefined) tokens.push(m[3]);
+    else tokens.push(m[4]);
+    last = re.lastIndex;
+  }
+  if(last !== s.length) throw new Error('invalid path at "' + s.slice(last) + '"');
+  return tokens;
+}
+function query(obj, path){
+  var toks = tokenizePath(path);
+  var cur = obj;
+  for(var i = 0; i < toks.length; i++){
+    if(cur == null) return undefined;
+    var k = toks[i];
+    if(typeof k === 'number'){
+      if(!Array.isArray(cur)) return undefined;
+      cur = cur[k];
+    } else {
+      if(typeof cur !== 'object' || Array.isArray(cur)) return undefined;
+      cur = cur[k];
+    }
+  }
+  return cur;
+}
+function queryJson(text, path){
+  var data = JSON.parse(text);   // throws on bad JSON
+  return query(data, path);      // throws on bad path
+}
+function typeOf(v){
+  if(v === null) return 'null';
+  if(Array.isArray(v)) return 'array[' + v.length + ']';
+  return typeof v;
+}
+
+if(typeof module !== 'undefined') module.exports = { tokenizePath, query, queryJson, typeOf };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var jsonEl = document.getElementById('json');
+  var pathEl = document.getElementById('path');
+  var outEl = document.getElementById('out');
+  var typeEl = document.getElementById('type');
+  var errEl = document.getElementById('err');
+
+  function render(){
+    errEl.textContent = ''; pathEl.classList.remove('bad');
+    var data;
+    try{ data = JSON.parse(jsonEl.value); }
+    catch(e){ errEl.textContent = 'Invalid JSON: ' + e.message; outEl.textContent = ''; typeEl.textContent = ''; return; }
+    var val;
+    try{ val = query(data, pathEl.value); }
+    catch(e){ pathEl.classList.add('bad'); errEl.textContent = e.message; outEl.textContent = ''; typeEl.textContent = ''; return; }
+    if(val === undefined){ outEl.textContent = '(no value at that path)'; typeEl.textContent = 'undefined'; }
+    else { outEl.textContent = JSON.stringify(val, null, 2); typeEl.textContent = 'type: ' + typeOf(val); }
+    try{ localStorage.setItem('jp.json', jsonEl.value); localStorage.setItem('jp.path', pathEl.value); }catch(e){}
+  }
+  [jsonEl, pathEl].forEach(function(x){ x.addEventListener('input', render); });
+  document.getElementById('copy').addEventListener('click', function(){
+    if(navigator.clipboard) navigator.clipboard.writeText(outEl.textContent);
+  });
+  try{ var s = localStorage.getItem('jp.json'); if(s !== null) jsonEl.value = s;
+       var p = localStorage.getItem('jp.path'); if(p !== null) pathEl.value = p; }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('jp.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('jp.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

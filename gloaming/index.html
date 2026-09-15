@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Gloaming — a snake in the dark</title>
+<style>
+  :root{ --ink:#e9eef7; --dim:#7f8aa3; --glow:#8fe3ff; --food:#ffd66b; }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{ height:100%; background:#04060a; color:var(--ink);
+    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; overflow:hidden;
+    -webkit-user-select:none; user-select:none; touch-action:none; }
+  #wrap{ position:fixed; inset:0; display:grid; place-items:center; }
+  #stage{ position:relative; }
+  canvas{ display:block; border-radius:6px; box-shadow:0 0 120px rgba(20,40,70,.5) inset,0 0 0 1px rgba(120,170,220,.07); }
+  #hud{ position:absolute; top:10px; left:12px; right:12px; display:flex; justify-content:space-between;
+    align-items:flex-start; font-size:13px; letter-spacing:.06em; pointer-events:none; text-shadow:0 1px 3px #000; }
+  #hud .r{ text-align:right; }
+  #score{ font-size:22px; color:var(--ink); }
+  #best,#seedlbl{ color:var(--dim); font-size:11px; }
+  #pings{ margin-top:6px; display:flex; gap:5px; justify-content:flex-end; }
+  #pings i{ width:16px; height:5px; border-radius:3px; background:rgba(143,227,255,.16); display:block;
+    transition:background .25s,box-shadow .25s; }
+  #pings i.on{ background:var(--glow); box-shadow:0 0 8px var(--glow); }
+  #oil{ margin-top:8px; width:120px; height:4px; border-radius:3px; background:rgba(255,214,107,.12); overflow:hidden; }
+  #oil b{ display:block; height:100%; width:100%; background:linear-gradient(90deg,#ff9d5b,var(--food));
+    transform-origin:left; transition:transform .12s linear; }
+  #overlay{ position:absolute; inset:0; display:grid; place-items:center; text-align:center; padding:24px;
+    background:radial-gradient(circle at 50% 45%,rgba(6,10,18,.55),rgba(2,4,8,.94)); pointer-events:auto; }
+  #overlay.hidden{ display:none; }
+  #overlay h1{ font-size:40px; font-weight:800; letter-spacing:.14em; color:var(--glow);
+    text-shadow:0 0 26px rgba(143,227,255,.55); margin-bottom:2px; }
+  #overlay .tag{ color:var(--dim); font-size:13px; margin-bottom:22px; max-width:34ch; line-height:1.5; }
+  #overlay .big{ font-size:15px; color:var(--ink); margin-bottom:8px; }
+  #overlay .keys{ color:var(--dim); font-size:12px; line-height:1.9; margin-bottom:20px; }
+  #overlay .keys b{ color:var(--glow); font-weight:600; }
+  button{ font:inherit; color:#04060a; background:var(--glow); border:0; padding:11px 26px; border-radius:22px;
+    font-weight:700; letter-spacing:.08em; cursor:pointer; box-shadow:0 0 22px rgba(143,227,255,.4); }
+  button.ghost{ background:transparent; color:var(--dim); box-shadow:none; padding:8px 14px; font-weight:500; }
+  #row{ display:flex; gap:10px; align-items:center; justify-content:center; margin-top:6px; flex-wrap:wrap; }
+  #share{ margin-top:14px; font-size:11px; color:var(--dim); word-break:break-all; max-width:40ch; }
+  #share.copied{ color:var(--glow); }
+  a{ color:var(--glow); }
+</style>
+</head>
+<body>
+<div id="wrap"><div id="stage">
+  <canvas id="cv"></canvas>
+  <div id="hud">
+    <div><div id="score">0</div><div id="best">best 0</div><div id="oil"><b id="oilbar"></b></div></div>
+    <div class="r"><div id="seedlbl">seed —</div><div id="pings"></div></div>
+  </div>
+  <div id="overlay">
+    <h1>GLOAMING</h1>
+    <div class="tag">A snake in the dark, lit only by the glow it carries. Your body vanishes past the light — remember your coils, or loop into them.</div>
+    <div id="ovbody"></div>
+    <div class="keys">
+      <b>arrows / WASD</b> steer &nbsp;·&nbsp; <b>space</b> memory ping &nbsp;·&nbsp; <b>R</b> restart<br>
+      on touch: <b>swipe</b> to steer &nbsp;·&nbsp; <b>tap</b> to ping
+    </div>
+    <div id="row"></div>
+    <div id="share"></div>
+  </div>
+</div></div>
+<script>
+"use strict";
+(function(){
+// ---------- config ----------
+var GRID = 26, CELL = 22;                 // logical grid; canvas sized to fit
+var W = GRID*CELL, H = GRID*CELL;
+var BASE_STEP = 150, MIN_STEP = 66;       // ms per move; ramps with length
+var LIGHT_MAX = 5.4, LIGHT_MIN = 2.3;     // lantern-oil radius bounds (in cells)
+var OIL_FULL = 1, OIL_DRAIN = 0.028;      // fraction of oil; drained per move
+var PING_MAX = 3, PING_REGEN = 9000, PING_MS = 260;
+var FLARE_MS = 620;                        // eat flare duration
+var reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// ---------- rng ----------
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; var t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function hashStr(s){ var h=2166136261>>>0; for(var i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619);} return h>>>0; }
+function todaySeed(){ var d=new Date(); return "daily-"+d.getUTCFullYear()+"-"+(d.getUTCMonth()+1)+"-"+d.getUTCDate(); }
+function readSeed(){ var m=/[#&]s=([^&]+)/.exec(location.hash); return m?decodeURIComponent(m[1]):null; }
+function writeSeed(s){ try{ history.replaceState(null,"","#s="+encodeURIComponent(s)); }catch(e){} }
+// storage that degrades gracefully under file://, private modes, or locked-down browsers
+function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+
+// ---------- state ----------
+var cv=document.getElementById("cv"), ctx=cv.getContext("2d");
+var buf=document.createElement("canvas"), bx=buf.getContext("2d");
+var lc=document.createElement("canvas"), lx=lc.getContext("2d");   // reused light-mask buffer
+var dpr=Math.max(1,Math.min(2,window.devicePixelRatio||1));
+function sizeCanvas(){
+  var maxw=Math.min(window.innerWidth-16, window.innerHeight-16, 620);
+  CELL=Math.max(12,Math.floor(maxw/GRID)); W=GRID*CELL; H=GRID*CELL;
+  cv.style.width=W+"px"; cv.style.height=H+"px"; cv.width=W*dpr; cv.height=H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
+  buf.width=W; buf.height=H;
+  lc.width=W; lc.height=H;
+}
+window.addEventListener("resize",sizeCanvas);
+
+var seed, rand, dailyMode=false;
+var snake, dir, nextDir, food, alive, playing, score, best, beatBest, oil, light, lightVel;
+var pings, pingT, pingRegen, flareT, stepMs, acc, lastT, shake, parts, afterglow, curTrail, overTimer;
+var el={ score:g("score"), best:g("best"), seedlbl:g("seedlbl"), pings:g("pings"),
+  oilbar:g("oilbar"), overlay:g("overlay"), ovbody:g("ovbody"), row:g("row"), share:g("share") };
+function g(i){ return document.getElementById(i); }
+function bestKey(){ return "gloaming.best."+(dailyMode?"daily."+todaySeed():seed); }
+function agKey(){ return "gloaming.afterglow."+(dailyMode?"daily."+todaySeed():seed); }
+
+function placeFood(){
+  var occ={}; for(var i=0;i<snake.length;i++) occ[snake[i].x+","+snake[i].y]=1;
+  var free=[]; for(var x=0;x<GRID;x++) for(var y=0;y<GRID;y++) if(!occ[x+","+y]) free.push([x,y]);
+  if(!free.length){ food=null; return; }
+  var c=free[(rand()*free.length)|0]; food={x:c[0],y:c[1]};
+}
+function reset(newSeed, daily){
+  clearTimeout(overTimer);
+  dailyMode=!!daily;
+  if(newSeed!=null) seed=String(newSeed);
+  rand=mulberry32(hashStr(seed));
+  if(!dailyMode) writeSeed(seed);
+  var mid=(GRID/2)|0;
+  snake=[{x:mid,y:mid},{x:mid-1,y:mid},{x:mid-2,y:mid}];
+  dir={x:1,y:0}; nextDir={x:1,y:0};
+  alive=true; playing=false; score=0; beatBest=false; oil=OIL_FULL; light=LIGHT_MAX; lightVel=0;
+  pings=PING_MAX; pingT=0; pingRegen=0; flareT=0; stepMs=BASE_STEP;
+  acc=0; shake=0; parts=[]; curTrail=[];
+  best=+(lsGet(bestKey())||0);
+  try{ afterglow=JSON.parse(lsGet(agKey())||"null"); }catch(e){ afterglow=null; }
+  placeFood();
+  el.overlay.classList.add("hidden");
+  syncHud();
+}
+// start (or restart) a run: hide the overlay and let the loop advance
+function startPlaying(){ initAudio(); playing=true; el.overlay.classList.add("hidden"); }
+
+// ---------- audio (proximity sixth-sense) ----------
+var AC, drone, droneGain, pan, started=false;
+function initAudio(){
+  if(started) return; started=true;
+  try{
+    AC=new (window.AudioContext||window.webkitAudioContext)();
+    drone=AC.createOscillator(); drone.type="sawtooth"; drone.frequency.value=55;
+    var lp=AC.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=320;
+    droneGain=AC.createGain(); droneGain.gain.value=0;
+    pan=AC.createStereoPanner?AC.createStereoPanner():null;
+    drone.connect(lp); lp.connect(droneGain);
+    if(pan){ droneGain.connect(pan); pan.connect(AC.destination); } else droneGain.connect(AC.destination);
+    drone.start();
+  }catch(e){ AC=null; }
+}
+function chime(){
+  if(!AC) return;
+  var o=AC.createOscillator(), gg=AC.createGain(); o.type="sine"; o.frequency.value=680;
+  o.frequency.exponentialRampToValueAtTime(1040, AC.currentTime+0.14);
+  gg.gain.value=0.0001; gg.gain.exponentialRampToValueAtTime(0.18, AC.currentTime+0.02);
+  gg.gain.exponentialRampToValueAtTime(0.0001, AC.currentTime+0.35);
+  o.connect(gg); gg.connect(AC.destination); o.start(); o.stop(AC.currentTime+0.36);
+}
+function deathSound(){
+  if(!AC) return;
+  var o=AC.createOscillator(), gg=AC.createGain(); o.type="triangle"; o.frequency.value=220;
+  o.frequency.exponentialRampToValueAtTime(40, AC.currentTime+0.6);
+  gg.gain.value=0.0001; gg.gain.exponentialRampToValueAtTime(0.25, AC.currentTime+0.03);
+  gg.gain.exponentialRampToValueAtTime(0.0001, AC.currentTime+0.7);
+  o.connect(gg); gg.connect(AC.destination); o.start(); o.stop(AC.currentTime+0.72);
+}
+// nearest own-coil distance (skip head + neck) + which side (for panning)
+function proximity(){
+  var head=snake[0], nd=1e9, dx=0;
+  for(var i=4;i<snake.length;i++){
+    var ex=snake[i].x-head.x, ey=snake[i].y-head.y, d=Math.hypot(ex,ey);
+    if(d<nd){ nd=d; dx=ex; }
+  }
+  return {d:nd, side:Math.max(-1,Math.min(1,dx/3))};
+}
+function updateAudio(){
+  if(!AC) return;
+  var p=proximity(), near=Math.max(0,1-(p.d/6)); // ramps up within 6 cells
+  near=near*near;
+  var t=AC.currentTime;
+  droneGain.gain.setTargetAtTime(alive?near*0.16:0, t, 0.08);
+  drone.frequency.setTargetAtTime(50+near*70, t, 0.1);
+  if(pan) pan.pan.setTargetAtTime(near?p.side:0, t, 0.1);
+}
+
+// ---------- input ----------
+function turn(nx,ny){ if(nx===-dir.x&&ny===-dir.y) return; nextDir={x:nx,y:ny}; }
+var STEER={ arrowup:[0,-1], w:[0,-1], arrowdown:[0,1], s:[0,1],
+  arrowleft:[-1,0], a:[-1,0], arrowright:[1,0], d:[1,0] };
+window.addEventListener("keydown",function(e){
+  var k=e.key.toLowerCase();
+  if(["arrowup","arrowdown","arrowleft","arrowright"," "].indexOf(k)>=0) e.preventDefault();
+  initAudio();
+  var steer=STEER[k];
+  // R always restarts the run, from any state
+  if(k==="r"){ reset(seed,dailyMode); startPlaying(); return; }
+  // while an overlay is up, any commit key (steer / space / enter) begins the run
+  if(!el.overlay.classList.contains("hidden")){
+    if(steer||k===" "||k==="enter"){
+      if(!alive) reset(seed,dailyMode);   // fresh run after game over
+      startPlaying();
+      if(steer) turn(steer[0],steer[1]);  // honor the first steer press
+    }
+    return;
+  }
+  // in play
+  if(steer) turn(steer[0],steer[1]);
+  else if(k===" ") doPing();
+});
+function doPing(){ if(alive && pings>0){ pings--; pingT=PING_MS; syncHud(); } }
+// touch swipe + tap
+var tsx=0,tsy=0,tst=0;
+cv.addEventListener("touchstart",function(e){ initAudio(); var t=e.touches[0]; tsx=t.clientX; tsy=t.clientY; tst=Date.now(); },{passive:true});
+cv.addEventListener("touchend",function(e){
+  var t=e.changedTouches[0], dx=t.clientX-tsx, dy=t.clientY-tsy, ad=Math.abs(dx), ay=Math.abs(dy);
+  if(ad<24&&ay<24&&Date.now()-tst<300){ doPing(); return; }
+  if(ad>ay) turn(dx>0?1:-1,0); else turn(0,dy>0?1:-1);
+},{passive:true});
+
+// ---------- step ----------
+function step(){
+  if(!alive) return;
+  dir=nextDir;
+  var head={x:snake[0].x+dir.x, y:snake[0].y+dir.y};
+  // wall death
+  if(head.x<0||head.y<0||head.x>=GRID||head.y>=GRID){ die(); return; }
+  // self death
+  for(var i=0;i<snake.length-1;i++) if(snake[i].x===head.x&&snake[i].y===head.y){ die(); return; }
+  snake.unshift(head);
+  curTrail.push({x:head.x,y:head.y});
+  var ate = food && head.x===food.x && head.y===food.y;
+  if(ate){
+    score++; oil=OIL_FULL; flareT=FLARE_MS; lightVel=3.2; chime();
+    stepMs=Math.max(MIN_STEP, BASE_STEP-score*3.4);
+    placeFood();
+    if(score>best){ best=score; beatBest=true; lsSet(bestKey(),best);
+      lsSet(agKey(), JSON.stringify(curTrail.slice(-260))); }
+  } else {
+    snake.pop();
+    oil=Math.max(0, oil-OIL_DRAIN);
+  }
+  syncHud();
+}
+function die(){
+  alive=false; playing=false; shake=reduce?0:16; deathSound();
+  var h=snake[0];
+  if(!reduce) for(var i=0;i<70;i++){ var a=Math.random()*6.28, sp=1+Math.random()*4;
+    parts.push({x:h.x*CELL+CELL/2, y:h.y*CELL+CELL/2, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp, life:1}); }
+  overTimer=setTimeout(showOver, 520);
+}
+
+// ---------- render ----------
+function draw(now){
+  // light radius from oil (lantern economy) + flare + ping decay
+  var target = LIGHT_MIN + (LIGHT_MAX-LIGHT_MIN)*oil;
+  light += (target-light)*0.08 + lightVel; lightVel*=0.82; if(Math.abs(lightVel)<0.01) lightVel=0;
+  var flare = flareT>0 ? (flareT/FLARE_MS) : 0; flareT=Math.max(0,flareT-16);
+  var pingOn = pingT>0; pingT=Math.max(0,pingT-16);
+  var radius = (light + flare*3.2) * CELL;
+
+  // pass 1: paint the world on buffer at full brightness
+  bx.clearRect(0,0,W,H);
+  bx.fillStyle="#070b12"; bx.fillRect(0,0,W,H);
+  // arena grid (very faint)
+  bx.strokeStyle="rgba(90,130,180,.05)"; bx.lineWidth=1;
+  for(var i=0;i<=GRID;i++){ bx.beginPath(); bx.moveTo(i*CELL,0); bx.lineTo(i*CELL,H); bx.stroke();
+    bx.beginPath(); bx.moveTo(0,i*CELL); bx.lineTo(W,i*CELL); bx.stroke(); }
+  // afterglow ribbon of best run (race a ghost)
+  if(afterglow&&afterglow.length){ bx.strokeStyle="rgba(180,120,255,.5)"; bx.lineWidth=Math.max(2,CELL*0.18);
+    bx.lineJoin="round"; bx.beginPath();
+    for(var a=0;a<afterglow.length;a++){ var q=afterglow[a]; var px=q.x*CELL+CELL/2, py=q.y*CELL+CELL/2;
+      if(a===0) bx.moveTo(px,py); else bx.lineTo(px,py); } bx.stroke(); }
+  // snake body
+  for(var s=snake.length-1;s>=0;s--){
+    var c=snake[s], t=1-s/Math.max(1,snake.length);
+    bx.fillStyle= s===0 ? "#eafcff" : "rgba("+(90+120*t)+","+(200+40*t)+","+(230+20*t)+",1)";
+    rrect(bx, c.x*CELL+1, c.y*CELL+1, CELL-2, CELL-2, 4);
+  }
+  // food
+  if(food){ var fx=food.x*CELL+CELL/2, fy=food.y*CELL+CELL/2;
+    bx.fillStyle="#fff2c8"; bx.beginPath(); bx.arc(fx,fy,CELL*0.3,0,6.29); bx.fill(); }
+
+  // compose to screen with shake
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,W,H);
+  var ox=0,oy=0;
+  if(shake>0){ ox=(Math.random()*2-1)*shake; oy=(Math.random()*2-1)*shake; shake*=0.86; if(shake<0.4) shake=0; }
+  ctx.save(); ctx.translate(ox,oy);
+
+  // background base always visible faintly (vignette floor)
+  ctx.fillStyle="#04060a"; ctx.fillRect(-20,-20,W+40,H+40);
+
+  // pass 2a: distant-pellet glow (colorblue-safe cyan halo, drawn on dark) so food is navigable-toward
+  if(food&&alive){ var hx=snake[0].x*CELL+CELL/2, hy=snake[0].y*CELL+CELL/2;
+    var fx2=food.x*CELL+CELL/2, fy2=food.y*CELL+CELL/2;
+    var dist=Math.hypot(fx2-hx,fy2-hy);
+    var vis = dist>radius ? 0.5*Math.min(1,radius/dist) : 0.7;
+    var fg=ctx.createRadialGradient(fx2,fy2,0,fx2,fy2,CELL*2.4);
+    fg.addColorStop(0,"rgba(255,214,107,"+(0.5*vis).toFixed(3)+")");
+    fg.addColorStop(0.5,"rgba(120,200,255,"+(0.22*vis).toFixed(3)+")");
+    fg.addColorStop(1,"rgba(120,200,255,0)");
+    ctx.fillStyle=fg; ctx.beginPath(); ctx.arc(fx2,fy2,CELL*2.4,0,6.29); ctx.fill();
+  }
+
+  // pass 2b: masked world — copy the lit disc of the buffer via radial-gradient (destination-in)
+  lx.globalCompositeOperation="source-over"; lx.clearRect(0,0,W,H);
+  lx.drawImage(buf,0,0);
+  var hx2=snake[0]?snake[0].x*CELL+CELL/2:W/2, hy2=snake[0]?snake[0].y*CELL+CELL/2:H/2;
+  lx.globalCompositeOperation="destination-in";
+  var mask=lx.createRadialGradient(hx2,hy2,radius*0.35,hx2,hy2,radius);
+  mask.addColorStop(0,"rgba(0,0,0,1)"); mask.addColorStop(0.7,"rgba(0,0,0,.85)"); mask.addColorStop(1,"rgba(0,0,0,0)");
+  lx.fillStyle=mask; lx.fillRect(0,0,W,H);
+  ctx.drawImage(lc,0,0);
+
+  // memory ping: strobe the whole outline briefly
+  if(pingOn){ var alpha=0.7*(pingT/PING_MS)+0.15;
+    ctx.strokeStyle="rgba(180,230,255,"+alpha.toFixed(3)+")"; ctx.lineWidth=2; ctx.lineJoin="round";
+    ctx.beginPath();
+    for(var k=0;k<snake.length;k++){ var pc=snake[k], px2=pc.x*CELL+CELL/2, py2=pc.y*CELL+CELL/2;
+      if(k===0) ctx.moveTo(px2,py2); else ctx.lineTo(px2,py2); }
+    ctx.stroke();
+  }
+
+  // head glow bloom over everything
+  if(snake[0]){ var hg=ctx.createRadialGradient(hx2,hy2,0,hx2,hy2,radius);
+    hg.addColorStop(0,"rgba(143,227,255,"+(0.28+flare*0.2).toFixed(3)+")");
+    hg.addColorStop(0.4,"rgba(143,227,255,.06)"); hg.addColorStop(1,"rgba(143,227,255,0)");
+    ctx.fillStyle=hg; ctx.beginPath(); ctx.arc(hx2,hy2,radius,0,6.29); ctx.fill(); }
+
+  // particles on death
+  if(parts.length){ for(var pi=0;pi<parts.length;pi++){ var p=parts[pi];
+      p.x+=p.vx; p.y+=p.vy; p.vy+=0.06; p.life-=0.02;
+      ctx.fillStyle="rgba(143,227,255,"+Math.max(0,p.life).toFixed(3)+")";
+      ctx.fillRect(p.x-1.5,p.y-1.5,3,3); }
+    parts=parts.filter(function(p){ return p.life>0; }); }
+
+  ctx.restore();
+
+  // edge vignette bloom (walls faintly glowing)
+  var vg=ctx.createRadialGradient(W/2,H/2,W*0.34,W/2,H/2,W*0.72);
+  vg.addColorStop(0,"rgba(0,0,0,0)"); vg.addColorStop(1,"rgba(60,110,170,.14)");
+  ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
+}
+function rrect(c,x,y,w,h,r){ c.beginPath(); c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r);
+  c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); c.fill(); }
+
+// ---------- hud ----------
+function syncHud(){
+  el.score.textContent=score;
+  el.best.textContent=(dailyMode?"daily best ":"best ")+best;
+  el.seedlbl.textContent=(dailyMode?"DAILY · ":"seed · ")+seed;
+  el.oilbar.style.transform="scaleX("+oil.toFixed(3)+")";
+  var html=""; for(var i=0;i<PING_MAX;i++) html+='<i class="'+(i<pings?"on":"")+'"></i>';
+  el.pings.innerHTML=html;
+}
+
+// ---------- overlay ----------
+function overlayButtons(gameover){
+  el.row.innerHTML="";
+  var b1=document.createElement("button"); b1.textContent=gameover?"play again":"begin";
+  b1.onclick=function(){ reset(seed,dailyMode); startPlaying(); }; el.row.appendChild(b1);
+  var b2=document.createElement("button"); b2.className="ghost"; b2.textContent="new seed";
+  b2.onclick=function(){ reset(String((Math.random()*1e9)|0),false); startPlaying(); }; el.row.appendChild(b2);
+  var b3=document.createElement("button"); b3.className="ghost"; b3.textContent="daily challenge";
+  b3.onclick=function(){ reset(todaySeed(),true); startPlaying(); }; el.row.appendChild(b3);
+}
+function shareUrl(){ return location.origin+location.pathname+(dailyMode?"#daily":"#s="+encodeURIComponent(seed)); }
+function wireShare(prefix){
+  var url=shareUrl();
+  el.share.classList.remove("copied");
+  el.share.textContent=prefix+url;
+  el.share.style.cursor="pointer";
+  el.share.onclick=function(){ if(navigator.clipboard) navigator.clipboard.writeText(url).then(function(){
+    el.share.textContent="copied! "+url; el.share.classList.add("copied"); }); };
+}
+function showStart(){
+  el.ovbody.innerHTML='<div class="big">'+(dailyMode?"Daily challenge — same board for everyone, UTC.":"Steer toward the far glimmer. Eat to refuel your lantern.")+'</div>'+
+    '<div class="keys">press any key — or tap <b>begin</b> — to start</div>';
+  overlayButtons(false);
+  wireShare("share this run: ");
+  el.overlay.classList.remove("hidden");
+}
+function showOver(){
+  el.ovbody.innerHTML='<div class="big">the light went out — score '+score+'</div>'+
+    '<div class="keys">'+(beatBest?'<b>new best.</b> your afterglow is saved.':'best '+best)+'</div>';
+  overlayButtons(true);
+  wireShare("beat my seed: ");
+  el.overlay.classList.remove("hidden");
+}
+
+// ---------- loop ----------
+function frame(now){
+  if(!lastT) lastT=now; var dt=Math.min(100, now-lastT); lastT=now;
+  if(alive&&playing){
+    acc+=dt; while(acc>=stepMs){ step(); acc-=stepMs; if(!alive) break; }
+    // ping regen
+    if(pings<PING_MAX){ pingRegen+=dt; if(pingRegen>=PING_REGEN){ pingRegen=0; pings++; syncHud(); } }
+  } else acc=0;
+  updateAudio();
+  draw(now);
+  requestAnimationFrame(frame);
+}
+
+// ---------- boot ----------
+sizeCanvas();
+var initial=readSeed();
+if(/(^|[#&])daily(&|$)/.test(location.hash)){ seed=todaySeed(); dailyMode=true; }
+else seed = initial || String((Math.random()*1e9)|0);
+reset(seed, dailyMode);
+showStart();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ADFGVX Cipher — WWII fractionating transposition</title>
+<meta name="description" content="Encrypt and decrypt with the ADFGVX cipher — a 6x6 Polybius square fractionation followed by columnar transposition, as used in WWI/WWII. Offline, no tracking.">
+<style>
+  :root{
+    --c:#5b21b6;
+    --bg:#f4f1fb; --card:#ffffff; --fg:#170f28; --muted:#5e5178;
+    --line:#e6ddf4; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#0e0a1a; --card:#181026; --fg:#eee7f8; --muted:#a898c4;
+    --line:#2b2142; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .mode{display:flex;gap:8px;margin-bottom:16px}
+  .mode button{flex:1;padding:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:10px;cursor:pointer;font-weight:600}
+  .mode button.on{background:var(--c);color:#fff;border-color:var(--c)}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+  @media(max-width:560px){.row{grid-template-columns:1fr}}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  input[type=text],textarea{width:100%;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  textarea{min-height:90px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  input:focus,textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .out{margin-top:14px}
+  .out textarea{background:var(--bg);font-size:1.05rem;letter-spacing:.1em}
+  .btn{background:var(--c);color:#fff;border:0;border-radius:9px;padding:9px 14px;font-weight:600;cursor:pointer;font-size:.88rem;margin-top:12px}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">📡</div>
+  <div>
+    <h1>ADFGVX Cipher</h1>
+    <p>Fractionation + columnar transposition</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="mode">
+      <button id="mEnc" class="on">Encrypt</button>
+      <button id="mDec">Decrypt</button>
+    </div>
+    <label id="inLbl">Plaintext (letters &amp; digits)</label>
+    <textarea id="in" spellcheck="false">attack at 1200</textarea>
+    <div class="row">
+      <div><label>Square keyword (mixes the 6×6 grid)</label><input type="text" id="skey" value="PRIVACY" spellcheck="false"></div>
+      <div><label>Transposition keyword</label><input type="text" id="tkey" value="GERMAN" spellcheck="false"></div>
+    </div>
+    <div class="out">
+      <label id="outLbl">Ciphertext</label>
+      <textarea id="out" readonly spellcheck="false"></textarea>
+    </div>
+    <button class="btn" id="copy">Copy result</button>
+  </div>
+
+  <div class="card">
+    <h2>How ADFGVX works</h2>
+    <p class="note">Used by the German army from 1918, ADFGVX first drops each of the 26 letters and 10 digits into a keyword-mixed <b>6×6 grid</b> whose rows and columns are labelled <b>A D F G V X</b> (letters chosen to be distinct in Morse code). Every character becomes a <b>pair</b> of those labels — a fractionation step. That doubled string is then written under a second <b>transposition keyword</b> and its columns are read off in alphabetical order, scrambling the pairs apart. The two stages together — substitution then transposition — made it one of the hardest field ciphers of its era. Everything runs locally.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var LABELS = 'ADFGVX';
+  var BASE36 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  function buildSquare(keyword){
+    keyword = (keyword || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    var seen = {}, sq = '';
+    (keyword + BASE36).split('').forEach(function(ch){ if(BASE36.indexOf(ch) >= 0 && !seen[ch]){ seen[ch] = 1; sq += ch; } });
+    return sq; // 36 chars
+  }
+  function clean(text){ return String(text == null ? '' : text).toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+  function cleanKey(key){ var k = String(key == null ? '' : key).toUpperCase().replace(/[^A-Z]/g, ''); if(k.length === 0) throw new Error('transposition keyword needs at least one letter'); return k; }
+  function charToPair(square, ch){
+    var i = square.indexOf(ch);
+    if(i < 0) throw new Error('character not in square: ' + ch);
+    return LABELS[Math.floor(i / 6)] + LABELS[i % 6];
+  }
+  function pairToChar(square, pair){
+    var r = LABELS.indexOf(pair[0]), c = LABELS.indexOf(pair[1]);
+    if(r < 0 || c < 0) throw new Error('invalid ADFGVX pair: ' + pair);
+    return square.charAt(r * 6 + c);
+  }
+  function fractionate(square, text){ var o = ''; for(var i = 0; i < text.length; i++) o += charToPair(square, text[i]); return o; }
+  function defractionate(square, fract){ var o = ''; for(var i = 0; i + 1 < fract.length; i += 2) o += pairToChar(square, fract.substr(i, 2)); return o; }
+  // Read-order of columns for a transposition key (stable by letter then position).
+  function keyOrder(key){
+    return key.split('').map(function(c, i){ return { c: c, i: i }; })
+      .sort(function(a, b){ return a.c < b.c ? -1 : a.c > b.c ? 1 : a.i - b.i; })
+      .map(function(o){ return o.i; });
+  }
+  function columnarEncrypt(text, key){
+    var n = key.length, order = keyOrder(key), out = '';
+    order.forEach(function(col){ for(var r = col; r < text.length; r += n) out += text[r]; });
+    return out;
+  }
+  function columnarDecrypt(cipher, key){
+    var n = key.length, order = keyOrder(key), L = cipher.length;
+    var full = Math.floor(L / n), rem = L % n, colLen = [];
+    for(var c = 0; c < n; c++) colLen[c] = full + (c < rem ? 1 : 0);
+    var cols = [], pos = 0;
+    order.forEach(function(col){ cols[col] = cipher.substr(pos, colLen[col]); pos += colLen[col]; });
+    var out = '', rows = full + (rem > 0 ? 1 : 0);
+    for(var r = 0; r < rows; r++){ for(var cc = 0; cc < n; cc++){ if(r < colLen[cc]) out += cols[cc][r]; } }
+    return out;
+  }
+  function adfgvxEncrypt(text, squareKey, transKey){
+    var sq = buildSquare(squareKey), tk = cleanKey(transKey);
+    return columnarEncrypt(fractionate(sq, clean(text)), tk);
+  }
+  function adfgvxDecrypt(cipher, squareKey, transKey){
+    var sq = buildSquare(squareKey), tk = cleanKey(transKey);
+    var fract = columnarDecrypt(String(cipher).toUpperCase().replace(/[^ADFGVX]/g, ''), tk);
+    return defractionate(sq, fract);
+  }
+
+  if(typeof module !== 'undefined') module.exports = { buildSquare:buildSquare, clean:clean, charToPair:charToPair, pairToChar:pairToChar, fractionate:fractionate, defractionate:defractionate, columnarEncrypt:columnarEncrypt, columnarDecrypt:columnarDecrypt, adfgvxEncrypt:adfgvxEncrypt, adfgvxDecrypt:adfgvxDecrypt };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var mode = 'enc';
+    var mEnc = document.getElementById('mEnc'), mDec = document.getElementById('mDec');
+    function render(){
+      var text = document.getElementById('in').value, sk = document.getElementById('skey').value, tk = document.getElementById('tkey').value;
+      try{ document.getElementById('out').value = mode === 'enc' ? adfgvxEncrypt(text, sk, tk) : adfgvxDecrypt(text, sk, tk); }
+      catch(e){ document.getElementById('out').value = ''; }
+    }
+    mEnc.addEventListener('click', function(){ mode='enc'; mEnc.classList.add('on'); mDec.classList.remove('on'); document.getElementById('inLbl').textContent='Plaintext (letters & digits)'; document.getElementById('outLbl').textContent='Ciphertext'; render(); });
+    mDec.addEventListener('click', function(){ mode='dec'; mDec.classList.add('on'); mEnc.classList.remove('on'); document.getElementById('inLbl').textContent='Ciphertext (ADFGVX)'; document.getElementById('outLbl').textContent='Plaintext'; render(); });
+    ['in','skey','tkey'].forEach(function(id){ document.getElementById(id).addEventListener('input', render); });
+    document.getElementById('copy').addEventListener('click', function(){
+      var t = document.getElementById('out').value;
+      if(navigator.clipboard) navigator.clipboard.writeText(t);
+      this.textContent = 'Copied!'; var b = this; setTimeout(function(){ b.textContent = 'Copy result'; }, 1200);
+    });
+    render();
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('adfgvx-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('adfgvx-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

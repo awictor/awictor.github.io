@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Firmament — a Star Battle puzzle box</title>
+<style>
+  :root{
+    --gold:#ffd76b; --gold-soft:#f3c66b; --ink:#0a0e22; --panel:#131a35;
+    --line:#2b3566; --line-strong:#8ea2ff; --text:#cdd6f4; --dim:#8891b8;
+    --good:#7ee787; --bad:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1200px 700px at 78% -8%, #1c2550 0%, transparent 55%),
+      radial-gradient(900px 600px at 12% 108%, #201a44 0%, transparent 55%),
+      var(--ink);
+    color:var(--text);
+    font-family:"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    display:flex; flex-direction:column; align-items:center;
+    min-height:100%; padding:22px 14px 40px;
+  }
+  h1{margin:0; font-size:30px; letter-spacing:.14em; font-weight:600;
+     background:linear-gradient(90deg,#fff,var(--gold)); -webkit-background-clip:text; background-clip:text; color:transparent;}
+  .tag{color:var(--dim); font-size:13px; margin:4px 0 16px; letter-spacing:.03em}
+  .bar{display:flex; flex-wrap:wrap; gap:8px; justify-content:center; max-width:640px; margin-bottom:12px}
+  button,input{
+    font:inherit; color:var(--text); background:var(--panel);
+    border:1px solid var(--line); border-radius:9px; padding:7px 12px; cursor:pointer;
+    transition:.15s border-color,.15s background;
+  }
+  button:hover{border-color:var(--line-strong)}
+  button:focus-visible,input:focus-visible{outline:none; box-shadow:0 0 0 2px var(--ink),0 0 0 4px var(--line-strong)}
+  button:disabled{opacity:.5; cursor:default}
+  button.pri{background:linear-gradient(180deg,#2a3466,#1a2247); border-color:var(--line-strong)}
+  button.active{background:linear-gradient(180deg,#3a4780,#232f66); border-color:var(--gold); color:#fff}
+  input{width:120px; cursor:text}
+  .stats{display:flex; gap:20px; margin-bottom:12px; font-size:14px; color:var(--dim)}
+  .stats b{color:var(--text); font-variant-numeric:tabular-nums}
+  #boardWrap{position:relative}
+  #board{display:grid; gap:0; background:var(--line); padding:0; border-radius:12px;
+    box-shadow:0 18px 50px rgba(0,0,0,.55), 0 0 0 1px rgba(142,162,255,.15)}
+  .gut{display:flex; align-items:center; justify-content:center; font-size:13px;
+    font-variant-numeric:tabular-nums; color:var(--dim); user-select:none; font-weight:600}
+  .gut.done{color:var(--good)} .gut.over{color:var(--bad)}
+  .cell{position:relative; display:flex; align-items:center; justify-content:center;
+    background:var(--panel); cursor:pointer; user-select:none;
+    font-size:calc(var(--cs) * .62); line-height:1; transition:background .12s}
+  @media (hover:hover){ .cell:hover{filter:brightness(1.25)} }
+  .cell .star{color:var(--gold); text-shadow:0 0 6px rgba(255,215,107,.7); transform:scale(0)}
+  .cell.on .star{transform:scale(1); transition:transform .18s cubic-bezier(.2,1.5,.4,1)}
+  .cell .udot{width:26%; height:26%; border-radius:50%; background:var(--text); opacity:.85}
+  .cell .adot{width:16%; height:16%; border-radius:50%; background:var(--dim); opacity:.55}
+  .cell.bad{background:rgba(255,107,107,.28)}
+  .cell.hint{box-shadow:inset 0 0 0 3px var(--line-strong); animation:pulse 1s ease-in-out infinite}
+  @keyframes pulse{50%{box-shadow:inset 0 0 0 3px var(--gold)}}
+  #board.won .cell.on .star{animation:tw 1.4s ease-in-out infinite}
+  @keyframes tw{0%,100%{opacity:1;text-shadow:0 0 6px rgba(255,215,107,.7)}
+    50%{opacity:.55;text-shadow:0 0 16px rgba(255,215,107,1)}}
+  .rbadge{position:absolute; top:2px; left:3px; font-size:10px; font-weight:700; color:rgba(255,255,255,.55)}
+  .rbadge.over{color:var(--bad)}
+  #banner{position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    flex-direction:column; background:rgba(6,9,26,.72); border-radius:12px; cursor:pointer;
+    -webkit-backdrop-filter:blur(2px); backdrop-filter:blur(2px)}
+  #banner.show{display:flex; animation:fade .5s ease}
+  @keyframes fade{from{opacity:0}}
+  #banner h2{margin:0 0 6px; font-size:26px; color:var(--gold); letter-spacing:.06em}
+  #banner p{margin:0; color:var(--text); font-size:14px}
+  #banner .dismiss{margin-top:12px; color:var(--dim); font-size:12px}
+  .msg{min-height:18px; margin-top:12px; font-size:13px; color:var(--gold-soft); max-width:560px; text-align:center}
+  .foot{margin-top:14px; font-size:12px; color:var(--dim); max-width:560px; text-align:center; line-height:1.6}
+  kbd{background:var(--panel); border:1px solid var(--line); border-radius:5px; padding:1px 6px; font-size:11px}
+</style>
+</head>
+<body>
+  <h1>FIRMAMENT</h1>
+  <div class="tag">A star-battle puzzle box — every board it deals has exactly one sky.</div>
+
+  <div class="bar">
+    <button class="pri deal" data-preset="8:1">Gentle · 8×8 ★1</button>
+    <button class="pri deal" data-preset="10:2">Classic · 10×10 ★2</button>
+    <button id="daily" class="deal">Daily Sky</button>
+    <button id="newseed" class="deal">New Seed</button>
+    <input id="seedIn" placeholder="seed" title="Type a seed then Load">
+    <button id="loadSeed" class="deal">Load</button>
+  </div>
+  <div class="bar">
+    <button id="hint">Hint</button>
+    <button id="undo" title="Ctrl/Cmd+Z">Undo</button>
+    <button id="redo" title="Ctrl/Cmd+Y">Redo</button>
+    <button id="reset">Reset</button>
+    <button id="reveal">Reveal</button>
+    <button id="copy">Copy Link</button>
+    <button id="share">Share</button>
+  </div>
+
+  <div class="stats">
+    <span>Seed <b id="sSeed">–</b></span>
+    <span>Difficulty <b id="sDiff">–</b></span>
+    <span>Time <b id="sTime">0:00</b></span>
+    <span>Best <b id="sBest">–</b></span>
+  </div>
+
+  <div id="boardWrap">
+    <div id="board"></div>
+    <div id="banner"><h2>Firmament complete ✦</h2><p id="bannerP"></p><p class="dismiss">tap to admire the sky</p></div>
+  </div>
+
+  <div class="msg" id="msg"></div>
+  <div class="foot">
+    Click a cell to cycle <b style="color:var(--gold)">★ star</b> → <b>• dot</b> → empty.
+    Right-click (or long-press on touch) toggles a <b>• dot</b> directly.
+    Placing a star auto-marks its neighbours. Row/column/region counters glow when broken; touching stars flash red.
+    Seed &amp; size live in the URL — share the link.
+  </div>
+
+<script>
+"use strict";
+/* ============================ PURE ENGINE ============================ */
+function xmur3(str){let h=1779033703^str.length;for(let i=0;i<str.length;i++){h=Math.imul(h^str.charCodeAt(i),3432918353);h=h<<13|h>>>19;}return function(){h=Math.imul(h^(h>>>16),2246822507);h=Math.imul(h^(h>>>13),3266489909);return (h^=h>>>16)>>>0;};}
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function rngFrom(str){const s=xmur3(str);return mulberry32(s());}
+function shuffle(arr,rng){for(let i=arr.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));const t=arr[i];arr[i]=arr[j];arr[j]=t;}return arr;}
+
+// all K-subsets of columns with within-row gap >= 2 (no horizontal adjacency)
+function genCombos(N,K){const out=[];(function rec(start,ch){if(ch.length===K){out.push(ch.slice());return;}for(let c=start;c<N;c++){ch.push(c);rec(c+2,ch);ch.pop();}})(0,[]);return out;}
+
+// backtracking placement of a valid star field: K per row/col, no adjacency
+function placeStars(N,K,rng){
+  const colCount=new Array(N).fill(0), rows=new Array(N), base=genCombos(N,K);
+  function solve(r){
+    if(r===N) return colCount.every(x=>x===K);
+    const prev=r>0?rows[r-1]:null, remain=N-1-r, opts=shuffle(base.slice(),rng);
+    for(const opt of opts){
+      let ok=true;
+      for(const c of opt){ if(colCount[c]>=K){ok=false;break;} if(prev&&prev.some(pc=>Math.abs(pc-c)<=1)){ok=false;break;} }
+      if(!ok) continue;
+      for(const c of opt) colCount[c]++;
+      rows[r]=opt;
+      let feas=true; for(let c=0;c<N;c++){ if(colCount[c]+remain<K){feas=false;break;} }
+      if(feas && solve(r+1)) return true;
+      for(const c of opt) colCount[c]--;
+    }
+    return false;
+  }
+  if(!solve(0)) return null;
+  const grid=Array.from({length:N},()=>new Array(N).fill(false)), list=[];
+  rows.forEach((cs,r)=>cs.forEach(c=>{grid[r][c]=true;list.push([r,c]);}));
+  return {grid,list};
+}
+
+// carve N contiguous regions seeded on the stars (K stars per region)
+function growRegions(N,K,stars,rng){
+  const cells=stars.list, groups=[];
+  if(K===1){ cells.forEach(c=>groups.push([c])); }
+  else{
+    const used=new Array(cells.length).fill(false);
+    for(let i=0;i<cells.length;i++){
+      if(used[i]) continue; used[i]=true;
+      let best=-1,bd=1e9;
+      for(let j=0;j<cells.length;j++){ if(used[j])continue; const d=Math.abs(cells[i][0]-cells[j][0])+Math.abs(cells[i][1]-cells[j][1]); if(d<bd){bd=d;best=j;} }
+      if(best<0) return null; used[best]=true; groups.push([cells[i],cells[best]]);
+    }
+  }
+  if(groups.length!==N) return null;
+  const region=Array.from({length:N},()=>new Array(N).fill(-1));
+  let assigned=0; groups.forEach((g,i)=>g.forEach(([r,c])=>{region[r][c]=i;assigned++;}));
+  const total=N*N, dirs=[[-1,0],[1,0],[0,-1],[0,1]];
+  while(assigned<total){
+    const front=[];
+    for(let r=0;r<N;r++)for(let c=0;c<N;c++){ if(region[r][c]<0)continue; const id=region[r][c];
+      for(const[dr,dc]of dirs){const nr=r+dr,nc=c+dc; if(nr<0||nc<0||nr>=N||nc>=N)continue; if(region[nr][nc]<0)front.push([nr,nc,id]);} }
+    if(!front.length) break;
+    const p=front[Math.floor(rng()*front.length)];
+    if(region[p[0]][p[1]]<0){region[p[0]][p[1]]=p[2];assigned++;}
+  }
+  if(assigned<total) return null;
+  for(let i=0;i<N;i++){ // verify contiguity
+    const cs=[]; for(let r=0;r<N;r++)for(let c=0;c<N;c++)if(region[r][c]===i)cs.push([r,c]);
+    if(!cs.length) return null;
+    const seen=new Set([cs[0][0]*N+cs[0][1]]), st=[cs[0]];
+    while(st.length){const[r,c]=st.pop(); for(const[dr,dc]of dirs){const nr=r+dr,nc=c+dc; if(nr<0||nc<0||nr>=N||nc>=N)continue; if(region[nr][nc]===i&&!seen.has(nr*N+nc)){seen.add(nr*N+nc);st.push([nr,nc]);}}}
+    if(seen.size!==cs.length) return null;
+  }
+  return region;
+}
+
+// verifying backtracking solver: count solutions up to `cap`
+function countSolutions(N,K,region,cap){
+  const base=genCombos(N,K), colCount=new Array(N).fill(0), regCount=new Array(N).fill(0);
+  const suffix=Array.from({length:N},()=>new Array(N+1).fill(0));
+  for(let g=0;g<N;g++)for(let r=N-1;r>=0;r--){let n=0;for(let c=0;c<N;c++)if(region[r][c]===g)n++;suffix[g][r]=suffix[g][r+1]+n;}
+  let count=0;
+  (function rec(r,prev){
+    if(count>=cap) return;
+    if(r===N){count++;return;}
+    const remain=N-1-r;
+    for(const opt of base){
+      let ok=true;
+      for(const c of opt){ if(colCount[c]>=K){ok=false;break;} if(regCount[region[r][c]]>=K){ok=false;break;} if(prev&&prev.some(pc=>Math.abs(pc-c)<=1)){ok=false;break;} }
+      if(!ok) continue;
+      if(K>1&&opt.length===2&&region[r][opt[0]]===region[r][opt[1]]&&regCount[region[r][opt[0]]]+2>K) continue;
+      for(const c of opt){colCount[c]++;regCount[region[r][c]]++;}
+      let feas=true; for(let c=0;c<N;c++){ if(colCount[c]+remain<K){feas=false;break;} }
+      if(feas)for(let g=0;g<N;g++){ if(regCount[g]+suffix[g][r+1]<K){feas=false;break;} }
+      if(feas) rec(r+1,opt);
+      for(const c of opt){colCount[c]--;regCount[region[r][c]]--;}
+      if(count>=cap) return;
+    }
+  })(0,null);
+  return count;
+}
+
+function unitsOf(N,region){
+  const rows=Array.from({length:N},()=>[]), cols=Array.from({length:N},()=>[]), regs=Array.from({length:N},()=>[]);
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){rows[r].push([r,c]);cols[c].push([r,c]);regs[region[r][c]].push([r,c]);}
+  return rows.concat(cols,regs);
+}
+// human-technique single deduction on a state (0 unknown,1 star,2 dot)
+function deduceStep(N,K,region,state){
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++) if(state[r][c]===1)
+    for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){ if(!dr&&!dc)continue; const nr=r+dr,nc=c+dc;
+      if(nr<0||nc<0||nr>=N||nc>=N)continue; if(state[nr][nc]===0) return {r:nr,c:nc,val:2,reason:'No two stars may touch — this neighbour of a star must be empty.'}; }
+  for(const u of unitsOf(N,region)){
+    let stars=0; const unk=[];
+    for(const[r,c]of u){ if(state[r][c]===1)stars++; else if(state[r][c]===0)unk.push([r,c]); }
+    if(stars===K&&unk.length) return {r:unk[0][0],c:unk[0][1],val:2,reason:'This line/region already holds all its stars — remaining cells must be empty.'};
+    if(stars<K&&unk.length===K-stars) return {r:unk[0][0],c:unk[0][1],val:1,reason:'This line/region has exactly enough open cells left — each must be a star.'};
+  }
+  return null;
+}
+// count the dead-ends the verifying solver hits before locking the unique sky — a
+// standard difficulty proxy (more branching = harder)
+function solverEffort(N,K,region){
+  const base=genCombos(N,K), colCount=new Array(N).fill(0), regCount=new Array(N).fill(0);
+  const suffix=Array.from({length:N},()=>new Array(N+1).fill(0));
+  for(let g=0;g<N;g++)for(let r=N-1;r>=0;r--){let n=0;for(let c=0;c<N;c++)if(region[r][c]===g)n++;suffix[g][r]=suffix[g][r+1]+n;}
+  let dead=0;
+  (function rec(r,prev){
+    if(r===N) return true;
+    for(const opt of base){
+      let ok=true;
+      for(const c of opt){ if(colCount[c]>=K){ok=false;break;} if(regCount[region[r][c]]>=K){ok=false;break;} if(prev&&prev.some(pc=>Math.abs(pc-c)<=1)){ok=false;break;} }
+      if(!ok) continue;
+      if(K>1&&opt.length===2&&region[r][opt[0]]===region[r][opt[1]]&&regCount[region[r][opt[0]]]+2>K) continue;
+      for(const c of opt){colCount[c]++;regCount[region[r][c]]++;}
+      let feas=true; for(let c=0;c<N;c++){ if(colCount[c]+(N-1-r)<K){feas=false;break;} }
+      if(feas)for(let g=0;g<N;g++){ if(regCount[g]+suffix[g][r+1]<K){feas=false;break;} }
+      let done=false; if(feas) done=rec(r+1,opt);
+      for(const c of opt){colCount[c]--;regCount[region[r][c]]--;}
+      if(done) return true;
+      dead++;
+    }
+    return false;
+  })(0,null);
+  return dead;
+}
+// difficulty: pure human logic solving it outright is a "Logic" board; otherwise
+// grade by solver branch effort, scaled per board size
+function rate(N,K,region,solution){
+  const state=Array.from({length:N},()=>new Array(N).fill(0));
+  for(let g=0,cap=N*N*6;g<cap;g++){const s=deduceStep(N,K,region,state); if(!s)break; state[s.r][s.c]=s.val;}
+  let logic=true;
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){ const want=solution[r][c]?1:2; if(state[r][c]!==want){logic=false;} }
+  if(logic) return 'Logic ✦';
+  const d=solverEffort(N,K,region), t=(K===1)?[40,110]:[600,3000];
+  return d<t[0]?'Gentle':d<t[1]?'Tricky':'Devious';
+}
+
+// would region `id` stay one connected piece if we removed `skip`?
+function stillConnected(region,N,id,skip){
+  const cells=[];
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++) if(region[r][c]===id&&!(skip[0]===r&&skip[1]===c)) cells.push([r,c]);
+  if(!cells.length) return false;
+  const dirs=[[-1,0],[1,0],[0,-1],[0,1]], seen=new Set([cells[0][0]*N+cells[0][1]]), st=[cells[0]];
+  while(st.length){const[r,c]=st.pop(); for(const[dr,dc]of dirs){const nr=r+dr,nc=c+dc;
+    if(nr<0||nc<0||nr>=N||nc>=N)continue; if(skip[0]===nr&&skip[1]===nc)continue;
+    if(region[nr][nc]===id&&!seen.has(nr*N+nc)){seen.add(nr*N+nc);st.push([nr,nc]);}}}
+  return seen.size===cells.length;
+}
+// hill-climb region borders toward a unique solution. Only non-star cells move,
+// so K stars per region is preserved automatically. Returns final solution count.
+function refineToUnique(N,K,region,rng,star,cap,maxIter){
+  const dirs=[[-1,0],[1,0],[0,-1],[0,1]];
+  let cur=countSolutions(N,K,region,cap);
+  for(let it=0;it<maxIter&&cur>1;it++){
+    const moves=[];
+    for(let r=0;r<N;r++)for(let c=0;c<N;c++){ if(star[r][c])continue; const A=region[r][c];
+      for(const[dr,dc]of dirs){const nr=r+dr,nc=c+dc; if(nr<0||nc<0||nr>=N||nc>=N)continue;
+        const Bv=region[nr][nc]; if(Bv!==A)moves.push([r,c,A,Bv]);} }
+    if(!moves.length) break;
+    const [r,c,A,Bv]=moves[Math.floor(rng()*moves.length)];
+    if(!stillConnected(region,N,A,[r,c])) continue; // moving would split region A
+    region[r][c]=Bv;
+    const nc=countSolutions(N,K,region,cap);
+    if(nc<=cur) cur=nc; else region[r][c]=A; // keep improving/neutral moves, revert the rest
+  }
+  return cur;
+}
+// generate-then-refine loop, deterministic per seed
+function makeBoard(seed,N,K){
+  for(let a=0;a<16;a++){
+    const rng=rngFrom(seed+'#'+N+'#'+K+'#'+a);
+    const stars=placeStars(N,K,rng); if(!stars) continue;
+    const region=growRegions(N,K,stars,rng); if(!region) continue;
+    if(refineToUnique(N,K,region,rng,stars.grid,22,3000)!==1) continue;
+    return {N,K,seed,region,solution:stars.grid,diff:rate(N,K,region,stars.grid)};
+  }
+  return null;
+}
+
+/* ============================ UI STATE ============================ */
+const $=id=>document.getElementById(id);
+let B=null, N=0, K=0, user=[], auto=[], hist=[], redo=[], hint=null, won=false, revealed=false, t0=0, timer=null, busy=false;
+
+// localStorage can throw (private mode, blocked site-data, some file:// sandboxes) — never let it kill the app
+function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+
+function fmt(s){return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');}
+function bestKey(){return 'firmament:'+N+':'+K+':'+B.seed;}
+const randSeed=()=>(Math.random()*1e6|0).toString(36);
+
+function setBusy(v){ busy=v; document.querySelectorAll('.deal').forEach(b=>{ b.disabled=v; }); }
+function markActivePresets(){
+  document.querySelectorAll('[data-preset]').forEach(btn=>{
+    const [pn,pk]=btn.dataset.preset.split(':').map(Number);
+    btn.classList.toggle('active', pn===N&&pk===K);
+  });
+}
+
+// Deal a board off the main thread's critical path: paint a "carving…" state first,
+// then generate on the next tick so the click feels responsive instead of frozen.
+// seeds is tried in order; the first that yields a unique sky wins (daily fallback).
+function deal(seeds,n,k,note){
+  if(busy) return;
+  setBusy(true);
+  $('msg').textContent='Carving a unique sky…';
+  requestAnimationFrame(()=>setTimeout(()=>{
+    let board=null, used=null;
+    for(const s of seeds){ board=makeBoard(String(s),n,k); if(board){ used=s; break; } }
+    setBusy(false);
+    if(!board){ $('msg').textContent='Could not carve a unique sky for that seed — try another.'; return; }
+    applyBoard(board,used,n,k);
+    $('msg').textContent = note || '';
+  },0));
+}
+
+function applyBoard(board,seed,n,k){
+  B=board; N=n; K=k;
+  user=Array.from({length:N},()=>new Array(N).fill(0));
+  auto=Array.from({length:N},()=>new Array(N).fill(0));
+  hist=[]; redo=[]; hint=null; won=false; revealed=false;
+  location.hash='s='+encodeURIComponent(seed)+'&n='+N+'&k='+K;
+  $('sSeed').textContent=seed; $('sDiff').textContent=board.diff;
+  const bt=lsGet(bestKey());
+  $('sBest').textContent=bt?fmt(+bt):'–';
+  $('banner').classList.remove('show'); $('board').classList.remove('won');
+  markActivePresets();
+  buildGrid(); render();
+  t0=Date.now(); clearInterval(timer); timer=setInterval(tick,500); tick();
+}
+function tick(){ if(!won&&!revealed) $('sTime').textContent=fmt(Math.floor((Date.now()-t0)/1000)); }
+
+function buildGrid(){
+  const b=$('board');
+  const avail=Math.min(520, (window.innerWidth||520)-32);
+  const gutW=avail<340?20:28;
+  const cs=Math.max(20, Math.min(46, Math.floor((avail-gutW)/N)));
+  document.documentElement.style.setProperty('--cs',cs+'px');
+  b.style.gridTemplateColumns=gutW+'px repeat('+N+','+cs+'px)';
+  b.style.gridAutoRows=cs+'px';
+  b.innerHTML='';
+  b.appendChild(gut('')); // corner
+  for(let c=0;c<N;c++) b.appendChild(gut('',{col:c}));
+  for(let r=0;r<N;r++){
+    b.appendChild(gut('',{row:r}));
+    for(let c=0;c<N;c++){
+      const d=document.createElement('div'); d.className='cell'; d.dataset.r=r; d.dataset.c=c;
+      const g=B.region[r][c];
+      d.style.background='hsl('+(g*360/N|0)+' 42% 17%)';
+      const bw=(rr,cc)=> (rr<0||cc<0||rr>=N||cc>=N||B.region[rr][cc]!==g)?'3px solid #8ea2ff':'1px solid rgba(120,140,220,.18)';
+      d.style.borderTop=bw(r-1,c); d.style.borderBottom=bw(r+1,c);
+      d.style.borderLeft=bw(r,c-1); d.style.borderRight=bw(r,c+1);
+      const star=document.createElement('div'); star.className='star'; star.textContent='★';
+      d.appendChild(star);
+      b.appendChild(d);
+    }
+  }
+  // left-click cycles; right-click / long-press toggles a dot directly
+  let lpTimer=null, lpFired=false;
+  const clearLP=()=>{ if(lpTimer){ clearTimeout(lpTimer); lpTimer=null; } };
+  b.onclick=e=>{ if(lpFired){ lpFired=false; return; } const c=e.target.closest('.cell'); if(c) cycle(+c.dataset.r,+c.dataset.c); };
+  b.oncontextmenu=e=>{ const c=e.target.closest('.cell'); if(c){ e.preventDefault(); toggleDot(+c.dataset.r,+c.dataset.c); } };
+  b.addEventListener('touchstart',e=>{ const cell=e.target.closest('.cell'); if(!cell) return;
+    lpFired=false; clearLP();
+    lpTimer=setTimeout(()=>{ lpFired=true; lpTimer=null; if(navigator.vibrate)navigator.vibrate(15);
+      toggleDot(+cell.dataset.r,+cell.dataset.c); },450); },{passive:true});
+  b.addEventListener('touchmove',clearLP,{passive:true});
+  b.addEventListener('touchend',clearLP);
+}
+function gut(txt,pos){ const d=document.createElement('div'); d.className='gut'; d.textContent=txt;
+  if(pos){ if('row'in pos)d.dataset.grow=pos.row; if('col'in pos)d.dataset.gcol=pos.col; } return d; }
+
+function adjustAuto(r,c,delta){
+  for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){ if(!dr&&!dc)continue; const nr=r+dr,nc=c+dc;
+    if(nr<0||nc<0||nr>=N||nc>=N)continue; auto[nr][nc]+=delta; }
+}
+function applyMove(r,c,from,to){
+  if(from===1) adjustAuto(r,c,-1);
+  user[r][c]=to;
+  if(to===1) adjustAuto(r,c,1);
+}
+function cycle(r,c){
+  if(won||revealed) return;
+  const from=user[r][c], to=(from+1)%3;
+  applyMove(r,c,from,to); hist.push({r,c,from,to}); redo=[]; hint=null; render();
+}
+function toggleDot(r,c){ // empty <-> dot, bypassing the star state
+  if(won||revealed) return;
+  const from=user[r][c], to=(from===2)?0:2;
+  applyMove(r,c,from,to); hist.push({r,c,from,to}); redo=[]; hint=null; render();
+}
+function undo(){ if(!hist.length)return; const m=hist.pop(); applyMove(m.r,m.c,m.to,m.from); redo.push(m); hint=null; render(); }
+function redoMove(){ if(!redo.length)return; const m=redo.pop(); applyMove(m.r,m.c,m.from,m.to); hist.push(m); hint=null; render(); }
+
+function stateGrid(){ // 0 unknown,1 star,2 dot (user dot or auto dot)
+  const s=Array.from({length:N},()=>new Array(N).fill(0));
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++) s[r][c]= user[r][c]===1?1 : (user[r][c]===2||auto[r][c]>0)?2 : 0;
+  return s;
+}
+
+function render(){
+  const cells=$('board').querySelectorAll('.cell');
+  const rowN=new Array(N).fill(0), colN=new Array(N).fill(0), regN=new Array(N).fill(0);
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++) if(user[r][c]===1){rowN[r]++;colN[c]++;regN[B.region[r][c]]++;}
+  // adjacency flags
+  const bad=Array.from({length:N},()=>new Array(N).fill(false));
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++) if(user[r][c]===1)
+    for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){ if(!dr&&!dc)continue; const nr=r+dr,nc=c+dc;
+      if(nr<0||nc<0||nr>=N||nc>=N)continue; if(user[nr][nc]===1){bad[r][c]=true;bad[nr][nc]=true;} }
+  // region badge first-cell map
+  const firstReg={};
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){const g=B.region[r][c]; if(!(g in firstReg))firstReg[g]=r*N+c;}
+  cells.forEach(d=>{
+    const r=+d.dataset.r,c=+d.dataset.c, u=user[r][c];
+    d.classList.toggle('on',u===1);
+    d.classList.toggle('bad',bad[r][c]);
+    d.classList.toggle('hint',!!hint&&hint.r===r&&hint.c===c);
+    let mark=d.querySelector('.udot,.adot'); if(mark)mark.remove();
+    if(u===2){const m=document.createElement('div');m.className='udot';d.appendChild(m);}
+    else if(u===0&&auto[r][c]>0){const m=document.createElement('div');m.className='adot';d.appendChild(m);}
+    let bg=d.querySelector('.rbadge'); if(bg)bg.remove();
+    const g=B.region[r][c];
+    if(firstReg[g]===r*N+c){ const b=document.createElement('div'); b.className='rbadge'+(regN[g]>K?' over':'');
+      const rem=K-regN[g]; b.textContent=(rem===0?'✓':rem); d.appendChild(b); }
+  });
+  // gutters
+  $('board').querySelectorAll('.gut[data-grow]').forEach(g=>{const r=+g.dataset.grow;setGut(g,K-rowN[r]);});
+  $('board').querySelectorAll('.gut[data-gcol]').forEach(g=>{const c=+g.dataset.gcol;setGut(g,K-colN[c]);});
+  checkWin(rowN,colN,regN,bad);
+}
+function setGut(el,rem){ el.textContent=rem; el.classList.toggle('done',rem===0); el.classList.toggle('over',rem<0); }
+
+function checkWin(rowN,colN,regN,bad){
+  if(won||revealed) return; // a revealed board is never a solve — no banner, no best time
+  let total=0,anyBad=false;
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){ if(user[r][c]===1)total++; if(bad[r][c])anyBad=true; }
+  const ok = total===N*K && !anyBad &&
+    rowN.every(x=>x===K) && colN.every(x=>x===K) && regN.every(x=>x===K);
+  if(!ok) return;
+  won=true; clearInterval(timer);
+  const secs=Math.floor((Date.now()-t0)/1000);
+  const prev=lsGet(bestKey());
+  if(!prev||secs<+prev){ lsSet(bestKey(),secs); $('sBest').textContent=fmt(secs); }
+  $('board').classList.add('won');
+  $('bannerP').textContent='Solved in '+fmt(secs)+'  ·  '+B.diff+'  ·  seed '+B.seed;
+  $('banner').classList.add('show');
+}
+
+/* ============================ CONTROLS ============================ */
+function doHint(){
+  if(won||revealed||!B) return;
+  const st=stateGrid();
+  // contradiction guard: any mark that conflicts with the proven sky
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){ const want=B.solution[r][c]?1:2;
+    if(st[r][c]!==0&&st[r][c]!==want){ hint={r,c}; $('msg').textContent='This mark contradicts the unique solution — undo it before hunting further.'; render(); return; } }
+  const s=deduceStep(N,K,B.region,st);
+  if(s){ hint={r:s.r,c:s.c}; $('msg').textContent=(s.val===1?'★ Place a star — ':'• Mark empty — ')+s.reason; render(); return; }
+  // no single-step deduction: fall back to the proven solution's next star
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++) if(B.solution[r][c]&&st[r][c]!==1){
+    hint={r,c}; $('msg').textContent='No one-step deduction here — the solver would branch. This cell holds a star in the proven sky.'; render(); return; }
+  $('msg').textContent='Every star is already placed correctly.';
+}
+function reveal(){
+  if(!B) return;
+  clearInterval(timer); revealed=true; won=false;
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){ user[r][c]=B.solution[r][c]?1:2; auto[r][c]=0; }
+  hist=[];redo=[];hint=null; $('msg').textContent='The unique sky, revealed.'; render();
+}
+function resetBoard(){
+  if(!B) return;
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){user[r][c]=0;auto[r][c]=0;}
+  hist=[];redo=[];hint=null;won=false;revealed=false; $('board').classList.remove('won');$('banner').classList.remove('show');
+  $('msg').textContent=''; t0=Date.now(); clearInterval(timer); timer=setInterval(tick,500); tick(); render();
+}
+function shareStr(){
+  const secs=won?Math.floor((Date.now()-t0)/1000):null;
+  return 'Firmament '+N+'×'+N+' ★'+K+'  seed '+B.seed+(secs!=null?'  · solved '+fmt(secs):'  · '+B.diff);
+}
+function copyText(txt,note){
+  const done=()=>{$('msg').textContent=note;};
+  if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done,()=>fallback());
+  else fallback();
+  function fallback(){const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');}catch(e){}ta.remove();done();}
+}
+
+document.querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>{
+  const [n,k]=b.dataset.preset.split(':').map(Number);
+  deal([randSeed()], n, k);
+});
+$('newseed').onclick=()=>deal([randSeed()], N||8, K||1);
+$('daily').onclick=()=>{ const d=new Date(); const base='sky-'+d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate();
+  // deterministic per-day fallback: if the base seed can't carve a unique sky, perturb it
+  const seeds=Array.from({length:40},(_,i)=>i===0?base:base+'#'+(i+1));
+  deal(seeds, 10, 2, "Today's Daily Sky — everyone gets this exact board."); };
+$('loadSeed').onclick=()=>{ const v=$('seedIn').value.trim(); if(v) deal([v], N||8, K||1); };
+$('seedIn').addEventListener('keydown',e=>{ if(e.key==='Enter')$('loadSeed').click(); });
+$('hint').onclick=doHint;
+$('undo').onclick=undo; $('redo').onclick=redoMove;
+$('reset').onclick=resetBoard; $('reveal').onclick=reveal;
+$('copy').onclick=()=>copyText(location.href,'Link copied — share this exact sky.');
+$('share').onclick=()=>copyText(shareStr(),'Spoiler-free result copied.');
+$('banner').onclick=()=>$('banner').classList.remove('show'); // let the solver admire the finished sky
+document.addEventListener('keydown',e=>{
+  const mod=e.ctrlKey||e.metaKey; // Cmd on macOS, Ctrl elsewhere
+  if(mod&&(e.key==='z'||e.key==='Z')&&!e.shiftKey){e.preventDefault();undo();}
+  else if(mod&&(e.key==='y'||(e.shiftKey&&(e.key==='z'||e.key==='Z')))){e.preventDefault();redoMove();}
+});
+// re-fit the board when the viewport changes (rotation/resize)
+let rzTimer=null;
+window.addEventListener('resize',()=>{ if(!B) return; clearTimeout(rzTimer);
+  rzTimer=setTimeout(()=>{ buildGrid(); render(); },150); });
+
+// boot from URL hash or default
+(function boot(){
+  const h=new URLSearchParams(location.hash.slice(1));
+  const seed=h.get('s'), n=+h.get('n')||8, k=+h.get('k')||1;
+  if(seed) deal([seed], n, k);
+  else deal([randSeed()], 8, 1);
+})();
+</script>
+</body>
+</html>

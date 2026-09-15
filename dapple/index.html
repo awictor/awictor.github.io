@@ -1,0 +1,650 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dapple — living stipple studio</title>
+<style>
+  :root{
+    --bg:#12100e; --panel:#1b1815; --panel2:#221e1a; --line:#332d27;
+    --ink:#f2ece2; --dim:#9a9086; --accent:#ff7a45; --accent2:#57c2b6;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(1200px 700px at 70% -10%,#221d18,#12100e 60%);
+    color:var(--ink);font:14px/1.45 ui-sans-serif,system-ui,"Segoe UI",Roboto,Helvetica,Arial;
+    display:flex;flex-direction:column;min-height:100%;
+  }
+  header{display:flex;align-items:baseline;gap:14px;padding:16px 22px 6px}
+  header h1{margin:0;font-size:22px;letter-spacing:.5px;font-weight:800}
+  header h1 .d{color:var(--accent)}
+  header .tag{color:var(--dim);font-size:12.5px}
+  main{flex:1;display:flex;gap:18px;padding:12px 22px 22px;align-items:flex-start;flex-wrap:wrap}
+  #stage{
+    flex:1 1 560px;min-width:320px;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px;
+    position:relative;box-shadow:0 20px 60px -30px #000;
+  }
+  #wrap{position:relative;border-radius:10px;overflow:hidden;background:#000;min-height:180px;
+    display:flex;align-items:center;justify-content:center}
+  canvas{max-width:100%;height:auto;display:block;image-rendering:auto}
+  #drop{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+    background:rgba(255,122,69,.14);border:2px dashed var(--accent);border-radius:10px;
+    color:var(--ink);font-weight:600;z-index:5;pointer-events:none}
+  #stage.drag #drop{display:flex}
+  .stagebar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .status{color:var(--dim);font-size:12px;margin-left:auto;font-variant-numeric:tabular-nums}
+  aside{flex:0 0 300px;max-width:340px;display:flex;flex-direction:column;gap:12px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 13px}
+  .card h2{margin:0 0 10px;font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:var(--accent)}
+  .row{display:flex;align-items:center;gap:8px;margin:8px 0}
+  .row label{flex:0 0 74px;color:var(--dim);font-size:12px}
+  .row output{flex:0 0 44px;text-align:right;font-variant-numeric:tabular-nums;font-size:12px}
+  input[type=range]{flex:1;accent-color:var(--accent);height:22px}
+  input[type=color]{width:34px;height:26px;border:1px solid var(--line);border-radius:6px;background:none;padding:0;cursor:pointer}
+  select{flex:1;background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:13px}
+  .seg{display:flex;gap:4px;flex-wrap:wrap}
+  .seg button{flex:1;min-width:60px}
+  button{
+    background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:9px;
+    padding:8px 11px;font-size:13px;cursor:pointer;transition:.12s;font-weight:600
+  }
+  button:hover{border-color:var(--accent);color:#fff}
+  button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.on{background:var(--accent);border-color:var(--accent);color:#160f0a}
+  button.ghost{background:none}
+  button.p{background:var(--accent);border-color:var(--accent);color:#160f0a}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+  .toggle{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+  .toggle input{accent-color:var(--accent);width:16px;height:16px}
+  .hint{color:var(--dim);font-size:11.5px;margin-top:6px}
+  a.link{color:var(--accent2);cursor:pointer;text-decoration:underline}
+  video{display:none}
+  .badge{font-size:10px;background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:2px 8px;color:var(--dim)}
+  footer{padding:0 22px 16px;color:var(--dim);font-size:11.5px}
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="d">Dapple</span></h1>
+  <span class="tag">drop a photo → watch it dissolve into a living cloud of ink dots → pull it out as vector</span>
+</header>
+<main>
+  <section id="stage">
+    <div id="drop">drop image to stipple</div>
+    <div id="wrap"><canvas id="cv"></canvas></div>
+    <div class="stagebar">
+      <button id="playBtn" class="p">Pause</button>
+      <button id="restartBtn" class="ghost">Restart</button>
+      <button id="recBtn" class="ghost">● Record</button>
+      <span class="badge" id="recBadge" style="display:none">recording…</span>
+      <span class="status" id="status">—</span>
+    </div>
+  </section>
+
+  <aside>
+    <div class="card">
+      <h2>Source</h2>
+      <div class="grid2">
+        <button id="fileBtn">Open image…</button>
+        <button id="camBtn">Webcam</button>
+        <button id="freezeBtn" class="ghost" style="display:none">Freeze frame</button>
+        <button id="sampleBtn" class="ghost">Sample</button>
+      </div>
+      <div class="hint">Drag-drop or paste (Ctrl+V) an image too. Nothing is uploaded — 100% in your browser.</div>
+      <input type="file" id="file" accept="image/*" style="display:none">
+    </div>
+
+    <div class="card">
+      <h2>Render</h2>
+      <div class="seg" id="modeSeg">
+        <button data-mode="stipple">Stipple</button>
+        <button data-mode="dots">Dots</button>
+        <button data-mode="tsp">TSP line</button>
+        <button data-mode="halftone">Halftone</button>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <label>Ink layers</label>
+        <select id="color">
+          <option value="mono">Mono</option>
+          <option value="duotone">Duotone</option>
+          <option value="cmyk">CMYK</option>
+        </select>
+      </div>
+      <div class="row" id="inkRow">
+        <label id="inkLabel">Ink / paper</label>
+        <input type="color" id="ink" value="#141414">
+        <input type="color" id="inkB" value="#e0563b" title="second ink (duotone)">
+        <input type="color" id="bg" value="#f7f4ec" title="paper / background">
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Tuning</h2>
+      <div class="row"><label>Dots</label><input type="range" id="n" min="500" max="8000" step="100"><output id="nOut"></output></div>
+      <div class="row"><label>Gamma</label><input type="range" id="gamma" min="0.3" max="3" step="0.05"><output id="gammaOut"></output></div>
+      <div class="row"><label>Contrast</label><input type="range" id="contrast" min="0.5" max="2.2" step="0.05"><output id="contrastOut"></output></div>
+      <div class="row"><label>Dot size</label><input type="range" id="radius" min="0.15" max="1.4" step="0.01"><output id="radiusOut"></output></div>
+      <div class="row"><label class="toggle"><input type="checkbox" id="invert"> Invert</label>
+        <button id="seedBtn" class="ghost" style="margin-left:auto">Reseed</button></div>
+    </div>
+
+    <div class="card">
+      <h2>Export</h2>
+      <div class="grid2">
+        <button id="pngBtn">PNG</button>
+        <button id="svgBtn">SVG (vector)</button>
+      </div>
+      <div class="grid2" style="margin-top:7px">
+        <button id="linkBtn" class="ghost">Copy share link</button>
+        <button id="recBtn2" class="ghost">Record WebM</button>
+      </div>
+      <div class="hint">SVG = circles per ink layer (own <code>&lt;g&gt;</code>) or one <code>&lt;path&gt;</code> polyline for TSP — plotter &amp; laser ready. Share link reproduces the exact look via seeded RNG in the URL.</div>
+    </div>
+  </aside>
+</main>
+<footer>Dapple · weighted-Voronoi Lloyd relaxation, live · zero dependencies · your image never leaves this tab</footer>
+
+<video id="vid" playsinline muted></video>
+<canvas id="work" style="display:none"></canvas>
+
+<script>
+"use strict";
+(function(){
+const $=id=>document.getElementById(id);
+const clamp01=v=>v<0?0:v>1?1:v;
+
+// ---------- config / URL hash ----------
+const cfg={ n:3000, gamma:1.15, contrast:1.2, radius:0.42, mode:"stipple",
+  color:"mono", ink:"#141414", inkB:"#e0563b", bg:"#f7f4ec", invert:false,
+  seed:(Math.random()*1e9)|0 };
+const GRID=190, ITERS=1, SETTLE=150, REC_MAX=280;
+// valid ranges for numeric config (mirrors the slider min/max) — used to sanitize the URL hash
+const LIMITS={ n:[500,8000], gamma:[0.3,3], contrast:[0.5,2.2], radius:[0.15,1.4], seed:[0,4294967295] };
+
+function readHash(){
+  const h=location.hash.replace(/^#/,""); if(!h) return;
+  for(const kv of h.split("&")){
+    const [k,v]=kv.split("="); if(v===undefined) continue; const val=decodeURIComponent(v);
+    if(k in cfg){
+      if(typeof cfg[k]==="number"){
+        let num=+val; if(!isFinite(num)) continue;      // reject NaN / non-numeric
+        const lim=LIMITS[k]; if(lim) num=Math.min(lim[1],Math.max(lim[0],num));
+        cfg[k]=num;
+      }
+      else if(typeof cfg[k]==="boolean") cfg[k]=(val==="1"||val==="true");
+      else cfg[k]=val;
+    }
+  }
+}
+let hashT=0;
+function writeHash(){
+  clearTimeout(hashT);
+  hashT=setTimeout(()=>{
+    const o=Object.entries(cfg).map(([k,v])=>k+"="+encodeURIComponent(typeof v==="boolean"?(v?1:0):v));
+    history.replaceState(null,"",""+location.pathname+"#"+o.join("&"));
+  },200);
+}
+
+// ---------- seeded RNG ----------
+let rnd=Math.random;
+function seedRng(s){ let a=(s>>>0)||1; return function(){ a|=0;a=a+0x6D2B79F5|0;
+  let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+// ---------- canvas / state ----------
+const cv=$("cv"), ctx=cv.getContext("2d");
+const work=$("work"), wctx=work.getContext("2d",{willReadFrequently:true});
+const vid=$("vid");
+let gw=0,gh=0,k=5,W=0,H=0;             // grid dims, scale, canvas px
+let systems=[];                        // ink layers
+let running=false, iterCount=0, camOn=false, camLive=false;
+let recorder=null, recording=false, recFrames=0, recChunks=[];
+
+function di(x,y){ // clamped grid index
+  x=x<0?0:x>=gw?gw-1:x|0; y=y<0?0:y>=gh?gh-1:y|0; return y*gw+x;
+}
+
+function setGrid(aw,ah){
+  if(aw>=ah){ gw=GRID; gh=Math.max(1,Math.round(GRID*ah/aw)); }
+  else { gh=GRID; gw=Math.max(1,Math.round(GRID*aw/ah)); }
+  k=Math.max(2,Math.round(900/Math.max(gw,gh)));
+  W=gw*k; H=gh*k; cv.width=W; cv.height=H;
+  work.width=gw; work.height=gh;
+}
+
+// draw a source (img or video) into the work canvas with cover-fit
+function drawCover(src,sw,sh){
+  const s=Math.max(gw/sw,gh/sh), dw=sw*s, dh=sh*s;
+  wctx.clearRect(0,0,gw,gh);
+  wctx.drawImage(src,(gw-dw)/2,(gh-dh)/2,dw,dh);
+}
+
+// ---------- density fields ----------
+function fillDens(arrs){
+  const id=wctx.getImageData(0,0,gw,gh).data, N=gw*gh;
+  const g=cfg.gamma, con=cfg.contrast, inv=cfg.invert;
+  if(cfg.color==="cmyk"){
+    const C=arrs[0],M=arrs[1],Y=arrs[2],K=arrs[3];
+    for(let i=0;i<N;i++){
+      let r=id[i*4]/255,gg=id[i*4+1]/255,b=id[i*4+2]/255;
+      if(inv){r=1-r;gg=1-gg;b=1-b;}
+      r=clamp01((r-.5)*con+.5); gg=clamp01((gg-.5)*con+.5); b=clamp01((b-.5)*con+.5);
+      const kk=1-Math.max(r,gg,b), den=1-kk;
+      C[i]=Math.pow(den>1e-4?clamp01((1-r-kk)/den):0,g);
+      M[i]=Math.pow(den>1e-4?clamp01((1-gg-kk)/den):0,g);
+      Y[i]=Math.pow(den>1e-4?clamp01((1-b-kk)/den):0,g);
+      K[i]=Math.pow(clamp01(kk),g);
+    }
+  } else {
+    const d=arrs[0];
+    for(let i=0;i<N;i++){
+      let L=(0.2126*id[i*4]+0.7152*id[i*4+1]+0.0722*id[i*4+2])/255;
+      L=clamp01((L-.5)*con+.5);
+      d[i]=Math.pow(inv?L:1-L,g);
+    }
+    if(arrs[1]) arrs[1].set(d); // duotone shares the field
+  }
+}
+
+// ---------- systems ----------
+function hex2rgb(h){ h=h.replace("#",""); if(h.length===3) h=h.split("").map(c=>c+c).join("");
+  return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)]; }
+
+function makeSys(color,n){
+  const cell=Math.max(1,Math.floor(Math.sqrt(gw*gh/Math.max(1,n))));
+  const bcols=Math.ceil(gw/cell), brows=Math.ceil(gh/cell);
+  const buckets=new Array(bcols*brows); for(let i=0;i<buckets.length;i++) buckets[i]=[];
+  return { color, dens:new Float32Array(gw*gh), pts:[], tour:null,
+    accX:new Float32Array(n),accY:new Float32Array(n),accW:new Float32Array(n),
+    cell,bcols,brows,buckets };
+}
+
+function sampleDark(sys,out){
+  for(let t=0;t<300;t++){
+    const x=rnd()*gw, y=rnd()*gh;
+    if(rnd()<sys.dens[di(x,y)]){ out.x=x; out.y=y; return; }
+  }
+  out.x=rnd()*gw; out.y=rnd()*gh;
+}
+
+function initSys(sys,n){
+  sys.pts.length=0; sys.tour=null;
+  for(let i=0;i<n;i++){ const p={x:0,y:0}; sampleDark(sys,p); sys.pts.push(p); }
+}
+
+function buildSystems(){
+  rnd=seedRng(cfg.seed);
+  systems=[];
+  if(cfg.color==="mono"){
+    systems.push(makeSys(hex2rgb(cfg.ink),cfg.n));
+    fillDens([systems[0].dens]);
+    initSys(systems[0],cfg.n);
+  } else if(cfg.color==="duotone"){
+    const half=Math.floor(cfg.n/2);
+    const a=makeSys(hex2rgb(cfg.ink),half), b=makeSys(hex2rgb(cfg.inkB),half);
+    systems.push(a,b);
+    fillDens([a.dens,b.dens]);
+    initSys(a,half); initSys(b,half);   // different rng draws -> interleaved two-tone
+  } else {
+    const cols=[[0,159,218],[214,37,127],[255,222,23],[26,26,26]];
+    const tmp=[new Float32Array(gw*gh),new Float32Array(gw*gh),new Float32Array(gw*gh),new Float32Array(gw*gh)];
+    fillDens(tmp);
+    const sums=[0,0,0,0]; for(let s=0;s<4;s++){ let a=tmp[s]; for(let i=0;i<a.length;i++) sums[s]+=a[i]; }
+    const tot=sums[0]+sums[1]+sums[2]+sums[3]||1;
+    for(let s=0;s<4;s++){
+      const nn=Math.max(40,Math.round(cfg.n*sums[s]/tot));
+      const sys=makeSys(cols[s],nn); sys.dens.set(tmp[s]); systems.push(sys); initSys(sys,nn);
+    }
+  }
+  iterCount=0; running=true; updatePlay();
+}
+
+// recompute only the density fields (live webcam / gamma-contrast tweaks) — keeps points
+function recomputeDens(){
+  if(cfg.color==="mono") fillDens([systems[0].dens]);
+  else if(cfg.color==="duotone") fillDens([systems[0].dens,systems[1].dens]);
+  else fillDens([systems[0].dens,systems[1].dens,systems[2].dens,systems[3].dens]);
+}
+
+// ---------- Lloyd relaxation (one step) ----------
+function relax(sys){
+  const pts=sys.pts, n=pts.length; if(!n) return;
+  const cell=sys.cell, bcols=sys.bcols, brows=sys.brows, buckets=sys.buckets, dens=sys.dens;
+  for(let i=0;i<buckets.length;i++) buckets[i].length=0;
+  for(let i=0;i<n;i++){ const p=pts[i];
+    let bx=(p.x/cell)|0, by=(p.y/cell)|0;
+    if(bx<0)bx=0; else if(bx>=bcols)bx=bcols-1;
+    if(by<0)by=0; else if(by>=brows)by=brows-1;
+    buckets[by*bcols+bx].push(i);
+  }
+  const aX=sys.accX,aY=sys.accY,aW=sys.accW; aX.fill(0);aY.fill(0);aW.fill(0);
+  for(let y=0;y<gh;y++) for(let x=0;x<gw;x++){
+    const w=dens[y*gw+x]; if(w<=0.002) continue;
+    const bx=(x/cell)|0, by=(y/cell)|0; let best=-1,bd=1e18;
+    for(let r=0;;r++){
+      const x0=bx-r,x1=bx+r,y0=by-r,y1=by+r;
+      for(let cy=y0;cy<=y1;cy++){ if(cy<0||cy>=brows) continue;
+        const ring=(cy===y0||cy===y1);
+        for(let cx=x0;cx<=x1;cx++){ if(cx<0||cx>=bcols) continue;
+          if(!ring && cx>x0 && cx<x1) continue;
+          const arr=buckets[cy*bcols+cx];
+          for(let m=0;m<arr.length;m++){ const j=arr[m],p=pts[j];
+            const dx=p.x-x,dy=p.y-y,d=dx*dx+dy*dy; if(d<bd){bd=d;best=j;} }
+        }
+      }
+      if(best>=0 && (r*cell)*(r*cell)>bd) break;
+      if(r>bcols+brows) break;
+    }
+    if(best>=0){ aX[best]+=x*w; aY[best]+=y*w; aW[best]+=w; }
+  }
+  for(let i=0;i<n;i++){
+    if(aW[i]>1e-4){ pts[i].x=aX[i]/aW[i]; pts[i].y=aY[i]/aW[i]; }
+    else sampleDark(sys,pts[i]);
+  }
+  sys.tour=null;
+}
+
+// ---------- TSP (nearest-neighbour + time-boxed 2-opt) ----------
+function buildTour(sys){
+  const pts=sys.pts, n=pts.length; if(n<3){ sys.tour=pts.map((_,i)=>i); return; }
+  const used=new Uint8Array(n), tour=[0]; used[0]=1; let cur=0;
+  for(let s=1;s<n;s++){ let best=-1,bd=1e18;
+    for(let j=0;j<n;j++){ if(used[j])continue; const dx=pts[j].x-pts[cur].x,dy=pts[j].y-pts[cur].y,d=dx*dx+dy*dy;
+      if(d<bd){bd=d;best=j;} }
+    used[best]=1; tour.push(best); cur=best;
+  }
+  const D=(a,b)=>{const dx=pts[a].x-pts[b].x,dy=pts[a].y-pts[b].y;return Math.sqrt(dx*dx+dy*dy);};
+  const t0=performance.now(); let improved=true;
+  while(improved && performance.now()-t0<30){ improved=false;
+    for(let i=0;i<n-1;i++){ if(performance.now()-t0>30) break;
+      const a=tour[i],b=tour[i+1];
+      for(let j=i+2;j<n-1;j++){ const c=tour[j],d=tour[j+1];
+        if(D(a,b)+D(c,d) > D(a,c)+D(b,d)+1e-7){
+          let lo=i+1,hi=j; while(lo<hi){ const t=tour[lo];tour[lo]=tour[hi];tour[hi]=t;lo++;hi--; }
+          improved=true; break;
+        }
+      }
+    }
+  }
+  sys.tour=tour;
+}
+
+// ---------- rendering ----------
+const HALF_ANG=[0.262,1.309,0,0.785]; // C,M,Y,K screen angles
+function drawHalftone(sys,idx){
+  const [r,g,b]=sys.color; ctx.fillStyle=`rgb(${r},${g},${b})`;
+  const ang=HALF_ANG[idx%4], cs=Math.cos(ang), sn=Math.sin(ang);
+  const step=Math.max(2.2,cfg.radius*7), D=Math.hypot(gw,gh);
+  for(let v=-D;v<=D;v+=step) for(let u=-D;u<=D;u+=step){
+    const gx=(u*cs-v*sn)+gw/2, gy=(u*sn+v*cs)+gh/2;
+    if(gx<0||gx>=gw||gy<0||gy>=gh) continue;
+    const w=sys.dens[di(gx,gy)]; if(w<=0.01) continue;
+    const rad=Math.sqrt(w)*step*0.62;
+    ctx.beginPath(); ctx.arc(gx*k,gy*k,rad*k,0,6.2832); ctx.fill();
+  }
+}
+function drawStipple(sys){
+  const [r,g,b]=sys.color; ctx.fillStyle=`rgb(${r},${g},${b})`;
+  const variable=cfg.mode==="dots";
+  for(const p of sys.pts){
+    let rad=cfg.radius;
+    if(variable){ const w=sys.dens[di(p.x,p.y)]; rad=cfg.radius*(0.35+1.5*w); }
+    ctx.beginPath(); ctx.arc(p.x*k,p.y*k,rad*k,0,6.2832); ctx.fill();
+  }
+}
+function drawTour(sys){
+  if(!sys.tour) buildTour(sys);
+  if(!sys.tour||!sys.tour.length) return;
+  const [r,g,b]=sys.color;
+  ctx.strokeStyle=`rgb(${r},${g},${b})`; ctx.lineWidth=Math.max(0.6,cfg.radius*k*0.85);
+  ctx.lineJoin="round"; ctx.lineCap="round"; ctx.beginPath();
+  const t=sys.tour, pts=sys.pts;
+  ctx.moveTo(pts[t[0]].x*k,pts[t[0]].y*k);
+  for(let i=1;i<t.length;i++) ctx.lineTo(pts[t[i]].x*k,pts[t[i]].y*k);
+  ctx.stroke();
+}
+function render(){
+  ctx.fillStyle=cfg.bg; ctx.fillRect(0,0,W,H);
+  systems.forEach((sys,i)=>{
+    if(cfg.mode==="halftone") drawHalftone(sys,i);
+    else if(cfg.mode==="tsp") drawTour(sys);
+    else drawStipple(sys);
+  });
+}
+
+// ---------- main loop ----------
+function loop(){
+  if(camLive){ drawCover(vid,vid.videoWidth||640,vid.videoHeight||480); recomputeDens(); }
+  if(running && cfg.mode!=="halftone"){
+    for(let it=0;it<ITERS;it++){ systems.forEach(relax); iterCount++; }
+    if(!camLive && iterCount>=SETTLE){ running=false; updatePlay(); }
+  }
+  render();
+  if(recording){ recFrames++; if(recFrames>=REC_MAX) stopRecord(); }
+  let dots=0; systems.forEach(s=>dots+=s.pts.length);
+  if(cfg.mode==="halftone") $("status").textContent=`halftone · ${dots} sample points`;
+  else $("status").textContent=`${dots} dots · iter ${iterCount}` + (camLive?" · LIVE":running?"":" · settled");
+  requestAnimationFrame(loop);
+}
+function updatePlay(){ const b=$("playBtn"); b.textContent=running?"Pause":"Play"; b.classList.toggle("p",!running); }
+
+// ---------- image sources ----------
+function loadImageEl(img){
+  stopCam();
+  setGrid(img.naturalWidth||img.width,img.naturalHeight||img.height);
+  drawCover(img,img.naturalWidth||img.width,img.naturalHeight||img.height);
+  buildSystems();
+}
+function loadFile(f){ if(!f) return; const url=URL.createObjectURL(f); const img=new Image();
+  img.onload=()=>{ loadImageEl(img); URL.revokeObjectURL(url); };
+  img.onerror=()=>{ $("status").textContent="could not load that image"; URL.revokeObjectURL(url); };
+  img.src=url; }
+
+function makeSample(){
+  const s=520;
+  // draw the whole scene at full 520px resolution into a dedicated canvas FIRST,
+  // then size the work grid and downsample into it (setGrid resets work's size).
+  const full=document.createElement("canvas"); full.width=s; full.height=s;
+  const fctx=full.getContext("2d");
+  // synthetic portrait-ish scene: gradient sky, lit sphere, vignette
+  const g=fctx.createLinearGradient(0,0,0,s); g.addColorStop(0,"#eef2f6"); g.addColorStop(1,"#8fa2b4");
+  fctx.fillStyle=g; fctx.fillRect(0,0,s,s);
+  const sph=fctx.createRadialGradient(s*0.4,s*0.36,10,s*0.5,s*0.5,s*0.42);
+  sph.addColorStop(0,"#ffffff"); sph.addColorStop(0.35,"#c9a06a"); sph.addColorStop(0.8,"#5b3d22"); sph.addColorStop(1,"#241408");
+  fctx.fillStyle=sph; fctx.beginPath(); fctx.arc(s*0.5,s*0.5,s*0.34,0,6.2832); fctx.fill();
+  fctx.fillStyle="rgba(20,10,0,0.55)"; fctx.beginPath(); fctx.ellipse(s*0.5,s*0.9,s*0.36,s*0.09,0,0,6.2832); fctx.fill();
+  const vg=fctx.createRadialGradient(s*0.5,s*0.5,s*0.3,s*0.5,s*0.5,s*0.75);
+  vg.addColorStop(0,"rgba(0,0,0,0)"); vg.addColorStop(1,"rgba(0,0,0,0.55)");
+  fctx.fillStyle=vg; fctx.fillRect(0,0,s,s);
+  stopCam();
+  setGrid(s,s); drawCover(full,s,s);
+  buildSystems();
+}
+
+// ---------- webcam ----------
+async function startCam(){
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480},audio:false});
+    vid.srcObject=stream; await vid.play(); camOn=true; camLive=true;
+    setGrid(vid.videoWidth||640,vid.videoHeight||480);
+    drawCover(vid,vid.videoWidth||640,vid.videoHeight||480);
+    buildSystems();
+    $("camBtn").classList.add("on"); $("freezeBtn").style.display="";
+  }catch(e){ $("status").textContent="webcam unavailable: "+(e.message||e.name); }
+}
+function stopCam(){ camLive=false; if(camOn){ const t=vid.srcObject&&vid.srcObject.getTracks?vid.srcObject.getTracks():[];
+  t.forEach(x=>x.stop()); vid.srcObject=null; camOn=false; }
+  $("camBtn").classList.remove("on"); $("freezeBtn").style.display="none"; }
+function freezeCam(){ camLive=false; running=true; iterCount=0; updatePlay(); $("freezeBtn").style.display="none"; }
+
+// ---------- exports ----------
+function download(blob,name){ const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name;
+  a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),4000); }
+function exportPNG(){ cv.toBlob(b=>download(b,"dapple.png"),"image/png"); }
+
+function exportSVG(){
+  const rgb=c=>`rgb(${c[0]},${c[1]},${c[2]})`;
+  let body=`<rect width="${W}" height="${H}" fill="${cfg.bg}"/>`;
+  const names=cfg.color==="cmyk"?["cyan","magenta","yellow","black"]
+            :cfg.color==="duotone"?["ink-a","ink-b"]:["ink"];
+  systems.forEach((sys,i)=>{
+    const id=names[i]||("layer"+i), col=rgb(sys.color);
+    if(cfg.mode==="tsp"){
+      if(!sys.tour) buildTour(sys);
+      if(!sys.tour.length) return;
+      const pts=sys.tour.map(j=>`${(sys.pts[j].x*k).toFixed(1)},${(sys.pts[j].y*k).toFixed(1)}`).join(" ");
+      body+=`<g id="${id}" fill="none" stroke="${col}" stroke-width="${(Math.max(0.6,cfg.radius*k*0.85)).toFixed(2)}" stroke-linejoin="round" stroke-linecap="round"><polyline points="${pts}"/></g>`;
+    } else if(cfg.mode==="halftone"){
+      const ang=HALF_ANG[i%4], cs=Math.cos(ang), sn=Math.sin(ang), step=Math.max(2.2,cfg.radius*7), D=Math.hypot(gw,gh);
+      let c=""; for(let v=-D;v<=D;v+=step) for(let u=-D;u<=D;u+=step){
+        const gx=(u*cs-v*sn)+gw/2, gy=(u*sn+v*cs)+gh/2; if(gx<0||gx>=gw||gy<0||gy>=gh) continue;
+        const w=sys.dens[di(gx,gy)]; if(w<=0.01) continue; const r=Math.sqrt(w)*step*0.62*k;
+        c+=`<circle cx="${(gx*k).toFixed(1)}" cy="${(gy*k).toFixed(1)}" r="${r.toFixed(2)}"/>`; }
+      body+=`<g id="${id}" fill="${col}">${c}</g>`;
+    } else {
+      const variable=cfg.mode==="dots"; let c="";
+      for(const p of sys.pts){ let r=cfg.radius; if(variable){ const w=sys.dens[di(p.x,p.y)]; r=cfg.radius*(0.35+1.5*w); }
+        c+=`<circle cx="${(p.x*k).toFixed(1)}" cy="${(p.y*k).toFixed(1)}" r="${(r*k).toFixed(2)}"/>`; }
+      body+=`<g id="${id}" fill="${col}">${c}</g>`;
+    }
+  });
+  const svg=`<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">\n${body}\n</svg>\n`;
+  download(new Blob([svg],{type:"image/svg+xml"}),"dapple.svg");
+}
+
+// ---------- record relaxation as WebM ----------
+// both record buttons (stage bar + Export card) share one toggle — keep them in sync
+function setRecBtns(){
+  ["recBtn","recBtn2"].forEach(id=>{ const b=$(id); if(!b) return;
+    b.classList.toggle("on",recording);
+    b.textContent = recording ? "■ Stop" : (id==="recBtn" ? "● Record" : "Record WebM");
+  });
+  $("recBadge").style.display = recording ? "" : "none";
+}
+function startRecord(){
+  if(recording) return;
+  // confirm support BEFORE touching any state — Safari has captureStream but no WebM encoder,
+  // and very old browsers have no MediaRecorder at all.
+  if(!cv.captureStream || typeof MediaRecorder==="undefined"){ $("status").textContent="recording unsupported here"; return; }
+  const mimes=["video/webm;codecs=vp9","video/webm;codecs=vp8","video/webm"];
+  let mime=""; for(const m of mimes){ try{ if(MediaRecorder.isTypeSupported(m)){ mime=m; break; } }catch(_){} }
+  let stream,rec;
+  try{
+    stream=cv.captureStream(30);
+    rec=new MediaRecorder(stream, mime?{mimeType:mime}:undefined);
+  }catch(e){ $("status").textContent="recording unsupported here"; return; }
+  recorder=rec; recChunks=[];
+  recorder.ondataavailable=e=>{ if(e.data.size) recChunks.push(e.data); };
+  recorder.onstop=()=>download(new Blob(recChunks,{type:"video/webm"}),"dapple.webm");
+  // only now that the recorder exists do we restart the sim so the whole convergence is captured
+  systems.forEach(s=>initSys(s,s.pts.length)); iterCount=0; running=true; updatePlay();
+  recorder.start(); recording=true; recFrames=0; setRecBtns();
+}
+function stopRecord(){ if(!recording) return; recording=false; try{recorder.stop();}catch(e){}
+  setRecBtns(); }
+
+// ---------- bind UI ----------
+function bindSlider(id,key,fmt){ const el=$(id), out=$(id+"Out");
+  const show=()=>{ if(out) out.textContent=fmt?fmt(cfg[key]):cfg[key]; };
+  el.value=cfg[key]; show();
+  el.addEventListener("input",()=>{ cfg[key]=+el.value; show(); writeHash();
+    if(key==="n"){ buildSystems(); } else { recomputeDens(); if(cfg.mode==="tsp") systems.forEach(buildTour); running=true; iterCount=Math.min(iterCount,SETTLE-30); updatePlay(); }
+  });
+}
+bindSlider("n","n",v=>v);
+bindSlider("gamma","gamma",v=>(+v).toFixed(2));
+bindSlider("contrast","contrast",v=>(+v).toFixed(2));
+bindSlider("radius","radius",v=>(+v).toFixed(2));
+
+$("invert").checked=cfg.invert;
+$("invert").addEventListener("change",e=>{ cfg.invert=e.target.checked; writeHash(); recomputeDens(); running=true; iterCount=0; updatePlay(); });
+
+["ink","inkB","bg"].forEach(id=>{ $(id).value=cfg[id];
+  $(id).addEventListener("input",e=>{ cfg[id]=e.target.value; writeHash();
+    if(systems.length){ if(cfg.color==="mono") systems[0].color=hex2rgb(cfg.ink);
+      else if(cfg.color==="duotone"){ systems[0].color=hex2rgb(cfg.ink); systems[1].color=hex2rgb(cfg.inkB); } } }); });
+
+// show only the ink swatches that actually affect the current mode:
+//  mono   -> ink + paper       (inkB is inert)
+//  duotone-> ink A + ink B + paper
+//  cmyk   -> paper only        (the four channel colours are fixed)
+function updateInkControls(){
+  const c=cfg.color;
+  $("ink").style.display  = c==="cmyk"    ? "none" : "";
+  $("inkB").style.display = c==="duotone" ? ""     : "none";
+  $("bg").style.display   = "";
+  $("inkLabel").textContent = c==="cmyk" ? "Paper" : c==="duotone" ? "Ink A / B / paper" : "Ink / paper";
+}
+$("color").value=cfg.color;
+$("color").addEventListener("change",e=>{ cfg.color=e.target.value; writeHash(); updateInkControls(); buildSystems(); });
+
+// halftone is a static screen (no relaxation) — dim the motion/record controls so they don't imply animation
+function updateControlsForMode(){
+  const frozen=cfg.mode==="halftone";
+  ["playBtn","restartBtn","recBtn","recBtn2"].forEach(id=>{ const b=$(id); if(b) b.disabled=frozen; });
+}
+function setMode(m){ cfg.mode=m; writeHash();
+  document.querySelectorAll("#modeSeg button").forEach(b=>b.classList.toggle("on",b.dataset.mode===m));
+  updateControlsForMode();
+  if(m==="tsp"){ running=false; updatePlay(); systems.forEach(buildTour); }
+}
+document.querySelectorAll("#modeSeg button").forEach(b=>b.addEventListener("click",()=>setMode(b.dataset.mode)));
+
+$("playBtn").addEventListener("click",()=>{ running=!running; if(running&&iterCount>=SETTLE) iterCount=0; updatePlay(); });
+$("restartBtn").addEventListener("click",()=>{ systems.forEach((s,i)=>initSys(s,s.pts.length)); iterCount=0; running=true; updatePlay(); });
+$("seedBtn").addEventListener("click",()=>{ cfg.seed=(Math.random()*1e9)|0; writeHash(); buildSystems(); });
+$("fileBtn").addEventListener("click",()=>$("file").click());
+$("file").addEventListener("change",e=>loadFile(e.target.files[0]));
+$("sampleBtn").addEventListener("click",makeSample);
+$("camBtn").addEventListener("click",()=>{ if(camOn) stopCam(); else startCam(); });
+$("freezeBtn").addEventListener("click",freezeCam);
+$("pngBtn").addEventListener("click",exportPNG);
+$("svgBtn").addEventListener("click",exportSVG);
+$("recBtn").addEventListener("click",()=>recording?stopRecord():startRecord());
+$("recBtn2").addEventListener("click",()=>recording?stopRecord():startRecord());
+$("linkBtn").addEventListener("click",()=>{ writeHash();
+  setTimeout(()=>{
+    if(navigator.clipboard) navigator.clipboard.writeText(location.href).then(
+      ()=>{ const b=$("linkBtn"); b.textContent="Copied!"; setTimeout(()=>b.textContent="Copy share link",1400); },
+      ()=>{ $("status").textContent="copy failed — URL is in the address bar"; });
+    else $("status").textContent="URL is in the address bar — copy it manually"; // file:// has no clipboard API
+  },260); });
+
+// drag & drop
+const stage=$("stage");
+["dragenter","dragover"].forEach(ev=>stage.addEventListener(ev,e=>{ e.preventDefault(); stage.classList.add("drag"); }));
+["dragleave","drop"].forEach(ev=>stage.addEventListener(ev,e=>{ e.preventDefault(); if(ev==="drop"||e.target===stage) stage.classList.remove("drag"); }));
+stage.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f&&f.type.startsWith("image")) loadFile(f); });
+window.addEventListener("paste",e=>{ for(const it of e.clipboardData.items) if(it.type.startsWith("image")){ loadFile(it.getAsFile()); break; } });
+
+// Space toggles Pause/Play (unless typing in a control or in the static halftone mode)
+window.addEventListener("keydown",e=>{
+  if(e.code!=="Space") return;
+  const t=document.activeElement, tag=t&&t.tagName;
+  if(tag==="INPUT"||tag==="SELECT"||tag==="TEXTAREA") return;
+  if(cfg.mode==="halftone") return;
+  e.preventDefault();
+  running=!running; if(running&&iterCount>=SETTLE) iterCount=0; updatePlay();
+});
+
+// ---------- boot ----------
+readHash();
+// reflect config into controls that weren't bound above
+$("n").value=cfg.n; $("nOut").textContent=cfg.n;
+$("gamma").value=cfg.gamma; $("gammaOut").textContent=(+cfg.gamma).toFixed(2);
+$("contrast").value=cfg.contrast; $("contrastOut").textContent=(+cfg.contrast).toFixed(2);
+$("radius").value=cfg.radius; $("radiusOut").textContent=(+cfg.radius).toFixed(2);
+$("invert").checked=cfg.invert; $("color").value=cfg.color;
+$("ink").value=cfg.ink; $("inkB").value=cfg.inkB; $("bg").value=cfg.bg;
+document.querySelectorAll("#modeSeg button").forEach(b=>b.classList.toggle("on",b.dataset.mode===cfg.mode));
+updateInkControls();
+updateControlsForMode();
+makeSample();
+updatePlay();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

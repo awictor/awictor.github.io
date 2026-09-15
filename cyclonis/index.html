@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cyclonis — seeded gas-giant portrait generator</title>
+<style>
+  :root{ --bg:#05060c; --panel:#0d1120; --edge:#1e2740; --ink:#c9d4ec; --dim:#7d89a8; --hi:#ffb14e; --hi2:#4ec6ff; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; }
+  body{ background:radial-gradient(1200px 800px at 70% -10%, #101a33 0, #05060c 60%), #05060c;
+        color:var(--ink); font:14px/1.5 "Segoe UI",system-ui,sans-serif; display:flex; min-height:100%; }
+  #stage{ flex:1; display:flex; align-items:center; justify-content:center; padding:24px; min-width:0; position:relative; }
+  #wrap{ position:relative; max-width:100%; max-height:100%; }
+  canvas#view{ max-width:100%; max-height:88vh; border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,.6),0 0 0 1px #ffffff10; display:block; }
+  aside{ width:290px; flex:none; background:linear-gradient(180deg,#0e1326,#0b0f1c); border-left:1px solid var(--edge);
+         padding:20px 20px 28px; overflow-y:auto; }
+  h1{ font-size:19px; margin:0 0 2px; letter-spacing:.5px; }
+  h1 b{ color:var(--hi); }
+  .sub{ color:var(--dim); font-size:12px; margin:0 0 18px; }
+  .row{ margin:0 0 14px; }
+  label{ display:flex; justify-content:space-between; font-size:12px; color:var(--dim); margin-bottom:5px; text-transform:uppercase; letter-spacing:.4px; }
+  label span{ color:var(--ink); font-variant-numeric:tabular-nums; }
+  input[type=range]{ width:100%; accent-color:var(--hi); }
+  select{ width:100%; background:#111830; color:var(--ink); border:1px solid var(--edge); border-radius:7px; padding:7px; font:inherit; }
+  .btns{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:6px; }
+  button{ background:#141c34; color:var(--ink); border:1px solid var(--edge); border-radius:8px; padding:9px 8px;
+          font:600 13px/1 inherit; cursor:pointer; transition:.12s; }
+  button:hover{ border-color:var(--hi); color:#fff; }
+  button.primary{ background:linear-gradient(180deg,#ff9a3c,#f2740e); color:#1a1206; border:none; }
+  button.primary:hover{ filter:brightness(1.08); }
+  button:focus-visible, select:focus-visible, input:focus-visible{ outline:2px solid var(--hi); outline-offset:2px; }
+  .toggles{ display:flex; gap:16px; flex-wrap:wrap; margin-top:4px; }
+  .toggles label{ text-transform:none; letter-spacing:0; color:var(--ink); display:flex; align-items:center; gap:6px; cursor:pointer; margin:0; }
+  .foot{ margin-top:18px; font-size:11px; color:var(--dim); border-top:1px solid var(--edge); padding-top:14px; }
+  code{ color:var(--hi2); }
+  /* gallery overlay */
+  #gal{ position:fixed; inset:0; background:rgba(4,6,12,.94); display:none; z-index:20; padding:28px; overflow:auto; }
+  #gal.open{ display:block; }
+  #gal h2{ margin:0 0 4px; font-size:18px; }
+  #gal p{ margin:0 0 18px; color:var(--dim); font-size:12px; }
+  #grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:14px; max-width:960px; margin:0 auto; }
+  .cell{ cursor:pointer; text-align:center; }
+  .cell canvas{ width:100%; border-radius:10px; display:block; box-shadow:0 6px 20px #0008; transition:.12s; }
+  .cell:hover canvas{ box-shadow:0 0 0 2px var(--hi),0 6px 24px #000a; }
+  .cell div{ font-size:11px; color:var(--dim); margin-top:5px; font-variant-numeric:tabular-nums; }
+  #galClose{ position:fixed; top:20px; right:24px; }
+  /* responsive: stack canvas over controls on narrow screens */
+  @media (max-width:720px){
+    body{ flex-direction:column; }
+    #stage{ padding:16px; }
+    canvas#view{ max-height:60vh; }
+    aside{ width:auto; border-left:none; border-top:1px solid var(--edge); }
+  }
+</style>
+</head>
+<body>
+  <div id="stage"><div id="wrap"><canvas id="view" width="560" height="560"></canvas></div></div>
+  <aside>
+    <h1><b>Cyclonis</b></h1>
+    <p class="sub">Seeded gas-giant portrait generator</p>
+
+    <div class="row">
+      <label>Palette</label>
+      <select id="palette">
+        <option value="0">Jovian ochre</option>
+        <option value="1">Ice-giant cyan</option>
+        <option value="2">Sulfur yellow</option>
+        <option value="3">Muted monochrome</option>
+        <option value="4">Hot brown-dwarf</option>
+      </select>
+    </div>
+    <div class="row"><label>Turbulence <span id="vT"></span></label><input type="range" id="turb" min="0" max="150" value="60"></div>
+    <div class="row"><label>Band density <span id="vB"></span></label><input type="range" id="bands" min="4" max="24" value="12"></div>
+    <div class="row"><label>Storms <span id="vS"></span></label><input type="range" id="storms" min="0" max="8" value="3"></div>
+    <div class="row"><label>Sun angle <span id="vSun"></span></label><input type="range" id="sun" min="0" max="100" value="42"></div>
+    <div class="row"><label>Moons <span id="vM"></span></label><input type="range" id="moons" min="0" max="3" value="1"></div>
+
+    <div class="row toggles">
+      <label><input type="checkbox" id="ring" checked> Ring system</label>
+      <label><input type="checkbox" id="anim"> Animate / spin</label>
+    </div>
+
+    <div class="row">
+      <label>Output size</label>
+      <select id="size">
+        <option value="400">400 px</option>
+        <option value="560" selected>560 px</option>
+        <option value="720">720 px</option>
+        <option value="900">900 px</option>
+      </select>
+    </div>
+
+    <div class="btns">
+      <button class="primary" id="reseed">Reseed</button>
+      <button id="png">Export PNG</button>
+      <button id="gallery">Gallery</button>
+      <button id="share">Copy link</button>
+    </div>
+
+    <p class="foot">Seed <code id="seedTxt"></code> lives in the URL — reload or share the link to reproduce this exact world. Latitude is split into alternating belts &amp; zones, each with its own zonal jet that shears a seeded fractal-noise field; ovals swirl in storms; the flat field is projected onto a lit sphere.</p>
+  </aside>
+
+  <div id="gal">
+    <button id="galClose">Close ✕</button>
+    <h2>Contact sheet</h2>
+    <p>Twelve worlds from sequential seeds. Click one to open it full-size.</p>
+    <div id="grid"></div>
+  </div>
+
+<script>
+"use strict";
+/* ---------- seeded PRNG + hashing ---------- */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function h2(x,y,s){let n=(Math.imul(x,374761393)+Math.imul(y,668265263)+Math.imul(s,2147483647))|0;n=Math.imul(n^(n>>>13),1274126177);n=n^(n>>>16);return (n>>>0)/4294967295;}
+function vnoise(x,y,s){const xi=Math.floor(x),yi=Math.floor(y),xf=x-xi,yf=y-yi;
+  const u=xf*xf*(3-2*xf),v=yf*yf*(3-2*yf);
+  const a=h2(xi,yi,s),b=h2(xi+1,yi,s),c=h2(xi,yi+1,s),dd=h2(xi+1,yi+1,s);
+  return a+(b-a)*u+(c-a)*v+(a-b-c+dd)*u*v;}
+function fbm(x,y,s,oct){let f=0,a=0.5,fr=1;for(let i=0;i<oct;i++){f+=a*vnoise(x*fr,y*fr,s+i*131);fr*=2;a*=0.5;}return f;}
+function smooth(e0,e1,x){let t=(x-e0)/(e1-e0);t=t<0?0:t>1?1:t;return t*t*(3-2*t);}
+
+/* ---------- palettes ---------- */
+const PAL=[
+ {stops:[[0,40,26,16],[.35,120,78,46],[.55,190,150,110],[.75,225,200,165],[1,247,236,214]],accent:[205,88,58],haze:[232,168,118]},
+ {stops:[[0,10,34,50],[.4,26,96,120],[.65,92,182,200],[1,222,246,250]],accent:[140,222,236],haze:[152,220,242]},
+ {stops:[[0,60,35,5],[.4,150,95,10],[.7,226,176,30],[1,250,236,140]],accent:[242,120,28],haze:[250,210,120]},
+ {stops:[[0,26,26,30],[.5,112,112,118],[1,236,236,242]],accent:[182,182,192],haze:[200,205,216]},
+ {stops:[[0,18,6,6],[.4,92,20,15],[.7,182,60,26],[1,242,150,60]],accent:[255,120,40],haze:[255,108,58]}
+];
+function palLerp(st,v){for(let i=1;i<st.length;i++){if(v<=st[i][0]){const a=st[i-1],b=st[i],t=(v-a[0])/((b[0]-a[0])||1);return [a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t,a[3]+(b[3]-a[3])*t];}}const l=st[st.length-1];return [l[1],l[2],l[3]];}
+
+/* ---------- model helpers ---------- */
+function sunVec(st){const a=(st.sun/100)*2.4-1.2,y=-0.2;const x=Math.sin(a),z=Math.cos(a);const L=Math.hypot(x,y,z);return [x/L,y/L,z/L];}
+function makeStorms(st){const r=mulberry32((st.seed^0x9e37)>>>0),out=[];const kmax=Math.max(1,Math.floor(1.2*st.bands/Math.PI));
+  for(let i=0;i<st.storms;i++){let k=Math.round((r()*2-1)*kmax);let slat=k*Math.PI/st.bands+(r()-0.5)*0.14;slat=Math.max(-1.25,Math.min(1.25,slat));
+    out.push({lat:slat,lon:(r()*2-1)*Math.PI,sr:0.12+r()*0.22,str:(r()<0.5?-1:1)*(2+r()*3.5),tint:0.5+r()*0.5});}
+  return out;}
+
+/* ---------- planet render (per-pixel onto its own transparent canvas) ---------- */
+function renderPlanet(PB,st){
+  const c=document.createElement("canvas");c.width=PB;c.height=PB;
+  const ctx=c.getContext("2d"),img=ctx.createImageData(PB,PB),d=img.data;
+  const R=PB/2-1,cx=PB/2,cy=PB/2,oct=st.oct||5,P=PAL[st.palIdx];
+  const storms=makeStorms(st),sd=sunVec(st),rot=st.rot||0,phase=st.phase||0;
+  const bands=st.bands,turb=st.turb/100;
+  const er=mulberry32((st.seed^0x7f7f)>>>0),eclipse=st.moons>0&&er()<0.7;
+  // bias the eclipse spot toward the sub-solar (lit) point so it always darkens the day side
+  const clampSpot=q=>q<-0.6?-0.6:q>0.6?0.6:q;
+  const ex=clampSpot(sd[0]*0.45+(er()*2-1)*0.32),ey=clampSpot(sd[1]*0.45+(er()*2-1)*0.28),erad=0.09+er()*0.07;
+  const cr=Math.cos(rot),sr=Math.sin(rot);
+  for(let y=0;y<PB;y++){const ny=(y-cy)/R;
+    for(let x=0;x<PB;x++){const nx=(x-cx)/R,r2=nx*nx+ny*ny,i=(y*PB+x)*4;
+      if(r2>1){d[i+3]=0;continue;}
+      const nz=Math.sqrt(1-r2);
+      const pxx=nx*cr+nz*sr, pzz=-nx*sr+nz*cr;
+      let lat=Math.asin(ny<-1?-1:ny>1?1:ny), lon=Math.atan2(pxx,pzz);
+      let stint=0;
+      for(let s=0;s<storms.length;s++){const S2=storms[s];
+        let dlon=lon-S2.lon;if(dlon>Math.PI)dlon-=6.2831853;else if(dlon<-Math.PI)dlon+=6.2831853;
+        const cl=Math.cos(lat)||1e-3,dx=dlon*cl,dy=lat-S2.lat,dist=Math.sqrt(dx*dx+dy*dy);
+        if(dist<S2.sr){const f=1-dist/S2.sr,ang=f*f*S2.str,ca=Math.cos(ang),sa=Math.sin(ang);
+          lon=S2.lon+(dx*ca-dy*sa)/cl;lat=S2.lat+(dx*sa+dy*ca);const t=f*f*S2.tint;if(t>stint)stint=t;}}
+      const wind=Math.sin(lat*bands+0.5*Math.sin(lat*3)), lonA=lon+wind*phase;
+      const w=fbm(lon*1.4+phase*0.03,lat*bands*0.5,st.seed+3,oct)-0.5, latW=lat+w*turb*0.4;
+      const a2=fbm(lonA*1.2+w*2,latW*bands*0.4+w,st.seed+7,oct);
+      let band=0.5+0.5*Math.sin(latW*bands+(a2-0.5)*turb*4);
+      const det=fbm(lonA*3+w*3,latW*bands,st.seed+31,oct);
+      let v=band*0.62+det*0.38;v=v<0?0:v>1?1:v;
+      let col=palLerp(P.stops,v);
+      if(stint>0){const t=Math.min(1,stint*0.9);col=[col[0]+(P.accent[0]-col[0])*t,col[1]+(P.accent[1]-col[1])*t,col[2]+(P.accent[2]-col[2])*t];}
+      const lam=nx*sd[0]+ny*sd[1]+nz*sd[2], day=smooth(-0.08,0.30,lam), limb=0.35+0.65*Math.pow(nz,0.6);
+      let sh=(0.06+day*0.94)*limb;
+      if(eclipse){const dd=Math.sqrt((nx-ex)*(nx-ex)+(ny-ey)*(ny-ey));if(dd<erad)sh*=0.18+0.82*smooth(erad*0.5,erad,dd);}
+      const rim=Math.pow(1-nz,3)*day*0.7;
+      let R0=col[0]*sh+P.haze[0]*rim, G0=col[1]*sh+P.haze[1]*rim, B0=col[2]*sh+P.haze[2]*rim;
+      const rr=Math.sqrt(r2);let al=rr>0.99?(1-rr)/0.01*255:255;
+      d[i]=R0>255?255:R0;d[i+1]=G0>255?255:G0;d[i+2]=B0>255?255:B0;d[i+3]=al<0?0:al;
+    }}
+  ctx.putImageData(img,0,0);return c;
+}
+
+/* ---------- scene layers ---------- */
+function drawStars(ctx,S,st){const r=mulberry32((st.seed^0x1234)>>>0),n=(S*S/1400)|0;
+  for(let i=0;i<n;i++){const x=r()*S,y=r()*S,b=r(),s=r()<0.08?1.6:0.8;
+    ctx.fillStyle="rgba(255,255,255,"+(0.18+b*0.7).toFixed(2)+")";ctx.fillRect(x,y,s,s);}}
+function drawRing(ctx,cx,cy,R,st){const r=mulberry32((st.seed^0x5151)>>>0),tilt=0.24+r()*0.16,P=PAL[st.palIdx];
+  ctx.save();ctx.translate(cx,cy);ctx.scale(1,tilt);const ri=R*1.22,ro=R*2.15,steps=46;
+  for(let i=0;i<steps;i++){const rad=ri+(ro-ri)*i/steps;
+    let a=(0.05+0.22*Math.abs(Math.sin(i*0.7+st.seed)))*(0.45+0.55*Math.sin(i*2.3));if(a<0)a=0;
+    ctx.beginPath();ctx.arc(0,0,rad,0,Math.PI*2);
+    ctx.strokeStyle="rgba("+P.haze[0]+","+P.haze[1]+","+P.haze[2]+","+a.toFixed(3)+")";
+    ctx.lineWidth=(ro-ri)/steps+0.7;ctx.stroke();}
+  ctx.restore();}
+function drawMoons(ctx,cx,cy,R,st){const r=mulberry32((st.seed^0x2a2a)>>>0),sd=sunVec(st),S=cx*2;
+  for(let i=0;i<st.moons;i++){const ang=r()*Math.PI*2,dist=R*(1.2+r()*0.7),mr=R*(0.045+r()*0.055);
+    // clamp centers so every moon stays fully on-canvas (else large orbits fall off-screen and appear to do nothing)
+    const mx=Math.max(mr,Math.min(S-mr,cx+Math.cos(ang)*dist)),my=Math.max(mr,Math.min(S-mr,cy+Math.sin(ang)*dist*0.5));
+    const g=ctx.createRadialGradient(mx+sd[0]*mr*0.5,my+sd[1]*mr*0.5,mr*0.1,mx,my,mr);
+    g.addColorStop(0,"#d3cec2");g.addColorStop(1,"#141209");
+    ctx.beginPath();ctx.arc(mx,my,mr,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();}}
+function drawScene(ctx,S,st){
+  const g=ctx.createRadialGradient(S*0.5,S*0.4,0,S*0.5,S*0.5,S*0.8);
+  g.addColorStop(0,"#0b1122");g.addColorStop(1,"#02030a");
+  ctx.fillStyle=g;ctx.fillRect(0,0,S,S);
+  drawStars(ctx,S,st);
+  const cx=S/2,cy=S/2,R=S*0.40;
+  if(st.ring)drawRing(ctx,cx,cy,R,st);
+  const pb=st.pb||(st.anim?360:Math.min(S,760));
+  ctx.imageSmoothingEnabled=true;
+  ctx.drawImage(renderPlanet(pb,st),cx-R,cy-R,2*R,2*R);
+  if(st.ring){ctx.save();ctx.beginPath();ctx.rect(0,cy,S,S-cy);ctx.clip();drawRing(ctx,cx,cy,R,st);ctx.restore();}
+  drawMoons(ctx,cx,cy,R,st);
+}
+
+/* ---------- state + URL hash ---------- */
+const view=document.getElementById("view"),vctx=view.getContext("2d");
+const ID=id=>document.getElementById(id);
+const state={seed:0,palIdx:0,turb:60,bands:12,storms:3,sun:42,ring:1,moons:1,anim:0,size:560,rot:0.35,phase:0};
+function encode(){return "#"+[state.seed,state.palIdx,state.turb,state.bands,state.storms,state.sun,state.ring,state.moons,state.size].join(",");}
+function decode(){const h=location.hash.slice(1);if(!h)return false;const p=h.split(",").map(Number);
+  if(p.length<6||!isFinite(p[0]))return false;
+  state.seed=p[0]>>>0;state.palIdx=p[1]||0;state.turb=p[2];state.bands=p[3];state.storms=p[4];state.sun=p[5];
+  state.ring=p[6]??1;state.moons=p[7]??1;
+  const sz=p[8]||560;state.size=[400,560,720,900].includes(sz)?sz:560;return true;}
+function syncControls(){ID("palette").value=state.palIdx;ID("turb").value=state.turb;ID("bands").value=state.bands;
+  ID("storms").value=state.storms;ID("sun").value=state.sun;ID("moons").value=state.moons;
+  ID("ring").checked=!!state.ring;ID("anim").checked=!!state.anim;ID("size").value=state.size;
+  ID("vT").textContent=(state.turb/100).toFixed(2);ID("vB").textContent=state.bands;ID("vS").textContent=state.storms;
+  ID("vSun").textContent=Math.round(((state.sun/100)*2.4-1.2)*180/Math.PI)+"°";ID("vM").textContent=state.moons;ID("seedTxt").textContent=state.seed;}
+
+/* ---------- render loop ---------- */
+let raf=0,last=0;
+function renderOnce(){cancelAnimationFrame(raf);raf=0;state.pb=0;
+  if(view.width!==state.size){view.width=view.height=state.size;}
+  drawScene(vctx,state.size,state);}
+function loop(t){if(!state.anim){return;}const dt=last?Math.min(0.05,(t-last)/1000):0.016;last=t;
+  state.phase+=dt*0.5;state.rot+=dt*0.12;state.pb=380;
+  if(view.width!==state.size){view.width=view.height=state.size;}
+  drawScene(vctx,state.size,state);raf=requestAnimationFrame(loop);}
+function render(){if(state.anim){if(!raf){last=0;raf=requestAnimationFrame(loop);}}else renderOnce();}
+
+let deb=0;
+function pushHash(){try{history.replaceState(null,"",encode());}catch(_){try{location.hash=encode().slice(1);}catch(__){}}}
+function onChange(immediate){clearTimeout(deb);syncControls();pushHash();
+  if(immediate||state.anim)render();else deb=setTimeout(render,110);}
+
+/* ---------- wire controls ---------- */
+ID("palette").oninput=e=>{state.palIdx=+e.target.value;onChange(true);};
+ID("turb").oninput=e=>{state.turb=+e.target.value;onChange();};
+ID("bands").oninput=e=>{state.bands=+e.target.value;onChange();};
+ID("storms").oninput=e=>{state.storms=+e.target.value;onChange();};
+ID("sun").oninput=e=>{state.sun=+e.target.value;onChange();};
+ID("moons").oninput=e=>{state.moons=+e.target.value;onChange(true);};
+ID("ring").oninput=e=>{state.ring=e.target.checked?1:0;onChange(true);};
+ID("size").oninput=e=>{state.size=+e.target.value;onChange(true);};
+ID("anim").oninput=e=>{state.anim=e.target.checked?1:0;render();};
+ID("reseed").onclick=()=>{state.seed=(Math.random()*4294967295)>>>0;onChange(true);};
+ID("share").onclick=async()=>{const b=ID("share");try{await navigator.clipboard.writeText(location.href);b.textContent="Copied!";}catch(_){b.textContent="Copy failed";}setTimeout(()=>b.textContent="Copy link",1400);};
+ID("png").onclick=()=>{const wasAnim=state.anim;state.anim=0;ID("anim").checked=false;renderOnce();
+  const a=document.createElement("a");a.download="cyclonis-"+state.seed+".png";a.href=view.toDataURL("image/png");a.click();
+  state.anim=wasAnim;render();};
+
+/* ---------- gallery / contact sheet ---------- */
+const gal=ID("gal");
+ID("gallery").onclick=()=>{const grid=ID("grid");grid.innerHTML="";gal.classList.add("open");
+  for(let i=0;i<12;i++){const seed=(state.seed+i*2654435761)>>>0;
+    const st=Object.assign({},state,{seed,pb:150,oct:3,rot:0.4,phase:0,anim:0});
+    const cell=document.createElement("div");cell.className="cell";
+    const cv=document.createElement("canvas");cv.width=cv.height=150;
+    drawScene(cv.getContext("2d"),150,st);
+    const lbl=document.createElement("div");lbl.textContent="seed "+seed;
+    cell.appendChild(cv);cell.appendChild(lbl);
+    cell.onclick=()=>{state.seed=seed;gal.classList.remove("open");onChange(true);};
+    grid.appendChild(cell);}};
+ID("galClose").onclick=()=>gal.classList.remove("open");
+gal.onclick=e=>{if(e.target===gal)gal.classList.remove("open");};
+
+/* ---------- keyboard shortcuts ---------- */
+addEventListener("keydown",e=>{
+  if(e.key==="Escape"){if(gal.classList.contains("open"))gal.classList.remove("open");return;}
+  const t=e.target;if(t&&/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName))return;
+  if(e.key==="r"||e.key==="R"){ID("reseed").click();}
+  else if(e.key==="g"||e.key==="G"){ID("gallery").click();}
+  else if(e.key===" "){e.preventDefault();ID("anim").checked=!ID("anim").checked;state.anim=ID("anim").checked?1:0;render();}
+});
+
+/* ---------- boot ---------- */
+if(!decode())state.seed=(Math.random()*4294967295)>>>0;
+syncControls();render();pushHash();
+</script>
+</body>
+</html>

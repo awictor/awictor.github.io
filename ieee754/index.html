@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IEEE754 — Floating-Point Bit Inspector</title>
+<meta name="description" content="See how any number is stored in IEEE 754 floating point: sign, exponent and mantissa bits for 32-bit and 64-bit, the hex encoding, and the exact stored value and rounding error. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('ieee-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#6366f1;
+    --bg:#f4f4fb; --card:#ffffff; --fg:#181824; --muted:#5f5c70; --line:#e5e4f0; --shadow:0 1px 3px rgba(0,0,0,.08);
+    --sign:#dc2626; --exp:#0891b2; --mant:#16a34a;
+  }
+  [data-theme="dark"]{
+    --bg:#0e0e17; --card:#181820; --fg:#eeeef6; --muted:#9494a6; --line:#272733; --shadow:0 1px 3px rgba(0,0,0,.5);
+    --sign:#f87171; --exp:#22d3ee; --mant:#4ade80;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:760px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#4338ca);display:flex;align-items:center;justify-content:center;font-size:18px;color:#fff;font-weight:800}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:760px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.2rem}
+  input.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  h2{font-size:.8rem;margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  .tag{font-size:.72rem;color:var(--muted);font-weight:600}
+  .bits{margin:10px 0;word-break:break-all;line-height:2.1;font-size:.95rem}
+  .bits b{padding:2px 1px;border-radius:3px}
+  .b-sign{background:color-mix(in srgb,var(--sign) 22%,transparent);color:var(--sign)}
+  .b-exp{background:color-mix(in srgb,var(--exp) 22%,transparent);color:var(--exp)}
+  .b-mant{background:color-mix(in srgb,var(--mant) 20%,transparent);color:var(--mant)}
+  .legend{display:flex;gap:16px;font-size:.78rem;margin-bottom:8px;flex-wrap:wrap}
+  .legend span{display:flex;align-items:center;gap:5px}
+  .dot{width:10px;height:10px;border-radius:3px;display:inline-block}
+  .rows{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;font-size:.9rem;margin-top:10px}
+  .rows .k{color:var(--muted)}
+  .rows .v{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;word-break:break-all}
+  .warn{color:var(--sign)}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:760px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo mono">754</div>
+    <div><h1>IEEE754</h1><div class="sub">Floating-point bit inspector</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="num">A number (try 0.1, -2, 3.14159, 1e30, Infinity)</label>
+    <input class="mono" id="num" value="0.1" spellcheck="false">
+    <div class="legend" style="margin-top:12px">
+      <span><i class="dot" style="background:var(--sign)"></i> sign</span>
+      <span><i class="dot" style="background:var(--exp)"></i> exponent</span>
+      <span><i class="dot" style="background:var(--mant)"></i> mantissa</span>
+    </div>
+  </div>
+  <div class="card" id="c64"></div>
+  <div class="card" id="c32"></div>
+</main>
+<footer>
+  Uses the platform's real IEEE 754 encoding (via <span class="mono">DataView</span>). Colors mark the sign, exponent and mantissa fields. 64-bit "double" is JavaScript's native number type. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/ieee754">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  // Decompose a number into IEEE 754 fields for 32- or 64-bit.
+  function bitsOf(value, bits){
+    if(bits !== 32 && bits !== 64) throw new Error('bits must be 32 or 64');
+    const n = Number(value);
+    const dv = new DataView(new ArrayBuffer(8));
+    let bin, hex, stored, expLen;
+    if(bits === 32){
+      dv.setFloat32(0, n);
+      const u = dv.getUint32(0) >>> 0;
+      bin = u.toString(2).padStart(32, '0');
+      hex = u.toString(16).padStart(8, '0');
+      stored = dv.getFloat32(0);
+      expLen = 8;
+    }else{
+      dv.setFloat64(0, n);
+      const hi = dv.getUint32(0) >>> 0, lo = dv.getUint32(4) >>> 0;
+      bin = hi.toString(2).padStart(32, '0') + lo.toString(2).padStart(32, '0');
+      hex = ((BigInt(hi) << 32n) | BigInt(lo)).toString(16).padStart(16, '0');
+      stored = dv.getFloat64(0);
+      expLen = 11;
+    }
+    const sign = bin[0];
+    const exponent = bin.slice(1, 1 + expLen);
+    const mantissa = bin.slice(1 + expLen);
+    const bias = Math.pow(2, expLen - 1) - 1;
+    const expRaw = parseInt(exponent, 2);
+    return { bits, sign, exponent, mantissa, bias, expRaw, expValue: expRaw - bias, hex, stored };
+  }
+
+  // Number class per IEEE 754.
+  function classify(value, bits){
+    const b = bitsOf(value, bits);
+    const expAllOnes = !b.exponent.includes('0');
+    const expAllZero = !b.exponent.includes('1');
+    const mantZero   = !b.mantissa.includes('1');
+    if(expAllOnes) return mantZero ? 'infinity' : 'nan';
+    if(expAllZero) return mantZero ? 'zero' : 'subnormal';
+    return 'normal';
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('c64')){
+    const $ = id => document.getElementById(id);
+
+    function card(bits){
+      const b = bitsOf($('num').value, bits);
+      const cls = classify($('num').value, bits);
+      const sign = `<b class="b-sign">${b.sign}</b>`;
+      const exp = `<b class="b-exp">${b.exponent}</b>`;
+      const mant = `<b class="b-mant">${b.mantissa}</b>`;
+      const input = Number($('num').value);
+      const lost = Number.isFinite(input) && b.stored !== input;
+      const rows = [
+        ['Sign', b.sign + (b.sign === '1' ? ' (negative)' : ' (positive)')],
+        ['Exponent', `${b.exponent}₂ = ${b.expRaw} − ${b.bias} bias = ${cls === 'normal' ? b.expValue : '—'}`],
+        ['Hex', '0x' + b.hex],
+        ['Class', cls],
+        ['Stored value', String(b.stored) + (lost ? ' ⚠ rounded' : '')]
+      ];
+      return `<h2>${bits}-bit ${bits === 64 ? '(double)' : '(single / float)'}</h2>
+        <div class="tag">1 sign · ${bits === 64 ? 11 : 8} exponent · ${bits === 64 ? 52 : 23} mantissa</div>
+        <div class="bits mono">${sign} ${exp} ${mant}</div>
+        <div class="rows">${rows.map(([k, v]) => `<div class="k">${k}</div><div class="v ${k === 'Stored value' && lost ? 'warn' : ''}">${v}</div>`).join('')}</div>`;
+    }
+
+    function render(){
+      try{ $('c64').innerHTML = card(64); $('c32').innerHTML = card(32); }
+      catch(e){ $('c64').innerHTML = '<div class="warn">' + e.message + '</div>'; $('c32').innerHTML = ''; }
+    }
+    $('num').addEventListener('input', render);
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('ieee-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { bitsOf, classify };
+</script>
+</body>
+</html>

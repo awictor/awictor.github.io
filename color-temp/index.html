@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ColorTemp — Color Temperature (Kelvin) to RGB</title>
+<meta name="description" content="Convert a color temperature in Kelvin to an approximate RGB / hex color using the Tanner Helland blackbody model, with a live swatch. Warm candlelight to cool daylight. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('colortemp-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#f59e0b;
+    --bg:#fbf7f0; --card:#ffffff; --fg:#211a10; --muted:#6b5c46; --line:#efe6d6; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#14100a; --card:#1e1810; --fg:#f5efe4; --muted:#a89275; --line:#2c2416; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:620px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#ffb46b,#8ec5ff);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:620px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  .swatch{height:130px;border-radius:12px;border:1px solid var(--line);margin-bottom:16px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:10px}
+  .swatch .k{background:rgba(0,0,0,.35);color:#fff;padding:3px 12px;border-radius:999px;font-weight:700;font-size:.9rem}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input[type=number]{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.2rem}
+  input[type=range]{width:100%;margin-top:12px;accent-color:var(--c)}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px}
+  .box{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+  .box .v{font-size:1.4rem;font-weight:800;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  .box .k{color:var(--muted);font-size:.72rem;text-transform:uppercase}
+  .hex{text-align:center;margin-top:14px;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:1.2rem}
+  .hex button{margin-left:8px;background:var(--c);color:#111;border:0;border-radius:6px;padding:5px 12px;cursor:pointer;font:inherit}
+  .refs{color:var(--muted);font-size:.8rem;margin-top:12px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:620px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.8rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🌡️</div>
+    <div><h1>ColorTemp</h1><div class="sub">Kelvin → RGB color</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="swatch" id="swatch"><span class="k" id="kLabel"></span></div>
+    <label for="k">Color temperature (K)</label>
+    <input type="number" id="k" value="6500" min="1000" max="40000" step="100">
+    <input type="range" id="kr" min="1000" max="12000" value="6500" step="50">
+    <div class="grid">
+      <div class="box"><div class="v" id="r">—</div><div class="k">R</div></div>
+      <div class="box"><div class="v" id="g">—</div><div class="k">G</div></div>
+      <div class="box"><div class="v" id="b">—</div><div class="k">B</div></div>
+    </div>
+    <div class="hex"><span id="hex"></span><button id="copyBtn" type="button">copy</button></div>
+    <div class="refs">1900K candle · 2700K incandescent · 4000K fluorescent · 5500K daylight · 6500K noon · 10000K clear sky</div>
+  </div>
+</main>
+<footer>
+  Approximate sRGB for a blackbody at a given temperature (Tanner Helland model, valid ~1000–40000K). Low K looks warm/orange, high K looks cool/blue. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/color-temp">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic (Tanner Helland approximation) ----------
+  const clamp = v => Math.max(0, Math.min(255, Math.round(v)));
+
+  function kelvinToRgb(kelvin){
+    let k = Number(kelvin);
+    if(!Number.isFinite(k)) throw new Error('enter a temperature in Kelvin');
+    k = Math.max(1000, Math.min(40000, k));      // model's valid range
+    const t = k / 100;
+    let r, g, b;
+    r = t <= 66 ? 255 : 329.698727446 * Math.pow(t - 60, -0.1332047592);
+    g = t <= 66 ? 99.4708025861 * Math.log(t) - 161.1195681661
+                : 288.1221695283 * Math.pow(t - 60, -0.0755148492);
+    b = t >= 66 ? 255 : t <= 19 ? 0 : 138.5177312231 * Math.log(t - 10) - 305.0447927307;
+    return { r: clamp(r), g: clamp(g), b: clamp(b) };
+  }
+
+  const toHex = ({ r, g, b }) => '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('swatch')){
+    const $ = id => document.getElementById(id);
+
+    function render(){
+      try{
+        const rgb = kelvinToRgb($('k').value);
+        const hex = toHex(rgb);
+        $('swatch').style.background = hex;
+        $('kLabel').textContent = Math.round(Math.max(1000, Math.min(40000, +$('k').value))) + ' K';
+        $('r').textContent = rgb.r; $('g').textContent = rgb.g; $('b').textContent = rgb.b;
+        $('hex').textContent = hex;
+      }catch(e){ $('hex').textContent = e.message; }
+    }
+    $('k').addEventListener('input', () => { $('kr').value = Math.min(12000, Math.max(1000, +$('k').value || 1000)); render(); });
+    $('kr').addEventListener('input', () => { $('k').value = $('kr').value; render(); });
+    $('copyBtn').addEventListener('click', () => {
+      navigator.clipboard?.writeText($('hex').textContent);
+      $('copyBtn').textContent = '✓'; setTimeout(() => $('copyBtn').textContent = 'copy', 1000);
+    });
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('colortemp-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { kelvinToRgb, toHex };
+</script>
+</body>
+</html>

@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BirthdayParadox — Shared-Birthday Probability Calculator</title>
+<meta name="description" content="How likely is it that two people in a group share a birthday? Compute the probability for any group size, or find the size needed for a target probability. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('bday-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#9333ea;
+    --bg:#f7f4fb; --card:#ffffff; --fg:#1c1626; --muted:#635772; --line:#e9e2f2; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#100b17; --card:#191221; --fg:#f0eaf7; --muted:#998cac; --line:#261d33; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:640px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#6b21a8);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:640px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input[type=number]{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.2rem}
+  input[type=range]{width:100%;accent-color:var(--c);margin-top:12px}
+  .big{text-align:center;margin-top:6px}
+  .big .n{font-size:3.4rem;font-weight:800;color:var(--c);line-height:1}
+  .big .u{color:var(--muted);font-size:.85rem}
+  .bar{height:12px;border-radius:6px;background:var(--line);overflow:hidden;margin-top:14px}
+  .bar > div{height:100%;background:var(--c);border-radius:6px;transition:width .15s}
+  h2{font-size:.82rem;margin:0 0 10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  .inv{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end}
+  .inv .res{font-size:1.4rem;font-weight:800;color:var(--c);white-space:nowrap}
+  .note{color:var(--muted);font-size:.85rem;margin-top:8px;text-align:center}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:640px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🎂</div>
+    <div><h1>BirthdayParadox</h1><div class="sub">Shared-birthday probability</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="people">Number of people</label>
+    <input type="number" id="people" value="23" min="1" max="365" step="1">
+    <input type="range" id="peopler" min="1" max="100" value="23" step="1">
+    <div class="big"><div class="n" id="prob">—</div><div class="u">chance at least two share a birthday</div></div>
+    <div class="bar"><div id="fill" style="width:0"></div></div>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card">
+    <h2>How many people for a target?</h2>
+    <div class="inv">
+      <div><label for="target">Target probability (%)</label><input type="number" id="target" value="50" min="0.01" max="99.99" step="1"></div>
+      <div class="res" id="need">—</div>
+    </div>
+    <div class="note" id="note"></div>
+  </div>
+</main>
+<footer>
+  With just 23 people the odds of a shared birthday already pass 50% — the famous "birthday paradox." Assumes 365 equally-likely birthdays, ignoring leap years and seasonal effects. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/birthday-paradox">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  // Probability that at least two of n people share a birthday (out of `days`).
+  function sharedProbability(n, days = 365){
+    const k = Number(n), d = Number(days);
+    if(!Number.isInteger(k) || k < 0) throw new Error('people must be a non-negative integer');
+    if(!(d > 0)) throw new Error('days must be > 0');
+    if(k <= 1) return 0;
+    if(k > d) return 1;
+    let pNoShare = 1;
+    for(let i = 0; i < k; i++) pNoShare *= (d - i) / d;
+    return 1 - pNoShare;
+  }
+
+  // Smallest group size whose shared-birthday probability ≥ target (0–1).
+  function peopleForProbability(target, days = 365){
+    const t = Number(target);
+    if(!(t >= 0) || t > 1) throw new Error('target must be between 0 and 1');
+    if(t === 0) return 1;
+    for(let n = 1; n <= Number(days) + 1; n++){
+      if(sharedProbability(n, days) >= t) return n;
+    }
+    return Number(days) + 1;   // guaranteed once n > days
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('prob')){
+    const $ = id => document.getElementById(id);
+
+    function render(){
+      try{
+        const p = sharedProbability(+$('people').value);
+        $('prob').textContent = (p * 100).toFixed(2) + '%';
+        $('fill').style.width = (p * 100) + '%';
+        const need = peopleForProbability(Number($('target').value) / 100);
+        $('need').textContent = need + ' people';
+        $('note').textContent = `${$('target').value}% chance of a match needs ${need} people.`;
+        $('err').textContent = '';
+      }catch(e){ $('prob').textContent = '—'; $('need').textContent = '—'; $('note').textContent = ''; $('err').textContent = e.message; }
+    }
+    $('people').addEventListener('input', () => { $('peopler').value = $('people').value; render(); });
+    $('peopler').addEventListener('input', () => { $('people').value = $('peopler').value; render(); });
+    $('target').addEventListener('input', render);
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('bday-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { sharedProbability, peopleForProbability };
+</script>
+</body>
+</html>

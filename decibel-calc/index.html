@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Decibel Calculator — dB ratios &amp; sound-level addition</title>
+<meta name="description" content="Convert power and amplitude ratios to decibels and back, and add multiple sound levels (incoherent sources). Doubling power = +3 dB, doubling amplitude = +6 dB. Offline, no tracking.">
+<style>
+  :root{
+    --c:#9333ea;
+    --bg:#f3ecfb; --card:#ffffff; --fg:#150a1f; --muted:#5b4d70;
+    --line:#e6daf5; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#0c0616; --card:#170e25; --fg:#ece3f7; --muted:#a998c2;
+    --line:#2a1c40; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto;font-weight:700}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  input,select,textarea{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.1rem;font-weight:600;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus,select:focus,textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .big{margin-top:18px;text-align:center;font-size:2.6rem;font-weight:800;color:var(--c);word-break:break-all;min-height:1.1em}
+  .tag{text-align:center;color:var(--muted);font-size:.9rem}
+  .err{color:#dc2626;font-size:.86rem;margin-top:10px;text-align:center;min-height:1em}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🔊</div>
+  <div>
+    <h1>Decibel Calculator</h1>
+    <p>dB ratios &amp; sound-level addition</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="row">
+      <div><label>Value</label><input id="val" inputmode="decimal" value="2"></div>
+      <div>
+        <label>Convert</label>
+        <select id="mode">
+          <option value="p2db">Power ratio → dB</option>
+          <option value="a2db">Amplitude ratio → dB</option>
+          <option value="db2p">dB → power ratio</option>
+          <option value="db2a">dB → amplitude ratio</option>
+        </select>
+      </div>
+    </div>
+    <div class="big" id="big">—</div>
+    <div class="tag" id="tag"></div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>Add sound levels</h2>
+    <p class="note" style="margin-top:0">Combine independent (incoherent) sound levels in dB — e.g. several machines running at once. Enter levels separated by commas or spaces.</p>
+    <label>Levels (dB)</label>
+    <textarea id="levels" rows="2">80, 80</textarea>
+    <div class="big" id="sumbig" style="font-size:2rem">—</div>
+    <div class="tag">combined level</div>
+    <div class="err" id="serr"></div>
+  </div>
+
+  <div class="card">
+    <h2>About decibels</h2>
+    <p class="note">A <b>decibel</b> is a logarithmic ratio. For <b>power</b> quantities (watts, intensity): <code>dB = 10·log₁₀(P/P₀)</code>. For <b>amplitude</b> quantities (voltage, pressure): <code>dB = 20·log₁₀(A/A₀)</code>, because power scales with amplitude squared. That's why <b>doubling power adds ~3 dB</b> but <b>doubling amplitude adds ~6 dB</b>. To combine independent sound sources you add their <i>powers</i>, not their dB values: two equal sources give +3 dB, four give +6 dB. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function posRatio(x){ if(typeof x !== 'number' || !isFinite(x) || x <= 0) throw new Error('ratio must be a positive number'); return x; }
+  function finite(x, name){ if(typeof x !== 'number' || !isFinite(x)) throw new Error((name || 'value') + ' must be a finite number'); return x; }
+  // Power ratio -> dB (10·log10).
+  function powerRatioToDb(ratio){ posRatio(ratio); return 10 * Math.log10(ratio); }
+  // Amplitude ratio -> dB (20·log10).
+  function amplitudeRatioToDb(ratio){ posRatio(ratio); return 20 * Math.log10(ratio); }
+  // dB -> power ratio.
+  function dbToPowerRatio(db){ finite(db, 'dB'); return Math.pow(10, db / 10); }
+  // dB -> amplitude ratio.
+  function dbToAmplitudeRatio(db){ finite(db, 'dB'); return Math.pow(10, db / 20); }
+  // Add incoherent sound levels (dB): 10·log10(Σ 10^(L/10)).
+  function sumDb(levels){ if(!Array.isArray(levels) || levels.length === 0) throw new Error('need at least one level'); var s = 0; for(var i = 0; i < levels.length; i++){ finite(levels[i], 'level'); s += Math.pow(10, levels[i] / 10); } return 10 * Math.log10(s); }
+
+  if(typeof module !== 'undefined') module.exports = { powerRatioToDb:powerRatioToDb, amplitudeRatioToDb:amplitudeRatioToDb, dbToPowerRatio:dbToPowerRatio, dbToAmplitudeRatio:dbToAmplitudeRatio, sumDb:sumDb };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var $ = function(id){ return document.getElementById(id); };
+    function render(){
+      $('err').textContent = '';
+      try{
+        var v = Number($('val').value), mode = $('mode').value, out, tag;
+        if(mode === 'p2db'){ out = powerRatioToDb(v).toFixed(4) + ' dB'; tag = '10·log₁₀(' + v + ')'; }
+        else if(mode === 'a2db'){ out = amplitudeRatioToDb(v).toFixed(4) + ' dB'; tag = '20·log₁₀(' + v + ')'; }
+        else if(mode === 'db2p'){ out = '×' + dbToPowerRatio(v).toPrecision(6); tag = 'power ratio for ' + v + ' dB'; }
+        else { out = '×' + dbToAmplitudeRatio(v).toPrecision(6); tag = 'amplitude ratio for ' + v + ' dB'; }
+        $('big').textContent = out; $('tag').textContent = tag;
+      }catch(e){ $('big').textContent = '—'; $('tag').textContent = ''; $('err').textContent = e.message; }
+    }
+    function renderSum(){
+      $('serr').textContent = '';
+      try{
+        var arr = $('levels').value.split(/[\s,]+/).filter(function(x){ return x.length; }).map(Number);
+        if(arr.some(function(x){ return !isFinite(x); })) throw new Error('all levels must be numbers');
+        $('sumbig').textContent = sumDb(arr).toFixed(2) + ' dB';
+      }catch(e){ $('sumbig').textContent = '—'; $('serr').textContent = e.message; }
+    }
+    ['val','mode'].forEach(function(id){ $(id).addEventListener('input', render); $(id).addEventListener('change', render); });
+    $('levels').addEventListener('input', renderSum);
+    render(); renderSum();
+
+    var root = document.documentElement, tb = $('theme');
+    function setTheme(t){ root.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? '☀️' : '🌙'; try{ localStorage.setItem('db-theme', t); }catch(e){} }
+    var saved; try{ saved = localStorage.getItem('db-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); });
+  }
+</script>
+</body>
+</html>

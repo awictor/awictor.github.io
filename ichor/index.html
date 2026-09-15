@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Ichor — a living pheromone-trail slime mold</title>
+<style>
+  :root{ --ink:#e8f4f2; --panel:rgba(10,16,20,.82); --edge:rgba(120,200,210,.22); --accent:#39e6d6; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:#05080b;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:var(--ink);-webkit-user-select:none;user-select:none}
+  #c{position:fixed;inset:0;width:100%;height:100%;display:block;cursor:crosshair;touch-action:none}
+  #panel{position:fixed;top:12px;left:12px;width:264px;max-height:calc(100% - 24px);overflow:auto;
+    background:var(--panel);-webkit-backdrop-filter:blur(9px);backdrop-filter:blur(9px);border:1px solid var(--edge);border-radius:12px;
+    padding:12px 13px 14px;font-size:11px;line-height:1.5;box-shadow:0 10px 40px rgba(0,0,0,.5);z-index:5}
+  #panel.hid{transform:translateX(-292px)}
+  #panel{transition:transform .25s ease}
+  h1{font-size:14px;margin:0 0 2px;letter-spacing:.14em;font-weight:600;color:var(--accent);text-transform:uppercase}
+  .sub{font-size:9.5px;color:#7fa8ab;margin:0 0 11px;letter-spacing:.02em}
+  .row{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:7px 0}
+  .row label{color:#9fc7c9;white-space:nowrap;font-size:10px;letter-spacing:.03em}
+  .row .val{color:var(--accent);font-variant-numeric:tabular-nums;min-width:44px;text-align:right}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:130px;height:3px;border-radius:3px;
+    background:linear-gradient(90deg,var(--accent),#2a6f74);outline:none;cursor:pointer}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
+    background:#eafffb;border:2px solid var(--accent);box-shadow:0 0 6px var(--accent);cursor:pointer}
+  input[type=range]::-moz-range-thumb{width:11px;height:11px;border-radius:50%;background:#eafffb;border:2px solid var(--accent);cursor:pointer}
+  .seg{display:flex;gap:4px;flex-wrap:wrap;margin:4px 0 8px}
+  .seg button,.chip{font:inherit;font-size:10px;color:#bfe6e2;background:rgba(255,255,255,.05);
+    border:1px solid var(--edge);border-radius:7px;padding:5px 8px;cursor:pointer;transition:.12s;letter-spacing:.02em}
+  .seg button:hover,.chip:hover{background:rgba(57,230,214,.16);color:#fff}
+  .seg button.on,.chip.on{background:var(--accent);color:#04211f;border-color:var(--accent);font-weight:600}
+  .lbl{font-size:9px;text-transform:uppercase;letter-spacing:.14em;color:#5f8b8e;margin:12px 0 3px;border-top:1px solid rgba(120,200,210,.12);padding-top:9px}
+  .lbl:first-of-type{border-top:none;padding-top:0}
+  select{font:inherit;font-size:10px;background:rgba(255,255,255,.05);color:#bfe6e2;border:1px solid var(--edge);border-radius:7px;padding:4px 6px;cursor:pointer}
+  .chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}
+  .actions{display:flex;gap:5px;flex-wrap:wrap;margin-top:10px}
+  .actions button{flex:1 1 auto;min-width:52px}
+  #dot{position:absolute;bottom:9px;right:11px;font-size:9px;color:#4c7275}
+  #toggle{position:fixed;top:12px;left:12px;z-index:6;display:none;background:var(--panel);border:1px solid var(--edge);
+    color:var(--accent);border-radius:9px;padding:7px 10px;font:inherit;font-size:11px;cursor:pointer}
+  #hint{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);z-index:4;font-size:10px;color:#7fa8ab;
+    background:var(--panel);border:1px solid var(--edge);border-radius:20px;padding:6px 14px;pointer-events:none;
+    opacity:0;transition:opacity .5s;letter-spacing:.03em}
+  #hint.show{opacity:1}
+  .rec{color:#ff5a6a !important;border-color:#ff5a6a !important}
+  #recPill{position:fixed;top:12px;right:12px;z-index:7;display:none;background:var(--panel);
+    -webkit-backdrop-filter:blur(9px);backdrop-filter:blur(9px);color:#ff5a6a;border:1px solid #ff5a6a;
+    border-radius:20px;padding:5px 12px;font:inherit;font-size:11px;letter-spacing:.08em;
+    box-shadow:0 4px 18px rgba(0,0,0,.4);animation:recblink 1.1s steps(1) infinite}
+  @keyframes recblink{50%{opacity:.35}}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<button id="toggle">☰ ICHOR</button>
+<div id="recPill">● REC</div>
+<div id="hint"></div>
+<div id="panel">
+  <h1>Ichor</h1>
+  <p class="sub">a living pheromone slime mold · drag to feed it</p>
+
+  <div class="lbl">Behaviour</div>
+  <div id="sliders"></div>
+
+  <div class="lbl">Colony</div>
+  <div class="row"><label>species</label><div class="seg" id="spSeg"></div></div>
+  <div class="row"><label>palette</label><select id="pal"></select></div>
+
+  <div class="lbl">Paint</div>
+  <div class="seg" id="toolSeg">
+    <button data-t="food" class="on">food</button>
+    <button data-t="wall">wall</button>
+    <button data-t="erase">erase</button>
+  </div>
+  <div class="row" id="paintSpRow"><label>feeds species</label><div class="seg" id="paintSp"></div></div>
+
+  <div class="lbl">Specimens</div>
+  <div class="chips" id="chips"></div>
+
+  <div class="actions">
+    <button id="bPause">pause</button>
+    <button id="bReset">reset</button>
+    <button id="bRand">shuffle</button>
+    <button id="bPng">png</button>
+    <button id="bRec">rec</button>
+    <button id="bHide">hide</button>
+  </div>
+  <div id="dot"></div>
+</div>
+<script>
+"use strict";
+const DEG = Math.PI/180, TAU = Math.PI*2;
+const cos = Math.cos, sin = Math.sin, exp = Math.exp;
+
+// ---- seeded RNG (mulberry32) ----
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+let rnd = mulberry32(1);
+
+// ---- palettes (species colours 0..1, bg 0..255) ----
+const PALS = [
+  {name:"bioluminescent", bg:[3,7,12],  wall:[34,56,74],  sp:[[0.12,0.92,1.0],[1.0,0.24,0.82],[0.62,1.0,0.22]]},
+  {name:"ember",          bg:[11,4,2],  wall:[74,42,30],  sp:[[1.0,0.52,0.12],[1.0,0.16,0.05],[1.0,0.86,0.34]]},
+  {name:"ink",            bg:[7,9,14],  wall:[58,64,80],  sp:[[0.82,0.87,1.0],[0.34,0.52,0.95],[0.66,0.42,0.95]]},
+  {name:"spore",          bg:[5,10,7],  wall:[40,60,46],  sp:[[0.52,1.0,0.34],[0.94,0.92,0.24],[0.20,0.82,0.62]]},
+];
+const GAIN = 0.13, BLOOM = 0.72, DIFF = 0.5, RIVAL = 1.0;
+
+// ---- parameters ----
+const P = { sa:22, sd:9, ta:26, dep:0.72, dec:0.94, n:20000, nsp:1, pal:0, seed:1 };
+const DEF = Object.assign({}, P);
+const SLIDERS = [
+  ["sa","sensor angle",5,60,1,"°"],
+  ["sd","sensor dist",3,32,1,"px"],
+  ["ta","turn angle",4,60,1,"°"],
+  ["dep","deposit",0.05,2,0.01,""],
+  ["dec","decay",0.85,0.998,0.001,""],
+  ["n","agents",1000,40000,500,""],
+];
+const MAXN = 40000;
+
+// ---- specimen presets ----
+const SPECIMENS = [
+  {t:"filaments", p:{sa:18,sd:9,ta:30,dep:0.85,dec:0.92,n:22000,nsp:1,pal:0}, seed:7},
+  {t:"oozing sheet", p:{sa:46,sd:22,ta:9,dep:0.30,dec:0.975,n:15000,nsp:1,pal:3}, seed:13},
+  {t:"hex lattice", p:{sa:40,sd:12,ta:44,dep:1.0,dec:0.90,n:26000,nsp:1,pal:1}, seed:29},
+  {t:"nervous web", p:{sa:11,sd:6,ta:46,dep:0.60,dec:0.90,n:30000,nsp:1,pal:2}, seed:44},
+  {t:"territories", p:{sa:22,sd:10,ta:24,dep:0.70,dec:0.94,n:24000,nsp:3,pal:0}, seed:5},
+  {t:"symbiosis", p:{sa:30,sd:14,ta:20,dep:0.52,dec:0.965,n:18000,nsp:2,pal:2}, seed:88},
+  {t:"veins", p:{sa:25,sd:16,ta:16,dep:0.68,dec:0.955,n:16000,nsp:1,pal:1}, seed:61},
+  {t:"tokyo rail", p:{sa:20,sd:13,ta:18,dep:0.60,dec:0.96,n:20000,nsp:1,pal:0}, seed:101, food:"tokyo"},
+];
+
+// ---- canvas + grid ----
+const canvas = document.getElementById("c"), ctx = canvas.getContext("2d");
+let GW, GH, N, bw, bh, bN;
+let F, TMP, BL, CR, CG, CB, BR, BG, BB, TB, WALL, FOOD, FOODSP, IMG;
+let AX, AY, AH, SP;
+
+function allocGrid(){
+  const AR = Math.max(0.4, Math.min(3, innerWidth/innerHeight));
+  GW = Math.min(520, Math.max(200, Math.round(Math.sqrt(118000*AR))));
+  GH = Math.max(140, Math.round(GW/AR));
+  N = GW*GH; bw = Math.ceil(GW/4); bh = Math.ceil(GH/4); bN = bw*bh;
+  canvas.width = GW; canvas.height = GH;
+  F = [0,1,2].map(()=>new Float32Array(N));
+  TMP = new Float32Array(N); BL = new Float32Array(N);
+  CR = new Float32Array(N); CG = new Float32Array(N); CB = new Float32Array(N);
+  BR = new Float32Array(bN); BG = new Float32Array(bN); BB = new Float32Array(bN); TB = new Float32Array(bN);
+  WALL = new Uint8Array(N); FOOD = new Float32Array(N); FOODSP = new Uint8Array(N);
+  IMG = ctx.createImageData(GW, GH);
+  AX = new Float32Array(MAXN); AY = new Float32Array(MAXN); AH = new Float32Array(MAXN); SP = new Uint8Array(MAXN);
+}
+
+function widx(x,y){ x=((x%GW)+GW)%GW; y=((y%GH)+GH)%GH; return (y|0)*GW+(x|0); }
+
+function seedAgents(){
+  rnd = mulberry32(P.seed>>>0 || 1);
+  const cx=GW/2, cy=GH/2, R=Math.min(GW,GH)*0.34;
+  for(let k=0;k<MAXN;k++){
+    const a=rnd()*TAU, r=Math.sqrt(rnd())*R;
+    AX[k]=cx+cos(a)*r; AY[k]=cy+sin(a)*r; AH[k]=rnd()*TAU; SP[k]=k%P.nsp;
+  }
+}
+function clearFields(){ for(const f of F) f.fill(0); WALL.fill(0); FOOD.fill(0); FOODSP.fill(0); }
+function reassignSpecies(){ for(let k=0;k<MAXN;k++) SP[k]=k%P.nsp; }
+
+// ---- simulation ----
+function sense(x,y,s){
+  const i=widx(x,y);
+  if(WALL[i]) return -1e6;
+  let v=F[s][i];
+  for(let o=0;o<P.nsp;o++) if(o!==s) v-=RIVAL*F[o][i];
+  return v;
+}
+function injectFood(){
+  for(let i=0;i<N;i++){ const a=FOOD[i]; if(a>0) F[FOODSP[i]][i]+=a; }
+}
+function stepAgents(){
+  const n=P.n, sd=P.sd, sar=P.sa*DEG, tar=P.ta*DEG, dep=P.dep;
+  for(let k=0;k<n;k++){
+    const s=SP[k], h=AH[k], x=AX[k], y=AY[k];
+    const dx=cos(h), dy=sin(h);
+    const fc=sense(x+dx*sd, y+dy*sd, s);
+    const cl=cos(h-sar), sl=sin(h-sar), cr=cos(h+sar), sr=sin(h+sar);
+    const fl=sense(x+cl*sd, y+sl*sd, s);
+    const fr=sense(x+cr*sd, y+sr*sd, s);
+    let nh=h;
+    if(fc>=fl && fc>=fr){}
+    else if(fc<fl && fc<fr) nh += (rnd()<0.5?-tar:tar);
+    else if(fl<fr) nh += tar;
+    else if(fr<fl) nh -= tar;
+    let nx=x+cos(nh), ny=y+sin(nh);
+    if(WALL[widx(nx,ny)]){ nh=rnd()*TAU; nx=x; ny=y; }
+    nx=((nx%GW)+GW)%GW; ny=((ny%GH)+GH)%GH;
+    AX[k]=nx; AY[k]=ny; AH[k]=nh;
+    F[s][widx(nx,ny)] += dep;
+  }
+}
+function diffuse(){
+  const dec=P.dec, keep=1-DIFF;
+  for(let s=0;s<P.nsp;s++){
+    const f=F[s];
+    for(let y=0;y<GH;y++){ const row=y*GW;
+      for(let x=0;x<GW;x++){
+        const l=f[row+(x>0?x-1:x)], c=f[row+x], r=f[row+(x<GW-1?x+1:x)];
+        TMP[row+x]=(l+c+r)*0.3333333;
+      }
+    }
+    for(let y=0;y<GH;y++){ const row=y*GW, up=(y>0?row-GW:row), dn=(y<GH-1?row+GW:row);
+      for(let x=0;x<GW;x++) BL[row+x]=(TMP[up+x]+TMP[row+x]+TMP[dn+x])*0.3333333;
+    }
+    for(let i=0;i<N;i++) f[i]=(f[i]*keep+BL[i]*DIFF)*dec;
+  }
+}
+
+// ---- render + bloom ----
+function blurSmall(a){
+  for(let y=0;y<bh;y++){ const row=y*bw;
+    for(let x=0;x<bw;x++){
+      const l=a[row+(x>0?x-1:x)], c=a[row+x], r=a[row+(x<bw-1?x+1:x)];
+      TB[row+x]=(l+c+r)*0.3333333;
+    }
+  }
+  for(let y=0;y<bh;y++){ const row=y*bw, up=(y>0?row-bw:row), dn=(y<bh-1?row+bw:row);
+    for(let x=0;x<bw;x++) a[row+x]=(TB[up+x]+TB[row+x]+TB[dn+x])*0.3333333;
+  }
+}
+function render(){
+  const P0=PALS[P.pal], sp=P0.sp, bg=P0.bg, wc=P0.wall, nsp=P.nsp;
+  for(let i=0;i<N;i++){
+    let r=0,g=0,b=0;
+    for(let s=0;s<nsp;s++){ const v=F[s][i]; if(v>0){ const t=1-exp(-v*GAIN), c=sp[s]; r+=c[0]*t; g+=c[1]*t; b+=c[2]*t; } }
+    const fd=FOOD[i]; if(fd>0){ const c=sp[FOODSP[i]]; r+=c[0]*0.7; g+=c[1]*0.7; b+=c[2]*0.7; }
+    CR[i]=r; CG[i]=g; CB[i]=b;
+  }
+  BR.fill(0); BG.fill(0); BB.fill(0);
+  for(let y=0;y<GH;y++){ const by=(y>>2)*bw, row=y*GW;
+    for(let x=0;x<GW;x++){ const bi=by+(x>>2), i=row+x; BR[bi]+=CR[i]; BG[bi]+=CG[i]; BB[bi]+=CB[i]; }
+  }
+  const inv=1/16;
+  for(let i=0;i<bN;i++){ BR[i]*=inv; BG[i]*=inv; BB[i]*=inv; }
+  blurSmall(BR); blurSmall(BG); blurSmall(BB);
+  const d=IMG.data;
+  for(let y=0;y<GH;y++){ const by=(y>>2)*bw, row=y*GW;
+    for(let x=0;x<GW;x++){
+      const i=row+x, p=i*4;
+      if(WALL[i]){ d[p]=wc[0]; d[p+1]=wc[1]; d[p+2]=wc[2]; d[p+3]=255; continue; }
+      const bi=by+(x>>2);
+      let r=bg[0]+CR[i]*255+BR[bi]*BLOOM*255;
+      let g=bg[1]+CG[i]*255+BG[bi]*BLOOM*255;
+      let b=bg[2]+CB[i]*255+BB[bi]*BLOOM*255;
+      d[p]  = r>255?255:r;
+      d[p+1]= g>255?255:g;
+      d[p+2]= b>255?255:b;
+      d[p+3]=255;
+    }
+  }
+  ctx.putImageData(IMG,0,0);
+  drawBrush();
+}
+
+// ---- main loop ----
+let paused=false;
+function frame(){
+  if(!paused){ injectFood(); stepAgents(); diffuse(); }
+  render();
+  requestAnimationFrame(frame);
+}
+
+// ---- painting ----
+let painting=false, tool="food", paintSpecies=0;
+function stamp(cx,cy){
+  const R=Math.max(4, GW*0.022), R2=R*R;
+  const x0=Math.max(0,Math.floor(cx-R)), x1=Math.min(GW-1,Math.ceil(cx+R));
+  const y0=Math.max(0,Math.floor(cy-R)), y1=Math.min(GH-1,Math.ceil(cy+R));
+  for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++){
+    const dx=x-cx, dy=y-cy; if(dx*dx+dy*dy>R2) continue;
+    const i=y*GW+x;
+    if(tool==="food"){ FOOD[i]=P.dep*2.2; FOODSP[i]=paintSpecies%P.nsp; WALL[i]=0; }
+    else if(tool==="wall"){ WALL[i]=1; FOOD[i]=0; for(const f of F) f[i]=0; }
+    else { WALL[i]=0; FOOD[i]=0; for(const f of F) f[i]=0; }
+  }
+}
+function evtToGrid(e){
+  const r=canvas.getBoundingClientRect();
+  const t=e.touches?e.touches[0]:e;
+  return [ (t.clientX-r.left)/r.width*GW, (t.clientY-r.top)/r.height*GH ];
+}
+let hoverX=0, hoverY=0, hovering=false;
+function down(e){ painting=true; const [x,y]=evtToGrid(e); hoverX=x; hoverY=y; hovering=true; stamp(x,y); dismissIntro(); e.preventDefault(); }
+function move(e){ if(!painting) return; const [x,y]=evtToGrid(e); hoverX=x; hoverY=y; stamp(x,y); e.preventDefault(); }
+function up(){ painting=false; }
+function hover(e){ const [x,y]=evtToGrid(e); hoverX=x; hoverY=y; hovering=true; }
+canvas.addEventListener("mousedown",down); addEventListener("mousemove",move); addEventListener("mouseup",up);
+canvas.addEventListener("mousemove",hover); canvas.addEventListener("mouseleave",()=>hovering=false);
+canvas.addEventListener("touchstart",down,{passive:false}); canvas.addEventListener("touchmove",move,{passive:false}); addEventListener("touchend",up);
+canvas.addEventListener("contextmenu",e=>e.preventDefault());
+function ringColor(){
+  if(tool==="wall"){ const w=PALS[P.pal].wall; return `rgba(${w[0]},${w[1]},${w[2]},.95)`; }
+  if(tool==="erase") return "rgba(220,235,235,.5)";
+  const c=PALS[P.pal].sp[paintSpecies%P.nsp]; return `rgba(${(c[0]*255)|0},${(c[1]*255)|0},${(c[2]*255)|0},.85)`;
+}
+function drawBrush(){
+  if(!hovering) return;
+  const R=Math.max(4, GW*0.022);
+  ctx.save(); ctx.strokeStyle=ringColor(); ctx.lineWidth=1;
+  ctx.beginPath(); ctx.arc(hoverX,hoverY,R,0,TAU); ctx.stroke(); ctx.restore();
+}
+
+function tokyoFood(){
+  const pts=[[0.22,0.32],[0.5,0.24],[0.78,0.34],[0.3,0.7],[0.68,0.72],[0.5,0.9]];
+  const oldTool=tool; tool="food"; paintSpecies=0;
+  for(const [fx,fy] of pts) stamp(fx*GW, fy*GH);
+  tool=oldTool;
+}
+
+// ---- URL hash ----
+function writeHash(){
+  const s = `sa=${P.sa}&sd=${P.sd}&ta=${P.ta}&dep=${P.dep}&dec=${P.dec}&n=${P.n}&nsp=${P.nsp}&pal=${P.pal}&seed=${P.seed}`;
+  history.replaceState(null,"","#"+s);
+}
+function readHash(){
+  const h=location.hash.replace(/^#/,""); if(!h) return false;
+  const q=new URLSearchParams(h); let ok=false;
+  for(const k of ["sa","sd","ta","dep","dec","n","nsp","pal","seed"]){
+    if(q.has(k)){ P[k]=parseFloat(q.get(k)); ok=true; }
+  }
+  return ok;
+}
+
+// ---- UI build ----
+const sBox=document.getElementById("sliders"), inputs={}, vals={};
+for(const [key,label,mn,mx,st,unit] of SLIDERS){
+  const row=document.createElement("div"); row.className="row";
+  row.innerHTML=`<label>${label}</label><input type="range" min="${mn}" max="${mx}" step="${st}"><span class="val"></span>`;
+  const inp=row.querySelector("input"), v=row.querySelector(".val");
+  inputs[key]=inp; vals[key]=v; inp.value=P[key];
+  const fmt=x=> key==="n" ? (+x).toLocaleString() : (st<1? (+x).toFixed(st<0.01?3:2): x)+unit;
+  const upd=()=>{ P[key]=parseFloat(inp.value); v.textContent=fmt(inp.value);
+    if(key==="n") P.n=Math.min(MAXN,P.n|0);
+    clearChip(); writeHash(); };
+  inp.addEventListener("input",upd); v.textContent=fmt(P[key]);
+  sBox.appendChild(row);
+}
+function syncSliders(){ for(const [key,,,, st,unit] of SLIDERS){ inputs[key].value=P[key]; vals[key].textContent= key==="n" ? (+P[key]).toLocaleString() : (st<1?(+P[key]).toFixed(st<0.01?3:2):P[key])+unit; } }
+
+// species count segmented
+const spSeg=document.getElementById("spSeg");
+[1,2,3].forEach(k=>{ const b=document.createElement("button"); b.textContent=k; b.onclick=()=>{ P.nsp=k; setSpBtns(); buildPaintSp(); reassignSpecies(); clearFields(); clearChip(); writeHash(); }; spSeg.appendChild(b); });
+function setSpBtns(){ [...spSeg.children].forEach((b,i)=> b.classList.toggle("on", i+1===P.nsp)); }
+
+// palette select
+const palSel=document.getElementById("pal");
+PALS.forEach((p,i)=>{ const o=document.createElement("option"); o.value=i; o.textContent=p.name; palSel.appendChild(o); });
+palSel.onchange=()=>{ P.pal=+palSel.value; buildPaintSp(); writeHash(); };
+
+// tool segmented
+document.querySelectorAll("#toolSeg button").forEach(b=>{
+  b.onclick=()=>{ tool=b.dataset.t; document.querySelectorAll("#toolSeg button").forEach(x=>x.classList.toggle("on",x===b));
+    document.getElementById("paintSpRow").style.display = (tool==="food"&&P.nsp>1)?"flex":"none"; };
+});
+// paint-species segmented
+const paintSpBox=document.getElementById("paintSp");
+function buildPaintSp(){
+  paintSpBox.innerHTML="";
+  for(let s=0;s<P.nsp;s++){ const b=document.createElement("button"); b.textContent=s+1;
+    const c=PALS[P.pal].sp[s]; b.style.color=`rgb(${c.map(v=>((v*255)|0)).join(",")})`;
+    b.onclick=()=>{ paintSpecies=s; [...paintSpBox.children].forEach((x,i)=>x.classList.toggle("on",i===s)); };
+    paintSpBox.appendChild(b);
+  }
+  paintSpBox.children[Math.min(paintSpecies,P.nsp-1)]?.classList.add("on");
+  paintSpecies=Math.min(paintSpecies,P.nsp-1);
+  document.getElementById("paintSpRow").style.display=(tool==="food"&&P.nsp>1)?"flex":"none";
+}
+
+// specimen chips
+const chipBox=document.getElementById("chips");
+function clearChip(){ [...chipBox.children].forEach(x=>x.classList.remove("on")); }
+SPECIMENS.forEach(sp=>{ const c=document.createElement("button"); c.className="chip"; c.textContent=sp.t;
+  c.onclick=()=>{ Object.assign(P, sp.p); P.seed=sp.seed; syncUIAll(); clearFields(); reassignSpecies(); seedAgents(); if(sp.food==="tokyo") tokyoFood(); writeHash(); clearChip(); c.classList.add("on"); toast(sp.t); };
+  chipBox.appendChild(c);
+});
+
+function syncUIAll(){ syncSliders(); setSpBtns(); palSel.value=P.pal; buildPaintSp(); }
+
+// actions
+const bPause=document.getElementById("bPause");
+bPause.onclick=()=>{ paused=!paused; bPause.textContent=paused?"play":"pause"; bPause.classList.toggle("on",paused); };
+document.getElementById("bReset").onclick=()=>{ clearFields(); reassignSpecies(); seedAgents(); toast("reset"); };
+document.getElementById("bRand").onclick=()=>{
+  P.sa=5+((rnd()*55)|0); P.sd=3+((rnd()*29)|0); P.ta=4+((rnd()*56)|0);
+  P.dep=+(0.15+rnd()*1.5).toFixed(2); P.dec=+(0.9+rnd()*0.09).toFixed(3);
+  P.n=(6000+(rnd()*30000|0)); P.nsp=1+((rnd()*3)|0); P.pal=(rnd()*PALS.length)|0;
+  P.seed=(rnd()*1e9)|0; syncUIAll(); clearFields(); reassignSpecies(); seedAgents(); clearChip(); writeHash(); toast("shuffle");
+};
+document.getElementById("bPng").onclick=()=>{ canvas.toBlob(b=>dl(b,`ichor-${P.seed}.png`)); };
+const togBtn=document.getElementById("toggle");
+document.getElementById("bHide").onclick=()=>{ document.getElementById("panel").classList.add("hid"); togBtn.style.display="block"; };
+togBtn.onclick=()=>{ document.getElementById("panel").classList.remove("hid"); togBtn.style.display="none"; };
+
+// WebM recording
+let rec=null; const bRec=document.getElementById("bRec"), recPill=document.getElementById("recPill");
+bRec.onclick=()=>{
+  if(rec){ rec.stop(); return; }
+  if(!canvas.captureStream || !window.MediaRecorder){ toast("recording unsupported"); return; }
+  const stream=canvas.captureStream(30);
+  const mimes=["video/webm;codecs=vp9","video/webm;codecs=vp8","video/webm"];
+  const mime=mimes.find(m=>MediaRecorder.isTypeSupported(m))||"";
+  const chunks=[];
+  rec=new MediaRecorder(stream, mime?{mimeType:mime,videoBitsPerSecond:8e6}:undefined);
+  rec.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data); };
+  rec.onstop=()=>{ dl(new Blob(chunks,{type:"video/webm"}), `ichor-${P.seed}.webm`); rec=null; bRec.textContent="rec"; bRec.classList.remove("rec"); recPill.style.display="none"; toast("saved webm"); };
+  rec.start(); bRec.textContent="stop"; bRec.classList.add("rec"); recPill.style.display="block"; toast("recording…");
+};
+
+function dl(blob,name){ const u=URL.createObjectURL(blob), a=document.createElement("a"); a.href=u; a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(u),1000); }
+let toastT; function toast(msg,ms){ const h=document.getElementById("hint"); h.textContent=msg; h.classList.add("show"); clearTimeout(toastT); if(ms!==0) toastT=setTimeout(()=>h.classList.remove("show"),ms||1400); }
+function dismissIntro(){ const h=document.getElementById("hint"); h.classList.remove("show"); clearTimeout(toastT); }
+
+let resizeT; addEventListener("resize", ()=>{ clearTimeout(resizeT); resizeT=setTimeout(()=>{ allocGrid(); reassignSpecies(); seedAgents(); }, 200); });
+
+// ---- keyboard shortcuts ----
+addEventListener("keydown", e=>{
+  if(e.metaKey||e.ctrlKey||e.altKey) return;
+  const t=e.target; if(t&&(t.tagName==="INPUT"||t.tagName==="SELECT"||t.tagName==="TEXTAREA")) return;
+  const k=e.key.toLowerCase(), panel=document.getElementById("panel");
+  if(e.code==="Space"||k===" "){ e.preventDefault(); bPause.onclick(); }
+  else if(k==="r"){ document.getElementById("bReset").onclick(); }
+  else if(k==="s"){ document.getElementById("bRand").onclick(); }
+  else if(k==="h"){ if(panel.classList.contains("hid")) togBtn.onclick(); else document.getElementById("bHide").onclick(); }
+  else if(k==="1"||k==="2"||k==="3"){ const b=document.querySelectorAll("#toolSeg button")[+k-1]; if(b){ b.onclick(); dismissIntro(); } }
+});
+
+// ---- boot ----
+readHash();
+// validate/clamp continuous params from a possibly tampered or truncated shared link
+for(const [key,,mn,mx] of SLIDERS){ P[key]=Number.isFinite(P[key]) ? Math.min(mx,Math.max(mn,P[key])) : DEF[key]; }
+P.nsp=Number.isFinite(P.nsp)?Math.min(3,Math.max(1,P.nsp|0)):DEF.nsp;
+P.pal=Number.isFinite(P.pal)?Math.min(PALS.length-1,Math.max(0,P.pal|0)):DEF.pal;
+P.seed=Number.isFinite(P.seed)?(P.seed>>>0)||1:DEF.seed;
+allocGrid(); seedAgents(); syncUIAll(); writeHash();
+document.getElementById("dot").textContent="keys: space r s h 1/2/3";
+toast("drag on the field to paint food · pick a specimen ↑", 6000);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Spandrel — Apollonian Gasket Lab</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#000; }
+  canvas { display:block; position:fixed; inset:0; touch-action:none; cursor:grab; }
+  canvas.dragging { cursor:grabbing; }
+  #hud, #help {
+    position:fixed; font:12px/1.55 ui-monospace,"Cascadia Mono","Consolas",monospace;
+    color:#f5f3ef; background:rgba(8,8,10,.62); -webkit-backdrop-filter:blur(7px); backdrop-filter:blur(7px);
+    border:1px solid rgba(255,255,255,.12); border-radius:9px; padding:11px 13px;
+    letter-spacing:.02em; -webkit-user-select:none; user-select:none; pointer-events:none;
+  }
+  #hud { top:14px; left:14px; max-width:60ch; }
+  #hud b { color:#ff8a3d; font-weight:600; letter-spacing:.06em; }
+  #hud .k { color:#8ea0b5; }
+  #hud .v { color:#f5f3ef; }
+  #hud .hash { color:#5f6f82; word-break:break-all; margin-top:4px; display:block; font-size:11px; }
+  #hud .copy { pointer-events:auto; cursor:pointer; margin-top:6px; font:11px ui-monospace,monospace;
+    color:#ffcf9e; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.18);
+    border-radius:6px; padding:3px 8px; }
+  #hud .copy:hover { background:rgba(255,255,255,.12); }
+  #help { bottom:14px; left:14px; max-width:44ch; display:none; }
+  #help.show { display:block; }
+  #help .title { color:#ff8a3d; display:block; margin-bottom:5px; letter-spacing:.1em; }
+  #help .row { display:flex; gap:8px; }
+  #help kbd { color:#ffcf9e; min-width:5.5ch; display:inline-block; }
+  #hint { position:fixed; bottom:16px; right:16px; color:#5f6f82;
+    font:11px ui-monospace,monospace; pointer-events:none; -webkit-user-select:none; user-select:none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"></div>
+<div id="help">
+  <div class="title">SPANDREL — CONTROLS</div>
+  <div class="row"><kbd>drag</kbd> pull a seed circle's edge → re-solve</div>
+  <div class="row"><kbd>scroll</kbd> zoom into a gap (deeper foam)</div>
+  <div class="row"><kbd>pinch</kbd> zoom (touch)</div>
+  <div class="row"><kbd>drag bg</kbd> pan</div>
+  <div class="row"><kbd>p</kbd> cycle palette</div>
+  <div class="row"><kbd>c</kbd> coloring mode</div>
+  <div class="row"><kbd>w</kbd> wireframe / fill</div>
+  <div class="row"><kbd>l</kbd> curvature labels (integer)</div>
+  <div class="row"><kbd>+ &minus;</kbd> max depth</div>
+  <div class="row"><kbd>space</kbd> replay bloom</div>
+  <div class="row"><kbd>s</kbd> PNG &nbsp; <kbd>v</kbd> SVG</div>
+  <div class="row"><kbd>b</kbd> record bloom frames</div>
+  <div class="row"><kbd>0</kbd> reset view &amp; seed</div>
+  <div class="row"><kbd>h</kbd> hide this</div>
+</div>
+<div id="hint">press <b style="color:#ffcf9e">h</b> for controls</div>
+<script>
+"use strict";
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+const hudEl = document.getElementById("hud");
+const helpEl = document.getElementById("help");
+const hintEl = document.getElementById("hint");
+
+// ---- palettes (bg, ink, generational color ramp) ----
+const PAL = [
+  { name:"Ember",  bg:"#0e0b09", ink:"#f5f3ef", cols:["#ff6100","#ff9647","#ffd0a0","#c43b00","#7a2600"] },
+  { name:"Ice",    bg:"#07121a", ink:"#eaf6ff", cols:["#8fdcff","#3aa0ff","#c4ecff","#2b6fb0","#123a5c"] },
+  { name:"Neon",   bg:"#0a0014", ink:"#f7e9ff", cols:["#ff2fd0","#8a2be2","#00e5ff","#ff6ec7","#5b00b3"] },
+  { name:"Verdant",bg:"#06120b", ink:"#eafff0", cols:["#3ddc84","#0f9d58","#b6e6a1","#1e6b3a","#0a3d22"] },
+  { name:"Mono",   bg:"#0d0d0d", ink:"#fafafa", cols:["#fafafa","#c4c4c4","#8a8a8a","#565656","#303030"] },
+  { name:"Sunset", bg:"#160b1a", ink:"#fff0e6", cols:["#ffb400","#ff8c42","#ff5e5b","#d7263d","#7a1e57"] },
+];
+const COLORNAMES = ["by generation","by log-curvature","mono ink","duotone"];
+
+// ---- state ----
+const state = { r1:0.5, pal:0, color:0, maxDepth:8, wire:false, labels:true };
+const view = { scale:0, ox:0, oy:0, loaded:false };
+const anim = { t0:0, playing:false };
+const GENMS = 105;               // ms per generation during the bloom
+let W=0, H=0, DPR=1, baseScale=1;
+let circles = [], maxGen=0, minRpx=Infinity, integerMode=false;
+let dirty=true, recFront=null, recording=false, zoomTimer=0;
+let hudHash="";
+
+const ease = t => t*t*(3-2*t);
+const clamp = (v,a,b) => v<a?a:v>b?b:v;
+// respect motion-sensitivity: skip the animated bloom, keep space-bar replay opt-in
+const reduceMotion = typeof matchMedia==="function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// ---- exact Apollonian math (Descartes reflection, real arithmetic) ----
+// Replace circle d in a mutually-tangent quadruple {a,b,c,d} with the other
+// tangent solution:  k' = 2(ka+kb+kc) - kd ,  k'z' = 2(ka za+kb zb+kc zc) - kd zd
+function reflect(a,b,c,d){
+  const k = 2*(a.k+b.k+c.k) - d.k;
+  const x = (2*(a.k*a.x+b.k*b.x+c.k*c.x) - d.k*d.x)/k;
+  const y = (2*(a.k*a.y+b.k*b.y+c.k*c.y) - d.k*d.y)/k;
+  return { k, x, y, r:1/Math.abs(k) };
+}
+
+// Seed: unit boundary circle (curvature -1) with two collinear inner circles
+// (radii r1 + r2 = 1, guaranteeing mutual tangency) and the inscribed C3
+// placed by the complex Descartes theorem (which collapses to a clean form here).
+function buildSeed(){
+  const r1 = state.r1, r2 = 1-r1;
+  const C0 = { k:-1,    x:0,      y:0, r:1,  gen:0 };
+  const C1 = { k:1/r1,  x:r1-1,   y:0, r:r1, gen:0 };
+  const C2 = { k:1/r2,  x:r1,     y:0, r:r2, gen:0 };
+  const k3 = -1 + 1/r1 + 1/r2;
+  const Kx = (1/r1)*(r1-1) + (1/r2)*r1;   // k0z0+k1z1+k2z2  (real part)
+  const C3 = { k:k3, x:Kx/k3, y:2/k3, r:1/k3, gen:0 };  // +2i solution = upper gap
+  return [C0,C1,C2,C3];
+}
+
+// Recursively inscribe circles, culling branches whose (parent) circle is fully
+// off-screen so a deep zoom lazily derives only the foam that's actually visible.
+function build(cutPx, cap, md){
+  const s=view.scale, ox=view.ox, oy=view.oy;
+  const arr = buildSeed();
+  const worldCut = cutPx/s;
+  const onScreen = c => {
+    const sx=c.x*s+ox, sy=c.y*s+oy, sr=c.r*s;
+    return !(sx+sr<0 || sx-sr>W || sy+sr<0 || sy-sr>H);
+  };
+  const ok = c => c.r>worldCut && isFinite(c.k) && Math.abs(c.k)<1e7 && onScreen(c);
+  let n=0;
+  function rec(a,b,c,d,depth){
+    if(n>cap || depth>md) return;
+    const kids  = [reflect(b,c,d,a), reflect(a,c,d,b), reflect(a,b,d,c)];
+    const keeps = [[b,c,d],[a,c,d],[a,b,d]];
+    for(let i=0;i<3;i++){
+      const nc=kids[i]; nc.gen=depth;
+      if(!ok(nc)) continue;
+      arr.push(nc); n++;
+      const kp=keeps[i]; rec(kp[0],kp[1],kp[2],nc,depth+1);
+    }
+  }
+  const q = arr.slice(0,4);
+  for(let i=0;i<4;i++){
+    const keep=q.filter((_,j)=>j!==i);
+    const nc=reflect(keep[0],keep[1],keep[2],q[i]); nc.gen=1;
+    if(ok(nc)){ arr.push(nc); n++; rec(keep[0],keep[1],keep[2],nc,2); }
+  }
+  return arr;
+}
+
+function effDepth(){
+  const z = Math.max(0, Math.log2(view.scale/baseScale));
+  return state.maxDepth + Math.round(z*6);   // diving deeper unlocks more generations
+}
+
+function regen(shallow, animate){
+  const cut = shallow?2.2:0.5;
+  const cap = shallow?6000:48000;
+  const md  = shallow?Math.min(6,effDepth()):effDepth();
+  circles = build(cut, cap, md);
+  integerMode = circles.slice(0,4).every(c=>Math.abs(c.k-Math.round(c.k))<1e-6);
+  maxGen=0; minRpx=Infinity;
+  for(const c of circles){
+    if(c.gen>maxGen) maxGen=c.gen;
+    if(c.k>0){ const sr=c.r*view.scale; if(sr<minRpx) minRpx=sr; }
+  }
+  if(animate && !reduceMotion){ anim.t0=performance.now(); anim.playing=true; }
+  updateHash(); updateHUD();
+  dirty=true;
+}
+
+// ---- coloring ----
+function hx(h){ h=h.replace("#",""); return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)]; }
+function hexLerp(a,b,t){ const p=hx(a),q=hx(b);
+  return `rgb(${Math.round(p[0]+(q[0]-p[0])*t)},${Math.round(p[1]+(q[1]-p[1])*t)},${Math.round(p[2]+(q[2]-p[2])*t)})`; }
+function colorOf(c){
+  const p=PAL[state.pal], L=p.cols.length;
+  if(state.color===0) return p.cols[c.gen % L];
+  if(state.color===1){ const i=Math.floor(Math.log2(Math.abs(c.k)+1)); return p.cols[((i%L)+L)%L]; }
+  if(state.color===2) return p.ink;
+  return hexLerp(p.cols[0], p.cols[2], (c.gen%6)/5);
+}
+
+// ---- rendering ----
+function currentFront(){
+  if(recFront!=null) return recFront;
+  if(anim.playing){
+    const f=(performance.now()-anim.t0)/GENMS;
+    if(f > maxGen+1.3){ anim.playing=false; return Infinity; }
+    return f;
+  }
+  return Infinity;
+}
+
+function drawScene(g, s, ox, oy, front){
+  const p = PAL[state.pal];
+  g.fillStyle = p.bg;
+  g.fillRect(0,0,W,H);
+  for(const c of circles){
+    let sc=1;
+    if(front!==Infinity && c.gen>0){
+      const local=front-c.gen;
+      if(local<=0) continue;
+      sc = local<1 ? ease(local) : 1;
+    }
+    const sx=c.x*s+ox, sy=c.y*s+oy;
+    if(c.k<0){ // outer boundary — stroke only, never fill
+      const sr=c.r*s;
+      g.beginPath(); g.arc(sx,sy,sr,0,6.2831853);
+      g.lineWidth=2; g.strokeStyle=p.ink; g.globalAlpha=.34; g.stroke(); g.globalAlpha=1;
+      continue;
+    }
+    const sr=c.r*s*sc;
+    if(sr<0.12) continue;
+    const col=colorOf(c);
+    g.beginPath(); g.arc(sx,sy,sr,0,6.2831853);
+    if(state.wire){
+      g.lineWidth=clamp(sr*0.05,0.4,2); g.strokeStyle=col; g.stroke();
+    } else {
+      g.fillStyle=col; g.fill();
+      if(sr>2){ g.lineWidth=clamp(sr*0.02,0.4,1); g.strokeStyle=p.bg; g.globalAlpha=.55; g.stroke(); g.globalAlpha=1; }
+    }
+    if(integerMode && state.labels && sr>9 && sc>0.6){
+      const fs=Math.min(sr*0.8,44);
+      g.font=`600 ${fs}px ui-monospace,monospace`;
+      g.textAlign="center"; g.textBaseline="middle";
+      g.fillStyle=state.wire?col:p.bg;
+      g.globalAlpha=state.wire?1:.85;
+      g.fillText(String(Math.round(Math.abs(c.k))), sx, sy);
+      g.globalAlpha=1;
+    }
+  }
+}
+
+function draw(){
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  drawScene(ctx, view.scale, view.ox, view.oy, currentFront());
+}
+
+function frame(){
+  if(anim.playing || dirty || recFront!=null){ draw(); dirty=false; }
+  requestAnimationFrame(frame);
+}
+
+// ---- HUD ----
+function updateHUD(){
+  const p=PAL[state.pal];
+  const z=(view.scale/baseScale);
+  hudEl.innerHTML =
+    `<b>SPANDREL</b>  Apollonian gasket lab<br>`+
+    `<span class="k">circles</span> <span class="v">${circles.length}</span> · `+
+    `<span class="k">depth</span> <span class="v">${maxGen}</span> · `+
+    `<span class="k">min r</span> <span class="v">${isFinite(minRpx)?minRpx.toFixed(2):"—"}px</span> · `+
+    `<span class="k">zoom</span> <span class="v">${z.toFixed(z<10?1:0)}×</span><br>`+
+    `<span class="k">palette</span> <span class="v">${p.name}</span> · `+
+    `<span class="k">color</span> <span class="v">${COLORNAMES[state.color]}</span> · `+
+    `<span class="v">${state.wire?"wireframe":"filled"}</span> · `+
+    `<span class="k">integer</span> <span class="v" style="color:${integerMode?"#7fe08a":"#c98b8b"}">${integerMode?"yes":"no"}</span><br>`+
+    `<span class="k">seed r₁</span> <span class="v">${state.r1.toFixed(3)}</span> · `+
+    `<span class="k">max depth</span> <span class="v">${state.maxDepth}</span>`+
+    `<span class="hash">#${hudHash}</span>`+
+    `<button class="copy" id="copyLink" type="button">copy link</button>`;
+}
+// the HUD is pointer-events:none, but the copy button opts back in
+hudEl.addEventListener("click", e=>{
+  if(e.target && e.target.id==="copyLink"){
+    const btn=e.target;
+    const done=()=>{ btn.textContent="copied ✓"; setTimeout(()=>{ btn.textContent="copy link"; },1200); };
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(location.href).then(done).catch(()=>{ btn.textContent="copy failed"; });
+    } else { btn.textContent="copy failed"; }
+  }
+});
+
+// ---- URL hash (shareable, reproducible permalink) ----
+function updateHash(){
+  const v=view;
+  hudHash = `s=${state.r1.toFixed(3)}&p=${state.pal}&c=${state.color}&d=${state.maxDepth}`+
+            `&w=${state.wire?1:0}&l=${state.labels?1:0}`+
+            `&z=${v.scale.toFixed(1)}&x=${v.ox.toFixed(0)}&y=${v.oy.toFixed(0)}`;
+  try{ history.replaceState(null,"","#"+hudHash); }catch(e){}
+}
+function loadHash(){
+  const h=location.hash.slice(1); if(!h) return;
+  const q={}; h.split("&").forEach(kv=>{ const i=kv.indexOf("="); if(i>0) q[kv.slice(0,i)]=kv.slice(i+1); });
+  // validate every parsed value; a mangled permalink falls back to defaults, not NaN
+  if(q.s!==undefined){ const s=+q.s; if(Number.isFinite(s)) state.r1=clamp(s,0.06,0.94); }
+  if(q.p!==undefined){ const p=+q.p; if(Number.isFinite(p)) state.pal=((Math.trunc(p)%PAL.length)+PAL.length)%PAL.length; }
+  if(q.c!==undefined){ const c=+q.c; if(Number.isFinite(c)) state.color=((Math.trunc(c)%4)+4)%4; }
+  if(q.d!==undefined){ const d=+q.d; if(Number.isFinite(d)) state.maxDepth=clamp(Math.trunc(d),1,20); }
+  if(q.w!==undefined) state.wire=q.w==="1";
+  if(q.l!==undefined) state.labels=q.l==="1";
+  if(q.z!==undefined && q.x!==undefined && q.y!==undefined){
+    const z=+q.z, x=+q.x, y=+q.y;
+    if(Number.isFinite(z) && Number.isFinite(x) && Number.isFinite(y) && z>0){
+      view.scale=z; view.ox=x; view.oy=y; view.loaded=true;
+    }
+  }
+}
+
+// ---- export ----
+function download(url,name){ const a=document.createElement("a"); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); }
+function exportPNG(){ draw(); download(canvas.toDataURL("image/png"), `spandrel_${Date.now()}.png`); }
+function exportSVG(){
+  const p=PAL[state.pal], s=view.scale, ox=view.ox, oy=view.oy;
+  let out=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
+  out+=`<rect width="${W}" height="${H}" fill="${p.bg}"/>`;
+  for(const c of circles){
+    const sx=(c.x*s+ox).toFixed(2), sy=(c.y*s+oy).toFixed(2), sr=c.r*s;
+    if(c.k<0){ out+=`<circle cx="${sx}" cy="${sy}" r="${sr.toFixed(2)}" fill="none" stroke="${p.ink}" stroke-opacity="0.34" stroke-width="2"/>`; continue; }
+    if(sr<0.3) continue;
+    const col=colorOf(c);
+    if(state.wire) out+=`<circle cx="${sx}" cy="${sy}" r="${sr.toFixed(2)}" fill="none" stroke="${col}" stroke-width="${clamp(sr*0.05,0.4,2).toFixed(2)}"/>`;
+    else out+=`<circle cx="${sx}" cy="${sy}" r="${sr.toFixed(2)}" fill="${col}"/>`;
+    if(integerMode && state.labels && sr>9){
+      const fs=Math.min(sr*0.8,44).toFixed(1);
+      out+=`<text x="${sx}" y="${sy}" font-family="monospace" font-weight="600" font-size="${fs}" fill="${state.wire?col:p.bg}" text-anchor="middle" dominant-baseline="central">${Math.round(Math.abs(c.k))}</text>`;
+    }
+  }
+  out+="</svg>";
+  download("data:image/svg+xml;charset=utf-8,"+encodeURIComponent(out), `spandrel_${Date.now()}.svg`);
+}
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+async function recordBloom(){
+  if(recording) return;
+  recording=true; anim.playing=false;
+  const frames=Math.min(maxGen+2,40);
+  for(let f=0; f<=frames; f++){
+    recFront=f; draw();
+    download(canvas.toDataURL("image/png"), `spandrel_frame_${String(f).padStart(2,"0")}.png`);
+    await sleep(140);
+  }
+  recFront=null; recording=false; dirty=true;
+}
+
+// ---- input ----
+addEventListener("keydown", e=>{
+  const k=e.key;
+  if(k==="h"||k==="?"){ helpEl.classList.toggle("show"); hintEl.style.display="none"; }
+  else if(k==="p"){ state.pal=(state.pal+1)%PAL.length; updateHash(); updateHUD(); dirty=true; }
+  else if(k==="c"){ state.color=(state.color+1)%4; updateHash(); updateHUD(); dirty=true; }
+  else if(k==="w"){ state.wire=!state.wire; updateHash(); updateHUD(); dirty=true; }
+  else if(k==="l"){ state.labels=!state.labels; updateHash(); updateHUD(); dirty=true; }
+  else if(k==="+"||k==="="){ state.maxDepth=clamp(state.maxDepth+1,1,20); regen(false,true); }
+  else if(k==="-"||k==="_"){ state.maxDepth=clamp(state.maxDepth-1,1,20); regen(false,true); }
+  else if(k===" "){ e.preventDefault(); anim.t0=performance.now(); anim.playing=true; }
+  else if(k==="s"){ exportPNG(); }
+  else if(k==="v"){ exportSVG(); }
+  else if(k==="b"){ recordBloom(); }
+  else if(k==="0"){ state.r1=0.5; fitView(); regen(false,true); }
+});
+
+let mode=null, lastX=0, lastY=0;
+const pointers=new Map();   // active pointers, for pinch-zoom
+let pinch=null;             // { dist } while two fingers are down
+// Seed reshaping is only offered as a narrow grab on a seed circle's ARC, and
+// only near baseline zoom — so panning stays usable at depth and reshaping is
+// deliberate rather than triggered by any drag that starts on the gasket.
+function hitSeed(wx,wy){
+  if(view.scale > baseScale*1.6) return false;
+  const tol = 14/view.scale;                 // ~14px edge tolerance in world units
+  for(const i of [1,2]){ const c=circles[i];
+    if(c && Math.abs(Math.hypot(wx-c.x, wy-c.y) - c.r) < tol) return true;
+  }
+  return false;
+}
+canvas.addEventListener("pointerdown", e=>{
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  if(pointers.size===2){                      // second finger → start pinch, drop drag
+    mode=null; canvas.classList.remove("dragging");
+    const p=[...pointers.values()];
+    pinch={ dist:Math.hypot(p[0].x-p[1].x, p[0].y-p[1].y) };
+    return;
+  }
+  canvas.classList.add("dragging");
+  lastX=e.clientX; lastY=e.clientY;
+  const wx=(e.clientX-view.ox)/view.scale, wy=(e.clientY-view.oy)/view.scale;
+  mode = hitSeed(wx,wy) ? "seed" : "pan";
+  canvas.style.cursor = mode==="seed" ? "ew-resize" : "grabbing";
+});
+canvas.addEventListener("pointermove", e=>{
+  if(pointers.has(e.pointerId)) pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  if(pinch && pointers.size>=2){              // pinch-to-zoom about the midpoint
+    const p=[...pointers.values()];
+    const dist=Math.hypot(p[0].x-p[1].x, p[0].y-p[1].y);
+    const mx=(p[0].x+p[1].x)/2, my=(p[0].y+p[1].y)/2;
+    const f = dist/(pinch.dist||dist);
+    view.ox = mx-(mx-view.ox)*f;
+    view.oy = my-(my-view.oy)*f;
+    view.scale *= f; pinch.dist=dist;
+    regen(true,false);
+    clearTimeout(zoomTimer); zoomTimer=setTimeout(()=>regen(false,false),170);
+    return;
+  }
+  if(!mode){                                  // hover: signal that seed arcs are draggable
+    const wx=(e.clientX-view.ox)/view.scale, wy=(e.clientY-view.oy)/view.scale;
+    canvas.style.cursor = hitSeed(wx,wy) ? "ew-resize" : "grab";
+    return;
+  }
+  if(mode==="seed"){
+    const wx=(e.clientX-view.ox)/view.scale;
+    state.r1 = clamp((wx+1)/2, 0.06, 0.94);
+    regen(true,false);
+  } else {
+    view.ox += e.clientX-lastX; view.oy += e.clientY-lastY;
+    lastX=e.clientX; lastY=e.clientY; dirty=true;
+  }
+});
+function endPointer(e){
+  pointers.delete(e.pointerId);
+  if(pinch && pointers.size<2){ pinch=null; regen(false,false); }
+  if(!mode){ canvas.classList.remove("dragging"); canvas.style.cursor="grab"; return; }
+  const wasSeed = mode==="seed";
+  mode=null; canvas.classList.remove("dragging"); canvas.style.cursor="grab";
+  regen(false, wasSeed);   // re-expand to full depth; animate the bloom after a seed pull
+}
+canvas.addEventListener("pointerup", endPointer);
+canvas.addEventListener("pointercancel", endPointer);
+
+canvas.addEventListener("wheel", e=>{
+  e.preventDefault();
+  // normalize wheel delta across browsers (Firefox line-mode, page-mode)
+  const unit = e.deltaMode===1 ? 16 : e.deltaMode===2 ? H : 1;
+  const f=Math.exp(-(e.deltaY*unit)*0.0015);
+  const mx=e.clientX, my=e.clientY;
+  view.ox = mx-(mx-view.ox)*f;
+  view.oy = my-(my-view.oy)*f;
+  view.scale *= f;
+  regen(true,false);
+  clearTimeout(zoomTimer);
+  zoomTimer=setTimeout(()=>regen(false,false), 170);
+}, { passive:false });
+
+// ---- setup ----
+function fitView(){ view.scale=baseScale; view.ox=W/2; view.oy=H/2; }
+function resize(){
+  DPR=Math.min(devicePixelRatio||1,2);
+  W=innerWidth; H=innerHeight;
+  canvas.width=W*DPR; canvas.height=H*DPR;
+  canvas.style.width=W+"px"; canvas.style.height=H+"px";
+  baseScale=0.42*Math.min(W,H);
+  if(!view.scale) fitView();
+  dirty=true;
+}
+addEventListener("resize", ()=>{ resize(); regen(false,false); });
+
+resize();
+loadHash();
+if(!view.loaded) fitView();
+regen(false,true);
+frame();
+</script>
+</body>
+</html>

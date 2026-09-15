@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hexweald — Seeded Hex Kingdom Generator</title>
+<style>
+  :root{ --ink:#3a3020; --panel:#f7f1e2; --edge:#d8cbab; --accent:#a5642c; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; }
+  body{
+    font-family:"Iowan Old Style","Palatino Linotype",Georgia,serif;
+    background:#2a2620; color:var(--ink);
+    display:flex; flex-direction:column; align-items:center; min-height:100%;
+  }
+  header{ text-align:center; padding:14px 10px 4px; color:#efe6cf; }
+  header h1{ margin:0; font-size:26px; letter-spacing:3px; font-weight:600; }
+  header p{ margin:3px 0 0; font-size:12.5px; opacity:.7; letter-spacing:.5px; }
+  #bar{
+    display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; justify-content:center;
+    background:var(--panel); border:1px solid var(--edge); border-radius:10px;
+    padding:9px 14px; margin:10px; box-shadow:0 4px 18px rgba(0,0,0,.35); max-width:940px;
+  }
+  #bar .grp{ display:flex; align-items:center; gap:7px; font-size:12.5px; }
+  #bar label{ opacity:.75; }
+  button{
+    font-family:inherit; font-size:13px; cursor:pointer; color:#fff;
+    background:var(--accent); border:none; border-radius:7px; padding:7px 13px;
+    letter-spacing:.4px; transition:filter .15s, transform .05s;
+  }
+  button.ghost{ background:#efe6d0; color:var(--ink); border:1px solid var(--edge); }
+  button:hover{ filter:brightness(1.08); }
+  button:active{ transform:translateY(1px); }
+  button:focus-visible, input:focus-visible, select:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+  #bar .val{ opacity:.65; min-width:34px; font-variant-numeric:tabular-nums; }
+  input[type=range]{ width:118px; accent-color:var(--accent); }
+  input[type=text]{
+    font-family:inherit; width:120px; padding:5px 7px; border:1px solid var(--edge);
+    border-radius:6px; background:#fff; color:var(--ink); font-size:12.5px;
+  }
+  select{ font-family:inherit; padding:5px 6px; border:1px solid var(--edge); border-radius:6px; background:#fff; color:var(--ink); }
+  #stage{ position:relative; margin:0 10px 20px; max-width:100%; }
+  canvas{ display:block; border-radius:8px; box-shadow:0 8px 34px rgba(0,0,0,.5); background:#111; max-width:100%; height:auto; }
+  #tip{
+    position:absolute; pointer-events:none; background:rgba(28,24,18,.94); color:#f4ecd8;
+    border:1px solid rgba(210,190,150,.4); border-radius:8px; padding:8px 10px; font-size:12px;
+    line-height:1.5; letter-spacing:.3px; opacity:0; transition:opacity .12s; min-width:150px;
+    box-shadow:0 6px 20px rgba(0,0,0,.5); font-family:"Menlo",monospace; z-index:5;
+  }
+  #tip b{ color:#e6b877; font-family:inherit; }
+  footer{ color:#c9bfa6; font-size:11.5px; opacity:.6; padding-bottom:16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>HEXWEALD</h1>
+  <p>a whole hex kingdom from a single seed — biomes · rivers · towns · roads</p>
+</header>
+<div id="bar">
+  <div class="grp"><button id="reseed">⟳ Reseed</button></div>
+  <div class="grp"><label>Seed</label><input type="text" id="seed" spellcheck="false"></div>
+  <div class="grp"><label>Size</label><input type="range" id="size" min="0" max="5" step="1"><span class="val" id="sizeVal"></span></div>
+  <div class="grp"><label>Sea&nbsp;level</label><input type="range" id="sea" min="20" max="62" step="1"><span class="val" id="seaVal"></span></div>
+  <div class="grp"><label>Theme</label>
+    <select id="theme"><option value="parchment">Parchment</option><option value="atlas">Atlas</option><option value="night">Satellite Night</option></select>
+  </div>
+  <div class="grp"><button class="ghost" id="png">PNG</button><button class="ghost" id="svg">SVG</button></div>
+</div>
+<div id="stage">
+  <canvas id="c"></canvas>
+  <div id="tip"></div>
+</div>
+<footer>deterministic · zero dependencies · share the URL to share the exact realm</footer>
+
+<script>
+"use strict";
+(function(){
+const W=920, H=600, cv=document.getElementById("c"), ctx=cv.getContext("2d");
+const DPR=Math.min(2,window.devicePixelRatio||1);
+cv.width=W*DPR; cv.height=H*DPR; cv.style.width=W+"px"; cv.style.height=H+"px"; ctx.scale(DPR,DPR);
+const R3=Math.sqrt(3);
+
+// ---- palettes: [deep, coast, grass, forest, desert, mountain, snow] + bg/ink/river/road ----
+const THEMES={
+  parchment:{ c:[[91,126,163],[143,176,201],[183,201,138],[123,160,102],[224,207,154],[179,165,151],[238,241,242]],
+    bg:"#efe6d0", ink:"#4a3f2f", river:"#4f7fae", road:"#7a5a34", frame:"#c9b990", paper:"#f3ead2" },
+  atlas:{ c:[[47,93,138],[91,147,196],[169,209,142],[95,160,90],[232,213,154],[154,143,130],[244,247,250]],
+    bg:"#dbe6ee", ink:"#243244", river:"#2f6fae", road:"#6b5333", frame:"#9fb2c4", paper:"#eef3f7" },
+  night:{ c:[[10,31,58],[22,74,110],[47,107,79],[32,80,58],[122,107,63],[74,69,80],[207,216,230]],
+    bg:"#0c1220", ink:"#cfe0f0", river:"#3fa0d8", road:"#c79a5a", frame:"#31405a", paper:"#141d2e" }
+};
+const BIOMES=["deep ocean","coast","grassland","forest","desert","mountain","snow"];
+
+// ---- seeded PRNG + value noise ----
+function hashStr(s){ let h=2166136261; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619);} return h>>>0; }
+function mulberry(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return((t^t>>>14)>>>0)/4294967296; }; }
+function noiseFn(sd){
+  function h(x,y){ let n=Math.imul(x,374761393)+Math.imul(y,668265263)+Math.imul(sd|0,1013904223); n=(n^n>>>13); n=Math.imul(n,1274126177); return((n^n>>>16)>>>0)/4294967296; }
+  function vn(x,y){ const xi=Math.floor(x),yi=Math.floor(y),xf=x-xi,yf=y-yi,u=xf*xf*(3-2*xf),v=yf*yf*(3-2*yf);
+    const a=h(xi,yi),b=h(xi+1,yi),c=h(xi,yi+1),d=h(xi+1,yi+1);
+    return a*(1-u)*(1-v)+b*u*(1-v)+c*(1-u)*v+d*u*v; }
+  return function(x,y,oct,f){ let amp=1,s=0,nm=0; for(let i=0;i<oct;i++){ s+=amp*vn(x*f,y*f); nm+=amp; amp*=0.5; f*=2; } return s/nm; };
+}
+
+// ---- flat-top odd-q offset hex neighbours ----
+const DIRS=[ [[1,0],[1,-1],[0,-1],[-1,-1],[-1,0],[0,1]], [[1,1],[1,0],[0,-1],[-1,0],[-1,1],[0,1]] ];
+function neigh(q,r){ const d=DIRS[q&1],o=[]; for(let i=0;i<6;i++)o.push([q+d[i][0],r+d[i][1]]); return o; }
+
+// ---- procedural names ----
+const NA=["Ael","Bar","Cor","Dun","El","Fen","Gor","Hal","Ir","Kel","Lor","Mor","Nor","Oa","Pyr","Quel","Ran","Sil","Thal","Ul","Vor","Wyn","Yr","Zel","Brae","Cael","Dra","Esk"];
+const NB=["","","a","e","i","o","ia","ae","ei","y"];
+const NC=["dor","gard","heim","mont","ford","wick","mere","fell","holt","vale","burgh","shire","crest","reach","moor","helm","stead","watch","haven","thorn"];
+const REALM=["Verdant","Sundered","Golden","Hollow","Iron","Amber","Silver","Frostbound","Emerald","Wandering","Ancient","Storm-swept"];
+const REALM2=["Marches","Reaches","Dominion","Expanse","Kingdom","Provinces","Weald","Coast","Highlands","Isles"];
+function townName(rng){ return NA[rng()*NA.length|0]+NB[rng()*NB.length|0]+NC[rng()*NC.length|0]; }
+function realmName(rng){ return "The "+REALM[rng()*REALM.length|0]+" "+REALM2[rng()*REALM2.length|0]; }
+
+// ---- state ----
+let ui={ seed:"weald", size:2, sea:42, theme:"parchment" };
+let world=null, layout=null;
+
+function readUI(){ ui.seed=seedEl.value||"weald"; ui.size=+sizeEl.value; ui.sea=+seaEl.value; ui.theme=themeEl.value; }
+function writeUI(){ seedEl.value=ui.seed; sizeEl.value=ui.size; seaEl.value=ui.sea; themeEl.value=ui.theme; updateReadouts(); }
+function updateReadouts(){ if(sizeValEl)sizeValEl.textContent=sizeEl.value+" / 5"; if(seaValEl)seaValEl.textContent=seaEl.value+"%"; }
+
+// ---- generate world ----
+function generate(){
+  const cols=18+ui.size*6, rows=Math.round((18+ui.size*6)*0.62);
+  const size=Math.min(W/(1.5*cols+0.5), (H-70)/(R3*(rows+0.6)));
+  const ox=(W-size*(1.5*(cols-1)))/2, oy=(H-size*R3*(rows-0.5)+8)/2+14;
+  const sd=hashStr(ui.seed), nz=noiseFn(sd), nz2=noiseFn(sd^0x9e3779b9), rng=mulberry(sd^0x51ed);
+  const sl=ui.sea/100;
+  const N=cols*rows, tiles=new Array(N);
+  const cx=cols/2, cy=rows/2, maxd=Math.hypot(cx,cy);
+  function px(q,r){ return [ox+size*1.5*q, oy+size*R3*(r+0.5*(q&1))]; }
+  for(let q=0;q<cols;q++)for(let r=0;r<rows;r++){
+    const i=q*rows+r, p=px(q,r);
+    // radial falloff → island continents; contrast-stretch noise so peaks & valleys emerge
+    const fall=Math.pow(Math.hypot(q-cx,r-cy)/maxd,2.1)*0.5;
+    let e=(nz(q,r,5,0.09)-0.5)*1.95+0.54-fall; e=Math.max(0,Math.min(1,e));
+    let m=(nz2(q+31.5,r+12.5,4,0.11)-0.5)*1.5+0.5; m=Math.max(0,Math.min(1,m));
+    tiles[i]={q,r,x:p[0],y:p[1],e,m,biome:0,river:0,region:-1,d2w:0};
+  }
+  // biome classify
+  for(const t of tiles){
+    if(t.e<sl-0.06)t.biome=0; else if(t.e<sl)t.biome=1;
+    else if(t.e>0.80)t.biome=6; else if(t.e>0.67)t.biome=5;
+    else if(t.m<0.32)t.biome=4; else if(t.m<0.58)t.biome=2; else t.biome=3;
+  }
+  const water=i=>tiles[i].biome<=1, idx=(q,r)=>(q>=0&&q<cols&&r>=0&&r<rows)?q*rows+r:-1;
+  // distance to water (multi-source BFS)
+  let queue=[]; for(let i=0;i<N;i++){ if(water(i)){tiles[i].d2w=0;queue.push(i);} else tiles[i].d2w=999; }
+  for(let h=0;h<queue.length;h++){ const t=tiles[queue[h]]; for(const[nq,nr]of neigh(t.q,t.r)){ const j=idx(nq,nr); if(j>=0&&tiles[j].d2w>t.d2w+1){tiles[j].d2w=t.d2w+1;queue.push(j);} } }
+  // rivers: steepest descent from high+wet peaks
+  const rivers=[];
+  const srcs=tiles.filter(t=>t.e>0.70&&t.m>0.52).sort((a,b)=>b.e-a.e).slice(0,10+ui.size*3);
+  for(const s of srcs){
+    let cur=s, path=[cur], guard=0, seen=new Set([cur.q*rows+cur.r]);
+    while(guard++<80){
+      if(water(cur.q*rows+cur.r)) break;
+      let best=null,be=cur.e;
+      for(const[nq,nr]of neigh(cur.q,cur.r)){ const j=idx(nq,nr); if(j<0)continue; if(tiles[j].e<be){be=tiles[j].e;best=tiles[j];} }
+      if(!best) break;
+      const bi=best.q*rows+best.r; if(seen.has(bi))break; seen.add(bi);
+      best.river++; path.push(best); cur=best;
+      if(best.river>1)break; // merged into existing river
+    }
+    if(path.length>3)rivers.push(path);
+  }
+  // settlements by habitability
+  const cand=[];
+  for(const t of tiles){ if(t.biome!==2)continue;
+    let coast=0,riv=0; for(const[nq,nr]of neigh(t.q,t.r)){ const j=idx(nq,nr); if(j<0)continue; if(tiles[j].biome===1)coast++; if(tiles[j].river>0)riv++; }
+    const score=1+coast*1.6+riv*1.3+(t.river>0?1.4:0)-t.e*1.5-Math.max(0,t.d2w-4)*0.15;
+    if(score>0.6)cand.push({t,score});
+  }
+  cand.sort((a,b)=>b.score-a.score);
+  const towns=[], want=3+(rng()*4|0), minsep=Math.max(3,cols*0.12);
+  for(const c of cand){ if(towns.length>=want)break;
+    if(towns.every(o=>Math.hypot(o.t.q-c.t.q,o.t.r-c.t.r)>minsep)){ towns.push({t:c.t,name:townName(rng),capital:false}); }
+  }
+  // regions: flood-fill land masses
+  let reg=0; for(let i=0;i<N;i++){ if(water(i)||tiles[i].region>=0)continue; const st=[i]; tiles[i].region=reg;
+    while(st.length){ const t=tiles[st.pop()]; for(const[nq,nr]of neigh(t.q,t.r)){ const j=idx(nq,nr); if(j>=0&&!water(j)&&tiles[j].region<0){tiles[j].region=reg;st.push(j);} } } reg++; }
+  // one capital per region (first/highest-score town in that region)
+  const capDone={}; for(const w of towns){ if(capDone[w.t.region]===undefined){ capDone[w.t.region]=w; w.capital=true; } }
+  // roads: A* connecting each town to nearest previous (MST-ish)
+  function cost(i){ const b=tiles[i].biome; const base=[40,9,1,2,2,7,10][b]; return base+(tiles[i].river>0?3:0); }
+  function astar(a,b){
+    const gi=a.q*rows+a.r, gg=b.q*rows+b.r;
+    const g=new Float64Array(N).fill(Infinity); g[gi]=0;
+    const prev=new Int32Array(N).fill(-1); const open=[[0,gi]]; const done=new Uint8Array(N);
+    const hh=j=>{ const t=tiles[j]; return (Math.abs(t.q-b.q)+Math.abs(t.r-b.r))*0.5; };
+    while(open.length){ open.sort((x,y)=>x[0]-y[0]); const[,i]=open.shift(); if(done[i])continue; done[i]=1; if(i===gg)break;
+      const t=tiles[i]; for(const[nq,nr]of neigh(t.q,t.r)){ const j=idx(nq,nr); if(j<0||done[j])continue;
+        const ng=g[i]+cost(j); if(ng<g[j]){ g[j]=ng; prev[j]=i; open.push([ng+hh(j),j]); } } }
+    if(prev[gg]<0&&gg!==gi)return null; let p=[],c=gg; while(c>=0){p.push(tiles[c]); if(c===gi)break; c=prev[c];} return p.reverse();
+  }
+  const roads=[]; const roadSet=new Set();
+  for(let i=1;i<towns.length;i++){ let bj=0,bd=1e9; for(let j=0;j<i;j++){ const d=Math.hypot(towns[i].t.q-towns[j].t.q,towns[i].t.r-towns[j].t.r); if(d<bd){bd=d;bj=j;} }
+    const pth=astar(towns[i].t,towns[bj].t); if(pth){roads.push(pth); pth.forEach(t=>roadSet.add(t.q*rows+t.r));} }
+  // reveal order (coast → inland by d2w, then radial)
+  let maxr=0; for(const t of tiles){ const rr=t.d2w+Math.hypot(t.q-cx,t.r-cy)*0.15; t._ro=rr; if(rr>maxr)maxr=rr; }
+  for(const t of tiles) t.reveal=t._ro/maxr;
+  world={cols,rows,size,ox,oy,sl,tiles,rivers,towns,roads,roadSet,realm:realmName(rng),idx,water};
+}
+
+// ---- geometry ----
+function corners(x,y,s){ const p=[]; for(let i=0;i<6;i++){ const a=Math.PI/180*60*i; p.push([x+s*Math.cos(a),y+s*Math.sin(a)]); } return p; }
+function hexPath(g,x,y,s){ const c=corners(x,y,s); g.beginPath(); g.moveTo(c[0][0],c[0][1]); for(let i=1;i<6;i++)g.lineTo(c[i][0],c[i][1]); g.closePath(); }
+function shadeOf(t){ // hillshade from neighbour elevation gradient, light from top-left
+  let gx=0,gy=0; for(const[nq,nr]of neigh(t.q,t.r)){ const j=world.idx(nq,nr); if(j<0)continue; const n=world.tiles[j]; const de=n.e-t.e; gx+=de*(n.x-t.x); gy+=de*(n.y-t.y); }
+  const l=(-0.6*gx-0.8*gy); return Math.max(0.72,Math.min(1.28,1+l*0.9));
+}
+function rgb(c,sh){ return "rgb("+Math.min(255,c[0]*sh|0)+","+Math.min(255,c[1]*sh|0)+","+Math.min(255,c[2]*sh|0)+")"; }
+function regionTint(rg){ const rng=mulberry(rg*2654435761>>>0); return "hsla("+(rng()*360|0)+",55%,50%,0.16)"; }
+
+// ---- render ----
+function render(prog){
+  prog=prog===undefined?1:prog;
+  const T=THEMES[ui.theme], g=ctx, w=world, s=w.size;
+  g.clearRect(0,0,W,H); g.fillStyle=T.bg; g.fillRect(0,0,W,H);
+  // tiles
+  for(const t of w.tiles){ if(t.reveal>prog)continue;
+    const sh=t.biome<=1?1:shadeOf(t); const fade=prog<1?Math.max(0,Math.min(1,(prog-t.reveal)*12+1)):1;
+    g.globalAlpha=fade; hexPath(g,t.x,t.y,s+0.5); g.fillStyle=rgb(T.c[t.biome],sh); g.fill(); g.globalAlpha=1;
+  }
+  if(prog>=0.999){
+    // region tints
+    for(const t of w.tiles){ if(t.region<0)continue; hexPath(g,t.x,t.y,s+0.5); g.fillStyle=regionTint(t.region); g.fill(); }
+    // biome hatch glyphs (printed-board texture)
+    g.lineWidth=1; g.lineCap="round";
+    for(const t of w.tiles){ drawGlyph(g,t,s,T); }
+    // coastlines: edges between land and water
+    g.strokeStyle=ui.theme==="night"?"rgba(150,190,230,.55)":"rgba(60,45,25,.5)"; g.lineWidth=1.6; g.lineJoin="round";
+    for(const t of w.tiles){ if(w.water(t.q*w.rows+t.r))continue; const c=corners(t.x,t.y,s+0.5), nb=neigh(t.q,t.r);
+      for(let i=0;i<6;i++){ const j=w.idx(nb[i][0],nb[i][1]); if(j<0||w.water(j)){ g.beginPath(); g.moveTo(c[i][0],c[i][1]); g.lineTo(c[(i+1)%6][0],c[(i+1)%6][1]); g.stroke(); } } }
+    // region borders (between different land regions)
+    g.strokeStyle=ui.theme==="night"?"rgba(230,210,160,.35)":"rgba(90,60,30,.35)"; g.lineWidth=1.1; g.setLineDash([3,3]);
+    for(const t of w.tiles){ if(t.region<0)continue; const c=corners(t.x,t.y,s+0.5), nb=neigh(t.q,t.r);
+      for(let i=0;i<6;i++){ const j=w.idx(nb[i][0],nb[i][1]); if(j>=0&&w.tiles[j].region>=0&&w.tiles[j].region!==t.region&&t.region<w.tiles[j].region){ g.beginPath(); g.moveTo(c[i][0],c[i][1]); g.lineTo(c[(i+1)%6][0],c[(i+1)%6][1]); g.stroke(); } } }
+    g.setLineDash([]);
+    // rivers (tapering)
+    g.strokeStyle=T.river; g.lineCap="round"; g.lineJoin="round";
+    for(const p of w.rivers){ for(let i=0;i<p.length-1;i++){ g.beginPath(); g.lineWidth=1.2+i*0.28; g.moveTo(p[i].x,p[i].y); g.lineTo(p[i+1].x,p[i+1].y); g.stroke(); } }
+    // roads (dashed brown)
+    g.strokeStyle=T.road; g.lineWidth=2.2; g.setLineDash([5,4]);
+    for(const p of w.roads){ g.beginPath(); g.moveTo(p[0].x,p[0].y); for(let i=1;i<p.length;i++)g.lineTo(p[i].x,p[i].y); g.stroke(); }
+    g.setLineDash([]);
+    // settlements
+    for(const wn of w.towns){ const t=wn.t;
+      if(wn.capital){ star(g,t.x,t.y,7,3.2,T.ink); }
+      else{ g.beginPath(); g.arc(t.x,t.y,4,0,7); g.fillStyle="#fff"; g.fill(); g.lineWidth=1.6; g.strokeStyle=T.ink; g.stroke(); }
+      g.font="12px 'Iowan Old Style',Georgia,serif"; g.textAlign="center";
+      g.lineWidth=3; g.strokeStyle=ui.theme==="night"?"rgba(8,12,22,.85)":"rgba(247,240,220,.9)"; g.strokeText(wn.name,t.x,t.y-9);
+      g.fillStyle=T.ink; g.fillText(wn.name,t.x,t.y-9);
+    }
+    frame(g,T);
+  }
+}
+function drawGlyph(g,t,s,T){ // subtle printed texture per biome
+  const b=t.biome; if(b<2)return; const rng=mulberry(((t.q*73856093)^(t.r*19349663))>>>0);
+  g.strokeStyle=ui.theme==="night"?"rgba(0,0,0,.22)":"rgba(70,50,25,.22)"; g.lineWidth=1;
+  if(b===3){ for(let k=0;k<2;k++){ const x=t.x+(rng()-.5)*s, y=t.y+(rng()-.5)*s*0.9; g.beginPath(); g.moveTo(x-2.5,y+2); g.lineTo(x,y-2.5); g.lineTo(x+2.5,y+2); g.stroke(); } }
+  else if(b===5||b===6){ const x=t.x,y=t.y; g.beginPath(); g.moveTo(x-3.5,y+2); g.lineTo(x,y-3.5); g.lineTo(x+3.5,y+2); g.stroke(); }
+  else if(b===4){ g.fillStyle=g.strokeStyle; for(let k=0;k<3;k++){ g.beginPath(); g.arc(t.x+(rng()-.5)*s*0.9,t.y+(rng()-.5)*s*0.7,0.7,0,7); g.fill(); } }
+}
+function star(g,x,y,ro,ri,col){ g.beginPath(); for(let i=0;i<10;i++){ const a=Math.PI/5*i-Math.PI/2, rr=i%2?ri:ro; g[i?"lineTo":"moveTo"](x+rr*Math.cos(a),y+rr*Math.sin(a)); } g.closePath(); g.fillStyle="#f4d488"; g.fill(); g.lineWidth=1.4; g.strokeStyle=col; g.stroke(); }
+function frame(g,T){
+  // outer cartouche
+  g.strokeStyle=T.frame; g.lineWidth=6; g.strokeRect(9,9,W-18,H-18);
+  g.lineWidth=1.4; g.strokeRect(15,15,W-30,H-30);
+  // title cartouche
+  g.font="20px 'Iowan Old Style',Georgia,serif"; g.textAlign="center";
+  const title=world.realm, tw=g.measureText(title).width+40;
+  g.fillStyle=T.paper; g.strokeStyle=T.frame; g.lineWidth=2;
+  roundRect(g,W/2-tw/2,22,tw,34,7); g.fill(); g.stroke();
+  g.fillStyle=T.ink; g.fillText(title,W/2,44);
+  // compass rose (top-right)
+  compass(g,W-52,88,20,T);
+  // biome legend (bottom-left)
+  legend(g,26,H-122,T);
+}
+function roundRect(g,x,y,w,h,r){ g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); }
+function compass(g,x,y,r,T){
+  g.strokeStyle=T.ink; g.fillStyle=T.paper; g.lineWidth=1.5; g.beginPath(); g.arc(x,y,r,0,7); g.fill(); g.stroke();
+  for(let i=0;i<4;i++){ const a=Math.PI/2*i-Math.PI/2; g.beginPath(); g.moveTo(x,y); g.lineTo(x+r*Math.cos(a-0.12),y+r*Math.sin(a-0.12)); g.lineTo(x+(r+7)*Math.cos(a),y+(r+7)*Math.sin(a)); g.lineTo(x+r*Math.cos(a+0.12),y+r*Math.sin(a+0.12)); g.closePath(); g.fillStyle=i%2?T.paper:T.ink; g.fill(); g.stroke(); }
+  g.fillStyle=T.ink; g.font="11px Georgia"; g.textAlign="center"; g.fillText("N",x,y-r-9);
+}
+function legend(g,x,y,T){
+  const items=[[0,"Ocean"],[1,"Coast"],[2,"Grass"],[3,"Forest"],[4,"Desert"],[5,"Mtn"],[6,"Snow"]];
+  const bw=104,bh=items.length*13+16;
+  g.fillStyle=T.paper; g.strokeStyle=T.frame; g.lineWidth=1.5; roundRect(g,x,y,bw,bh,6); g.fill(); g.stroke();
+  g.font="11px Georgia"; g.textAlign="left"; g.textBaseline="middle";
+  items.forEach((it,k)=>{ const yy=y+14+k*13; g.fillStyle=rgb(T.c[it[0]],1); g.fillRect(x+9,yy-4,12,9); g.strokeStyle="rgba(0,0,0,.25)"; g.lineWidth=0.8; g.strokeRect(x+9,yy-4,12,9); g.fillStyle=T.ink; g.fillText(it[1],x+27,yy); });
+  g.textBaseline="alphabetic";
+}
+
+// ---- animation ----
+let anim=null;
+function reveal(){ if(anim)cancelAnimationFrame(anim); const t0=performance.now();
+  (function step(now){ const p=Math.min(1,(now-t0)/650); render(p); if(p<1)anim=requestAnimationFrame(step); else anim=null; })(t0);
+}
+
+// ---- interaction ----
+const seedEl=document.getElementById("seed"),sizeEl=document.getElementById("size"),seaEl=document.getElementById("sea"),themeEl=document.getElementById("theme"),tip=document.getElementById("tip"),sizeValEl=document.getElementById("sizeVal"),seaValEl=document.getElementById("seaVal");
+function pixelToTile(mx,my){ let best=null,bd=1e9; for(const t of world.tiles){ const d=(t.x-mx)*(t.x-mx)+(t.y-my)*(t.y-my); if(d<bd){bd=d;best=t;} } return (bd<world.size*world.size)?best:null; }
+function showTipAt(clientX,clientY){ if(!world)return; const rc=cv.getBoundingClientRect();
+  // map to the internal 920x600 buffer coords (canvas may be CSS-scaled on small screens)
+  const sx=W/rc.width, sy=H/rc.height, lx=(clientX-rc.left)*sx, ly=(clientY-rc.top)*sy;
+  const t=pixelToTile(lx,ly);
+  if(!t){ tip.style.opacity=0; return; }
+  let nearest=null,nd=1e9; for(const w of world.towns){ const d=Math.hypot(w.t.q-t.q,w.t.r-t.r); if(d<nd){nd=d;nearest=w;} }
+  const onRoad=world.roadSet.has(t.q*world.rows+t.r);
+  tip.innerHTML=`<b>${BIOMES[t.biome]}</b><br>hex &nbsp;${t.q}, ${t.r}<br>elev &nbsp;${t.e.toFixed(2)} &nbsp; moist ${t.m.toFixed(2)}<br>to&nbsp;water &nbsp;${t.d2w} hex${t.river?"<br>~ river tile":""}${onRoad?"<br>— on road":""}<br>near &nbsp;${nearest?nearest.name+" ("+nd.toFixed(0)+")":"—"}`;
+  let tx=clientX-rc.left+14, ty=clientY-rc.top+14; if(tx>rc.width-160)tx-=180; if(ty>rc.height-96)ty-=100;
+  tip.style.left=tx+"px"; tip.style.top=ty+"px"; tip.style.opacity=1;
+}
+cv.addEventListener("mousemove",e=>showTipAt(e.clientX,e.clientY));
+cv.addEventListener("mouseleave",()=>tip.style.opacity=0);
+// touch: tap a hex to pin its readout (touch devices fire no hover events)
+cv.addEventListener("touchstart",e=>{ if(e.touches&&e.touches[0]){ e.preventDefault(); showTipAt(e.touches[0].clientX,e.touches[0].clientY); } },{passive:false});
+
+function syncHash(){ location.hash=encodeURIComponent(ui.seed)+"~"+ui.size+"~"+ui.sea+"~"+ui.theme; }
+function loadHash(){ const h=decodeURIComponent(location.hash.slice(1)); if(!h)return false; const p=h.split("~"); if(p.length<4)return false;
+  // split trailing fields first so a '~' inside the seed round-trips (encodeURIComponent leaves '~' unescaped)
+  const theme=p.pop(), sea=p.pop(), size=p.pop(), seed=p.join("~");
+  ui.seed=seed||"weald";
+  const sz=parseInt(size,10); ui.size=Math.max(0,Math.min(5,Number.isFinite(sz)?sz:2));
+  const sv=parseInt(sea,10); ui.sea=Math.max(20,Math.min(62,Number.isFinite(sv)?sv:42));
+  ui.theme=THEMES[theme]?theme:"parchment"; return true; }
+
+function rebuild(animate){ readUI(); generate(); syncHash(); if(animate)reveal(); else render(1); }
+
+document.getElementById("reseed").addEventListener("click",()=>{ ui.seed=townName(mulberry((Math.random()*4294967296)>>>0)).toLowerCase(); writeUI(); rebuild(true); });
+seedEl.addEventListener("change",()=>rebuild(true));
+// coalesce rapid slider drags to one full regen per animation frame
+let rafPending=false;
+function rebuildLive(){ updateReadouts(); if(rafPending)return; rafPending=true; requestAnimationFrame(()=>{ rafPending=false; rebuild(false); }); }
+sizeEl.addEventListener("input",rebuildLive);
+seaEl.addEventListener("input",rebuildLive);
+themeEl.addEventListener("change",()=>rebuild(false));
+document.getElementById("png").addEventListener("click",()=>{ const a=document.createElement("a"); a.download="hexweald-"+ui.seed+".png"; a.href=cv.toDataURL("image/png"); a.click(); });
+document.getElementById("svg").addEventListener("click",exportSVG);
+
+function svgEsc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function exportSVG(){
+  const T=THEMES[ui.theme], w=world, s=w.size, e=[];
+  const coast=ui.theme==="night"?"rgba(150,190,230,.55)":"rgba(60,45,25,.5)";
+  e.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`);
+  e.push(`<rect width="${W}" height="${H}" fill="${T.bg}"/>`);
+  for(const t of w.tiles){ const sh=t.biome<=1?1:shadeOf(t); const c=corners(t.x,t.y,s+0.5).map(p=>p[0].toFixed(1)+","+p[1].toFixed(1)).join(" ");
+    e.push(`<polygon points="${c}" fill="${rgb(T.c[t.biome],sh)}"/>`); }
+  // region tints (match canvas provinces)
+  for(const t of w.tiles){ if(t.region<0)continue; const c=corners(t.x,t.y,s+0.5).map(p=>p[0].toFixed(1)+","+p[1].toFixed(1)).join(" ");
+    e.push(`<polygon points="${c}" fill="${regionTint(t.region)}"/>`); }
+  // coastlines (theme-aware, matches canvas)
+  for(const t of w.tiles){ if(w.water(t.q*w.rows+t.r))continue; const c=corners(t.x,t.y,s+0.5), nb=neigh(t.q,t.r);
+    for(let i=0;i<6;i++){ const j=w.idx(nb[i][0],nb[i][1]); if(j<0||w.water(j)) e.push(`<line x1="${c[i][0].toFixed(1)}" y1="${c[i][1].toFixed(1)}" x2="${c[(i+1)%6][0].toFixed(1)}" y2="${c[(i+1)%6][1].toFixed(1)}" stroke="${coast}" stroke-width="1.4"/>`); } }
+  for(const p of w.rivers){ const pts=p.map(t=>t.x.toFixed(1)+","+t.y.toFixed(1)).join(" "); e.push(`<polyline points="${pts}" fill="none" stroke="${T.river}" stroke-width="2.5" stroke-linecap="round"/>`); }
+  for(const p of w.roads){ const pts=p.map(t=>t.x.toFixed(1)+","+t.y.toFixed(1)).join(" "); e.push(`<polyline points="${pts}" fill="none" stroke="${T.road}" stroke-width="2.2" stroke-dasharray="5 4"/>`); }
+  for(const wn of w.towns){ const t=wn.t;
+    if(wn.capital){ let pts=""; for(let i=0;i<10;i++){ const a=Math.PI/5*i-Math.PI/2, rr=i%2?3.2:7; pts+=(t.x+rr*Math.cos(a)).toFixed(1)+","+(t.y+rr*Math.sin(a)).toFixed(1)+" "; }
+      e.push(`<polygon points="${pts.trim()}" fill="#f4d488" stroke="${T.ink}" stroke-width="1.4"/>`); }
+    else e.push(`<circle cx="${t.x.toFixed(1)}" cy="${t.y.toFixed(1)}" r="4" fill="#fff" stroke="${T.ink}" stroke-width="1.4"/>`);
+    e.push(`<text x="${t.x.toFixed(1)}" y="${(t.y-9).toFixed(1)}" text-anchor="middle" font-family="Georgia,serif" font-size="12" fill="${T.ink}">${svgEsc(wn.name)}</text>`); }
+  // atlas frame (outer + inner) and title cartouche
+  e.push(`<rect x="9" y="9" width="${W-18}" height="${H-18}" fill="none" stroke="${T.frame}" stroke-width="6"/>`);
+  e.push(`<rect x="15" y="15" width="${W-30}" height="${H-30}" fill="none" stroke="${T.frame}" stroke-width="1.4"/>`);
+  const tw=svgEsc(w.realm).length*10+40;
+  e.push(`<rect x="${(W/2-tw/2).toFixed(1)}" y="22" width="${tw.toFixed(1)}" height="34" rx="7" fill="${T.paper}" stroke="${T.frame}" stroke-width="2"/>`);
+  e.push(`<text x="${W/2}" y="44" text-anchor="middle" font-family="Georgia,serif" font-size="20" fill="${T.ink}">${svgEsc(w.realm)}</text>`);
+  e.push(`</svg>`);
+  const blob=new Blob([e.join("")],{type:"image/svg+xml"}), a=document.createElement("a");
+  a.download="hexweald-"+ui.seed+".svg"; a.href=URL.createObjectURL(blob); a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+window.addEventListener("hashchange",()=>{ const h=decodeURIComponent(location.hash.slice(1)); if(h!==encodeURIComponent(ui.seed)+"~"+ui.size+"~"+ui.sea+"~"+ui.theme){ if(loadHash()){ writeUI(); readUI(); generate(); render(1); } } });
+
+// ---- boot ----
+loadHash(); writeUI(); readUI(); generate(); reveal();
+})();
+</script>
+</body>
+</html>

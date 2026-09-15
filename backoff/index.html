@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backoff — Exponential Backoff Retry Schedule Calculator</title>
+<meta name="description" content="Plan retry delays with exponential backoff: base, multiplier, max cap and jitter across N attempts, with per-attempt delays and total wait. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('backoff-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#ea580c;
+    --bg:#fbf6f2; --card:#ffffff; --fg:#211812; --muted:#6b5a4c; --line:#efe5da; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#140f0a; --card:#1e1710; --fg:#f5efe7; --muted:#a89279; --line:#2c2318; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:680px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#c2410c);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:680px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.78rem;color:var(--muted);margin-bottom:5px;font-weight:600}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .field{margin-bottom:14px}
+  input[type=number]{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem}
+  .opt{display:flex;align-items:center;gap:8px;font-size:.9rem;color:var(--muted)}
+  table{width:100%;border-collapse:collapse;font-size:.92rem;margin-top:4px}
+  th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:600;font-size:.75rem;text-transform:uppercase}
+  td.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  .total{margin-top:12px;text-align:center;font-size:1.05rem}
+  .total b{color:var(--c)}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:680px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🔁</div>
+    <div><h1>Backoff</h1><div class="sub">Exponential retry schedule</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div class="field"><label for="base">Base delay (ms)</label><input type="number" id="base" value="100" min="1" step="10"></div>
+      <div class="field"><label for="factor">Multiplier</label><input type="number" id="factor" value="2" min="1" step="0.1"></div>
+    </div>
+    <div class="grid">
+      <div class="field"><label for="max">Max delay cap (ms)</label><input type="number" id="max" value="10000" min="1" step="100"></div>
+      <div class="field"><label for="attempts">Attempts</label><input type="number" id="attempts" value="8" min="1" max="30" step="1"></div>
+    </div>
+    <label class="opt"><input type="checkbox" id="jitter" style="width:auto"> show full-jitter range (random 0…delay)</label>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card">
+    <table id="tbl"><thead><tr><th>Attempt</th><th>Delay</th><th>Cumulative</th></tr></thead><tbody></tbody></table>
+    <div class="total" id="total"></div>
+  </div>
+</main>
+<footer>
+  Exponential backoff: delay = min(cap, base × multiplier<sup>attempt</sup>). Adding jitter (a random fraction of each delay) spreads retries so clients don't stampede. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/backoff">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  // Delay for a 0-indexed attempt: min(maxDelay, base * factor^attempt).
+  function backoffDelay(attempt, opts){
+    const { base, factor } = opts;
+    const maxDelay = opts.maxDelay ?? Infinity;
+    const a = Number(attempt);
+    if(!Number.isInteger(a) || a < 0) throw new Error('attempt must be a non-negative integer');
+    if(!(Number(base) > 0)) throw new Error('base must be > 0');
+    if(!(Number(factor) >= 1)) throw new Error('multiplier must be ≥ 1');
+    if(!(Number(maxDelay) > 0)) throw new Error('max delay must be > 0');
+    return Math.min(Number(maxDelay), Number(base) * Math.pow(Number(factor), a));
+  }
+
+  // Delays for attempts 0 … n-1.
+  function schedule(opts, attempts){
+    const n = Number(attempts);
+    if(!Number.isInteger(n) || n < 1) throw new Error('attempts must be a positive integer');
+    return Array.from({ length: n }, (_, i) => backoffDelay(i, opts));
+  }
+
+  const totalWait = delays => delays.reduce((s, d) => s + d, 0);
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('tbl')){
+    const $ = id => document.getElementById(id);
+    const fmt = ms => ms >= 1000 ? (ms / 1000).toFixed(ms % 1000 ? 2 : 0) + ' s' : Math.round(ms) + ' ms';
+
+    function render(){
+      try{
+        const opts = { base: +$('base').value, factor: +$('factor').value, maxDelay: +$('max').value };
+        const delays = schedule(opts, +$('attempts').value);
+        const jitter = $('jitter').checked;
+        let cum = 0;
+        $('tbl').querySelector('tbody').innerHTML = delays.map((d, i) => {
+          cum += d;
+          const cell = jitter ? `0 – ${fmt(d)}` : fmt(d);
+          return `<tr><td>#${i + 1}</td><td class="mono">${cell}</td><td class="mono">${fmt(cum)}</td></tr>`;
+        }).join('');
+        const total = totalWait(delays);
+        $('total').innerHTML = jitter
+          ? `Worst-case total wait: <b>${fmt(total)}</b> (avg ~${fmt(total / 2)} with jitter)`
+          : `Total wait across all retries: <b>${fmt(total)}</b>`;
+        $('err').textContent = '';
+      }catch(e){ $('tbl').querySelector('tbody').innerHTML = ''; $('total').textContent = ''; $('err').textContent = e.message; }
+    }
+    [...document.querySelectorAll('input')].forEach(el => el.addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('backoff-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { backoffDelay, schedule, totalWait };
+</script>
+</body>
+</html>

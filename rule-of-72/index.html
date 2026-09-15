@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RuleOf72 — Doubling Time &amp; Rule of 72 Calculator</title>
+<meta name="description" content="How long until money doubles at a given rate — the exact answer plus the Rule of 72, 70 and 69.3 estimates and their error. Also tripling time and implied rate. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('ruleof72-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#15803d;
+    --bg:#f2f8f3; --card:#ffffff; --fg:#122016; --muted:#576b5e; --line:#dcebe0; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#08130c; --card:#0f1d13; --fg:#e8f4ec; --muted:#84a390; --line:#1a2c20; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:660px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#166534);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:660px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input[type=number]{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.2rem}
+  input[type=range]{width:100%;accent-color:var(--c);margin-top:12px}
+  .big{text-align:center;margin-top:6px}
+  .big .n{font-size:3rem;font-weight:800;color:var(--c);line-height:1}
+  .big .u{color:var(--muted);font-size:.85rem}
+  table{width:100%;border-collapse:collapse;font-size:.92rem;margin-top:8px}
+  th,td{padding:8px;border-bottom:1px solid var(--line);text-align:right}
+  th:first-child,td:first-child{text-align:left}
+  th{color:var(--muted);font-weight:600;font-size:.72rem;text-transform:uppercase}
+  td.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  .extra{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px}
+  .box{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+  .box .v{font-size:1.3rem;font-weight:800;color:var(--c)}
+  .box .k{color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:660px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">📈</div>
+    <div><h1>RuleOf72</h1><div class="sub">Doubling time &amp; the Rule of 72</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="rate">Annual growth / interest rate (%)</label>
+    <input type="number" id="rate" value="8" min="0.01" max="100" step="0.1">
+    <input type="range" id="rater" min="1" max="30" value="8" step="0.5">
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card">
+    <div class="big"><div class="n" id="exact">—</div><div class="u">years to double (exact)</div></div>
+    <table id="tbl"><thead><tr><th>Estimate</th><th>Years</th><th>Error</th></tr></thead><tbody></tbody></table>
+    <div class="extra">
+      <div class="box"><div class="v" id="triple">—</div><div class="k">Years to triple</div></div>
+      <div class="box"><div class="v" id="ten">—</div><div class="k">Years to 10×</div></div>
+    </div>
+  </div>
+</main>
+<footer>
+  The Rule of 72: divide 72 by the percentage rate to estimate the doubling time. 72 works well for everyday rates; 69.3 is exact for continuous compounding, and 70 is a common middle ground. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/rule-of-72">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  // Exact time (in periods) for money to grow by `factor` at ratePct per period.
+  function multiplyingTime(ratePct, factor){
+    const r = Number(ratePct) / 100, f = Number(factor);
+    if(!Number.isFinite(r) || r <= 0) throw new Error('rate must be > 0');
+    if(!(f > 1)) throw new Error('factor must be > 1');
+    return Math.log(f) / Math.log(1 + r);
+  }
+  const doublingTime = ratePct => multiplyingTime(ratePct, 2);
+
+  // The "Rule of N" estimate for doubling time.
+  function ruleOf(n, ratePct){
+    const r = Number(ratePct);
+    if(!Number.isFinite(r) || r <= 0) throw new Error('rate must be > 0');
+    return Number(n) / r;
+  }
+
+  // Rate (%) implied by doubling in `years` (or reaching `factor`).
+  function impliedRate(years, factor = 2){
+    const y = Number(years), f = Number(factor);
+    if(!(y > 0)) throw new Error('years must be > 0');
+    if(!(f > 1)) throw new Error('factor must be > 1');
+    return (Math.pow(f, 1 / y) - 1) * 100;
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('exact')){
+    const $ = id => document.getElementById(id);
+    const r2 = n => (Math.round(n * 100) / 100).toFixed(2);
+
+    function render(){
+      try{
+        const rate = +$('rate').value;
+        const exact = doublingTime(rate);
+        $('exact').textContent = r2(exact);
+        $('tbl').querySelector('tbody').innerHTML = [72, 70, 69.3].map(nn => {
+          const est = ruleOf(nn, rate);
+          const err = est - exact;
+          return `<tr><td>Rule of ${nn}</td><td class="mono">${r2(est)}</td><td class="mono">${err >= 0 ? '+' : ''}${r2(err)}</td></tr>`;
+        }).join('');
+        $('triple').textContent = r2(multiplyingTime(rate, 3));
+        $('ten').textContent = r2(multiplyingTime(rate, 10));
+        $('err').textContent = '';
+      }catch(e){ $('exact').textContent = '—'; $('tbl').querySelector('tbody').innerHTML = ''; $('triple').textContent = '—'; $('ten').textContent = '—'; $('err').textContent = e.message; }
+    }
+    $('rate').addEventListener('input', () => { $('rater').value = $('rate').value; render(); });
+    $('rater').addEventListener('input', () => { $('rate').value = $('rater').value; render(); });
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('ruleof72-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { multiplyingTime, doublingTime, ruleOf, impliedRate };
+</script>
+</body>
+</html>

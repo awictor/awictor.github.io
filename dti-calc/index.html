@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DtiCalc — Debt-to-Income Ratio Calculator</title>
+<meta name="description" content="Calculate your front-end and back-end debt-to-income (DTI) ratios against the 28/36 rule, see whether you'd qualify for a mortgage, and how much borrowing room is left. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('dti-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#0d9488;
+    --bg:#f1f8f7; --card:#ffffff; --fg:#12201e; --muted:#576966; --line:#daeae7; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#08130f; --card:#0f1c19; --fg:#e7f4f1; --muted:#83a29b; --line:#1a2b27; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:660px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#0f766e);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:660px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  .field{margin-bottom:14px}
+  .field:last-child{margin-bottom:0}
+  input{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem}
+  .ratios{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .ratio{text-align:center;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+  .ratio .v{font-size:2.4rem;font-weight:800;line-height:1}
+  .ratio .k{color:var(--muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;margin-top:6px}
+  .ratio .lim{font-size:.75rem;margin-top:4px}
+  .cat{text-align:center;margin-top:16px;font-size:1.15rem;font-weight:700}
+  .room{text-align:center;color:var(--muted);font-size:.9rem;margin-top:8px}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:660px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.8rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">📊</div>
+    <div><h1>DtiCalc</h1><div class="sub">Debt-to-income ratio</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="field"><label for="income">Gross monthly income</label><input type="number" id="income" value="6000" min="0" step="100"></div>
+    <div class="field"><label for="housing">Monthly housing payment (rent/mortgage, taxes, insurance)</label><input type="number" id="housing" value="1500" min="0" step="50"></div>
+    <div class="field"><label for="other">Other monthly debt (loans, cards, alimony…)</label><input type="number" id="other" value="500" min="0" step="50"></div>
+  </div>
+  <div class="card">
+    <div class="ratios">
+      <div class="ratio"><div class="v" id="frontV">—</div><div class="k">Front-end</div><div class="lim" id="frontL"></div></div>
+      <div class="ratio"><div class="v" id="backV">—</div><div class="k">Back-end</div><div class="lim" id="backL"></div></div>
+    </div>
+    <div class="cat" id="cat"></div>
+    <div class="room" id="room"></div>
+    <div class="err" id="err"></div>
+  </div>
+</main>
+<footer>
+  The <strong>28/36 rule</strong>: lenders often want housing ≤ 28% of gross income (front-end) and total debt ≤ 36% (back-end); 43% is a common upper limit for a qualified mortgage. Guidance only — <strong>not financial advice</strong>. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/dti-calc">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  // Category from the back-end ratio (fraction, e.g. 0.33).
+  const CATS = [
+    { max: 0.36,      name: 'Good',       color: '#16a34a' },
+    { max: 0.43,      name: 'Manageable', color: '#ca8a04' },
+    { max: Infinity,  name: 'High',       color: '#dc2626' }
+  ];
+  function category(backRatio){
+    return CATS.find(c => Number(backRatio) <= c.max);
+  }
+
+  // Maximum total monthly debt to stay at or under a target ratio.
+  function maxDebtForRatio(income, ratio){
+    const i = Number(income), r = Number(ratio);
+    if(!Number.isFinite(i) || !Number.isFinite(r)) throw new Error('enter numbers');
+    if(i <= 0) throw new Error('income must be > 0');
+    return i * r;
+  }
+
+  function analyze(income, housing, otherDebt){
+    const i = Number(income), h = Number(housing), o = Number(otherDebt);
+    if(![i, h, o].every(Number.isFinite)) throw new Error('enter numbers');
+    if(i <= 0) throw new Error('income must be > 0');
+    if(h < 0 || o < 0) throw new Error('debts must be ≥ 0');
+    const totalDebt = h + o;
+    const front = h / i;
+    const back = totalDebt / i;
+    return {
+      income: i, housing: h, otherDebt: o, totalDebt,
+      front, back,
+      frontOk: front <= 0.28,
+      backOk: back <= 0.36,
+      category: category(back),
+      // room left before hitting the 36% back-end guideline
+      roomTo36: maxDebtForRatio(i, 0.36) - totalDebt
+    };
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('cat')){
+    const $ = id => document.getElementById(id);
+    const pct = x => (x * 100).toFixed(1) + '%';
+    const money = n => '$' + Math.round(n).toLocaleString('en-US');
+
+    function render(){
+      try{
+        const a = analyze($('income').value, $('housing').value, $('other').value);
+        $('frontV').textContent = pct(a.front);
+        $('frontV').style.color = a.frontOk ? '#16a34a' : '#dc2626';
+        $('frontL').textContent = (a.frontOk ? '✓' : '✗') + ' limit 28%';
+        $('frontL').style.color = a.frontOk ? '#16a34a' : '#dc2626';
+
+        $('backV').textContent = pct(a.back);
+        $('backV').style.color = a.category.color;
+        $('backL').textContent = (a.backOk ? '✓' : '✗') + ' limit 36%';
+        $('backL').style.color = a.backOk ? '#16a34a' : '#dc2626';
+
+        $('cat').textContent = a.category.name;
+        $('cat').style.color = a.category.color;
+        $('room').textContent = a.roomTo36 >= 0
+          ? `You could take on about ${money(a.roomTo36)}/mo more debt and stay within 36%.`
+          : `You're ${money(-a.roomTo36)}/mo over the 36% guideline.`;
+        $('err').textContent = '';
+      }catch(e){
+        ['frontV','backV','cat','room'].forEach(id => $(id).textContent = '');
+        $('frontL').textContent = ''; $('backL').textContent = '';
+        $('err').textContent = e.message;
+      }
+    }
+    [...document.querySelectorAll('input')].forEach(el => el.addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('dti-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { category, maxDebtForRatio, analyze };
+</script>
+</body>
+</html>

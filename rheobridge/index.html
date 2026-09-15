@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rheobridge — Hex vs a resistor-network AI</title>
+<style>
+  :root{--bg:#0e1622;--panel:#16212f;--ink:#e8eef5;--muted:#8ba0b6;--red:#ff6100;--blue:#3fa9ff;--line:#26374a}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 800px at 70% -10%,#1a2a3d 0,#0e1622 60%);color:var(--ink);font:15px/1.45 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:18px 16px 40px}
+  h1{font-size:22px;margin:0 0 2px;letter-spacing:.3px}
+  h1 b{color:var(--red)}
+  .sub{color:var(--muted);margin:0 0 14px;font-size:13px}
+  .stage{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start}
+  canvas{background:#0b1220;border:1px solid var(--line);border-radius:12px;touch-action:none;box-shadow:0 10px 40px rgba(0,0,0,.35)}
+  .side{flex:1;min-width:230px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0}
+  label{color:var(--muted);font-size:12px;min-width:64px}
+  select,button{background:#1f2c3c;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13px;cursor:pointer}
+  button:hover,select:hover{border-color:#3a5170}
+  button.on{background:var(--red);border-color:var(--red);color:#1a0d00;font-weight:600}
+  button.watch.on{background:var(--blue);border-color:var(--blue);color:#04121f}
+  button:disabled{opacity:.45;cursor:default}
+  button:disabled:hover{border-color:var(--line)}
+  .status{display:flex;align-items:center;gap:9px;font-size:14px;min-height:22px}
+  .dot{width:11px;height:11px;border-radius:50%;background:var(--muted);flex:none}
+  .dot.red{background:var(--red)} .dot.blue{background:var(--blue)}
+  .dot.think{background:var(--blue);animation:pulse 1s ease-in-out infinite}
+  @keyframes pulse{0%,100%{transform:scale(.7);opacity:.4}50%{transform:scale(1.25);opacity:1}}
+  @media (prefers-reduced-motion: reduce){ .dot.think{animation:none;opacity:1} }
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:11px;color:var(--muted);align-items:center}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .sw{width:14px;height:10px;border-radius:2px;flex:none}
+  .sw.load{background:linear-gradient(90deg,#b23a00,#ffd070)}
+  .sw.bridge{border-top:2px dashed var(--blue);height:0;width:16px}
+  .sw.aipath{width:9px;height:9px;border-radius:50%;background:#e6f8ff;box-shadow:0 0 5px #bfe6ff}
+  .win{color:var(--red);font-weight:700}
+  .metrics{display:flex;gap:10px;margin-top:8px}
+  .metric{flex:1;background:#101a26;border:1px solid var(--line);border-radius:9px;padding:8px 10px}
+  .metric .k{font-size:11px;color:var(--muted)}
+  .metric .v{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums}
+  .metric.r .v{color:var(--red)} .metric.b .v{color:var(--blue)}
+  .note{font-size:12px;color:var(--muted);line-height:1.5}
+  .note b{color:var(--ink);font-weight:600}
+  .bar{height:8px;border-radius:5px;background:#0b1220;overflow:hidden;margin-top:6px;display:flex}
+  .bar i{display:block;height:100%}
+  a{color:var(--blue)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><b>Rheobridge</b> — Hex vs a resistor-network AI</h1>
+  <p class="sub">You are <span style="color:var(--red)">orange</span> (link top↔bottom). The AI is <span style="color:var(--blue)">blue</span> (link left↔right). It scores the board as an electrical circuit.</p>
+  <div class="stage">
+    <canvas id="cv" width="640" height="640"></canvas>
+    <div class="side">
+      <div class="panel">
+        <div class="status"><span class="dot" id="dot"></span><span id="status" role="status" aria-live="polite">Your move.</span></div>
+        <div class="metrics">
+          <div class="metric r"><div class="k">Your resistance</div><div class="v" id="rR">—</div></div>
+          <div class="metric b"><div class="k">AI resistance</div><div class="v" id="rB">—</div></div>
+        </div>
+        <div class="bar" id="advbar"><i style="width:50%;background:var(--red)"></i><i style="width:50%;background:var(--blue)"></i></div>
+        <div class="note" style="margin-top:6px">Lower resistance = closer to connecting. The bar shows who the circuit favours.</div>
+        <div class="legend" aria-hidden="true">
+          <span><i class="sw load"></i>load-bearing</span>
+          <span><i class="sw bridge"></i>bridge</span>
+          <span><i class="sw aipath"></i>AI path</span>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="row"><label>Difficulty</label>
+          <select id="diff">
+            <option value="7,1,0.30">Easy · 7×7 · 1-ply</option>
+            <option value="9,2,0.10" selected>Medium · 9×9 · 2-ply</option>
+            <option value="9,3,0">Hard · 9×9 · 3-ply</option>
+            <option value="11,2,0">Expert · 11×11 · 2-ply</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
+        <div class="note" id="blunderNote" style="display:none"></div>
+        <div class="row"><label>Board</label>
+          <select id="size"><option>7</option><option selected>9</option><option>11</option></select>
+          <label style="min-width:auto">Depth</label>
+          <select id="depth"><option>1</option><option selected>2</option><option>3</option></select>
+        </div>
+        <div class="row">
+          <button id="new">New game</button>
+          <button id="undo">Undo</button>
+          <button id="ov" class="on">Tension field</button>
+          <button id="watch" class="watch">Watch AI vs AI</button>
+        </div>
+      </div>
+      <div class="panel note">
+        <b>How it thinks.</b> Your stones become zero-resistance wire, empty cells unit resistors, its stones open circuits. Gauss–Seidel relaxation solves the voltage field between each player's two sides; the resistance ratio is the score inside an alpha–beta search. The overlay glows on the <b>load-bearing</b> cells and streams current along its best connection. Dashed links are <b>bridges</b> — cells that are already virtually connected. Board + turn live in the URL, so any position is shareable.
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+"use strict";
+/* ---------- constants ---------- */
+var RED=1, BLUE=2;                 // RED = human (top-bottom), BLUE = AI (left-right)
+var W=9;                           // wire / stone conductance (empty-empty = 1)
+var DIRS=[[0,1],[0,-1],[-1,0],[1,0],[-1,1],[1,-1]];
+// bridge vector + its two carrier cells (relative offsets)
+var BRIDGES=[[1,1,1,0,0,1],[-1,-1,-1,0,0,-1],[2,-1,1,0,1,-1],[-2,1,-1,0,-1,1],[1,-2,0,-1,1,-1],[-1,2,0,1,-1,1]];
+
+/* ---------- state ---------- */
+var N=9, DEPTH=2, BLUNDER=0.1;
+var board, turn, gameOver, winner, swapDone, overlay=true, watching=false, watchT=null;
+var undoStack=[], par, warm={}, ov=null, cx, cy, R, dpr=1;
+var cv, ctx, hover=-1, particlePhase=0, loopOn=false;
+var reduceMotion=(typeof matchMedia!=="undefined")&&matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function inb(r,c){return r>=0&&c>=0&&r<N&&c<N;}
+function iters(){return N<=9?70:45;}
+
+/* ---------- resistor-network relaxation ---------- */
+function resistance(color, bd, warmV){
+  var NN=N*N, opp=color===RED?BLUE:RED, V=warmV;
+  if(!V){V=new Float32Array(NN); for(var q=0;q<NN;q++)V[q]=0.5;}
+  var IT=iters();
+  for(var it=0; it<IT; it++){
+    for(var i=0;i<NN;i++){
+      if(bd[i]===opp) continue;
+      var r=(i/N)|0, c=i%N, self=bd[i]===color, num=0, den=0;
+      var onS=color===RED?r===0:c===0, onT=color===RED?r===N-1:c===N-1;
+      if(onS){var gs=self?W:1; num+=gs; den+=gs;}          // source terminal at V=1
+      if(onT){var gt=self?W:1; den+=gt;}                    // sink terminal at V=0
+      for(var d=0;d<6;d++){
+        var nr=r+DIRS[d][0], nc=c+DIRS[d][1];
+        if(nr<0||nc<0||nr>=N||nc>=N) continue;
+        var j=nr*N+nc; if(bd[j]===opp) continue;
+        var g=(self||bd[j]===color)?W:1;
+        num+=g*V[j]; den+=g;
+      }
+      if(den>0) V[i]=num/den;
+    }
+  }
+  var I=0;
+  for(var k=0;k<NN;k++){
+    if(bd[k]===opp) continue;
+    var rr=(k/N)|0, cc=k%N, onSrc=color===RED?rr===0:cc===0;
+    if(onSrc){ var g2=(bd[k]===color)?W:1; I+=g2*(1-V[k]); }
+  }
+  return {V:V, R:1/Math.max(I,1e-6)};
+}
+
+/* ---------- evaluation (from `me`'s perspective, higher = better) ---------- */
+function evalBoard(bd, me){
+  var oc=me===RED?BLUE:RED;
+  var Rme=resistance(me,bd,warm[me]).R, Ro=resistance(oc,bd,warm[oc]).R;
+  return Math.log(Ro)-Math.log(Rme);
+}
+
+/* ---------- connectivity (search win test) ---------- */
+function wins(bd,color){
+  var NN=N*N, seen=new Uint8Array(NN), st=[];
+  for(var k=0;k<N;k++){ var i=color===RED?k:k*N; if(bd[i]===color){seen[i]=1;st.push(i);} }
+  while(st.length){
+    var x=st.pop(), r=(x/N)|0, c=x%N;
+    if(color===RED?r===N-1:c===N-1) return true;
+    for(var d=0;d<6;d++){ var nr=r+DIRS[d][0], nc=c+DIRS[d][1]; if(nr<0||nc<0||nr>=N||nc>=N)continue; var j=nr*N+nc; if(!seen[j]&&bd[j]===color){seen[j]=1;st.push(j);} }
+  }
+  return false;
+}
+
+/* ---------- move ordering by current throughput + bridge bonus ---------- */
+function bridgeBonus(bd,i,color){
+  var r=(i/N)|0, c=i%N, b=0;
+  for(var k=0;k<6;k++){
+    var B=BRIDGES[k], nr=r+B[0], nc=c+B[1]; if(!inb(nr,nc))continue;
+    if(bd[nr*N+nc]===color){
+      var e1=inb(r+B[2],c+B[3])&&bd[(r+B[2])*N+(c+B[3])]===0;
+      var e2=inb(r+B[4],c+B[5])&&bd[(r+B[4])*N+(c+B[5])]===0;
+      if(e1&&e2) b++;
+    }
+  }
+  return b;
+}
+function orderedMoves(bd,toMove,limit){
+  var NN=N*N, opp=toMove===RED?BLUE:RED, V=resistance(toMove,bd,warm[toMove]).V, cand=[];
+  for(var i=0;i<NN;i++){
+    if(bd[i]!==0) continue;
+    var r=(i/N)|0, c=i%N, t=0;
+    var onS=toMove===RED?r===0:c===0, onT=toMove===RED?r===N-1:c===N-1;
+    if(onS) t+=Math.abs(1-V[i]);
+    if(onT) t+=Math.abs(V[i]);
+    for(var d=0;d<6;d++){ var nr=r+DIRS[d][0], nc=c+DIRS[d][1]; if(nr<0||nc<0||nr>=N||nc>=N)continue; var j=nr*N+nc; if(bd[j]===opp)continue; t+=Math.abs(V[i]-V[j]); }
+    t+=0.4*bridgeBonus(bd,i,toMove);
+    cand.push([t,i]);
+  }
+  cand.sort(function(a,b){return b[0]-a[0];});
+  var out=[]; for(var m=0;m<cand.length&&m<limit;m++) out.push(cand[m][1]);
+  return out;
+}
+
+/* ---------- alpha-beta ---------- */
+function search(bd,depth,alpha,beta,toMove,me){
+  var limit=depth>=3?14:depth>=2?10:8;
+  var moves=orderedMoves(bd,toMove,limit);
+  if(depth===0||moves.length===0) return evalBoard(bd,me);
+  var maxing=toMove===me, best=maxing?-1e9:1e9, oc=toMove===RED?BLUE:RED;
+  for(var i=0;i<moves.length;i++){
+    var m=moves[i]; bd[m]=toMove; var val;
+    if(wins(bd,toMove)) val=(toMove===me?1:-1)*(1e6+depth);
+    else val=search(bd,depth-1,alpha,beta,oc,me);
+    bd[m]=0;
+    if(maxing){ if(val>best)best=val; if(best>alpha)alpha=best; }
+    else{ if(val<best)best=val; if(best<beta)beta=best; }
+    if(beta<=alpha) break;
+  }
+  return best;
+}
+function bestMove(color){
+  var bd=board, oc=color===RED?BLUE:RED;
+  var moves=orderedMoves(bd,color,N<=7?40:DEPTH>=3?20:28);
+  var best=-1e9, bm=moves[0], scored=[];
+  for(var i=0;i<moves.length;i++){
+    var m=moves[i]; bd[m]=color; var val;
+    if(wins(bd,color)) val=1e7; else val=search(bd,DEPTH-1,-1e9,1e9,oc,color);
+    bd[m]=0; scored.push([val,m]); if(val>best){best=val;bm=m;}
+  }
+  if(Math.random()<BLUNDER && scored.length>1){
+    scored.sort(function(a,b){return b[0]-a[0];});
+    var pool=scored.slice(0,Math.max(2,scored.length>>1));
+    bm=pool[(Math.random()*pool.length)|0][1];
+  }
+  return bm;
+}
+
+/* ---------- shortest connection path (Dijkstra) ---------- */
+function pathFor(color,stonesOnly){
+  var NN=N*N, opp=color===RED?BLUE:RED, dist=new Float32Array(NN), prev=new Int32Array(NN), done=new Uint8Array(NN);
+  for(var i=0;i<NN;i++){dist[i]=Infinity;prev[i]=-1;}
+  var pq=[];
+  for(var k=0;k<N;k++){
+    var s=color===RED?k:k*N;
+    if(board[s]===opp) continue;
+    if(stonesOnly&&board[s]!==color) continue;
+    var cost=board[s]===color?0.001:1; if(cost<dist[s]){dist[s]=cost;pq.push(s);}
+  }
+  while(pq.length){
+    var bi=0; for(var q=1;q<pq.length;q++) if(dist[pq[q]]<dist[pq[bi]])bi=q;
+    var u=pq.splice(bi,1)[0]; if(done[u])continue; done[u]=1;
+    var r=(u/N)|0, c=u%N;
+    if((color===RED?r===N-1:c===N-1)){ var out=[],x=u; while(x!==-1){out.push(x);x=prev[x];} return out.reverse(); }
+    for(var d=0;d<6;d++){
+      var nr=r+DIRS[d][0], nc=c+DIRS[d][1]; if(nr<0||nc<0||nr>=N||nc>=N)continue;
+      var v=nr*N+nc; if(board[v]===opp)continue; if(stonesOnly&&board[v]!==color)continue;
+      var w=board[v]===color?0.001:1, nd=dist[u]+w;
+      if(nd<dist[v]){dist[v]=nd;prev[v]=u;pq.push(v);}
+    }
+  }
+  return null;
+}
+function bridgePairs(color){
+  var NN=N*N, out=[];
+  for(var i=0;i<NN;i++){
+    if(board[i]!==color) continue;
+    var r=(i/N)|0, c=i%N;
+    for(var k=0;k<6;k++){
+      var B=BRIDGES[k]; if(B[0]<0||(B[0]===0&&B[1]<0)) continue; // one direction only
+      var nr=r+B[0], nc=c+B[1]; if(!inb(nr,nc))continue; var j=nr*N+nc;
+      if(board[j]===color){
+        var c1=inb(r+B[2],c+B[3])?(r+B[2])*N+(c+B[3]):-1, c2=inb(r+B[4],c+B[5])?(r+B[4])*N+(c+B[5]):-1;
+        if(c1>=0&&c2>=0&&board[c1]===0&&board[c2]===0) out.push([i,j,c1,c2]);
+      }
+    }
+  }
+  return out;
+}
+
+/* ---------- overlay data (computed once per turn) ---------- */
+function computeOverlay(){
+  if(!overlay){ov=null;return;}
+  var res=resistance(BLUE,board,warm[BLUE]), V=res.V, NN=N*N, thr=new Float32Array(NN), mx=1e-6;
+  for(var i=0;i<NN;i++){
+    if(board[i]===RED) continue;
+    var r=(i/N)|0, c=i%N, t=0;
+    if(c===0)t+=W*Math.abs(1-V[i]); if(c===N-1)t+=W*Math.abs(V[i]);
+    for(var d=0;d<6;d++){ var nr=r+DIRS[d][0], nc=c+DIRS[d][1]; if(nr<0||nc<0||nr>=N||nc>=N)continue; var j=nr*N+nc; if(board[j]===RED)continue; var g=(board[i]===BLUE||board[j]===BLUE)?W:1; t+=g*Math.abs(V[i]-V[j]); }
+    thr[i]=t; if(t>mx)mx=t;
+  }
+  ov={thr:thr, mx:mx, path:pathFor(BLUE,false), bridges:bridgePairs(BLUE)};
+}
+
+/* ---------- geometry ---------- */
+function layout(){
+  var S=Math.sqrt(3), pts=[];
+  var minX=1e9,maxX=-1e9,minY=1e9,maxY=-1e9;
+  for(var r=0;r<N;r++)for(var c=0;c<N;c++){
+    var x=S*c+S/2*r, y=1.5*r; pts.push([x,y]);
+    if(x-S/2<minX)minX=x-S/2; if(x+S/2>maxX)maxX=x+S/2;
+    if(y-1<minY)minY=y-1; if(y+1>maxY)maxY=y+1;
+  }
+  var pad=26, wpx=cv.width/dpr, hpx=cv.height/dpr;
+  R=Math.min((wpx-2*pad)/(maxX-minX),(hpx-2*pad)/(maxY-minY));
+  var ox=pad-minX*R+((wpx-2*pad)-(maxX-minX)*R)/2, oy=pad-minY*R+((hpx-2*pad)-(maxY-minY)*R)/2;
+  cx=[];cy=[];
+  for(var i=0;i<pts.length;i++){cx.push(ox+pts[i][0]*R);cy.push(oy+pts[i][1]*R);}
+}
+function hexPath(x,y,rad){
+  ctx.beginPath();
+  for(var k=0;k<6;k++){ var a=Math.PI/180*(60*k+30), px=x+rad*Math.cos(a), py=y+rad*Math.sin(a); if(k===0)ctx.moveTo(px,py); else ctx.lineTo(px,py); }
+  ctx.closePath();
+}
+function heat(t){
+  // dark -> ember -> gold
+  var stops=[[16,25,40],[178,58,0],[255,208,112]];
+  t=Math.max(0,Math.min(1,t)); var s=t*2, i=s<1?0:1, f=s-i;
+  var a=stops[i], b=stops[i+1];
+  return [a[0]+(b[0]-a[0])*f, a[1]+(b[1]-a[1])*f, a[2]+(b[2]-a[2])*f];
+}
+
+/* ---------- render ---------- */
+function draw(){
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,cv.width,cv.height);
+  var NN=N*N;
+  // heat fills
+  if(overlay&&ov){
+    for(var i=0;i<NN;i++){
+      if(board[i]===RED) continue;
+      var t=ov.thr[i]/ov.mx, col=heat(Math.pow(t,0.7));
+      hexPath(cx[i],cy[i],R*0.98);
+      ctx.fillStyle="rgba("+(col[0]|0)+","+(col[1]|0)+","+(col[2]|0)+","+(0.12+0.62*t)+")"; ctx.fill();
+    }
+  }
+  // cells + stones
+  for(var i2=0;i2<NN;i2++){
+    var r=(i2/N)|0, c=i2%N;
+    hexPath(cx[i2],cy[i2],R*0.94);
+    if(board[i2]===0 && !(overlay&&ov)){ ctx.fillStyle="#101a26"; ctx.fill(); }
+    // border coloring
+    var edge = r===0||r===N-1 ? "#ff6100" : (c===0||c===N-1 ? "#3fa9ff" : "#26374a");
+    ctx.lineWidth = (r===0||r===N-1||c===0||c===N-1)?2.4:1; ctx.strokeStyle=edge; ctx.stroke();
+    if(board[i2]){
+      hexPath(cx[i2],cy[i2],R*0.72);
+      var grd=ctx.createRadialGradient(cx[i2]-R*0.25,cy[i2]-R*0.25,R*0.1,cx[i2],cy[i2],R*0.8);
+      if(board[i2]===RED){grd.addColorStop(0,"#ffb27a");grd.addColorStop(1,"#e15400");}
+      else{grd.addColorStop(0,"#9fd4ff");grd.addColorStop(1,"#1c78d1");}
+      ctx.fillStyle=grd; ctx.fill();
+      ctx.lineWidth=1.4; ctx.strokeStyle="rgba(0,0,0,.35)"; ctx.stroke();
+    }
+  }
+  // hover preview
+  if(hover>=0 && board[hover]===0 && turn===RED && !gameOver && !watching){
+    hexPath(cx[hover],cy[hover],R*0.72); ctx.fillStyle="rgba(255,97,0,.35)"; ctx.fill();
+  }
+  // bridge annotations
+  if(overlay&&ov){
+    ctx.save(); ctx.setLineDash([4,5]); ctx.lineWidth=1.6; ctx.strokeStyle="rgba(63,169,255,.6)";
+    for(var p=0;p<ov.bridges.length;p++){ var bp=ov.bridges[p]; ctx.beginPath(); ctx.moveTo(cx[bp[0]],cy[bp[0]]); ctx.lineTo(cx[bp[1]],cy[bp[1]]); ctx.stroke();
+      ctx.fillStyle="rgba(63,169,255,.28)"; hexPath(cx[bp[2]],cy[bp[2]],R*0.34); ctx.fill(); hexPath(cx[bp[3]],cy[bp[3]],R*0.34); ctx.fill();
+    }
+    ctx.restore();
+  }
+  // winner / best-connection path
+  var showPath = gameOver ? pathFor(winner,true) : (overlay&&ov?ov.path:null);
+  if(showPath&&showPath.length>1){
+    ctx.save(); ctx.lineJoin="round"; ctx.lineCap="round";
+    ctx.strokeStyle= gameOver ? (winner===RED?"rgba(255,97,0,.9)":"rgba(63,169,255,.9)") : "rgba(200,235,255,.75)";
+    ctx.lineWidth=R*0.28; ctx.shadowColor=ctx.strokeStyle; ctx.shadowBlur=14;
+    ctx.beginPath(); ctx.moveTo(cx[showPath[0]],cy[showPath[0]]);
+    for(var s=1;s<showPath.length;s++) ctx.lineTo(cx[showPath[s]],cy[showPath[s]]);
+    ctx.stroke(); ctx.restore();
+    // current particles along AI path (not on win); skipped when reduced motion is requested
+    if(!gameOver && overlay && !reduceMotion){
+      var segs=[],total=0;
+      for(var s2=1;s2<showPath.length;s2++){ var dx=cx[showPath[s2]]-cx[showPath[s2-1]], dy=cy[showPath[s2]]-cy[showPath[s2-1]], L=Math.hypot(dx,dy); segs.push([showPath[s2-1],showPath[s2],L]); total+=L; }
+      var count=Math.max(3,showPath.length);
+      for(var pn=0;pn<count;pn++){
+        var ph=(pn/count+particlePhase)%1, dtar=ph*total, acc=0, seg=segs[0];
+        for(var g=0;g<segs.length;g++){ if(acc+segs[g][2]>=dtar){seg=segs[g];break;} acc+=segs[g][2]; }
+        var f=seg[2]>0?(dtar-acc)/seg[2]:0, X=cx[seg[0]]+(cx[seg[1]]-cx[seg[0]])*f, Y=cy[seg[0]]+(cy[seg[1]]-cy[seg[0]])*f;
+        ctx.beginPath(); ctx.arc(X,Y,R*0.12,0,7); ctx.fillStyle="rgba(230,248,255,.95)"; ctx.shadowColor="#bfe6ff"; ctx.shadowBlur=10; ctx.fill(); ctx.shadowBlur=0;
+      }
+    }
+  }
+}
+
+/* ---------- game flow ---------- */
+function pushUndo(){ undoStack.push({b:board.slice(),t:turn,o:gameOver,w:winner,s:swapDone}); }
+function updateInfo(){
+  var dot=document.getElementById("dot"), st=document.getElementById("status");
+  var rR=resistance(RED,board).R, rB=resistance(BLUE,board).R;
+  document.getElementById("rR").textContent=isFinite(rR)?rR.toFixed(2):"∞";
+  document.getElementById("rB").textContent=isFinite(rB)?rB.toFixed(2):"∞";
+  var lr=Math.log(rR), lb=Math.log(rB), redAdv=lr-lb; // >0 favours blue
+  var blueShare=Math.max(0.04,Math.min(0.96, 0.5+redAdv*0.18));
+  document.getElementById("advbar").children[0].style.width=((1-blueShare)*100).toFixed(1)+"%";
+  document.getElementById("advbar").children[1].style.width=(blueShare*100).toFixed(1)+"%";
+  dot.className="dot"+(gameOver?(winner===RED?" red":" blue"):(turn===RED?" red":" blue"));
+  if(gameOver){ st.innerHTML='<span class="win" style="color:'+(winner===RED?"var(--red)":"var(--blue)")+'">'+(winner===RED?"You connected — you win!":"The AI connected — it wins.")+'</span>'; }
+  else if(watching){ st.textContent=(turn===RED?"Orange":"Blue")+" (AI) to move…"; }
+  else if(turn===RED){ st.textContent="Your move."; }
+}
+function refresh(){ computeOverlay(); draw(); updateInfo(); updateButtons(); syncHash(); kickLoop(); }
+
+function applyMove(i,color,silent){
+  board[i]=color; unionCell(i,color);
+  if(checkWin(color)){ gameOver=true; winner=color; }
+  else turn=color===RED?BLUE:RED;
+  if(!silent) refresh();
+}
+function humanMove(i){
+  if(gameOver||watching||turn!==RED||board[i]!==0) return;
+  pushUndo(); applyMove(i,RED);
+  if(!gameOver) scheduleAI();
+}
+function scheduleAI(){
+  var st=document.getElementById("status"), dot=document.getElementById("dot");
+  st.textContent="AI is solving the circuit…"; dot.className="dot think";
+  requestAnimationFrame(function(){ requestAnimationFrame(function(){ setTimeout(aiTurn,10); }); });
+}
+function stoneCount(){ var n=0; for(var i=0;i<board.length;i++) if(board[i])n++; return n; }
+function aiTurn(){
+  if(gameOver||turn!==BLUE) return;
+  pushUndo();
+  // pie rule: on move two, AI may swap a strong opening
+  if(stoneCount()===1 && !swapDone){
+    var only=-1; for(var i=0;i<board.length;i++) if(board[i]===RED)only=i;
+    var r=(only/N)|0, c=only%N, k=Math.floor(N/4);
+    if(only>=0 && r>=k&&r<=N-1-k&&c>=k&&c<=N-1-k){
+      board[only]=0; var mir=c*N+r; board[mir]=BLUE; swapDone=true; turn=RED; rebuild();
+      document.getElementById("status").textContent="AI invoked the pie rule — it swapped your opening.";
+      computeOverlay(); draw(); updateInfo(); syncHash(); return;
+    }
+  }
+  var m=bestMove(BLUE); applyMove(m,BLUE);
+}
+function watchStep(){
+  if(!watching){ return; }
+  if(gameOver){ watching=false; document.getElementById("watch").classList.remove("on"); refresh(); return; }
+  var m=bestMove(turn); applyMove(m,turn);
+  watchT=setTimeout(watchStep,650);
+}
+
+/* ---------- union-find ---------- */
+function find(x){ while(par[x]!==x){par[x]=par[par[x]];x=par[x];} return x; }
+function uni(a,b){ par[find(a)]=find(b); }
+function unionCell(i,color){
+  var NN=N*N, r=(i/N)|0, c=i%N;
+  if(color===RED){ if(r===0)uni(i,NN); if(r===N-1)uni(i,NN+1); }
+  else { if(c===0)uni(i,NN+2); if(c===N-1)uni(i,NN+3); }
+  for(var d=0;d<6;d++){ var nr=r+DIRS[d][0], nc=c+DIRS[d][1]; if(nr<0||nc<0||nr>=N||nc>=N)continue; var j=nr*N+nc; if(board[j]===color)uni(i,j); }
+}
+function checkWin(color){ var NN=N*N; return color===RED?find(NN)===find(NN+1):find(NN+2)===find(NN+3); }
+function rebuild(){
+  var NN=N*N; par=new Int32Array(NN+4); for(var i=0;i<par.length;i++)par[i]=i;
+  gameOver=false; winner=0;
+  for(var k=0;k<NN;k++) if(board[k]){ unionCell(k,board[k]); }
+  if(checkWin(RED)){gameOver=true;winner=RED;} else if(checkWin(BLUE)){gameOver=true;winner=BLUE;}
+}
+
+/* ---------- url hash ---------- */
+function syncHash(){
+  var s=""; for(var i=0;i<board.length;i++)s+=board[i];
+  var frag="#"+N+"."+turn+"."+s;
+  try{ history.replaceState(null,"",frag); }
+  catch(e){ try{ location.hash=N+"."+turn+"."+s; }catch(_){} }
+}
+function loadHash(){
+  var h=location.hash.slice(1); if(!h) return false;
+  var p=h.split("."); if(p.length!==3) return false;
+  var n=+p[0]; if([7,9,11].indexOf(n)<0) return false;
+  if(p[2].length!==n*n) return false;
+  N=n; document.getElementById("size").value=n;
+  board=new Int8Array(n*n); for(var i=0;i<board.length;i++){ var v=+p[2][i]; board[i]=(v===1||v===2)?v:0; }
+  turn=(+p[1]===2)?BLUE:RED; swapDone=stoneCount()>1;
+  resetWarm(); rebuild(); layout(); return true;
+}
+
+/* ---------- difficulty / control coherence ---------- */
+function goCustom(){ BLUNDER=0; var d=document.getElementById("diff"); if(d)d.value="custom"; updateDiffCaption(); }
+function updateDiffCaption(){
+  var el=document.getElementById("blunderNote"); if(!el) return;
+  if(BLUNDER>0){ el.style.display=""; el.textContent="Handicap: the AI plays "+Math.round(BLUNDER*100)+"% of its moves at random."; }
+  else{ el.style.display="none"; el.textContent=""; }
+}
+function updateButtons(){
+  var u=document.getElementById("undo"); if(u) u.disabled=undoStack.length===0;
+  var n=document.getElementById("new"); if(n) n.classList.toggle("on",!!gameOver);
+}
+
+/* ---------- setup ---------- */
+function resetWarm(){ var NN=N*N; warm={}; warm[RED]=new Float32Array(NN); warm[BLUE]=new Float32Array(NN); for(var i=0;i<NN;i++){warm[RED][i]=0.5;warm[BLUE][i]=0.5;} }
+function newGame(){
+  board=new Int8Array(N*N); turn=RED; gameOver=false; winner=0; swapDone=false; undoStack=[];
+  resetWarm(); rebuild(); layout(); refresh();
+}
+function doUndo(){
+  if(watching||!undoStack.length) return;
+  // Undo a full ply-pair: pop back to the human's own decision point (turn===RED).
+  var s; do{ s=undoStack.pop(); }while(undoStack.length && s.t!==RED);
+  board=s.b; turn=s.t; gameOver=s.o; winner=s.w; swapDone=s.s;
+  rebuild(); refresh();
+  // Safety net: if we still landed on the AI's turn, resume it so the board isn't stuck.
+  if(!gameOver && turn===BLUE && !watching) scheduleAI();
+}
+function pickCell(mx,my){
+  var best=-1,bd=1e9;
+  for(var i=0;i<cx.length;i++){ var d=(cx[i]-mx)*(cx[i]-mx)+(cy[i]-my)*(cy[i]-my); if(d<bd){bd=d;best=i;} }
+  return bd<=(R*R)?best:-1;
+}
+function setSizeDpr(){
+  var css=Math.min(640, Math.max(300, window.innerWidth-320));
+  css=Math.min(css, window.innerWidth-24);
+  dpr=window.devicePixelRatio||1;
+  cv.style.width=css+"px"; cv.style.height=css+"px";
+  cv.width=Math.round(css*dpr); cv.height=Math.round(css*dpr);
+}
+
+function init(){
+  cv=document.getElementById("cv"); ctx=cv.getContext("2d");
+  setSizeDpr();
+  if(!loadHash()){ newGame(); } else { refresh(); if(turn===BLUE&&!gameOver) scheduleAI(); }
+  updateDiffCaption();
+
+  // Pointer Events unify mouse/touch/pen (no reliance on synthesized click).
+  cv.addEventListener("pointermove",function(e){ if(e.pointerType==="touch")return; var b=cv.getBoundingClientRect(); var h=pickCell(e.clientX-b.left,e.clientY-b.top); if(h!==hover){hover=h;draw();} });
+  cv.addEventListener("pointerleave",function(){ if(hover!==-1){hover=-1;draw();} });
+  cv.addEventListener("pointerup",function(e){ var b=cv.getBoundingClientRect(); var i=pickCell(e.clientX-b.left,e.clientY-b.top); if(i>=0)humanMove(i); if(e.pointerType!=="mouse"&&hover!==-1){hover=-1;draw();} });
+
+  document.getElementById("new").onclick=function(){ if(watchT){clearTimeout(watchT);} watching=false; document.getElementById("watch").classList.remove("on"); newGame(); };
+  document.getElementById("undo").onclick=doUndo;
+  document.getElementById("ov").onclick=function(){ overlay=!overlay; this.classList.toggle("on",overlay); refresh(); };
+  document.getElementById("watch").onclick=function(){
+    watching=!watching; this.classList.toggle("on",watching);
+    if(watching){ overlay=true; document.getElementById("ov").classList.add("on"); if(gameOver)newGame(); watchStep(); }
+    else if(watchT){ clearTimeout(watchT); refresh(); }
+  };
+  document.getElementById("size").onchange=function(){ N=+this.value; goCustom(); watching=false; document.getElementById("watch").classList.remove("on"); setSizeDpr(); newGame(); };
+  document.getElementById("depth").onchange=function(){ DEPTH=+this.value; goCustom(); };
+  document.getElementById("diff").onchange=function(){
+    if(this.value==="custom"){ updateDiffCaption(); return; }
+    var v=this.value.split(","); N=+v[0]; DEPTH=+v[1]; BLUNDER=+v[2];
+    document.getElementById("size").value=N; document.getElementById("depth").value=DEPTH;
+    updateDiffCaption();
+    watching=false; document.getElementById("watch").classList.remove("on"); setSizeDpr(); newGame();
+  };
+  window.addEventListener("resize",function(){ setSizeDpr(); layout(); draw(); });
+  window.addEventListener("hashchange",function(){ if(loadHash()){ refresh(); if(turn===BLUE&&!gameOver&&!watching) scheduleAI(); } });
+
+  kickLoop();
+}
+function animActive(){ return !reduceMotion && overlay && ov && ov.path && !gameOver && !!cv; }
+function loop(){
+  if(!animActive()){ loopOn=false; return; }        // stop when nothing is moving so the tab can idle
+  particlePhase=(particlePhase+0.006)%1; draw();
+  requestAnimationFrame(loop);
+}
+function kickLoop(){ if(!loopOn && animActive()){ loopOn=true; requestAnimationFrame(loop); } }
+
+if(typeof window!=="undefined" && typeof document!=="undefined" && document.getElementById){
+  if(document.readyState==="loading") window.addEventListener("DOMContentLoaded",init); else init();
+}
+/* test hook */
+if(typeof globalThis!=="undefined") globalThis.__hex={
+  setSize:function(n){N=n;board=new Int8Array(n*n);turn=RED;resetWarm();rebuild();},
+  place:function(i,c){board[i]=c;unionCell(i,c);},
+  resistance:function(c){return resistance(c,board).R;},
+  wins:function(c){return wins(board,c);},
+  checkWin:function(c){return checkWin(c);},
+  best:function(c){return bestMove(c);},
+  get:function(){return {N:N,board:board};}
+};
+</script>
+</body>
+</html>

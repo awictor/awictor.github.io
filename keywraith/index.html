@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Keywraith — race the ghost of anyone's keystrokes</title>
+<style>
+  :root{
+    --bg:#0c0d12; --panel:#14161f; --line:#242838; --ink:#e7e9f2; --dim:#8a90a8;
+    --acc:#ff6b35; --cyan:#39d0d8; --mag:#e05ffb; --good:#68e39a; --bad:#ff5470;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(900px 520px at 50% -8%,#1a1d2b 0%,var(--bg) 62%);
+    color:var(--ink); font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    display:flex; align-items:flex-start; justify-content:center; padding:26px 16px 60px;
+  }
+  .wrap{width:100%;max-width:840px}
+  header{display:flex;align-items:baseline;gap:12px;margin-bottom:4px}
+  h1{font-size:26px;margin:0;letter-spacing:.5px}
+  h1 .k{color:var(--acc)}
+  .tag{color:var(--dim);font-size:13px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-top:16px;box-shadow:0 14px 40px -22px #000}
+  .stats{display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px;font-variant-numeric:tabular-nums}
+  .stat b{display:block;font-size:22px;color:var(--acc);line-height:1.1}
+  .stat span{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px}
+  #banner{min-height:26px;font-weight:700;font-size:14px;display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px}
+  .gap{padding:3px 10px;border-radius:20px;border:1px solid var(--line);font-variant-numeric:tabular-nums}
+  #passage{font:19px/2.05 "SFMono-Regular",ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word;letter-spacing:.3px;user-select:none;outline:none;cursor:text;border-radius:6px}
+  #passage.armed{box-shadow:inset 0 0 0 1px var(--acc)}
+  #cap{position:absolute;opacity:0;width:1px;height:1px;padding:0;border:0;left:-2px;pointer-events:none}
+  #passage span{border-radius:3px;transition:background .06s}
+  #passage .done{color:var(--good)}
+  #passage .todo{color:var(--dim)}
+  #passage .cur{background:rgba(255,107,53,.28);box-shadow:inset 0 -2px 0 var(--acc)}
+  #passage .bad{background:rgba(255,84,112,.55);color:#fff}
+  #passage .car-challenge{box-shadow:inset 3px 0 0 var(--cyan);background:rgba(57,208,216,.18)}
+  #passage .car-pb{box-shadow:inset -3px 0 0 var(--mag);background:rgba(224,95,251,.18)}
+  canvas{display:block;max-width:100%}
+  #ribbon{margin-top:14px;width:100%;height:54px;border-radius:8px;border:1px solid var(--line)}
+  .hint{color:var(--dim);font-size:12.5px;margin-top:10px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px}
+  button{background:var(--acc);color:#1a1206;border:0;padding:9px 15px;border-radius:9px;font-weight:700;cursor:pointer;font-size:13.5px}
+  button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+  button:hover{filter:brightness(1.08)}
+  input,textarea{background:#0b0c11;color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:9px 11px;font:13px ui-monospace,monospace;width:100%}
+  textarea{resize:vertical;min-height:54px}
+  .end{display:none}
+  .end.show{display:block}
+  .endgrid{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start}
+  #qr{background:#fff;border-radius:8px;padding:6px}
+  .verdict{font-size:19px;font-weight:800;margin:0 0 8px}
+  .words{display:flex;gap:4px;flex-wrap:wrap;margin-top:12px;max-height:120px;overflow:auto}
+  .wd{font:12px ui-monospace,monospace;padding:2px 6px;border-radius:6px;border:1px solid var(--line);font-variant-numeric:tabular-nums}
+  details{margin-top:14px}
+  summary{cursor:pointer;color:var(--dim);font-size:13px}
+  .lbl{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;margin:12px 0 5px}
+  a{color:var(--cyan)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="k">Key</span>wraith</h1>
+    <span class="tag">race the ghost of anyone's keystrokes — the whole run lives in the URL</span>
+  </header>
+
+  <div class="card">
+    <div class="stats">
+      <div class="stat"><b id="s-wpm">0</b><span>wpm</span></div>
+      <div class="stat"><b id="s-acc">100%</b><span>accuracy</span></div>
+      <div class="stat"><b id="s-time">0.0s</b><span>time</span></div>
+      <div class="stat"><b id="s-prog">0/0</b><span>progress</span></div>
+    </div>
+    <div id="banner"></div>
+    <div id="passage" tabindex="0"></div>
+    <input id="cap" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" aria-hidden="true" tabindex="-1">
+    <canvas id="ribbon"></canvas>
+    <div class="hint" id="ribhint"></div>
+    <div class="hint" id="hint">Tap or click the text and start typing. Type the correct key to advance — mistakes cost you real time against the wraith.</div>
+
+    <div class="end card" id="end">
+      <p class="verdict" id="verdict"></p>
+      <div class="endgrid">
+        <canvas id="resultcard" width="560" height="320"></canvas>
+        <div>
+          <div class="lbl">Scan to race on your phone</div>
+          <canvas id="qr"></canvas>
+        </div>
+      </div>
+      <div id="worddiff"></div>
+      <div class="row">
+        <input id="share" readonly>
+        <button id="copy">Copy ghost link</button>
+        <button class="ghost" id="again">Race again</button>
+      </div>
+    </div>
+
+    <details>
+      <summary>Mint a custom challenge / race your PB</summary>
+      <div class="lbl">Paste any passage (≤180 chars) to forge a fresh no-ghost challenge link</div>
+      <textarea id="custom" maxlength="180" placeholder="Paste text here…"></textarea>
+      <div class="row">
+        <button id="mint">Mint challenge link</button>
+        <button class="ghost" id="racepb" style="display:none">Race my personal best</button>
+        <button class="ghost" id="fresh">New random passage</button>
+      </div>
+    </details>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ---------- tiny QR encoder (byte mode, ECC level L) ---------- */
+const QR = (function(){
+  const ECC=[-1,7,10,15,20,26,18,20,24,30,18,20,24,26,30,22,24,28,30,28,28,28,28,30,30,26,28,30,30,30,30,30,30,30,30,30,30,30,30,30,30];
+  const NB=[-1,1,1,1,1,1,2,2,2,2,4,4,4,4,4,6,6,6,6,7,8,8,9,9,10,12,12,12,13,14,15,16,17,18,19,19,20,21,22,24,25];
+  const mul=(x,y)=>{let z=0;for(let i=7;i>=0;i--){z=(z<<1)^((z>>>7)*0x11D);z^=((y>>>i)&1)*x;}return z&0xFF;};
+  function rsDiv(deg){let r=new Array(deg).fill(0);r[deg-1]=1;let root=1;for(let i=0;i<deg;i++){for(let j=0;j<r.length;j++){r[j]=mul(r[j],root);if(j+1<r.length)r[j]^=r[j+1];}root=mul(root,2);}return r;}
+  function rsRem(data,div){let r=div.map(()=>0);for(const b of data){const f=b^r.shift();r.push(0);div.forEach((c,i)=>r[i]^=mul(c,f));}return r;}
+  const rawMods=v=>{let r=(16*v+128)*v+64;if(v>=2){const n=Math.floor(v/7)+2;r-=(25*n-10)*n-55;if(v>=7)r-=36;}return r;};
+  const dataCw=v=>Math.floor(rawMods(v)/8)-ECC[v]*NB[v];
+  function alignPos(v){if(v===1)return[];const n=Math.floor(v/7)+2,size=v*4+17;const step=(v===32)?26:Math.ceil((v*4+4)/(n*2-2))*2;const r=[];for(let i=0,p=size-7;i<n-1;i++,p-=step)r.unshift(p);r.unshift(6);return r;}
+  const bit=(x,i)=>((x>>>i)&1)!==0;
+
+  function make(text){
+    const bytes=Array.from(new TextEncoder().encode(text));
+    let v=1;for(;v<=40;v++){if(4+(v<10?8:16)+bytes.length*8<=dataCw(v)*8)break;}
+    if(v>40)return null;
+    const cap=dataCw(v)*8, bits=[];
+    const put=(val,len)=>{for(let i=len-1;i>=0;i--)bits.push((val>>>i)&1);};
+    put(4,4);put(bytes.length,v<10?8:16);bytes.forEach(b=>put(b,8));
+    put(0,Math.min(4,cap-bits.length));
+    while(bits.length%8)bits.push(0);
+    for(let pad=0xEC;bits.length<cap;pad^=0xEC^0x11)put(pad,8);
+    const dc=[];for(let i=0;i<bits.length;i+=8){let b=0;for(let j=0;j<8;j++)b=(b<<1)|bits[i+j];dc.push(b);}
+    // ecc + interleave
+    const nb=NB[v],ecl=ECC[v],raw=Math.floor(rawMods(v)/8),nsb=nb-raw%nb,sbl=Math.floor(raw/nb),div=rsDiv(ecl);
+    const blocks=[];for(let i=0,k=0;i<nb;i++){const len=sbl-ecl+(i<nsb?0:1);const dat=dc.slice(k,k+len);k+=len;const ec=rsRem(dat,div);if(i<nsb)dat.push(0);blocks.push(dat.concat(ec));}
+    const all=[];for(let i=0;i<blocks[0].length;i++)blocks.forEach((bl,j)=>{if(i!==sbl-ecl||j>=nsb)all.push(bl[i]);});
+    // matrix
+    const size=v*4+17;
+    const mod=Array.from({length:size},()=>new Array(size).fill(false));
+    const fn=Array.from({length:size},()=>new Array(size).fill(false));
+    const setF=(x,y,d)=>{mod[y][x]=d;fn[y][x]=true;};
+    const finder=(x,y)=>{for(let dy=-4;dy<=4;dy++)for(let dx=-4;dx<=4;dx++){const d=Math.max(Math.abs(dx),Math.abs(dy)),xx=x+dx,yy=y+dy;if(xx>=0&&xx<size&&yy>=0&&yy<size)setF(xx,yy,d!==2&&d!==4);}};
+    for(let i=0;i<size;i++){setF(6,i,i%2===0);setF(i,6,i%2===0);}
+    finder(3,3);finder(size-4,3);finder(3,size-4);
+    const ap=alignPos(v),na=ap.length;
+    for(let i=0;i<na;i++)for(let j=0;j<na;j++){if((i===0&&j===0)||(i===0&&j===na-1)||(i===na-1&&j===0))continue;for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++)setF(ap[i]+dx,ap[j]+dy,Math.max(Math.abs(dx),Math.abs(dy))!==1);}
+    if(v>=7){let rem=v;for(let i=0;i<12;i++)rem=(rem<<1)^((rem>>>11)*0x1F25);const b=v<<12|rem;for(let i=0;i<18;i++){const d=bit(b,i),a=size-11+i%3,c=Math.floor(i/3);setF(a,c,d);setF(c,a,d);}}
+    function fmt(mask){const data=(1<<3)|mask;let rem=data;for(let i=0;i<10;i++)rem=(rem<<1)^((rem>>>9)*0x537);const b=((data<<10)|rem)^0x5412;
+      for(let i=0;i<=5;i++)setF(8,i,bit(b,i));setF(8,7,bit(b,6));setF(8,8,bit(b,7));setF(7,8,bit(b,8));
+      for(let i=9;i<15;i++)setF(14-i,8,bit(b,i));
+      for(let i=0;i<8;i++)setF(size-1-i,8,bit(b,i));
+      for(let i=8;i<15;i++)setF(8,size-15+i,bit(b,i));setF(8,size-8,true);}
+    // reserve format-info + dark module positions as function modules BEFORE data placement
+    fmt(0);
+    // data
+    let idx=0;
+    for(let right=size-1;right>=1;right-=2){if(right===6)right=5;for(let vert=0;vert<size;vert++)for(let j=0;j<2;j++){const x=right-j,up=((right+1)&2)===0,y=up?size-1-vert:vert;if(!fn[y][x]&&idx<all.length*8){mod[y][x]=bit(all[idx>>>3],7-(idx&7));idx++;}}}
+    const applyMask=m=>{for(let y=0;y<size;y++)for(let x=0;x<size;x++){if(fn[y][x])continue;let inv;switch(m){case 0:inv=(x+y)%2===0;break;case 1:inv=y%2===0;break;case 2:inv=x%3===0;break;case 3:inv=(x+y)%3===0;break;case 4:inv=(Math.floor(x/3)+Math.floor(y/2))%2===0;break;case 5:inv=(x*y)%2+(x*y)%3===0;break;case 6:inv=((x*y)%2+(x*y)%3)%2===0;break;default:inv=((x+y)%2+(x*y)%3)%2===0;}if(inv)mod[y][x]=!mod[y][x];}};
+    function penalty(){let p=0;const lines=[];for(let y=0;y<size;y++){let s='';for(let x=0;x<size;x++)s+=mod[y][x]?'1':'0';lines.push(s);}for(let x=0;x<size;x++){let s='';for(let y=0;y<size;y++)s+=mod[y][x]?'1':'0';lines.push(s);}
+      for(const s of lines){let run=1;for(let i=1;i<s.length;i++){if(s[i]===s[i-1]){run++;if(run===5)p+=3;else if(run>5)p++;}else run=1;}let k;k=0;while((k=s.indexOf('10111010000',k))>=0){p+=40;k++;}k=0;while((k=s.indexOf('00001011101',k))>=0){p+=40;k++;}}
+      for(let y=0;y<size-1;y++)for(let x=0;x<size-1;x++){const c=mod[y][x];if(c===mod[y][x+1]&&c===mod[y+1][x]&&c===mod[y+1][x+1])p+=3;}
+      let dark=0;for(let y=0;y<size;y++)for(let x=0;x<size;x++)if(mod[y][x])dark++;p+=Math.floor(Math.abs(dark/(size*size)*100-50)/5)*10;return p;}
+    let best=0,bp=Infinity;for(let m=0;m<8;m++){applyMask(m);fmt(m);const pen=penalty();if(pen<bp){bp=pen;best=m;}applyMask(m);}
+    applyMask(best);fmt(best);
+    return{size,mod};
+  }
+  return{make};
+})();
+
+/* ---------- codec: varint + base64url ---------- */
+const wv=(n,a)=>{n=Math.round(n);do{let b=n&0x7f;n=Math.floor(n/128);if(n>0)b|=0x80;a.push(b);}while(n>0);};
+const rv=(a,p)=>{let r=0,s=1,b;do{b=a[p.i++];r+=(b&0x7f)*s;s*=128;}while(b&0x80);return r;};
+const b64e=u8=>{let s='';for(const b of u8)s+=String.fromCharCode(b);return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');};
+const b64d=s=>{s=s.replace(/-/g,'+').replace(/_/g,'/');const bin=atob(s),u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return u;};
+function encodeGhost(text,deltas,mistakes){const tb=new TextEncoder().encode(text),by=[1];wv(tb.length,by);for(const b of tb)by.push(b);wv(mistakes,by);for(const d of deltas)wv(Math.min(60000,d),by);return b64e(Uint8Array.from(by));}
+function decodeGhost(str){const by=b64d(str),p={i:0};by[p.i++];const tl=rv(by,p);const tb=by.slice(p.i,p.i+tl);p.i+=tl;const text=new TextDecoder().decode(tb);const mistakes=rv(by,p);const chars=Array.from(text),deltas=[];for(let k=0;k<chars.length&&p.i<by.length;k++)deltas.push(rv(by,p));return{text,deltas,mistakes};}
+const cumsum=d=>{const c=[];let t=0;for(const x of d){t+=x;c.push(t);}return c;};
+
+/* ---------- app ---------- */
+const PASSAGES=[
+  "The quick brown fox jumps over the lazy dog while the ghost of yesterday's typist watches every hesitant keystroke.",
+  "Speed is nothing without rhythm; the wraith does not sprint, it simply never stops, one steady stroke after another.",
+  "Somewhere a link is quietly carrying the exact cadence of a stranger's hands, waiting for you to try and outrun them.",
+  "Type as though the past is chasing you, because in this small window it genuinely is, delta by quantized delta.",
+  "A good race feels less like a test and more like a duet where only one of you is allowed to make mistakes."
+];
+const $=id=>document.getElementById(id);
+const passageEl=$("passage"),cap=$("cap"),banner=$("banner"),ribbon=$("ribbon"),rc=ribbon.getContext("2d");
+const armInput=()=>{try{cap.focus({preventScroll:true});}catch(e){cap.focus();}};
+
+let target=[], spans=[], userTimes=[], userDeltas=[], ghosts=[];
+let pos=0, mistakes=0, started=false, startTime=0, finished=false, raf=0, lastCarat=[];
+
+function pbKey(text){let h=5381;for(let i=0;i<text.length;i++)h=((h<<5)+h+text.charCodeAt(i))>>>0;return "kw_pb_"+h;}
+
+function setup(text,ghostList){
+  cancelAnimationFrame(raf);
+  target=Array.from(text); spans=[]; userTimes=[]; userDeltas=[];
+  pos=0; mistakes=0; started=false; finished=false; lastCarat=[];
+  ghosts=ghostList||[];
+  passageEl.innerHTML="";
+  target.forEach((ch,i)=>{const s=document.createElement("span");s.textContent=ch;s.className="todo";passageEl.appendChild(s);spans.push(s);});
+  if(target.length)spans[0].classList.add("cur"); // show where typing begins before the first key
+  $("end").classList.remove("show");
+  $("hint").style.display="";
+  cap.value="";
+  updateStats(); drawRibbon(); renderBanner();
+  armInput();
+}
+
+function boot(){
+  const h=location.hash; let text, gl=[];
+  if(h.startsWith("#g=")){try{const g=decodeGhost(h.slice(3));text=g.text;gl.push({key:"challenge",name:"Challenge wraith",color:"#39d0d8",deltas:g.deltas,cum:cumsum(g.deltas),mistakes:g.mistakes});}catch(e){text=rndPassage();}}
+  else if(h.startsWith("#c=")){try{text=new TextDecoder().decode(b64d(h.slice(3)));}catch(e){text=rndPassage();}}
+  else text=rndPassage();
+  // attach personal best ghost for this exact text
+  const pb=loadPB(text);
+  if(pb)gl.push({key:"pb",name:"Your PB",color:"#e05ffb",deltas:pb.deltas,cum:cumsum(pb.deltas),mistakes:pb.mistakes});
+  $("racepb").style.display=pb?"":"none";
+  setup(text,gl);
+}
+const rndPassage=()=>PASSAGES[Math.floor(Math.random()*PASSAGES.length)];
+function loadPB(text){try{const raw=localStorage.getItem(pbKey(text));if(!raw)return null;const o=JSON.parse(raw);return decodeGhost(o.enc);}catch(e){return null;}}
+
+/* typing — one character at a time, routed through a hidden <input> so mobile
+   soft keyboards fire (a focused div does not summon them on iOS/Android) */
+function handleChar(ch){
+  if(finished||pos>=target.length)return;
+  const now=performance.now();
+  if(!started){started=true;startTime=now;loop();}
+  if(ch===target[pos]){
+    const t=now-startTime;
+    const prev=userTimes.length?userTimes[userTimes.length-1]:0;
+    userDeltas.push(t-prev); userTimes.push(t);
+    spans[pos].className="done";
+    pos++;
+    if(pos<target.length)spans[pos].classList.add("cur");
+    updateStats(); drawRibbon();
+    if(pos>=target.length)finish();
+  }else{
+    mistakes++;
+    const s=spans[pos];
+    s.classList.add("bad");
+    setTimeout(()=>s.classList.remove("bad"),160);
+    updateStats();
+  }
+}
+// beforeinput covers desktop keyboards, mobile soft keyboards, and IME insertions
+cap.addEventListener("beforeinput",e=>{
+  const it=e.inputType||"";
+  if(it==="insertText"||it==="insertCompositionText"||it==="insertFromComposition"){
+    if(e.data)for(const ch of e.data)handleChar(ch);
+  }
+  e.preventDefault(); // keep the field empty so it never scrolls or grows
+});
+cap.addEventListener("input",()=>{cap.value="";}); // fallback for browsers that ignore preventDefault
+// desktop fallback: if beforeinput is unsupported, keydown still delivers printable keys
+cap.addEventListener("keydown",e=>{
+  if(finished)return;
+  if(e.key==="Backspace"){e.preventDefault();return;}
+  if(e.key===" ")e.preventDefault();
+  if(typeof InputEvent==="function"&&"inputType" in InputEvent.prototype)return; // beforeinput will handle it
+  if(e.key.length!==1||e.ctrlKey||e.metaKey||e.altKey)return;
+  handleChar(e.key);
+});
+
+function loop(){
+  const el=performance.now()-startTime;
+  $("s-time").textContent=(el/1000).toFixed(1)+"s";
+  ghosts.forEach(g=>{let i=0;while(i<g.cum.length&&g.cum[i]<=el)i++;g.idx=i;});
+  lastCarat.forEach(s=>{s.classList.remove("car-challenge","car-pb");});
+  lastCarat=[];
+  if(pos<target.length)spans[pos].classList.add("cur");
+  ghosts.forEach(g=>{if(g.idx<spans.length){const cls=g.key==="pb"?"car-pb":"car-challenge";spans[g.idx].classList.add(cls);lastCarat.push(spans[g.idx]);}});
+  renderBanner();
+  if(!finished)raf=requestAnimationFrame(loop);
+}
+
+function renderBanner(){
+  banner.innerHTML="";
+  if(!ghosts.length){const d=document.createElement("div");d.className="gap";d.style.color="var(--dim)";d.textContent="No wraith here — set a personal best or share this link to spawn one.";banner.appendChild(d);return;}
+  ghosts.forEach(g=>{
+    const wi=g.idx||0;
+    const dChar=pos-wi;
+    let dMs=0;
+    if(pos>0){const wt=pos<=g.cum.length?g.cum[pos-1]:g.cum[g.cum.length-1];dMs=wt-userTimes[pos-1];}
+    const ahead=dChar>0||(dChar===0&&dMs>0);
+    const el=document.createElement("div");el.className="gap";
+    el.style.borderColor=g.color;el.style.color=dChar===0?"var(--dim)":(ahead?"var(--good)":"var(--bad)");
+    const word=dChar===0?"even":(ahead?"AHEAD":"BEHIND");
+    el.innerHTML=`<span style="color:${g.color}">${g.name}</span> · ${word} ${Math.abs(dChar)} ch (${dMs>=0?"+":""}${Math.round(dMs)}ms)`;
+    banner.appendChild(el);
+  });
+}
+
+function updateStats(){
+  const el=userTimes.length?userTimes[userTimes.length-1]:0;
+  const mins=el/60000;
+  $("s-wpm").textContent=mins>0?Math.round((pos/5)/mins):0;
+  $("s-acc").textContent=(pos+mistakes>0?Math.round(pos/(pos+mistakes)*100):100)+"%";
+  $("s-prog").textContent=pos+"/"+target.length;
+}
+
+function speedColor(delta){const c=Math.max(50,Math.min(500,delta));const h=140-(c-50)/450*140;return `hsl(${h},72%,52%)`;}
+function drawRibbon(){
+  const w=ribbon.clientWidth||760, twoRow=ghosts.length>0;
+  ribbon.width=w; ribbon.height=twoRow?54:30; ribbon.style.height=ribbon.height+"px";
+  rc.clearRect(0,0,w,ribbon.height);
+  const n=target.length, cw=w/n, rh=twoRow?24:26;
+  // your row
+  for(let i=0;i<pos;i++){rc.fillStyle=speedColor(userDeltas[i]);rc.fillRect(i*cw,2,Math.max(1,cw-0.5),rh);}
+  rc.strokeStyle="rgba(255,255,255,.06)";rc.strokeRect(0,2,w,rh);
+  rc.font="700 10px sans-serif";rc.textBaseline="middle";
+  rc.fillStyle="rgba(231,233,242,.85)";rc.fillText("you",6,2+rh/2);
+  if(twoRow){
+    const g=ghosts[0];
+    for(let i=0;i<g.deltas.length;i++){rc.fillStyle=speedColor(g.deltas[i]);rc.fillRect(i*cw,30,Math.max(1,cw-0.5),rh);}
+    rc.strokeRect(0,30,w,rh);
+    rc.fillStyle=g.color;rc.fillText(g.name,6,30+rh/2);
+  }
+  // caption
+  const rh$=$("ribhint");
+  rh$.textContent=twoRow
+    ? "Each block is one keystroke — greener = faster, redder = slower. Top row is you; bottom row is the wraith."
+    : "Each block is one keystroke — greener = faster, redder = slower.";
+}
+
+function finish(){
+  finished=true; cancelAnimationFrame(raf);
+  lastCarat.forEach(s=>s.classList.remove("car-challenge","car-pb"));
+  const text=target.join(""), total=userTimes[userTimes.length-1];
+  const enc=encodeGhost(text,userDeltas.map(Math.round),mistakes);
+  // location.origin is the string "null" on file:// in Chromium/Firefox — fall back to the full path
+  const base=(location.origin&&location.origin!=="null")?location.origin+location.pathname:location.href.split("#")[0];
+  const link=base+"#g="+enc;
+  // personal best update
+  const prevPB=loadPB(text);
+  if(!prevPB||total<cumsum(prevPB.deltas).slice(-1)[0]) localStorage.setItem(pbKey(text),JSON.stringify({enc,time:Math.round(total)}));
+  // verdict vs primary ghost
+  let verdict="Run complete — this is now the ghost others will chase.",vcolor="var(--acc)";
+  const primary=ghosts.find(g=>g.key==="challenge")||ghosts[0];
+  if(primary){const gt=primary.cum[primary.cum.length-1];const m=gt-total;
+    verdict=(m>=0?`You BEAT ${primary.name} by ${(m/1000).toFixed(2)}s`:`${primary.name} beat you by ${(-m/1000).toFixed(2)}s`);
+    vcolor=m>=0?"var(--good)":"var(--bad)";}
+  const vEl=$("verdict");vEl.textContent=verdict;vEl.style.color=vcolor;
+  $("hint").style.display="none";
+  $("share").value=link;
+  drawResultCard(text,total,primary);
+  drawQR(link);
+  drawWordDiff(text,primary);
+  $("end").classList.add("show");
+  $("racepb").style.display=loadPB(text)?"":"none";
+}
+
+function drawResultCard(text,total,primary){
+  const cv=$("resultcard"),x=cv.getContext("2d"),W=cv.width,H=cv.height;
+  x.fillStyle="#0c0d12";x.fillRect(0,0,W,H);
+  x.fillStyle="#14161f";x.fillRect(0,0,W,44);
+  x.fillStyle="#ff6b35";x.font="700 22px sans-serif";x.fillText("Keywraith",18,30);
+  x.fillStyle="#8a90a8";x.font="12px sans-serif";x.fillText("the ghost is the link",130,30);
+  x.fillStyle="#e7e9f2";x.font="13px monospace";
+  const words=text.split(" ");let line="",y=72;
+  for(const wd of words){const t=line+wd+" ";if(x.measureText(t).width>W-36){x.fillText(line,18,y);y+=19;line=wd+" ";if(y>150)break;}else line=t;}
+  x.fillText(line,18,y);
+  const mins=total/60000,wpm=Math.round((target.length/5)/mins),acc=Math.round(target.length/(target.length+mistakes)*100);
+  const big=(v,lbl,cx)=>{x.fillStyle="#ff6b35";x.font="700 34px sans-serif";x.fillText(v,cx,232);x.fillStyle="#8a90a8";x.font="11px sans-serif";x.fillText(lbl,cx,250);};
+  big(wpm,"WPM",18);big(acc+"%","ACCURACY",150);big((total/1000).toFixed(1)+"s","TIME",320);
+  if(primary){const m=primary.cum[primary.cum.length-1]-total;x.fillStyle=m>=0?"#68e39a":"#ff5470";x.font="700 18px sans-serif";x.fillText((m>=0?"WON by ":"LOST by ")+Math.abs(m/1000).toFixed(2)+"s vs "+primary.name,18,296);}
+  else{x.fillStyle="#8a90a8";x.font="14px sans-serif";x.fillText("First ghost minted — share the link to start a race.",18,296);}
+}
+
+function drawQR(link){
+  const cv=$("qr");const q=QR.make(link);
+  if(!q){cv.width=1;cv.height=1;return;}
+  const sc=Math.max(2,Math.floor(220/(q.size+8))),qz=4,dim=(q.size+qz*2)*sc;
+  cv.width=dim;cv.height=dim;const x=cv.getContext("2d");
+  x.fillStyle="#fff";x.fillRect(0,0,dim,dim);x.fillStyle="#000";
+  for(let y=0;y<q.size;y++)for(let xx=0;xx<q.size;xx++)if(q.mod[y][xx])x.fillRect((xx+qz)*sc,(y+qz)*sc,sc,sc);
+}
+
+function drawWordDiff(text,primary){
+  const box=$("worddiff");box.innerHTML="";
+  if(!primary){return;}
+  const gd=primary.deltas;
+  box.innerHTML='<div class="lbl">Per-word time vs '+primary.name+' (green = you gained, red = you lost)</div>';
+  const wrap=document.createElement("div");wrap.className="words";
+  let i=0;const chars=target;
+  const words=[];let cur={w:"",idxs:[]};
+  chars.forEach((ch,k)=>{if(ch===" "){if(cur.w){words.push(cur);}cur={w:"",idxs:[]};}else{cur.w+=ch;cur.idxs.push(k);}});
+  if(cur.w)words.push(cur);
+  words.forEach(wd=>{
+    let mine=0,ghost=0;
+    wd.idxs.forEach(k=>{mine+=userDeltas[k]||0;ghost+=gd[k]||0;});
+    const diff=mine-ghost; // positive = slower = lost
+    const el=document.createElement("span");el.className="wd";
+    el.style.borderColor=diff<=0?"#2f6b46":"#7a2f42";
+    el.style.color=diff<=0?"#68e39a":"#ff5470";
+    el.textContent=wd.w+" "+(diff<=0?"":"+")+Math.round(diff)+"ms";
+    wrap.appendChild(el);
+  });
+  box.appendChild(wrap);
+}
+
+/* controls */
+$("copy").onclick=()=>{
+  const inp=$("share");inp.focus();inp.select();inp.setSelectionRange(0,inp.value.length);
+  let ok=false;
+  if(navigator.clipboard&&location.protocol!=="file:"){navigator.clipboard.writeText(inp.value).catch(()=>{});ok=true;}
+  else{try{ok=document.execCommand("copy");}catch(e){ok=false;}}
+  const b=$("copy");b.textContent=ok?"Copied!":"Select + Ctrl-C";setTimeout(()=>b.textContent="Copy ghost link",1400);
+};
+$("again").onclick=()=>boot();
+$("fresh").onclick=()=>{history.replaceState(null,"","#");setup(rndPassage(),[]);$("racepb").style.display="none";};
+$("mint").onclick=()=>{const t=$("custom").value.trim();if(!t)return;location.hash="c="+b64e(new TextEncoder().encode(t));boot();};
+$("racepb").onclick=()=>{const text=target.join("");const pb=loadPB(text);if(pb)setup(text,[{key:"pb",name:"Your PB",color:"#e05ffb",deltas:pb.deltas,cum:cumsum(pb.deltas),mistakes:pb.mistakes}]);};
+window.addEventListener("resize",drawRibbon);
+window.addEventListener("hashchange",boot);
+passageEl.addEventListener("pointerdown",e=>{e.preventDefault();armInput();});
+cap.addEventListener("focus",()=>passageEl.classList.add("armed"));
+cap.addEventListener("blur",()=>passageEl.classList.remove("armed"));
+
+boot();
+</script>
+</body>
+</html>

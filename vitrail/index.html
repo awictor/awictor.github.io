@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Vitrail — kaleidoscope studio</title>
+<style>
+  :root{ --bar:#141420; --ink:#e8e6ef; --dim:#8b88a0; --accent:#ff6a3d; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; overflow:hidden; background:#0a0a12;
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--ink); }
+  #stage{ position:fixed; inset:0; touch-action:none; cursor:crosshair; display:block; }
+  #bar{ position:fixed; left:50%; bottom:14px; transform:translateX(-50%);
+    display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; justify-content:center;
+    max-width:min(96vw,980px); padding:9px 13px; border-radius:14px;
+    background:rgba(20,20,32,.72); -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px);
+    box-shadow:0 8px 34px rgba(0,0,0,.5); border:1px solid rgba(255,255,255,.07);
+    font-size:12px; user-select:none; z-index:10; }
+  #bar .grp{ display:flex; align-items:center; gap:6px; }
+  #bar .sep{ width:1px; height:22px; background:rgba(255,255,255,.1); }
+  label{ color:var(--dim); white-space:nowrap; display:flex; align-items:center; gap:5px; }
+  input[type=range]{ width:88px; accent-color:var(--accent); }
+  input[type=color]{ width:26px; height:24px; padding:0; border:none; background:none; border-radius:6px; cursor:pointer; }
+  input[type=color]:disabled{ opacity:.35; cursor:not-allowed; }
+  select{ background:#20202f; color:var(--ink); border:1px solid rgba(255,255,255,.12); border-radius:7px; padding:4px 6px; font-size:12px; }
+  button{ background:#22222f; color:var(--ink); border:1px solid rgba(255,255,255,.1);
+    border-radius:8px; padding:5px 10px; font-size:12px; cursor:pointer; transition:.14s; white-space:nowrap; }
+  button:hover{ background:#2e2e40; border-color:rgba(255,255,255,.22); }
+  button.pri{ background:var(--accent); color:#160b06; border-color:transparent; font-weight:600; }
+  button.pri:hover{ filter:brightness(1.08); }
+  button:focus-visible, select:focus-visible, input:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+  .chk{ cursor:pointer; }
+  #val{ color:var(--ink); min-width:16px; text-align:center; font-variant-numeric:tabular-nums; }
+  #hint{ position:fixed; top:14px; left:50%; transform:translateX(-50%); color:var(--dim);
+    font-size:12px; letter-spacing:.02em; z-index:10; pointer-events:none; transition:opacity .6s; text-shadow:0 1px 6px #000; }
+  #toast{ position:fixed; top:44px; left:50%; transform:translateX(-50%); background:var(--accent); color:#160b06;
+    font-weight:600; font-size:12px; padding:6px 14px; border-radius:20px; opacity:0; transition:opacity .3s; z-index:20; pointer-events:none; }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div id="hint">Draw inside the glowing wedge — Vitrail mirrors it into a mandala</div>
+<div id="toast"></div>
+<div id="bar">
+  <div class="grp"><label>Fold <span id="val">8</span></label><input id="fold" type="range" min="3" max="24" value="8"></div>
+  <label class="chk" title="Mirror — reflected Dn symmetry (M)"><input id="mirror" type="checkbox" checked> Mirror</label>
+  <label class="chk" title="Glass — additive glow render"><input id="glass" type="checkbox" checked> Glass</label>
+  <label class="chk" title="Spin — gentle auto-rotate (Space)"><input id="spin" type="checkbox"> Spin</label>
+  <div class="sep"></div>
+  <div class="grp"><input id="color" type="color" value="#ff6a3d" title="Brush color" aria-label="Brush color"><label title="Brush width">W<input id="width" type="range" min="1" max="30" value="5" aria-label="Brush width"></label>
+  <label class="chk" title="Rainbow — hue by angle (overrides brush color)"><input id="rainbow" type="checkbox" checked> Rainbow</label></div>
+  <div class="sep"></div>
+  <div class="grp">
+    <select id="preset" title="Preset gallery"></select>
+    <button id="lucky" class="pri" title="Random mandala (G)">✦ Lucky</button>
+    <button id="undo" title="Undo last stroke (Z)">Undo</button>
+    <button id="clear" title="Clear canvas (C)">Clear</button>
+  </div>
+  <div class="sep"></div>
+  <div class="grp">
+    <button id="png">PNG</button>
+    <button id="svg">SVG</button>
+    <button id="webm">WebM</button>
+    <button id="link">Copy Link</button>
+  </div>
+</div>
+<script>
+"use strict";
+(function(){
+// ---------- state ----------
+var C = document.getElementById("stage"), ctx = C.getContext("2d");
+var dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+var reduceMotion = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+var S = { fold:8, mirror:true, glass:true, spin:false, color:"#ff6a3d", width:5,
+          rainbow:true, strokes:[], spinAngle:0, spinSpeed:0.004, guide:1, dirty:true };
+var drawing = null;                       // current stroke while pointer down
+var W=0, H=0, R=0, cx=0, cy=0;
+var PALETTES = [ ["#ff6a3d","#ffd23f","#06d6a0","#118ab2","#e63946"],
+                 ["#f72585","#7209b7","#3a0ca3","#4361ee","#4cc9f0"],
+                 ["#ffbe0b","#fb5607","#ff006e","#8338ec","#3a86ff"],
+                 ["#00f5d4","#00bbf9","#9b5de5","#f15bb5","#fee440"] ];
+
+// ---------- geometry / rendering ----------
+function resize(){
+  W = window.innerWidth; H = window.innerHeight;
+  C.width = W*dpr; C.height = H*dpr;
+  C.style.width = W+"px"; C.style.height = H+"px";
+  cx = W/2; cy = H/2; R = Math.min(W,H)/2;
+  S.dirty = true;
+}
+function allStrokes(){ return drawing ? S.strokes.concat([drawing]) : S.strokes; }
+function toLocal(px,py){                 // pointer -> {t,r} folded into wedge 0
+  var dx = px-cx, dy = py-cy, step = Math.PI*2/S.fold;
+  var a = Math.atan2(dy,dx); a = ((a % step)+step)%step;
+  return { t:a/step, r:Math.hypot(dx,dy)/R };
+}
+
+// stroke one path (rendered around current translate/rotate origin)
+function drawStroke(g, s){
+  var step = Math.PI*2/S.fold, reflects = S.mirror ? [1,-1] : [1];
+  g.lineWidth = s.width; g.lineCap="round"; g.lineJoin="round";
+  if(S.glass){ g.shadowBlur = s.width*2.6; }
+  for(var k=0;k<S.fold;k++){
+    for(var ri=0;ri<reflects.length;ri++){
+      var sgn = reflects[ri], base = k*step, pts = s.pts;
+      if(s.rainbow){
+        for(var i=1;i<pts.length;i++){
+          var col = "hsl("+((pts[i].t*300+k*(360/S.fold))%360)+",90%,"+(S.glass?60:52)+"%)";
+          g.strokeStyle = col; if(S.glass) g.shadowColor = col;
+          g.beginPath();
+          var a0=base+sgn*pts[i-1].t*step, a1=base+sgn*pts[i].t*step;
+          g.moveTo(Math.cos(a0)*pts[i-1].r*R, Math.sin(a0)*pts[i-1].r*R);
+          g.lineTo(Math.cos(a1)*pts[i].r*R, Math.sin(a1)*pts[i].r*R);
+          g.stroke();
+        }
+      } else {
+        g.strokeStyle = s.color; if(S.glass) g.shadowColor = s.color;
+        g.beginPath();
+        for(var j=0;j<pts.length;j++){
+          var a=base+sgn*pts[j].t*step, x=Math.cos(a)*pts[j].r*R, y=Math.sin(a)*pts[j].r*R;
+          if(j===0) g.moveTo(x,y); else g.lineTo(x,y);
+        }
+        g.stroke();
+      }
+    }
+  }
+}
+function paintTo(g, w, h, showGuide){
+  var lcx=w/2, lcy=h/2;
+  g.setTransform(1,0,0,1,0,0);
+  g.globalCompositeOperation = "source-over";
+  g.fillStyle = S.glass ? "#0a0a12" : "#f5f3ef";
+  g.fillRect(0,0,w,h);
+  g.save();
+  g.translate(lcx,lcy); g.rotate(S.spinAngle);
+  g.globalCompositeOperation = S.glass ? "lighter" : "source-over";
+  var list = allStrokes();
+  for(var i=0;i<list.length;i++) drawStroke(g, list[i]);
+  g.shadowBlur = 0; g.restore();
+  if(showGuide && S.guide>0.01){                       // active-wedge overlay
+    var step = Math.PI*2/S.fold;
+    g.save(); g.translate(lcx,lcy); g.rotate(S.spinAngle);
+    g.globalAlpha = S.guide*0.5; g.globalCompositeOperation="source-over";
+    g.strokeStyle = S.glass ? "rgba(255,255,255,.5)" : "rgba(35,47,62,.5)";
+    g.lineWidth = 1; g.setLineDash([5,6]);
+    g.beginPath(); g.moveTo(0,0); g.lineTo(R,0);
+    g.moveTo(0,0); g.lineTo(Math.cos(step)*R, Math.sin(step)*R);
+    g.arc(0,0,R*0.94,0,step); g.stroke();
+    g.restore(); g.globalAlpha=1;
+  }
+}
+function frame(){
+  // Respect prefers-reduced-motion: skip ambient auto-spin (still allow it while recording a WebM loop)
+  if(S.spin && (!reduceMotion || recording)){ S.spinAngle += S.spinSpeed; S.dirty=true; }
+  var target = (S.spin||recording) ? 0 : 1;             // fade guide during spin/export
+  if(Math.abs(S.guide-target) > 0.005){ S.guide = reduceMotion ? target : S.guide+(target-S.guide)*0.08; S.dirty=true; }
+  else S.guide = target;
+  if(S.dirty){
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    paintTo(ctx, W, H, true);
+    S.dirty = false;
+  }
+  requestAnimationFrame(frame);
+}
+
+// ---------- pointer drawing ----------
+function pos(e){ var r=C.getBoundingClientRect(); return [e.clientX-r.left, e.clientY-r.top]; }
+C.addEventListener("pointerdown", function(e){
+  C.setPointerCapture(e.pointerId);
+  var p=pos(e);
+  drawing = { color:S.color, width:S.width, rainbow:S.rainbow, pts:[toLocal(p[0],p[1])] };
+  hideHint(); S.dirty=true;
+});
+C.addEventListener("pointermove", function(e){
+  if(!drawing) return;
+  var p=pos(e), lp=toLocal(p[0],p[1]), last=drawing.pts[drawing.pts.length-1];
+  if(Math.abs(lp.t-last.t)+Math.abs(lp.r-last.r) < 0.004) return;   // simplify + cap density
+  if(drawing.pts.length<250) drawing.pts.push(lp);
+  S.dirty=true;
+});
+function endStroke(){ if(drawing){ if(drawing.pts.length>1) S.strokes.push(drawing); drawing=null; syncHash(); S.dirty=true; } }
+C.addEventListener("pointerup", endStroke);
+C.addEventListener("pointercancel", endStroke);
+
+// ---------- seed pack / unpack (URL hash) ----------
+function hexToRgb(h){ h=h.replace('#',''); return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)]; }
+function rgbToHex(r,g,b){ return "#"+[r,g,b].map(function(v){return ("0"+v.toString(16)).slice(-2);}).join(""); }
+function clamp(v,a,b){ return v<a?a:v>b?b:v; }
+function b64u(bytes){ var s=""; for(var i=0;i<bytes.length;i++) s+=String.fromCharCode(bytes[i]);
+  return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+function unb64u(str){ str=str.replace(/-/g,'+').replace(/_/g,'/'); var s=atob(str), a=new Uint8Array(s.length);
+  for(var i=0;i<s.length;i++) a[i]=s.charCodeAt(i); return a; }
+function pack(){
+  var b=[]; b.push(S.fold, (S.mirror?1:0)|(S.glass?2:0), S.strokes.length & 255);
+  for(var i=0;i<S.strokes.length && i<255;i++){
+    var s=S.strokes[i], rgb=hexToRgb(s.color), pts=s.pts.slice(0,255);
+    b.push(rgb[0],rgb[1],rgb[2], clamp(Math.round(s.width),1,255), s.rainbow?1:0, pts.length);
+    for(var j=0;j<pts.length;j++){ b.push(clamp(Math.round(pts[j].t*255),0,255), clamp(Math.round(pts[j].r/2*255),0,255)); }
+  }
+  return b64u(Uint8Array.from(b));
+}
+function unpack(str){
+  try{
+    var b=unb64u(str), o=0;
+    var fold=clamp(b[o++],3,24), flags=b[o++], n=b[o++], strokes=[];
+    for(var i=0;i<n;i++){
+      var color=rgbToHex(b[o++],b[o++],b[o++]), width=b[o++], rainbow=!!b[o++], m=b[o++], pts=[];
+      for(var j=0;j<m;j++){ pts.push({ t:b[o++]/255, r:b[o++]/255*2 }); }
+      strokes.push({ color:color, width:width, rainbow:rainbow, pts:pts });
+    }
+    S.fold=fold; S.mirror=!!(flags&1); S.glass=!!(flags&2); S.strokes=strokes;
+    return true;
+  }catch(err){ return false; }
+}
+var hashLock=false;
+function syncHash(){ hashLock=true; location.replace("#"+pack()); setTimeout(function(){hashLock=false;},0); }
+window.addEventListener("hashchange", function(){ if(hashLock) return; if(location.hash.length>1 && unpack(location.hash.slice(1))){ pushUI(); S.dirty=true; } });
+
+// ---------- generative presets / Lucky ----------
+function mulberry(seed){ return function(){ seed|=0; seed=seed+0x6D2B79F5|0; var t=Math.imul(seed^seed>>>15,1|seed);
+  t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function generate(seed){
+  var rnd=mulberry(seed), pal=PALETTES[Math.floor(rnd()*PALETTES.length)];
+  S.fold = 3+Math.floor(rnd()*22);
+  S.mirror = rnd()>0.25; S.glass = rnd()>0.3; S.rainbow = rnd()>0.4;
+  var nS = 3+Math.floor(rnd()*4), strokes=[];
+  for(var s=0;s<nS;s++){
+    var pts=[], n=14+Math.floor(rnd()*20), t0=rnd(), tspan=0.4+rnd()*0.6,
+        rb=0.25+rnd()*0.55, amp=0.1+rnd()*0.4, freq=1+Math.floor(rnd()*4), ph=rnd()*6.28, drift=(rnd()-0.5)*0.3;
+    for(var i=0;i<n;i++){ var u=i/(n-1);
+      pts.push({ t:clamp(t0+u*tspan+Math.sin(u*6.28*freq*0.3)*0.04, 0, 0.999),
+                 r:clamp(rb+u*drift+Math.sin(u*6.28*freq+ph)*amp, 0.03, 1.35) }); }
+    strokes.push({ color:pal[s%pal.length], width:2+Math.floor(rnd()*8), rainbow:S.rainbow, pts:pts });
+  }
+  S.strokes=strokes; S.spinAngle=0;
+}
+var PRESETS=[ {n:"Rose Window",s:70141}, {n:"Ice Star",s:24019}, {n:"Solar Petal",s:88213},
+              {n:"Deep Sea",s:5150}, {n:"Ember Lace",s:31337}, {n:"Aurora",s:60623} ];
+
+// ---------- exports ----------
+function download(url, name){ var a=document.createElement("a"); a.href=url; a.download=name;
+  document.body.appendChild(a); a.click(); a.remove(); }
+function exportPNG(){
+  var sz=1600, off=document.createElement("canvas"); off.width=sz; off.height=sz;
+  var g=off.getContext("2d"), sR=R, sSpin=S.spinAngle;
+  R=sz/2; S.spinAngle=0;                          // render square, unrotated, no guide
+  paintTo(g, sz, sz, false);
+  R=sR; S.spinAngle=sSpin; S.dirty=true;
+  off.toBlob(function(bl){ download(URL.createObjectURL(bl), "vitrail.png"); }, "image/png");
+  toast("PNG exported");
+}
+function exportSVG(){
+  var sz=1000, r=sz/2*0.94, step=Math.PI*2/S.fold, deg=step*180/Math.PI;
+  function P(v){ return Math.round(v*100)/100; }
+  // Build one wedge's paths. hueOff shifts rainbow hue to match the canvas per-wedge offset.
+  function buildWedge(hueOff){
+    var wedge="";
+    for(var i=0;i<S.strokes.length;i++){
+      var s=S.strokes[i], p=s.pts;
+      if(s.rainbow){
+        for(var k=1;k<p.length;k++){
+          var a0=p[k-1].t*step, a1=p[k].t*step,
+              col="hsl("+(((p[k].t*300+hueOff)%360+360)%360)+",90%,"+(S.glass?60:52)+"%)";
+          wedge+='<path d="M'+P(Math.cos(a0)*p[k-1].r*r)+' '+P(Math.sin(a0)*p[k-1].r*r)+'L'+P(Math.cos(a1)*p[k].r*r)+' '+P(Math.sin(a1)*p[k].r*r)+'" stroke="'+col+'" stroke-width="'+s.width+'"/>';
+        }
+      } else {
+        var d="M";
+        for(var j=0;j<p.length;j++){ var a=p[j].t*step; d+=(j?"L":"")+P(Math.cos(a)*p[j].r*r)+" "+P(Math.sin(a)*p[j].r*r); }
+        wedge+='<path d="'+d+'" stroke="'+s.color+'" stroke-width="'+s.width+'"/>';
+      }
+    }
+    return wedge;
+  }
+  var filt = S.glass ? '<filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>' : '';
+  var wattr = 'fill="none" stroke-linecap="round" stroke-linejoin="round"'+(S.glass?' filter="url(#glow)"':'');
+  var blend = S.glass ? ' style="mix-blend-mode:screen"' : '';
+  // Rainbow hue varies per wedge, so <use> reuse of one geometry can't reproduce it — emit a
+  // distinct hue-shifted group per fold in that case. Non-rainbow reuses a single <g> via <use>.
+  var anyRainbow=false;
+  for(var q=0;q<S.strokes.length;q++){ if(S.strokes[q].rainbow){ anyRainbow=true; break; } }
+  var defs='<defs>'+filt, body="";
+  if(anyRainbow){
+    for(var m=0;m<S.fold;m++){
+      var w=buildWedge(m*(360/S.fold));
+      body+='<g '+wattr+' transform="rotate('+P(m*deg)+')">'+w+'</g>';
+      if(S.mirror) body+='<g '+wattr+' transform="rotate('+P(m*deg)+') scale(1,-1)">'+w+'</g>';
+    }
+    defs+='</defs>';
+  } else {
+    defs+='<g id="w" '+wattr+'>'+buildWedge(0)+'</g></defs>';
+    for(var n=0;n<S.fold;n++){
+      body+='<use href="#w" xlink:href="#w" transform="rotate('+P(n*deg)+')"/>';
+      if(S.mirror) body+='<use href="#w" xlink:href="#w" transform="rotate('+P(n*deg)+') scale(1,-1)"/>';
+    }
+  }
+  var svg='<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 '+sz+' '+sz+'" width="'+sz+'" height="'+sz+'">'
+    +defs
+    +'<rect width="'+sz+'" height="'+sz+'" fill="'+(S.glass?'#0a0a12':'#f5f3ef')+'"/>'
+    +'<g transform="translate('+sz/2+','+sz/2+')"'+blend+'>'+body+'</g></svg>';
+  download(URL.createObjectURL(new Blob([svg],{type:"image/svg+xml"})), "vitrail.svg");
+  toast("SVG exported (vector)");
+}
+var recording=false;
+function exportWebM(){
+  if(recording || !C.captureStream || !window.MediaRecorder){ toast("WebM not supported here"); return; }
+  var mimes=["video/webm;codecs=vp9","video/webm;codecs=vp8","video/webm"], mime="";
+  for(var i=0;i<mimes.length;i++){ if(MediaRecorder.isTypeSupported(mimes[i])){ mime=mimes[i]; break; } }
+  var wasSpin=S.spin; S.spin=true; recording=true;
+  var chunks=[], rec=new MediaRecorder(C.captureStream(30), mime?{mimeType:mime}:undefined);
+  rec.ondataavailable=function(e){ if(e.data.size) chunks.push(e.data); };
+  rec.onstop=function(){ recording=false; S.spin=wasSpin; pushUI();
+    download(URL.createObjectURL(new Blob(chunks,{type:"video/webm"})), "vitrail.webm"); toast("WebM saved"); };
+  rec.start();
+  var loopMs = (Math.PI*2/S.fold)/S.spinSpeed * (1000/60);   // one seamless symmetry step
+  toast("Recording loop…");
+  setTimeout(function(){ rec.stop(); }, Math.max(900, loopMs));
+}
+
+// ---------- UI wiring ----------
+function $(id){ return document.getElementById(id); }
+function toast(msg){ var t=$("toast"); t.textContent=msg; t.style.opacity=1; clearTimeout(toast._t); toast._t=setTimeout(function(){t.style.opacity=0;},1600); }
+var hintGone=false;
+function hideHint(){ if(!hintGone){ hintGone=true; $("hint").style.opacity=0; } }
+// Rainbow overrides the picked color, so grey the swatch out to show it has no effect.
+function syncColorEnabled(){ $("color").disabled = S.rainbow; }
+// Re-show a lightweight prompt whenever the canvas goes empty (e.g. after Clear/Undo).
+function emptyPrompt(){ if(S.strokes.length===0 && !drawing){ hintGone=false;
+  var h=$("hint"); h.textContent="Draw in the wedge, or press G for a random mandala"; h.style.opacity=1; } }
+function pushUI(){
+  $("fold").value=S.fold; $("val").textContent=S.fold;
+  $("mirror").checked=S.mirror; $("glass").checked=S.glass; $("spin").checked=S.spin;
+  $("rainbow").checked=S.rainbow; $("width").value=S.width; $("color").value=S.color;
+  syncColorEnabled();
+}
+$("fold").addEventListener("input", function(e){ S.fold=+e.target.value; $("val").textContent=S.fold; S.dirty=true; syncHash(); });
+$("mirror").addEventListener("change", function(e){ S.mirror=e.target.checked; S.dirty=true; syncHash(); });
+$("glass").addEventListener("change", function(e){ S.glass=e.target.checked; S.dirty=true; syncHash(); });
+$("spin").addEventListener("change", function(e){ S.spin=e.target.checked; S.dirty=true; });
+$("rainbow").addEventListener("change", function(e){ S.rainbow=e.target.checked; syncColorEnabled(); });
+$("color").addEventListener("input", function(e){ S.color=e.target.value; });
+$("width").addEventListener("input", function(e){ S.width=+e.target.value; });
+$("undo").addEventListener("click", function(){ S.strokes.pop(); S.dirty=true; syncHash(); emptyPrompt(); });
+$("clear").addEventListener("click", function(){ S.strokes=[]; S.dirty=true; syncHash(); emptyPrompt(); });
+$("lucky").addEventListener("click", function(){ generate((Math.random()*1e9)|0); pushUI(); hideHint(); S.dirty=true; syncHash(); toast("Feeling lucky!"); });
+$("png").addEventListener("click", exportPNG);
+$("svg").addEventListener("click", exportSVG);
+$("webm").addEventListener("click", exportWebM);
+$("link").addEventListener("click", function(){ syncHash();
+  var url=location.href; if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(url).then(function(){toast("Link copied");},function(){toast("Copy failed");}); } else toast("Copy manually from URL"); });
+var psel=$("preset");
+psel.innerHTML='<option value="-1">Presets…</option>'+PRESETS.map(function(p,i){return '<option value="'+i+'">'+p.n+'</option>';}).join("");
+psel.addEventListener("change", function(e){ var i=+e.target.value; if(i>=0){ generate(PRESETS[i].s); pushUI(); hideHint(); S.dirty=true; syncHash(); } e.target.value="-1"; });
+window.addEventListener("keydown", function(e){
+  if(e.target.tagName==="INPUT"||e.target.tagName==="SELECT") return;
+  var k=e.key.toLowerCase();
+  if(k==="z"){ S.strokes.pop(); S.dirty=true; syncHash(); emptyPrompt(); }
+  else if(k==="c"){ S.strokes=[]; S.dirty=true; syncHash(); emptyPrompt(); }
+  else if(k==="g"){ generate((Math.random()*1e9)|0); pushUI(); hideHint(); S.dirty=true; syncHash(); }
+  else if(k==="m"){ S.mirror=!S.mirror; pushUI(); S.dirty=true; syncHash(); }
+  else if(k===" "){ e.preventDefault(); S.spin=!S.spin; pushUI(); }
+});
+
+// ---------- boot ----------
+window.addEventListener("resize", resize);
+resize();
+if(!(location.hash.length>1 && unpack(location.hash.slice(1)))){
+  generate((PRESETS[0].s));                 // open on a curated mandala
+}
+pushUI(); S.dirty=true;
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

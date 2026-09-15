@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lexical Diversity — type-token ratio & vocabulary richness</title>
+<meta name="description" content="Measure vocabulary richness of any text: type-token ratio (TTR), unique words, hapax legomena, and Guiraud's index. Offline, no tracking.">
+<style>
+  :root{
+    --c:#7c3aed;
+    --bg:#f7f5fc; --card:#ffffff; --fg:#191426; --muted:#6a6480;
+    --line:#e8e3f3; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#130f1d; --card:#1d1729; --fg:#efebf8; --muted:#a49bbb;
+    --line:#312a45; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.35rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.82rem;font-weight:600;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+  textarea{width:100%;font:inherit;padding:12px;border:1px solid var(--line);border-radius:10px;
+    background:var(--bg);color:var(--fg);min-height:150px;resize:vertical}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:6px}
+  @media(max-width:560px){.grid{grid-template-columns:1fr 1fr}}
+  .stat{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:16px;text-align:center}
+  .stat .k{font-size:.74rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .stat .v{font-size:1.7rem;font-weight:800;color:var(--c);font-variant-numeric:tabular-nums;margin-top:3px}
+  .stat .sub{font-size:.78rem;color:var(--muted);margin-top:2px}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">📚</div>
+  <div>
+    <h1>Lexical Diversity</h1>
+    <p>How rich is your vocabulary?</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <label for="in">Your text</label>
+    <textarea id="in" spellcheck="false">The quick brown fox jumps over the lazy dog. The dog barks and the fox runs.</textarea>
+    <div class="grid">
+      <div class="stat"><div class="k">Total words</div><div class="v" id="tokens">0</div><div class="sub">tokens</div></div>
+      <div class="stat"><div class="k">Unique words</div><div class="v" id="types">0</div><div class="sub">types</div></div>
+      <div class="stat"><div class="k">TTR</div><div class="v" id="ttr">0</div><div class="sub">types ÷ tokens</div></div>
+      <div class="stat"><div class="k">Hapax</div><div class="v" id="hapax">0</div><div class="sub">used once</div></div>
+      <div class="stat"><div class="k">Guiraud</div><div class="v" id="guiraud">0</div><div class="sub">types ÷ √tokens</div></div>
+      <div class="stat"><div class="k">Most common</div><div class="v" id="top" style="font-size:1.2rem">—</div><div class="sub" id="topN"></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Reading the numbers</h2>
+    <p class="note"><b>TTR</b> (type-token ratio) is unique words ÷ total words — higher means more varied vocabulary, but it drops as text gets longer, so compare similar lengths. <b>Guiraud's index</b> (types ÷ √tokens) is more length-stable. <b>Hapax legomena</b> are words that appear exactly once — a rough sign of richness. Comparisons and non-letters are ignored; matching is case-insensitive.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function tokenize(text){
+    var m = String(text).toLowerCase().match(/[a-z0-9]+(?:'[a-z]+)?/g);
+    return m || [];
+  }
+  function counts(words){
+    var c = {};
+    words.forEach(function(w){ c[w] = (c[w] || 0) + 1; });
+    return c;
+  }
+  function types(words){ return Object.keys(counts(words)).length; }
+  function ttr(words){ return words.length ? types(words) / words.length : 0; }
+  function hapax(words){
+    var c = counts(words), h = 0;
+    Object.keys(c).forEach(function(w){ if(c[w] === 1) h++; });
+    return h;
+  }
+  function guiraud(words){ return words.length ? types(words) / Math.sqrt(words.length) : 0; }
+  function mostCommon(words){
+    var c = counts(words), best = null, bestN = 0;
+    Object.keys(c).forEach(function(w){ if(c[w] > bestN || (c[w] === bestN && (best === null || w < best))){ best = w; bestN = c[w]; } });
+    return best === null ? null : { word: best, count: bestN };
+  }
+  function summarize(text){
+    var w = tokenize(text);
+    return { tokens: w.length, types: types(w), ttr: ttr(w), hapax: hapax(w), guiraud: guiraud(w), mostCommon: mostCommon(w) };
+  }
+
+  if(typeof module !== 'undefined') module.exports = { tokenize:tokenize, types:types, ttr:ttr, hapax:hapax, guiraud:guiraud, mostCommon:mostCommon, summarize:summarize };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var inp=document.getElementById('in');
+    function render(){
+      var s = summarize(inp.value);
+      document.getElementById('tokens').textContent = s.tokens.toLocaleString();
+      document.getElementById('types').textContent = s.types.toLocaleString();
+      document.getElementById('ttr').textContent = (s.ttr * 100).toFixed(1) + '%';
+      document.getElementById('hapax').textContent = s.hapax.toLocaleString();
+      document.getElementById('guiraud').textContent = s.guiraud.toFixed(2);
+      document.getElementById('top').textContent = s.mostCommon ? s.mostCommon.word : '—';
+      document.getElementById('topN').textContent = s.mostCommon ? '×' + s.mostCommon.count : '';
+    }
+    inp.addEventListener('input', render);
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('lexdiv-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('lexdiv-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+
+    render();
+  }
+</script>
+</body>
+</html>

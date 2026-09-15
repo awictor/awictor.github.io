@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Word Echo Finder — catch repeated words in your writing</title>
+<meta name="description" content="Find words you repeat too close together — the unintentional echoes that make prose feel clumsy. Adjustable window and stop-word filtering. Offline, no tracking.">
+<style>
+  :root{
+    --c:#db2777;
+    --bg:#fdf1f7; --card:#ffffff; --fg:#25101b; --muted:#75516a;
+    --line:#f4d7e6; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#160810; --card:#22101a; --fg:#f7e6ef; --muted:#c092ac;
+    --line:#3a1d2c; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  textarea{width:100%;min-height:150px;font:inherit;padding:14px;border:1px solid var(--line);border-radius:10px;
+    background:var(--bg);color:var(--fg);resize:vertical;line-height:1.6}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .controls{display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin-top:14px}
+  .controls label{font-size:.84rem;color:var(--muted);font-weight:600}
+  input[type=range]{accent-color:var(--c);vertical-align:middle}
+  input[type=number]{width:56px;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)}
+  .controls .chk{display:flex;gap:6px;align-items:center}
+  .out{margin-top:8px}
+  .echo{padding:10px 12px;border:1px solid var(--line);border-radius:9px;margin-bottom:8px;font-size:.9rem}
+  .echo b{color:var(--c)} .echo .ctx{color:var(--muted);font-size:.85rem}
+  mark{background:color-mix(in srgb, var(--c) 30%, transparent);color:inherit;border-radius:3px;padding:0 2px}
+  .empty{color:var(--muted);font-size:.9rem}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🔁</div>
+  <div>
+    <h1>Word Echo Finder</h1>
+    <p>Catch words you repeat too close together</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <textarea id="in" placeholder="Paste your writing here…">The report reported that the reported figures were, in the report, reported inaccurately. She quickly walked to the store and quickly bought milk before quickly leaving.</textarea>
+    <div class="controls">
+      <label>Window: <span id="wv">6</span> words <input type="range" id="win" min="2" max="30" value="6"></label>
+      <label>Min length <input type="number" id="minlen" value="4" min="1" max="12"></label>
+      <label class="chk"><input type="checkbox" id="stop" checked> Ignore common words</label>
+    </div>
+  </div>
+  <div class="card">
+    <h2 id="count">Echoes</h2>
+    <div class="out" id="out"></div>
+  </div>
+
+  <div class="card">
+    <h2>What's an "echo"?</h2>
+    <p class="note">An echo is the same word popping up again within a few words — usually accidental, and it makes writing feel repetitive ("the <i>report</i> <i>reported</i>… in the <i>report</i>… <i>reported</i>"). Editors hunt these down and vary the wording. Widen the <b>window</b> to catch echoes that are further apart; raise <b>min length</b> to ignore short words; "ignore common words" skips the/and/of and similar, since those naturally recur. Everything runs locally.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var STOP = new Set('the a an and or but of to in on at by for with as is are was were be been it its this that these those i you he she we they them from not no so if then than too very just about into over under up down out'.split(' '));
+  // Tokenize into { word (lowercased), raw, index } for word tokens only.
+  function tokenize(text){
+    var out = [], re = /[A-Za-z]+(?:'[A-Za-z]+)?/g, m, i = 0;
+    while((m = re.exec(String(text == null ? '' : text)))){
+      out.push({ word: m[0].toLowerCase(), raw: m[0], index: i++ });
+    }
+    return out;
+  }
+  // Find echoes: same word within `window` word-positions, length >= minLength.
+  // Returns pairs { word, from, to, distance } for each qualifying adjacent-in-window repeat.
+  function findEchoes(text, opts){
+    opts = opts || {};
+    var window = opts.window == null ? 6 : Number(opts.window);
+    var minLength = opts.minLength == null ? 4 : Number(opts.minLength);
+    var ignoreStop = opts.ignoreStopwords !== false;
+    if(window < 1) throw new Error('window must be at least 1');
+    var toks = tokenize(text);
+    var last = {}; // word -> last index seen
+    var echoes = [];
+    toks.forEach(function(t){
+      if(t.word.length >= minLength && !(ignoreStop && STOP.has(t.word))){
+        if(last[t.word] !== undefined){
+          var dist = t.index - last[t.word];
+          if(dist <= window) echoes.push({ word: t.word, from: last[t.word], to: t.index, distance: dist });
+        }
+        last[t.word] = t.index;
+      }
+    });
+    return echoes;
+  }
+  // Count of distinct words that echo at least once.
+  function echoWordCount(text, opts){
+    var set = {};
+    findEchoes(text, opts).forEach(function(e){ set[e.word] = true; });
+    return Object.keys(set).length;
+  }
+
+  if(typeof module !== 'undefined') module.exports = { tokenize:tokenize, findEchoes:findEchoes, echoWordCount:echoWordCount, STOP:STOP };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var inEl = document.getElementById('in');
+    function opts(){ return { window: Number(document.getElementById('win').value), minLength: Number(document.getElementById('minlen').value), ignoreStopwords: document.getElementById('stop').checked }; }
+    function render(){
+      document.getElementById('wv').textContent = document.getElementById('win').value;
+      var echoes;
+      try{ echoes = findEchoes(inEl.value, opts()); }catch(e){ echoes = []; }
+      var byWord = {};
+      echoes.forEach(function(e){ (byWord[e.word] = byWord[e.word] || []).push(e); });
+      var words = Object.keys(byWord);
+      document.getElementById('count').textContent = words.length ? (words.length + ' echoed word' + (words.length === 1 ? '' : 's')) : 'Echoes';
+      var out = document.getElementById('out');
+      if(!words.length){ out.innerHTML = '<div class="empty">No echoes found with these settings. 🎉</div>'; return; }
+      out.innerHTML = words.map(function(w){
+        var list = byWord[w];
+        var minD = Math.min.apply(null, list.map(function(e){ return e.distance; }));
+        return '<div class="echo"><b>' + w + '</b> — repeats ' + (list.length + 1) + '× · closest ' + minD + ' words apart <span class="ctx">(' + list.length + ' echo' + (list.length === 1 ? '' : 's') + ')</span></div>';
+      }).join('');
+    }
+    ['in','win','minlen','stop'].forEach(function(id){ document.getElementById(id).addEventListener('input', render); });
+    render();
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('echo-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('echo-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Function Grapher — plot f(x) with a real expression parser</title>
+<meta name="description" content="Plot any function y = f(x) over a range as a crisp SVG graph — powers, sin/cos/exp/ln, constants — with auto-scaled axes and grid. Real parser, no eval(). Offline, no tracking.">
+<style>
+  :root{
+    --c:#4f46e5;
+    --bg:#eef0fb; --card:#ffffff; --fg:#0c0f26; --muted:#4b4f70;
+    --line:#dcdcf3; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px; --grid:#d8dcf0; --axis:#8a90c0;
+  }
+  [data-theme="dark"]{
+    --bg:#07081a; --card:#12142e; --fg:#e8e9fb; --muted:#9a9dc6;
+    --line:#232648; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+    --grid:#20244a; --axis:#5b62a0;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:900px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto;font-weight:700}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:900px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.74rem;font-weight:600;color:var(--muted);margin-bottom:5px}
+  input{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.05rem;font-weight:700;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .fx input{font-size:1.25rem}
+  .ranges{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+  svg{width:100%;height:auto;display:block;background:var(--bg);border:1px solid var(--line);border-radius:12px;margin-top:8px}
+  .curve{fill:none;stroke:var(--c);stroke-width:2.2;stroke-linejoin:round;stroke-linecap:round}
+  .chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}
+  .chip{padding:5px 10px;border:1px solid var(--line);border-radius:16px;background:var(--bg);color:var(--fg);font-family:ui-monospace,monospace;font-size:.8rem;cursor:pointer}
+  .chip:hover{border-color:var(--c);color:var(--c)}
+  .err{color:#dc2626;font-size:.9rem;margin-top:8px;min-height:1em}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .note code{background:var(--bg);padding:1px 5px;border-radius:5px}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">📈</div>
+  <div>
+    <h1>Function Grapher</h1>
+    <p>plot y = f(x)</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="fx"><label>f(x)</label><input id="fx" value="sin(x)" autocomplete="off" spellcheck="false"></div>
+    <div class="chips" id="chips"></div>
+    <div class="ranges">
+      <div><label>x min</label><input id="xmin" value="-6.283"></div>
+      <div><label>x max</label><input id="xmax" value="6.283"></div>
+    </div>
+    <div class="err" id="err"></div>
+    <svg id="plot" viewBox="0 0 600 360" preserveAspectRatio="none" role="img" aria-label="function plot"></svg>
+  </div>
+
+  <div class="card">
+    <h2>About</h2>
+    <p class="note">Type any function of <code>x</code> and see it plotted over your chosen range. The curve is sampled at hundreds of points, the y-axis auto-scales to fit, and the graph is drawn as crisp <b>SVG</b> (no bitmap). Discontinuities and undefined regions (like <code>1/x</code> at 0 or <code>sqrt(x)</code> below 0) break the line rather than drawing false verticals. Supports <code>sin cos tan exp ln log sqrt abs</code> and constants <code>pi</code>, <code>e</code> — parsed by a real recursive-descent parser, no <code>eval()</code>. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var CONSTS = { pi: Math.PI, e: Math.E, tau: 2 * Math.PI };
+  var FUNCS = { sin: Math.sin, cos: Math.cos, tan: Math.tan, asin: Math.asin, acos: Math.acos, atan: Math.atan,
+    sqrt: Math.sqrt, cbrt: Math.cbrt, ln: Math.log, log: function(v){ return Math.log(v) / Math.LN10; },
+    exp: Math.exp, abs: Math.abs, sinh: Math.sinh, cosh: Math.cosh, tanh: Math.tanh };
+  function tokenize(s){
+    var t = [], i = 0;
+    while(i < s.length){
+      var ch = s[i];
+      if(/\s/.test(ch)){ i++; continue; }
+      if(/[0-9.]/.test(ch)){ var j = i; while(j < s.length && /[0-9.]/.test(s[j])) j++; t.push({ t: 'num', v: parseFloat(s.slice(i, j)) }); i = j; continue; }
+      if(/[a-zA-Z]/.test(ch)){ var k = i; while(k < s.length && /[a-zA-Z0-9]/.test(s[k])) k++; t.push({ t: 'id', v: s.slice(i, k) }); i = k; continue; }
+      if('+-*/^()'.indexOf(ch) >= 0){ t.push({ t: 'op', v: ch }); i++; continue; }
+      throw new Error('unexpected character: "' + ch + '"');
+    }
+    return t;
+  }
+  function parseExpr(tokens){
+    var pos = 0;
+    function peek(){ return tokens[pos]; }
+    function eat(v){ if(!peek() || peek().v !== v) throw new Error('expected "' + v + '"'); pos++; }
+    function add(){ var n = mul(); while(peek() && (peek().v === '+' || peek().v === '-')){ var o = tokens[pos++].v; n = { o: o, l: n, r: mul() }; } return n; }
+    function mul(){ var n = un(); while(peek() && (peek().v === '*' || peek().v === '/')){ var o = tokens[pos++].v; n = { o: o, l: n, r: un() }; } return n; }
+    function un(){ if(peek() && (peek().v === '-' || peek().v === '+')){ var o = tokens[pos++].v; return { o: 'u' + o, c: un() }; } return pow(); }
+    function pow(){ var b = prim(); if(peek() && peek().v === '^'){ pos++; return { o: '^', l: b, r: un() }; } return b; }
+    function prim(){
+      var tk = peek();
+      if(!tk) throw new Error('unexpected end');
+      if(tk.t === 'num'){ pos++; return { o: 'num', v: tk.v }; }
+      if(tk.t === 'id'){ pos++; var name = tk.v.toLowerCase();
+        if(peek() && peek().v === '('){ pos++; var arg = add(); eat(')'); if(!FUNCS[name]) throw new Error('unknown function: ' + tk.v); return { o: 'fn', f: name, c: arg }; }
+        if(name === 'x') return { o: 'x' };
+        if(name in CONSTS) return { o: 'num', v: CONSTS[name] };
+        throw new Error('unknown identifier: ' + tk.v);
+      }
+      if(tk.v === '('){ pos++; var n = add(); eat(')'); return n; }
+      throw new Error('unexpected token');
+    }
+    var ast = add();
+    if(pos < tokens.length) throw new Error('trailing input');
+    return ast;
+  }
+  function evalAst(n, x){
+    switch(n.o){
+      case 'num': return n.v; case 'x': return x;
+      case '+': return evalAst(n.l, x) + evalAst(n.r, x); case '-': return evalAst(n.l, x) - evalAst(n.r, x);
+      case '*': return evalAst(n.l, x) * evalAst(n.r, x); case '/': return evalAst(n.l, x) / evalAst(n.r, x);
+      case '^': return Math.pow(evalAst(n.l, x), evalAst(n.r, x));
+      case 'u-': return -evalAst(n.c, x); case 'u+': return evalAst(n.c, x);
+      case 'fn': return FUNCS[n.f](evalAst(n.c, x));
+    }
+    throw new Error('bad node');
+  }
+  function compile(expr){ var ast = parseExpr(tokenize(expr)); return function(x){ return evalAst(ast, x); }; }
+  function sample(expr, xmin, xmax, n){
+    var f = compile(expr), pts = [];
+    for(var i = 0; i <= n; i++){ var x = xmin + (xmax - xmin) * i / n; pts.push({ x: x, y: f(x) }); }
+    return pts;
+  }
+  function extent(pts){
+    var min = Infinity, max = -Infinity;
+    for(var i = 0; i < pts.length; i++){ var y = pts[i].y; if(isFinite(y)){ if(y < min) min = y; if(y > max) max = y; } }
+    if(min === Infinity) return null;
+    return { min: min, max: max };
+  }
+
+  if(typeof module !== 'undefined') module.exports = { compile:compile, sample:sample, extent:extent };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var $ = function(id){ return document.getElementById(id); };
+    var W = 600, H = 360, PAD = 8;
+    function draw(){
+      $('err').textContent = '';
+      try{
+        var expr = $('fx').value.trim();
+        var xmin = compile($('xmin').value.trim())(0), xmax = compile($('xmax').value.trim())(0);
+        if(!(xmax > xmin)) throw new Error('x max must be greater than x min');
+        var pts = sample(expr, xmin, xmax, 600);
+        var ext = extent(pts); if(!ext) throw new Error('function is undefined across the whole range');
+        var ymin = ext.min, ymax = ext.max;
+        if(ymin === ymax){ ymin -= 1; ymax += 1; }
+        var pad = (ymax - ymin) * 0.08; ymin -= pad; ymax += pad;
+        function sx(x){ return PAD + (x - xmin) / (xmax - xmin) * (W - 2 * PAD); }
+        function sy(y){ return H - PAD - (y - ymin) / (ymax - ymin) * (H - 2 * PAD); }
+        var d = '', pen = false;
+        for(var i = 0; i < pts.length; i++){
+          var p = pts[i];
+          if(!isFinite(p.y) || Math.abs(p.y) > 1e6){ pen = false; continue; }
+          d += (pen ? 'L' : 'M') + sx(p.x).toFixed(2) + ' ' + sy(p.y).toFixed(2) + ' '; pen = true;
+        }
+        var axes = '';
+        if(ymin < 0 && ymax > 0){ var y0 = sy(0); axes += '<line x1="' + PAD + '" y1="' + y0 + '" x2="' + (W - PAD) + '" y2="' + y0 + '" stroke="var(--axis)" stroke-width="1"/>'; }
+        if(xmin < 0 && xmax > 0){ var x0 = sx(0); axes += '<line x1="' + x0 + '" y1="' + PAD + '" x2="' + x0 + '" y2="' + (H - PAD) + '" stroke="var(--axis)" stroke-width="1"/>'; }
+        $('plot').innerHTML = axes + '<path class="curve" d="' + d + '"/>';
+      }catch(e){ $('plot').innerHTML = ''; $('err').textContent = e.message; }
+    }
+    ['fx','xmin','xmax'].forEach(function(id){ $(id).addEventListener('input', draw); });
+    [['sin(x)','sin(x)'],['x^2','x^2'],['x^3-x','x^3 - x'],['1/x','1/x'],['exp(-x^2)','exp(-x^2)'],['abs(x)','abs(x)']].forEach(function(p){
+      var c = document.createElement('span'); c.className = 'chip'; c.textContent = p[0]; c.addEventListener('click', function(){ $('fx').value = p[1]; draw(); }); $('chips').appendChild(c);
+    });
+    draw();
+
+    var root = document.documentElement, tb = $('theme');
+    function setTheme(t){ root.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? '☀️' : '🌙'; try{ localStorage.setItem('grapher-theme', t); }catch(e){} }
+    var saved; try{ saved = localStorage.getItem('grapher-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); });
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ovulation — Fertile Window & Ovulation Calculator</title>
+<meta name="description" content="Estimate your ovulation day, fertile window, and next periods from your last period date and cycle length. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('ovulation-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#db2777;
+    --bg:#f8f5f7; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#ece2e8; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#16111400; --bg:#161114; --card:#20181d; --fg:#f2eaef; --muted:#a5969f; --line:#342832; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#9d174d);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:720px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
+  input{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  .hero{text-align:center;margin:6px 0 2px}
+  .hero .big{font-size:1.9rem;font-weight:800;color:var(--c)}
+  .hero .lab{color:var(--muted);font-size:.85rem}
+  .win{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+  @media(max-width:480px){.win{grid-template-columns:1fr}}
+  .win div{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+  .win span{display:block;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .win b{font-size:1.05rem}
+  table{width:100%;border-collapse:collapse;font-size:.9rem;margin-top:6px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.05em}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🌸</div>
+    <div><h1>Ovulation</h1><div class="sub">Fertile window &amp; cycle predictor</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div><label for="lp">First day of last period</label><input type="date" id="lp"></div>
+      <div><label for="cycle">Cycle length (days)</label><input type="number" id="cycle" value="28" min="21" max="45"></div>
+      <div><label for="luteal">Luteal phase (days)</label><input type="number" id="luteal" value="14" min="10" max="16"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="hero"><div class="big" id="ovu">—</div><div class="lab">estimated ovulation day</div></div>
+    <div class="win">
+      <div><span>Fertile window</span><b id="fw">—</b></div>
+      <div><span>Next period</span><b id="np">—</b></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <label>Next cycles</label>
+    <table><thead><tr><th>Fertile window</th><th>Ovulation</th><th>Period</th></tr></thead><tbody id="rows"></tbody></table>
+  </div>
+</main>
+<footer>
+  Estimates only — not a contraceptive method or medical advice. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/ovulation">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  function addDays(dateStr, n){
+    const d = new Date(dateStr + 'T00:00:00Z');
+    if(isNaN(d.getTime())) throw new Error('invalid date: ' + dateStr);
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  }
+
+  function predict(opts){
+    const lastPeriod = opts.lastPeriod;
+    const cycleLength = opts.cycleLength == null ? 28 : Number(opts.cycleLength);
+    const lutealPhase = opts.lutealPhase == null ? 14 : Number(opts.lutealPhase);
+    if(!(cycleLength >= 21 && cycleLength <= 45)) throw new Error('cycle length must be 21–45 days');
+    if(!(lutealPhase >= 10 && lutealPhase <= 16)) throw new Error('luteal phase must be 10–16 days');
+    const ovulation = addDays(lastPeriod, cycleLength - lutealPhase);
+    return {
+      ovulation,
+      fertileStart: addDays(ovulation, -5),
+      fertileEnd: addDays(ovulation, 1),
+      nextPeriod: addDays(lastPeriod, cycleLength)
+    };
+  }
+
+  function nextCycles(opts, count = 3){
+    const out = [];
+    let lp = opts.lastPeriod;
+    for(let i = 0; i < count; i++){
+      const c = predict(Object.assign({}, opts, { lastPeriod: lp }));
+      out.push(c);
+      lp = c.nextPeriod;
+    }
+    return out;
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('ovu')){
+    const $ = id => document.getElementById(id);
+    const fmt = iso => {
+      const d = new Date(iso + 'T00:00:00Z');
+      return d.toLocaleDateString(undefined, { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' });
+    };
+    const fmtShort = iso => {
+      const d = new Date(iso + 'T00:00:00Z');
+      return d.toLocaleDateString(undefined, { timeZone: 'UTC', month: 'short', day: 'numeric' });
+    };
+
+    function render(){
+      const opts = { lastPeriod: $('lp').value, cycleLength: +$('cycle').value, lutealPhase: +$('luteal').value };
+      let cycles;
+      try{ cycles = nextCycles(opts, 3); }
+      catch(e){ $('ovu').textContent = '—'; $('fw').textContent = '—'; $('np').textContent = '—'; $('rows').innerHTML = ''; return; }
+      const first = cycles[0];
+      $('ovu').textContent = fmt(first.ovulation);
+      $('fw').textContent = `${fmtShort(first.fertileStart)} – ${fmtShort(first.fertileEnd)}`;
+      $('np').textContent = fmt(first.nextPeriod);
+      $('rows').innerHTML = cycles.map(c =>
+        `<tr><td>${fmtShort(c.fertileStart)} – ${fmtShort(c.fertileEnd)}</td><td>${fmtShort(c.ovulation)}</td><td>${fmtShort(c.nextPeriod)}</td></tr>`
+      ).join('');
+    }
+
+    ['lp', 'cycle', 'luteal'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('ovulation-theme', cur); }catch(e){}
+    });
+
+    $('lp').value = new Date().toISOString().slice(0, 10);
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { addDays, predict, nextCycles };
+</script>
+</body>
+</html>

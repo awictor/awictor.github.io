@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QTc — Corrected QT Interval Calculator</title>
+<meta name="description" content="Calculate the corrected QT interval (QTc) from the QT interval and heart rate using Bazett, Fridericia, Framingham and Hodges formulas, with a prolongation category. 100% offline, informational only.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('qtc-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#be123c;
+    --bg:#fbf4f5; --card:#ffffff; --fg:#20161a; --muted:#6b5560; --line:#f0e2e5; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#140b0e; --card:#1e1317; --fg:#f5ecef; --muted:#a88d96; --line:#2d1e23; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:640px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#9f1239);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:640px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.78rem;color:var(--muted);margin-bottom:5px;font-weight:600}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .field{margin-bottom:14px}
+  input{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem}
+  .sex{display:flex;gap:6px}
+  .sex button{flex:1;padding:9px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;cursor:pointer;font:inherit}
+  .sex button.active{background:var(--c);color:#fff;border-color:var(--c)}
+  .primary{text-align:center;margin-bottom:8px}
+  .primary .v{font-size:3rem;font-weight:800;color:var(--c);line-height:1}
+  .primary .u{color:var(--muted);font-size:.85rem}
+  .cat{display:inline-block;margin-top:8px;padding:5px 16px;border-radius:999px;color:#fff;font-weight:700}
+  table{width:100%;border-collapse:collapse;font-size:.92rem;margin-top:10px}
+  th,td{padding:8px;border-bottom:1px solid var(--line);text-align:right}
+  th:first-child,td:first-child{text-align:left}
+  th{color:var(--muted);font-weight:600;font-size:.72rem;text-transform:uppercase}
+  td.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:640px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.8rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🫀</div>
+    <div><h1>QTc</h1><div class="sub">Corrected QT interval</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div class="field"><label for="qt">QT interval (ms)</label><input type="number" id="qt" value="400" min="1" step="1"></div>
+      <div class="field"><label for="hr">Heart rate (bpm)</label><input type="number" id="hr" value="60" min="1" step="1"></div>
+    </div>
+    <div class="field"><label>Sex (for the normal threshold)</label>
+      <div class="sex"><button id="sMale" class="active" type="button">Male</button><button id="sFemale" type="button">Female</button></div>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card">
+    <div class="primary"><div class="v" id="bazett">—</div><div class="u">QTc (Bazett), ms</div><div><span class="cat" id="cat"></span></div></div>
+    <table id="tbl"><thead><tr><th>Formula</th><th>QTc (ms)</th></tr></thead><tbody></tbody></table>
+  </div>
+</main>
+<footer>
+  QTc corrects the measured QT interval for heart rate. Bazett is most common but over-corrects at fast rates; Fridericia and Framingham are steadier. Informational only — <strong>not medical advice</strong>. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/qtc">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  // QT in ms, HR in bpm. RR interval in seconds = 60 / HR.
+  function rrSeconds(hr){
+    const h = Number(hr);
+    if(!Number.isFinite(h) || h <= 0) throw new Error('heart rate must be > 0');
+    return 60 / h;
+  }
+  function chkQt(qt){
+    const q = Number(qt);
+    if(!Number.isFinite(q) || q <= 0) throw new Error('QT must be > 0');
+    return q;
+  }
+
+  const bazett      = (qt, hr) => chkQt(qt) / Math.sqrt(rrSeconds(hr));
+  const fridericia  = (qt, hr) => chkQt(qt) / Math.cbrt(rrSeconds(hr));
+  const framingham  = (qt, hr) => chkQt(qt) + 154 * (1 - rrSeconds(hr));
+  const hodges      = (qt, hr) => chkQt(qt) + 1.75 * (Number(hr) - 60);
+
+  function correctAll(qt, hr){
+    return { bazett: bazett(qt, hr), fridericia: fridericia(qt, hr), framingham: framingham(qt, hr), hodges: hodges(qt, hr) };
+  }
+
+  // Prolongation category for a QTc (ms), sex-aware normal threshold.
+  function category(qtc, sex){
+    const q = Number(qtc);
+    const upper = sex === 'female' ? 460 : 450;
+    if(q < upper) return { name: 'Normal', color: '#16a34a' };
+    if(q < 480)   return { name: 'Borderline', color: '#ca8a04' };
+    if(q < 500)   return { name: 'Prolonged', color: '#ea580c' };
+    return { name: 'Markedly prolonged (>500)', color: '#dc2626' };
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('bazett')){
+    const $ = id => document.getElementById(id);
+    let sex = 'male';
+    const r = n => Math.round(n);
+
+    function render(){
+      try{
+        const qt = $('qt').value, hr = $('hr').value;
+        const all = correctAll(qt, hr);
+        const cat = category(all.bazett, sex);
+        $('bazett').textContent = r(all.bazett);
+        $('cat').textContent = cat.name;
+        $('cat').style.background = cat.color;
+        $('tbl').querySelector('tbody').innerHTML = [
+          ['Bazett', all.bazett], ['Fridericia', all.fridericia], ['Framingham', all.framingham], ['Hodges', all.hodges]
+        ].map(([k, v]) => `<tr><td>${k}</td><td class="mono">${r(v)}</td></tr>`).join('');
+        $('err').textContent = '';
+      }catch(e){ $('bazett').textContent = '—'; $('cat').textContent = ''; $('tbl').querySelector('tbody').innerHTML = ''; $('err').textContent = e.message; }
+    }
+    function setSex(s){ sex = s; $('sMale').classList.toggle('active', s === 'male'); $('sFemale').classList.toggle('active', s === 'female'); render(); }
+    $('sMale').addEventListener('click', () => setSex('male'));
+    $('sFemale').addEventListener('click', () => setSex('female'));
+    ['qt', 'hr'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('qtc-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { rrSeconds, bazett, fridericia, framingham, hodges, correctAll, category };
+</script>
+</body>
+</html>

@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>eGFR — CKD-EPI 2021 Kidney Function Calculator</title>
+<meta name="description" content="Estimate glomerular filtration rate (eGFR) from serum creatinine using the race-free CKD-EPI 2021 equation, and see the CKD stage. 100% offline, informational only.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('egfr-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#0e7490;
+    --bg:#f1f8fa; --card:#ffffff; --fg:#121e22; --muted:#54666c; --line:#d9eaee; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#08151a; --card:#0f1e24; --fg:#e7f4f7; --muted:#82a1aa; --line:#1a2c33; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:640px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#155e75);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:640px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  .field{margin-bottom:14px}
+  .field:last-child{margin-bottom:0}
+  input{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem}
+  .units{display:flex;gap:6px;margin-bottom:14px}
+  .units button,.sex button{flex:1;padding:9px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;cursor:pointer;font:inherit}
+  .units button.active,.sex button.active{background:var(--c);color:#fff;border-color:var(--c)}
+  .sex{display:flex;gap:6px}
+  .out{text-align:center}
+  .big{font-size:3rem;font-weight:800;color:var(--c);line-height:1}
+  .unit{color:var(--muted);font-size:.85rem}
+  .stage{display:inline-block;margin-top:12px;padding:5px 16px;border-radius:999px;color:#fff;font-weight:700}
+  .stageDesc{color:var(--muted);font-size:.9rem;margin-top:8px}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:640px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.8rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🫘</div>
+    <div><h1>eGFR</h1><div class="sub">CKD-EPI 2021 kidney function</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label>Serum creatinine unit</label>
+    <div class="units">
+      <button id="uMg" class="active" type="button">mg/dL</button>
+      <button id="uUm" type="button">µmol/L</button>
+    </div>
+    <div class="field"><label for="scr">Serum creatinine (<span id="scrUnit">mg/dL</span>)</label><input type="number" id="scr" value="1.1" step="0.01" min="0"></div>
+    <div class="field"><label for="age">Age (years)</label><input type="number" id="age" value="55" step="1" min="1"></div>
+    <div class="field"><label>Sex</label>
+      <div class="sex">
+        <button id="sMale" class="active" type="button">Male</button>
+        <button id="sFemale" type="button">Female</button>
+      </div>
+    </div>
+  </div>
+  <div class="card out">
+    <div class="big" id="val">—</div>
+    <div class="unit">mL/min/1.73m²</div>
+    <div><span class="stage" id="stage"></span></div>
+    <div class="stageDesc" id="stageDesc"></div>
+    <div class="err" id="err"></div>
+  </div>
+</main>
+<footer>
+  Uses the <strong>CKD-EPI 2021</strong> creatinine equation (race-free), the current U.S. standard. Informational only — <strong>not medical advice</strong>; eGFR is one input a clinician interprets in context. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/egfr">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  const UMOL_PER_MGDL = 88.42;   // 1 mg/dL creatinine = 88.42 µmol/L
+
+  // CKD-EPI 2021 (creatinine, race-free). Scr in mg/dL, age in years.
+  function egfr(scrMgDl, age, sex){
+    const scr = Number(scrMgDl), a = Number(age);
+    if(!Number.isFinite(scr) || !Number.isFinite(a)) throw new Error('enter numbers');
+    if(scr <= 0) throw new Error('creatinine must be > 0');
+    if(a <= 0) throw new Error('age must be > 0');
+    const female = sex === 'female';
+    if(sex !== 'female' && sex !== 'male') throw new Error('sex must be male or female');
+    const kappa = female ? 0.7 : 0.9;
+    const alpha = female ? -0.241 : -0.302;
+    const ratio = scr / kappa;
+    const val = 142
+      * Math.pow(Math.min(ratio, 1), alpha)
+      * Math.pow(Math.max(ratio, 1), -1.200)
+      * Math.pow(0.9938, a)
+      * (female ? 1.012 : 1);
+    return val;
+  }
+
+  // Convenience: accepts µmol/L too.
+  function egfrFrom(value, unit, age, sex){
+    const scrMgDl = unit === 'umol' ? Number(value) / UMOL_PER_MGDL : Number(value);
+    return egfr(scrMgDl, age, sex);
+  }
+
+  const STAGES = [
+    { min: 90,  stage: 'G1',  label: 'Normal or high' },
+    { min: 60,  stage: 'G2',  label: 'Mildly decreased' },
+    { min: 45,  stage: 'G3a', label: 'Mild–moderate decrease' },
+    { min: 30,  stage: 'G3b', label: 'Moderate–severe decrease' },
+    { min: 15,  stage: 'G4',  label: 'Severely decreased' },
+    { min: 0,   stage: 'G5',  label: 'Kidney failure' }
+  ];
+  function stage(value){
+    return STAGES.find(s => Number(value) >= s.min);
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('val')){
+    const $ = id => document.getElementById(id);
+    const COLORS = { G1:'#16a34a', G2:'#65a30d', G3a:'#ca8a04', G3b:'#ea580c', G4:'#dc2626', G5:'#991b1b' };
+    let unit = 'mg', sex = 'male';
+
+    function render(){
+      try{
+        const v = egfrFrom($('scr').value, unit === 'mg' ? 'mgdl' : 'umol', $('age').value, sex);
+        const s = stage(v);
+        $('val').textContent = Math.round(v);
+        $('stage').textContent = 'Stage ' + s.stage;
+        $('stage').style.background = COLORS[s.stage];
+        $('stageDesc').textContent = s.label;
+        $('err').textContent = '';
+      }catch(e){
+        $('val').textContent = '—'; $('stage').textContent = ''; $('stageDesc').textContent = '';
+        $('err').textContent = e.message;
+      }
+    }
+    function setUnit(u){ unit = u; $('uMg').classList.toggle('active', u === 'mg'); $('uUm').classList.toggle('active', u === 'um'); $('scrUnit').textContent = u === 'mg' ? 'mg/dL' : 'µmol/L'; render(); }
+    function setSex(s){ sex = s; $('sMale').classList.toggle('active', s === 'male'); $('sFemale').classList.toggle('active', s === 'female'); render(); }
+    $('uMg').addEventListener('click', () => setUnit('mg'));
+    $('uUm').addEventListener('click', () => setUnit('um'));
+    $('sMale').addEventListener('click', () => setSex('male'));
+    $('sFemale').addEventListener('click', () => setSex('female'));
+    ['scr', 'age'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('egfr-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { UMOL_PER_MGDL, egfr, egfrFrom, stage };
+</script>
+</body>
+</html>

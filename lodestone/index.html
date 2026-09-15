@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lodestone — iron filings field sandbox</title>
+<style>
+  :root{ --bg:#07080c; --panel:#12141c; --ink:#e8ecf4; --dim:#8792a8; --accent:#ffb454; --line:#232838; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; overflow:hidden; }
+  #stage{ position:fixed; inset:0; touch-action:none; cursor:crosshair; display:block; }
+  #bar{ position:fixed; left:50%; top:14px; transform:translateX(-50%); z-index:10;
+    display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center;
+    max-width:calc(100% - 24px);
+    background:rgba(18,20,28,.82); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+    border:1px solid var(--line); border-radius:14px; padding:9px 12px;
+    box-shadow:0 10px 40px rgba(0,0,0,.5); }
+  .brand{ font-weight:700; letter-spacing:.5px; margin-right:4px; display:flex; align-items:center; gap:7px; }
+  .brand b{ color:var(--accent); }
+  .dot{ width:12px; height:12px; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, #ff8b6b, #b53a1e); box-shadow:0 0 10px #ff6a4a99; }
+  button,select{ font:inherit; font-size:13px; color:var(--ink); background:#1c2030;
+    border:1px solid var(--line); border-radius:9px; padding:6px 11px; cursor:pointer;
+    transition:.12s background,.12s border-color; }
+  button:hover,select:hover{ background:#262c40; border-color:#3a4258; }
+  button:active{ transform:translateY(1px); }
+  button.on{ border-color:var(--accent); color:var(--accent); }
+  .sep{ width:1px; height:24px; background:var(--line); margin:0 2px; }
+  label.slider{ display:flex; align-items:center; gap:7px; font-size:12px; color:var(--dim); }
+  input[type=range]{ width:96px; accent-color:var(--accent); }
+  #densityVal{ min-width:18px; text-align:right; color:var(--ink); font-variant-numeric:tabular-nums; }
+  #hint{ position:fixed; left:50%; bottom:14px; transform:translateX(-50%); z-index:10;
+    font-size:12px; color:var(--dim); background:rgba(18,20,28,.7); padding:6px 12px;
+    border-radius:14px; border:1px solid var(--line); pointer-events:none; text-align:center;
+    max-width:calc(100% - 24px); line-height:1.5; }
+  @media (min-width:760px){ #hint{ white-space:nowrap; border-radius:20px; } }
+  #toast{ position:fixed; left:50%; top:64px; transform:translateX(-50%) translateY(-8px); z-index:20;
+    background:var(--accent); color:#1a1206; font-weight:600; font-size:13px; padding:8px 16px;
+    border-radius:10px; opacity:0; pointer-events:none; transition:.25s; }
+  #toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div id="bar">
+  <span class="brand"><span class="dot"></span>Lode<b>stone</b></span>
+  <button id="addBar">+ Bar magnet</button>
+  <button id="addN">+ N pole</button>
+  <button id="addS">+ S pole</button>
+  <div class="sep"></div>
+  <select id="preset" title="Load a preset layout">
+    <option value="">Presets…</option>
+    <option value="bar">Single bar magnet</option>
+    <option value="dipole">Dipole pair (N↔S)</option>
+    <option value="repel">Like poles (N↔N)</option>
+    <option value="horseshoe">Horseshoe</option>
+    <option value="quad">Quadrupole</option>
+  </select>
+  <div class="sep"></div>
+  <label class="slider">Filings<input id="density" type="range" min="16" max="72" value="40"><span id="densityVal">40</span></label>
+  <button id="compass">Compass grid</button>
+  <div class="sep"></div>
+  <button id="share">Copy link</button>
+  <button id="png">Save PNG</button>
+  <button id="clear">Clear</button>
+</div>
+<div id="hint">Drag a magnet to reshape the field · double-click (or double-tap) to flip polarity · scroll over a bar to rotate it · right-click (or long-press) to remove</div>
+<div id="toast"></div>
+<script>
+"use strict";
+const cv = document.getElementById('stage'), ctx = cv.getContext('2d');
+const off = document.createElement('canvas'), octx = off.getContext('2d');
+let W, H, DPR = Math.min(2, window.devicePixelRatio || 1);
+
+// ---- state ----
+let magnets = [];            // {type:'bar'|'pole', x, y, ang, pol, str}
+let density = 40, showCompass = false, dragging = null, dragOff = {x:0,y:0}, needFull = true;
+
+// A magnet is modeled as one (pole) or two (bar) magnetic point charges.
+function poles(m){
+  if (m.type === 'pole') return [{x:m.x, y:m.y, q:m.pol * m.str}];
+  const dx = Math.cos(m.ang) * m.len * 0.5, dy = Math.sin(m.ang) * m.len * 0.5;
+  return [ {x:m.x+dx, y:m.y+dy, q:+m.pol*m.str}, {x:m.x-dx, y:m.y-dy, q:-m.pol*m.str} ];
+}
+// Superposed field from all poles: B = Σ q·r̂ / r²  (2D magnetic-charge model).
+function field(px, py){
+  let bx = 0, by = 0;
+  for (const m of magnets) for (const p of poles(m)){
+    let rx = px - p.x, ry = py - p.y, r2 = rx*rx + ry*ry;
+    if (r2 < 64) r2 = 64;                       // clamp the 1/r² singularity
+    const r = Math.sqrt(r2), inv = p.q / (r2 * r) * 4200;
+    bx += rx * inv; by += ry * inv;
+  }
+  return { bx, by, mag: Math.hypot(bx, by) };
+}
+
+// ---- streamline tracer (RK2, direction field) ----
+function step(x, y, h){
+  const a = field(x, y); if (a.mag < 1e-6) return null;
+  let ux = a.bx/a.mag, uy = a.by/a.mag;
+  const b = field(x + ux*h*0.5, y + uy*h*0.5); if (b.mag < 1e-6) return null;
+  return { x: x + (b.bx/b.mag)*h, y: y + (b.by/b.mag)*h };
+}
+function trace(sx, sy, steps, h, dir){
+  const pts = [{x:sx, y:sy}]; let x = sx, y = sy;
+  for (let i = 0; i < steps; i++){
+    const n = step(x, y, h*dir); if (!n) break;
+    if (n.x < -40 || n.x > W+40 || n.y < -40 || n.y > H+40) break;
+    x = n.x; y = n.y; pts.push(n);
+  }
+  return pts;
+}
+
+// deterministic pseudo-random in [0,1) from two integer grid indices
+function hash(a, b){ const s = Math.sin(a*12.9898 + b*78.233) * 43758.5453; return s - Math.floor(s); }
+
+// ---- field render (offscreen) ----
+function renderField(full){
+  octx.clearRect(0,0,W,H);
+  octx.globalCompositeOperation = 'source-over';
+  // soft radial glow around each pole → depth near the magnets
+  for (const m of magnets) for (const p of poles(m)){
+    const warm = p.q > 0, r = 120;
+    const g = octx.createRadialGradient(p.x, p.y, 2, p.x, p.y, r);
+    const c = warm ? '255,150,110' : '120,170,255';
+    g.addColorStop(0, `rgba(${c},.30)`); g.addColorStop(1, `rgba(${c},0)`);
+    octx.fillStyle = g; octx.beginPath(); octx.arc(p.x, p.y, r, 0, 7); octx.fill();
+  }
+  octx.globalCompositeOperation = 'lighter';
+  octx.lineCap = 'round';
+  const spacing = full ? (5200 / density + 8) : (5200 / density + 8) * 1.8;
+  const steps = full ? 9 : 5, h = full ? 6 : 8;
+  let ci = 0;
+  for (let gx = spacing*0.5; gx < W; gx += spacing, ci++){
+    let cj = 0;
+    for (let gy = spacing*0.5; gy < H; gy += spacing, cj++){
+      // deterministic per-cell jitter so filings stay put across renders (no shimmer while dragging)
+      const jx = gx + (hash(ci, cj)-0.5)*spacing, jy = gy + (hash(cj, ci*7+31)-0.5)*spacing;
+      const f = field(jx, jy); if (f.mag < 0.02) continue;
+      const bright = Math.min(1, Math.pow(f.mag, 0.42) * 0.9);
+      const len = 0.7 + Math.min(1.6, 0.9/(f.mag*0.5 + 0.35)); // weaker field → longer whiskers
+      const fwd = trace(jx, jy, Math.round(steps*len), h, 1),
+            bwd = trace(jx, jy, Math.round(steps*len), h, -1);
+      const pts = bwd.reverse().concat(fwd.slice(1));
+      if (pts.length < 2) continue;
+      octx.beginPath(); octx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) octx.lineTo(pts[i].x, pts[i].y);
+      const a = 0.10 + bright*0.55;
+      octx.strokeStyle = `rgba(${218+bright*37|0},${226+bright*20|0},${240},${a})`;
+      octx.lineWidth = 0.6 + bright*1.1; octx.stroke();
+    }
+  }
+  octx.globalCompositeOperation = 'source-over';
+  if (full) drawSeparatrices();     // neutral points + accent field lines (only on the crisp pass)
+}
+
+// ---- neutral-point (B→0) detection + separatrices ----
+function findNulls(){
+  if (magnets.length < 2) return [];
+  const nulls = [], N = 46, sx = W/N, sy = H/N;
+  for (let i = 1; i < N; i++) for (let j = 1; j < N; j++){
+    const x = i*sx, y = j*sy, m0 = field(x,y).mag;
+    if (m0 > 0.06) continue;
+    let lo = true;
+    for (let a = -1; a <= 1 && lo; a++) for (let b = -1; b <= 1; b++){
+      if (!a && !b) continue;
+      if (field(x+a*sx*0.6, y+b*sy*0.6).mag < m0){ lo = false; break; }
+    }
+    if (lo) nulls.push({x, y});
+  }
+  // merge near-duplicates
+  const out = [];
+  for (const n of nulls) if (!out.some(o => Math.hypot(o.x-n.x, o.y-n.y) < 40)) out.push(n);
+  return out;
+}
+function drawSeparatrices(){
+  const nulls = findNulls();
+  for (const n of nulls){
+    octx.globalCompositeOperation = 'lighter';
+    for (let k = 0; k < 8; k++){
+      const a = k/8 * Math.PI*2, ox = n.x + Math.cos(a)*10, oy = n.y + Math.sin(a)*10;
+      for (const dir of [1,-1]){
+        const pts = trace(ox, oy, 60, 5, dir); if (pts.length < 2) continue;
+        octx.beginPath(); octx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) octx.lineTo(pts[i].x, pts[i].y);
+        octx.strokeStyle = 'rgba(255,180,84,.32)'; octx.lineWidth = 1; octx.stroke();
+      }
+    }
+    octx.globalCompositeOperation = 'source-over';
+    octx.strokeStyle = 'rgba(255,180,84,.95)'; octx.lineWidth = 1.6;
+    octx.beginPath(); octx.arc(n.x, n.y, 7, 0, 7); octx.stroke();
+    octx.beginPath(); octx.moveTo(n.x-4,n.y-4); octx.lineTo(n.x+4,n.y+4);
+    octx.moveTo(n.x+4,n.y-4); octx.lineTo(n.x-4,n.y+4); octx.stroke();
+  }
+}
+
+// ---- overlays on the main canvas ----
+function drawCompass(){
+  const s = 46; ctx.save();
+  for (let x = s*0.6; x < W; x += s) for (let y = s*0.6; y < H; y += s){
+    const f = field(x, y); if (f.mag < 1e-4) continue;
+    const a = Math.atan2(f.by, f.bx), L = 13;
+    ctx.translate(x, y); ctx.rotate(a);
+    ctx.strokeStyle = 'rgba(150,165,195,.4)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(-L,0); ctx.lineTo(L,0); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,120,90,.9)';                 // north tip
+    ctx.beginPath(); ctx.moveTo(L,0); ctx.lineTo(L-5,-3); ctx.lineTo(L-5,3); ctx.fill();
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  ctx.restore();
+}
+function drawMagnets(){
+  for (const m of magnets){
+    ctx.save(); ctx.translate(m.x, m.y);
+    if (m.type === 'bar'){
+      ctx.rotate(m.ang);
+      const L = m.len, w = 20;
+      const nx = m.pol > 0 ? L/2 : -L/2;                   // north (+q) end — matches the warm pole glow
+      ctx.fillStyle = '#2b57c9'; roundRect(-L/2, -w/2, L, w, 5); ctx.fill();      // whole bar = south / cool
+      ctx.fillStyle = '#c33a26'; roundRect(nx>0?0:-L/2, -w/2, L/2, w, 5); ctx.fill(); // north half = warm
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 13px sans-serif';
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('N', nx>0? L/2-9 : -L/2+9, 0);
+      ctx.fillText('S', nx>0? -L/2+9 : L/2-9, 0);
+    } else {
+      const warm = m.pol > 0;
+      ctx.fillStyle = warm ? '#c33a26' : '#2b57c9';
+      ctx.beginPath(); ctx.arc(0,0,13,0,7); ctx.fill();
+      ctx.fillStyle='#fff'; ctx.font='bold 14px sans-serif';
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(warm?'N':'S', 0, 1);
+    }
+    ctx.restore();
+  }
+}
+function roundRect(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+
+// ---- compose ----
+function compose(){
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.fillStyle = '#07080c'; ctx.fillRect(0,0,W,H);
+  ctx.drawImage(off, 0, 0, W, H);
+  if (showCompass) drawCompass();
+  drawMagnets();
+  if (magnets.length === 0) drawEmptyState();
+}
+function draw(){ if (needFull){ renderField(true); needFull = false; } compose(); }
+function retraceGhost(){ renderField(false); compose(); }   // fast path during drag (no full retrace)
+function drawEmptyState(){
+  ctx.save(); ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(232,236,244,.55)'; ctx.font = '600 20px -apple-system,Segoe UI,Roboto,sans-serif';
+  ctx.fillText('Add a magnet or pick a preset to begin', W/2, H/2 - 8);
+  ctx.fillStyle = 'rgba(135,146,168,.8)'; ctx.font = '14px -apple-system,Segoe UI,Roboto,sans-serif';
+  ctx.fillText('use the “+ Bar magnet” button or the Presets menu above', W/2, H/2 + 20);
+  ctx.restore();
+}
+
+// ---- hit testing / interaction ----
+function hit(x, y){
+  for (let i = magnets.length-1; i >= 0; i--){
+    const m = magnets[i];
+    const r = m.type === 'bar' ? m.len*0.55 : 16;
+    if (Math.hypot(x-m.x, y-m.y) < r) return i;
+  }
+  return -1;
+}
+function evtPos(e){ return { x: e.clientX, y: e.clientY }; }
+function flip(i){ magnets[i].pol *= -1; needFull = true; draw(); syncHash(); }
+function remove(i){ magnets.splice(i,1); needFull = true; draw(); syncHash(); }
+
+let downPos = null, movedFar = false, lpTimer = null, lastTap = 0, lastTapPos = {x:0,y:0};
+
+cv.addEventListener('pointerdown', e => {
+  if (e.button === 2) return;                       // right-click handled by contextmenu
+  const p = evtPos(e), i = hit(p.x, p.y);
+  downPos = p; movedFar = false;
+  if (i >= 0){
+    dragging = i; dragOff = {x:p.x-magnets[i].x, y:p.y-magnets[i].y};
+    cv.setPointerCapture(e.pointerId); cv.style.cursor = 'grabbing';
+    if (e.pointerType === 'touch'){                 // long-press to remove (touch has no right-click)
+      clearTimeout(lpTimer);
+      lpTimer = setTimeout(() => { if (!movedFar && dragging === i){ dragging = null; remove(i); } }, 550);
+    }
+  }
+});
+cv.addEventListener('pointermove', e => {
+  const p = evtPos(e);
+  if (dragging === null){                           // hover affordance: show magnets are grabbable
+    cv.style.cursor = hit(p.x, p.y) >= 0 ? 'grab' : 'crosshair';
+    return;
+  }
+  if (downPos && Math.hypot(p.x-downPos.x, p.y-downPos.y) > 6){ movedFar = true; clearTimeout(lpTimer); }
+  const m = magnets[dragging];
+  m.x = p.x - dragOff.x; m.y = p.y - dragOff.y; retraceGhost();
+});
+function endDrag(e){
+  clearTimeout(lpTimer);
+  if (dragging !== null){
+    const i = dragging, wasTouch = e && e.pointerType === 'touch';
+    dragging = null; cv.style.cursor = 'crosshair';
+    if (wasTouch && !movedFar){                      // double-tap to flip (touch equivalent of dblclick)
+      const p = evtPos(e), now = Date.now();
+      if (now - lastTap < 300 && Math.hypot(p.x-lastTapPos.x, p.y-lastTapPos.y) < 24){ lastTap = 0; flip(i); return; }
+      lastTap = now; lastTapPos = p;
+    }
+    needFull = true; draw(); syncHash();
+  }
+}
+cv.addEventListener('pointerup', endDrag);
+cv.addEventListener('pointercancel', endDrag);
+cv.addEventListener('dblclick', e => {
+  const p = evtPos(e), i = hit(p.x, p.y); if (i >= 0) flip(i);
+});
+cv.addEventListener('contextmenu', e => {
+  e.preventDefault(); const i = hit(e.clientX, e.clientY); if (i >= 0) remove(i);
+});
+cv.addEventListener('wheel', e => {                  // scroll over a bar magnet to rotate it
+  const i = hit(e.clientX, e.clientY);
+  if (i >= 0 && magnets[i].type === 'bar'){
+    e.preventDefault();
+    magnets[i].ang += (e.deltaY > 0 ? 1 : -1) * 0.12;
+    needFull = true; draw(); syncHash();
+  }
+}, { passive: false });
+
+// ---- toolbar ----
+function add(m){ magnets.push(m); needFull = true; draw(); syncHash(); }
+document.getElementById('addBar').onclick = () =>
+  add({type:'bar', x:W/2+(Math.random()-.5)*80, y:H/2+(Math.random()-.5)*80, ang:0, pol:1, str:1, len:150});
+document.getElementById('addN').onclick = () =>
+  add({type:'pole', x:W/2+(Math.random()-.5)*80, y:H/2+(Math.random()-.5)*80, ang:0, pol:1, str:1});
+document.getElementById('addS').onclick = () =>
+  add({type:'pole', x:W/2+(Math.random()-.5)*80, y:H/2+(Math.random()-.5)*80, ang:0, pol:-1, str:1});
+document.getElementById('clear').onclick = () => { magnets = []; needFull = true; draw(); syncHash(); };
+document.getElementById('density').oninput = e => {
+  density = +e.target.value; document.getElementById('densityVal').textContent = density;
+  needFull = true; draw(); };
+const compassBtn = document.getElementById('compass');
+compassBtn.onclick = () => { showCompass = !showCompass; compassBtn.classList.toggle('on', showCompass); draw(); };
+document.getElementById('share').onclick = () => {
+  syncHash(); const link = location.href;
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(link)
+      .then(() => toast('Link copied — share your field'))
+      .catch(() => prompt('Copy this link to share your field', link));
+  } else { prompt('Copy this link to share your field', link); }
+};
+document.getElementById('png').onclick = () => {
+  if (needFull){ renderField(true); needFull = false; compose(); }  // export exactly what is on screen
+  const tmp = document.createElement('canvas'); tmp.width = W*DPR; tmp.height = H*DPR;
+  const tc = tmp.getContext('2d');
+  tc.fillStyle = '#07080c'; tc.fillRect(0,0,tmp.width,tmp.height);
+  tc.drawImage(off, 0, 0, tmp.width, tmp.height);
+  const a = document.createElement('a'); a.download = 'lodestone-field.png';
+  a.href = tmp.toDataURL('image/png'); a.click(); toast('Saved PNG wallpaper'); };
+document.getElementById('preset').onchange = e => { if (e.target.value){ loadPreset(e.target.value); e.target.value=''; } };
+
+function toast(msg){ const t = document.getElementById('toast'); t.textContent = msg;
+  t.classList.add('show'); clearTimeout(toast._t); toast._t = setTimeout(()=>t.classList.remove('show'), 1600); }
+
+// ---- presets (built from relative coordinates) ----
+function loadPreset(k){
+  const cx = W/2, cy = H/2;
+  if (k==='bar') magnets = [{type:'bar',x:cx,y:cy,ang:0,pol:1,str:1,len:170}];
+  else if (k==='dipole') magnets = [
+    {type:'bar',x:cx-140,y:cy,ang:0,pol:1,str:1,len:130},
+    {type:'bar',x:cx+140,y:cy,ang:0,pol:-1,str:1,len:130}];
+  else if (k==='repel') magnets = [
+    {type:'bar',x:cx-150,y:cy,ang:0,pol:1,str:1,len:130},
+    {type:'bar',x:cx+150,y:cy,ang:Math.PI,pol:1,str:1,len:130}];
+  else if (k==='horseshoe') magnets = [
+    {type:'pole',x:cx-70,y:cy+40,ang:0,pol:1,str:1.2},
+    {type:'pole',x:cx+70,y:cy+40,ang:0,pol:-1,str:1.2}];
+  else if (k==='quad') magnets = [
+    {type:'pole',x:cx-120,y:cy-90,ang:0,pol:1,str:1},
+    {type:'pole',x:cx+120,y:cy-90,ang:0,pol:-1,str:1},
+    {type:'pole',x:cx-120,y:cy+90,ang:0,pol:-1,str:1},
+    {type:'pole',x:cx+120,y:cy+90,ang:0,pol:1,str:1}];
+  needFull = true; draw(); syncHash();
+}
+
+// ---- URL-hash serialize / deserialize (coords normalized to canvas) ----
+function syncHash(){
+  const s = magnets.map(m => [
+    m.type==='bar'?'b':'p', (m.x/W).toFixed(4), (m.y/H).toFixed(4),
+    m.ang.toFixed(3), m.pol, m.str, m.len||0
+  ].join(',')).join(';');
+  history.replaceState(null, '', '#' + (s ? encodeURIComponent(s) : ''));
+}
+function loadHash(){
+  let raw; try { raw = decodeURIComponent(location.hash.slice(1)); } catch(_){ return false; }
+  if (!raw) return false;
+  const fin = Number.isFinite;
+  const parsed = raw.split(';').filter(Boolean).map(seg => {
+    const [t,x,y,a,pol,str,len] = seg.split(',');
+    const type = t==='b' ? 'bar' : 'pole';
+    return { type, x:+x*W, y:+y*H, ang:+a, pol:+pol, str:+str, len:+len };
+  }).filter(m =>
+    fin(m.x) && fin(m.y) && fin(m.ang) && fin(m.pol) && m.pol !== 0 &&
+    fin(m.str) && m.str > 0 && (m.type !== 'bar' || (fin(m.len) && m.len > 0))
+  );
+  magnets = parsed;
+  return magnets.length > 0;   // malformed / truncated hash → false, so loadPreset('dipole') runs
+}
+
+// ---- resize / boot ----
+function resize(){
+  const oldW = W, oldH = H;
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = W*DPR; cv.height = H*DPR; cv.style.width = W+'px'; cv.style.height = H+'px';
+  off.width = W*DPR; off.height = H*DPR; octx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  if (oldW && magnets.length) for (const m of magnets){ m.x *= W/oldW; m.y *= H/oldH; }
+  needFull = true; draw();
+}
+window.addEventListener('resize', resize);
+W = window.innerWidth; H = window.innerHeight;
+cv.width = W*DPR; cv.height = H*DPR; cv.style.width = W+'px'; cv.style.height = H+'px';
+off.width = W*DPR; off.height = H*DPR; octx.setTransform(DPR,0,0,DPR,0,0);
+if (!loadHash()) loadPreset('dipole');
+resize();
+</script>
+</body>
+</html>

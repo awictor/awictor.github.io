@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blob — CSS Blob Shape Generator</title>
+<meta name="description" content="Generate organic blob shapes with CSS border-radius: randomize, fine-tune each corner, set size and color, and copy the code. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('blob-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#d946ef;
+    --bg:#f7f5f8; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e8e2ea; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#150f16; --card:#1e1720; --fg:#f2ecf4; --muted:#a596a8; --line:#332839; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:880px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:60% 40% 55% 45% / 45% 55% 45% 55%;background:linear-gradient(135deg,var(--c),#a21caf);display:flex;align-items:center;justify-content:center;font-size:20px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:880px;margin:0 auto;padding:12px 20px 60px;display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:720px){main{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow)}
+  .stage{display:flex;align-items:center;justify-content:center;min-height:300px}
+  .blob{background:linear-gradient(135deg,var(--c),#a21caf);transition:border-radius .2s}
+  label{display:block;font-size:.82rem;color:var(--muted);margin:12px 0 6px;font-weight:600}
+  label:first-child{margin-top:0}
+  input[type=range]{width:100%;accent-color:var(--c)}
+  input[type=color]{width:100%;height:38px;border:1px solid var(--line);border-radius:8px;background:var(--bg);cursor:pointer}
+  .corners{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:6px}
+  .corners input{width:100%}
+  pre{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px;overflow:auto;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.8rem;margin:14px 0 0;white-space:pre-wrap}
+  .btns{display:flex;gap:10px;margin-top:12px}
+  button.act{background:var(--c);color:#fff;border:0;border-radius:8px;padding:10px 16px;cursor:pointer;font:inherit;font-weight:600}
+  button.ghost{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:10px 16px;cursor:pointer;font:inherit}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:880px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🫟</div>
+    <div><h1>Blob</h1><div class="sub">Organic CSS blob shape generator</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="stage"><div class="blob" id="blob"></div></div>
+  </div>
+  <div class="card">
+    <label>Corners (border-radius %)</label>
+    <div class="corners" id="corners"></div>
+    <label for="size">Size</label>
+    <input type="range" id="size" min="80" max="300" value="220">
+    <label for="color">Color</label>
+    <input type="color" id="color" value="#d946ef">
+    <div class="btns">
+      <button class="act" id="rand" type="button">🎲 Randomize</button>
+      <button class="ghost" id="copy" type="button">Copy CSS</button>
+    </div>
+    <pre id="out"></pre>
+  </div>
+</main>
+<footer>
+  100% offline. Nothing leaves your browser. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/blob-gen">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  // 8 percentages → the CSS border-radius shorthand "a% b% c% d% / e% f% g% h%"
+  function blobRadius(values){
+    if(!Array.isArray(values) || values.length !== 8) throw new Error('need exactly 8 values');
+    for(const v of values){
+      const n = Number(v);
+      if(!(n >= 0 && n <= 100)) throw new Error('each value must be between 0 and 100');
+    }
+    const p = values.map(v => Number(v) + '%');
+    return `${p[0]} ${p[1]} ${p[2]} ${p[3]} / ${p[4]} ${p[5]} ${p[6]} ${p[7]}`;
+  }
+
+  // deterministic when given an rng; values land in a pleasing 25–75% band
+  function randomBlob(rng = Math.random){
+    const out = [];
+    for(let i = 0; i < 8; i++) out.push(Math.round(25 + rng() * 50));
+    return out;
+  }
+
+  function blobCss(values, opts = {}){
+    const size = opts.size == null ? 220 : opts.size;
+    const color = opts.color || '#d946ef';
+    return [
+      `width: ${size}px;`,
+      `height: ${size}px;`,
+      `border-radius: ${blobRadius(values)};`,
+      `background: ${color};`
+    ].join('\n');
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('blob')){
+    const $ = id => document.getElementById(id);
+    let values = [60, 40, 55, 45, 45, 55, 45, 55];
+
+    function buildCorners(){
+      $('corners').innerHTML = '';
+      values.forEach((v, i) => {
+        const inp = document.createElement('input');
+        inp.type = 'range'; inp.min = '0'; inp.max = '100'; inp.value = v; inp.dataset.i = i;
+        inp.addEventListener('input', () => { values[i] = +inp.value; render(); });
+        $('corners').appendChild(inp);
+      });
+    }
+
+    function syncCorners(){
+      [...$('corners').querySelectorAll('input')].forEach((inp, i) => { inp.value = values[i]; });
+    }
+
+    function render(){
+      let css;
+      try{ css = blobCss(values, { size: +$('size').value, color: $('color').value }); }catch(e){ return; }
+      const b = $('blob');
+      b.style.width = $('size').value + 'px';
+      b.style.height = $('size').value + 'px';
+      b.style.borderRadius = blobRadius(values);
+      b.style.background = `linear-gradient(135deg, ${$('color').value}, ${$('color').value})`;
+      $('out').textContent = css;
+    }
+
+    $('rand').addEventListener('click', () => { values = randomBlob(); syncCorners(); render(); });
+    $('copy').addEventListener('click', async () => {
+      try{ await navigator.clipboard.writeText($('out').textContent); $('copy').textContent = 'Copied!'; setTimeout(() => $('copy').textContent = 'Copy CSS', 1200); }catch(e){}
+    });
+    ['size', 'color'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('blob-theme', cur); }catch(e){}
+    });
+
+    buildCorners();
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { blobRadius, randomBlob, blobCss };
+</script>
+</body>
+</html>

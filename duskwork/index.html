@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Duskwork — procedural night-city skylines</title>
+<style>
+  :root{ --bg:#0a0c14; --panel:#12151f; --line:#232a3a; --ink:#e7ecf5; --dim:#8a93a8; --acc:#ffb14e; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family:ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif; overflow:hidden; }
+  #wrap{ display:flex; height:100%; }
+  #stage{ flex:1; display:flex; align-items:center; justify-content:center; padding:18px; min-width:0; }
+  #view{ max-width:100%; max-height:100%; border-radius:10px; box-shadow:0 20px 60px rgba(0,0,0,.6); }
+  #panel{ width:296px; background:var(--panel); border-left:1px solid var(--line);
+    padding:16px 16px 22px; overflow-y:auto; display:flex; flex-direction:column; gap:14px; }
+  h1{ font-size:19px; margin:0; letter-spacing:.5px; }
+  h1 b{ color:var(--acc); }
+  .sub{ font-size:11px; color:var(--dim); margin:-8px 0 2px; line-height:1.4; }
+  .row{ display:flex; flex-direction:column; gap:5px; }
+  label{ font-size:11px; color:var(--dim); display:flex; justify-content:space-between; }
+  label span{ color:var(--ink); font-variant-numeric:tabular-nums; }
+  input[type=range]{ width:100%; accent-color:var(--acc); height:4px; }
+  .seedrow{ display:flex; gap:6px; }
+  input[type=text]{ flex:1; min-width:0; background:#0b0e17; border:1px solid var(--line);
+    color:var(--ink); border-radius:6px; padding:7px 9px; font-family:ui-monospace,monospace; font-size:12px; }
+  button{ background:#1b2130; color:var(--ink); border:1px solid var(--line); border-radius:6px;
+    padding:8px 10px; font-size:12px; cursor:pointer; transition:.12s; }
+  button:hover{ background:#242c3e; border-color:#33405a; }
+  button.acc{ background:var(--acc); color:#241300; border-color:var(--acc); font-weight:600; }
+  button.acc:hover{ filter:brightness(1.08); }
+  .btns{ display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  .chk{ flex-direction:row; align-items:center; gap:8px; cursor:pointer; }
+  .chk input{ accent-color:var(--acc); }
+  .divider{ height:1px; background:var(--line); margin:2px 0; }
+  .gtitle{ font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:1px; }
+  #gallery{ display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  #gallery canvas{ width:100%; border-radius:5px; cursor:pointer; border:1px solid var(--line);
+    display:block; transition:.12s; }
+  #gallery canvas:hover{ border-color:var(--acc); transform:translateY(-1px); }
+  .foot{ font-size:10px; color:var(--dim); line-height:1.5; }
+  kbd{ background:#0b0e17; border:1px solid var(--line); border-radius:3px; padding:0 4px; font-size:10px; }
+  #gallery canvas.active{ border-color:var(--acc); box-shadow:0 0 0 1px var(--acc); }
+  @media (max-width:720px){
+    html,body{ overflow:auto; }
+    #wrap{ flex-direction:column; height:auto; min-height:100%; }
+    #stage{ padding:12px; min-height:56vh; }
+    #panel{ width:100%; border-left:none; border-top:1px solid var(--line); max-height:none; }
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="stage"><canvas id="view"></canvas></div>
+  <div id="panel">
+    <h1>Dusk<b>work</b></h1>
+    <div class="sub">Procedurally generated night-city skylines, reflected in still water. Every scene is deterministic from its seed.</div>
+
+    <div class="row">
+      <label>Seed</label>
+      <div class="seedrow">
+        <input type="text" id="seed" spellcheck="false">
+        <button id="reseed" title="Reseed (R)">↻</button>
+      </div>
+    </div>
+
+    <div class="row"><label>Time &amp; weather <span id="vTod">dusk</span></label>
+      <input type="range" id="tod" min="0" max="1000" value="180"></div>
+    <div class="row"><label>City density <span id="vDen"></span></label>
+      <input type="range" id="den" min="14" max="46" value="26"></div>
+    <div class="row"><label>Depth layers <span id="vLay"></span></label>
+      <input type="range" id="lay" min="3" max="5" value="4"></div>
+    <div class="row"><label>Max tower height <span id="vHt"></span></label>
+      <input type="range" id="ht" min="30" max="90" value="62"></div>
+    <div class="row"><label>Lit-window ratio <span id="vLit"></span></label>
+      <input type="range" id="lit" min="5" max="80" value="42"></div>
+    <div class="row"><label>Moon phase <span id="vMoon"></span></label>
+      <input type="range" id="moon" min="0" max="1000" value="640"></div>
+
+    <label class="chk"><input type="checkbox" id="anim"> Living-city animation</label>
+    <div class="divider"></div>
+
+    <div class="btns">
+      <button id="png">Export PNG</button>
+      <button id="postcard" class="acc">Postcard 3×</button>
+    </div>
+    <label class="chk"><input type="checkbox" id="capOn" checked> Burn caption bar</label>
+
+    <div class="divider"></div>
+    <div class="gtitle">Curated gallery</div>
+    <div id="gallery"></div>
+
+    <div class="foot">
+      <kbd>R</kbd> reseed · <kbd>←</kbd><kbd>→</kbd> density · <kbd>↑</kbd><kbd>↓</kbd> height.
+      Seed &amp; settings live in the URL — copy the address bar to share a city.
+    </div>
+  </div>
+</div>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const view=$("view"), vx=view.getContext("2d");
+const GALLERY=[104729,271828,314159,161803,424242,777001,90210,555512];
+
+// ---- seeded PRNG (mulberry32) + string hash ----
+function hstr(s){let h=1779033703^s.length;for(let i=0;i<s.length;i++){h=Math.imul(h^s.charCodeAt(i),3432918353);h=h<<13|h>>>19;}return (h>>>0);}
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function whash(a,b,c,s){let h=(a*73856093)^(b*19349663)^(c*83492791)^s;h=Math.imul(h^h>>>13,0x85ebca6b);return((h^h>>>16)>>>0)/4294967296;}
+
+// ---- palette keyframes: dusk -> midnight -> fog/rain ----
+const KF=[
+ {top:'#241539',mid:'#6b2f63',low:'#f0894e',haze:'#e8a06a',glow:'#ffd39a',moon:'#fff3d6',water:'#2a1c30',glowW:'#ffcf87',neon:['#ff5d7a','#4de3ff','#ffd24d'],stars:.5,moonB:.75,fog:.14,clar:.78},
+ {top:'#04060f',mid:'#0b1230',low:'#152049',haze:'#1c2c5c',glow:'#33508f',moon:'#f2f6ff',water:'#050a14',glowW:'#ffd08a',neon:['#ff4d90','#3df0ff','#b96bff'],stars:1,moonB:1,fog:.08,clar:.9},
+ {top:'#3b414c',mid:'#565d6a',low:'#727a86',haze:'#8b929e',glow:'#a4aab4',moon:'#c8ccd2',water:'#3c424b',glowW:'#cdbfa6',neon:['#c46a80','#6fb6c4','#c7b46a'],stars:.15,moonB:.4,fog:.55,clar:.3}
+];
+const hx=c=>[parseInt(c.slice(1,3),16),parseInt(c.slice(3,5),16),parseInt(c.slice(5,7),16)];
+const rgb=a=>`rgb(${a[0]|0},${a[1]|0},${a[2]|0})`;
+const rgba=(a,al)=>`rgba(${a[0]|0},${a[1]|0},${a[2]|0},${al})`;
+function mixc(x,y,t){x=hx(x);y=hx(y);return[x[0]+(y[0]-x[0])*t,x[1]+(y[1]-x[1])*t,x[2]+(y[2]-x[2])*t];}
+function palAt(tod){const seg=tod<.5?0:1,t=tod<.5?tod/.5:(tod-.5)/.5,a=KF[seg],b=KF[seg+1];
+  const p={};for(const k of['top','mid','low','haze','glow','moon','water','glowW'])p[k]=mixc(a[k],b[k],t);
+  for(const k of['stars','moonB','fog','clar'])p[k]=a[k]+(b[k]-a[k])*t;
+  p.neon=a.neon.map((n,i)=>mixc(n,b.neon[i],t));return p;}
+
+// ---- state ----
+const S={seed:'duskwork',tod:.18,den:26,lay:4,ht:.62,lit:.42,moon:.64,anim:false,cap:true};
+
+// ---- city generation (resolution-independent, normalized coords) ----
+function genCity(){
+  const rng=mulberry32(hstr(S.seed));
+  const layers=[];
+  for(let L=0;L<S.lay;L++){
+    const near=S.lay<2?1:L/(S.lay-1);          // 0 far .. 1 near
+    const towers=[];
+    let x=-0.02+rng()*0.02;
+    const baseW=0.012+(1-near)*0.006+near*0.02;
+    const maxH=(0.14+near*(S.ht))*(0.55+near*0.6);
+    const count=Math.round(S.den*(0.7+near*0.9));
+    for(let i=0;i<count && x<1.03;i++){
+      const w=baseW*(0.6+rng()*1.5);
+      const h=maxH*(0.32+Math.pow(rng(),1.6)*0.85);
+      const roofR=rng();
+      const t={x,w,h,seed:(rng()*1e9)|0,
+        roof: roofR<.2?'tank':roofR<.37?'antenna':roofR<.5?'spire':roofR<.63?'setback':roofR<.72?'billboard':'flat',
+        neon: near>0.35 && rng()<0.16*near,
+        neonC:(rng()*3)|0, litJit:rng()};
+      towers.push(t);
+      x+=w*(1.02+rng()*0.5);
+    }
+    layers.push({near,towers,maxH});
+  }
+  // moon
+  const moon={x:0.12+rng()*0.76,y:0.1+rng()*0.24,r:0.03+rng()*0.02,phase:S.moon};
+  // foreground silhouette (crane/bridge), strong parallax
+  const fg={kind:rng()<.5?'crane':'bridge',x:0.05+rng()*0.6,scale:0.8+rng()*0.6,flip:rng()<.5};
+  // rare hero features
+  const hero={search:rng()<.28,searchX:rng(),strobe:rng()<.35,strobeX:rng()};
+  // drifting clouds
+  const clouds=[];for(let i=0;i<4;i++)clouds.push({x:rng(),y:0.05+rng()*0.32,w:0.18+rng()*0.22,s:0.4+rng()*0.7});
+  return {layers,moon,fg,hero,clouds,rng};
+}
+
+// cached radial bloom sprite
+let bloomSprite=(()=>{const c=document.createElement('canvas');c.width=c.height=128;const g=c.getContext('2d');
+  const rg=g.createRadialGradient(64,64,0,64,64,64);rg.addColorStop(0,'#fff');rg.addColorStop(.4,'rgba(255,255,255,.5)');rg.addColorStop(1,'rgba(255,255,255,0)');
+  g.fillStyle=rg;g.fillRect(0,0,128,128);return c;})();
+
+function bloom(ctx,x,y,r,col,alpha){ctx.save();ctx.globalCompositeOperation='lighter';ctx.globalAlpha=alpha;
+  ctx.fillStyle=rgb(col);ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.fill();
+  ctx.globalAlpha=alpha*0.7;ctx.drawImage(bloomSprite,x-r,y-r,r*2,r*2);ctx.restore();}
+
+// draw the above-water scene into ctx sized W x wy
+function drawUpper(ctx,W,wy,city,P,t){
+  // sky gradient
+  const g=ctx.createLinearGradient(0,0,0,wy);
+  g.addColorStop(0,rgb(P.top));g.addColorStop(.5,rgb(P.mid));g.addColorStop(1,rgb(P.low));
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,wy);
+  // horizon glow
+  const hg=ctx.createLinearGradient(0,wy*0.55,0,wy);
+  hg.addColorStop(0,rgba(P.glow,0));hg.addColorStop(1,rgba(P.glow,0.5));
+  ctx.fillStyle=hg;ctx.fillRect(0,wy*0.55,W,wy*0.45);
+  // stars — thin near horizon
+  const sr=mulberry32(hstr(S.seed)^0x5151);const ns=Math.round(320*P.stars);
+  ctx.fillStyle='#fff';
+  for(let i=0;i<ns;i++){const sx=sr()*W,sy=sr()*wy*0.82;const near=sy/(wy*0.82);
+    if(sr()>near*0.85+0.1)continue;let a=(0.3+sr()*0.7)*(1-near*0.6);
+    if(S.anim)a*=0.6+0.4*Math.sin(t*2+i*1.3);ctx.globalAlpha=Math.max(0,a)*P.stars;
+    ctx.fillRect(sx,sy,sr()<.15?2:1,1);}
+  ctx.globalAlpha=1;
+  // moon with phase + halo
+  const m=city.moon,mx=m.x*W,my=m.y*wy,mr=m.r*W;
+  bloom(ctx,mx,my,mr*4.5,P.moon,0.28*P.moonB);
+  ctx.save();ctx.beginPath();ctx.arc(mx,my,mr,0,7);ctx.clip();
+  ctx.fillStyle=rgba(P.moon,0.95*P.moonB);ctx.fillRect(mx-mr,my-mr,mr*2,mr*2);
+  // shadow overlap: maximal at ph 0/1 ('new'), zero at ph 0.5 ('full') — matches labels
+  const ph=m.phase;const off=(ph<0.5?-1:1)*(1-Math.abs(ph-0.5)*2)*2*mr;
+  ctx.fillStyle=rgba(P.top,0.9);ctx.beginPath();ctx.arc(mx+off,my,mr*1.02,0,7);ctx.fill();ctx.restore();
+  // drifting neon-tinted clouds
+  for(const c of city.clouds){let cx=c.x*W;if(S.anim)cx=((c.x+t*0.012*c.s)%1.2-0.1)*W;
+    const tint=P.neon[(c.x*3|0)%3];ctx.save();ctx.globalAlpha=(0.05+P.fog*0.22);
+    ctx.fillStyle=rgba(P.haze,0.5);ctx.beginPath();
+    ctx.ellipse(cx,c.y*wy,c.w*W,c.w*W*0.32,0,0,7);ctx.fill();
+    ctx.globalAlpha=0.05;ctx.fillStyle=rgb(tint);ctx.beginPath();
+    ctx.ellipse(cx,c.y*wy,c.w*W*0.7,c.w*W*0.22,0,0,7);ctx.fill();ctx.restore();}
+  // searchlight hero beam
+  if(city.hero.search){const bx=city.hero.searchX*W,by=wy*0.5;
+    const ang=(-Math.PI/2)+Math.sin((S.anim?t:1.2)*0.5)*0.5;
+    ctx.save();ctx.globalCompositeOperation='lighter';ctx.translate(bx,by);ctx.rotate(ang);
+    const bg=ctx.createLinearGradient(0,0,0,-wy);bg.addColorStop(0,rgba(P.glowW,0.22));bg.addColorStop(1,rgba(P.glowW,0));
+    ctx.fillStyle=bg;ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(-W*0.06,-wy);ctx.lineTo(W*0.06,-wy);ctx.fill();ctx.restore();}
+
+  // skyline layers, far -> near
+  for(const layer of city.layers){
+    const near=layer.near, base=wy;
+    const shade=mixc(P.haze,'#05060c',0.3+near*0.65);       // near = darker
+    const hazeA=(1-near)*(0.35+P.fog*0.5);
+    // group window fills by bucket for batching
+    for(const tw of layer.towers){
+      const x=tw.x*W, w=tw.w*W, h=tw.h*wy, ty=base-h;
+      if(w<0.5)continue;
+      ctx.fillStyle=rgb(shade);ctx.fillRect(x,ty,w,h);
+      drawRoof(ctx,tw,x,ty,w,shade,P,near,t);
+      // windows (skip tiny far towers)
+      if(w>4 && near>0.15){
+        const cols=Math.max(1,Math.floor(w/6)), rows=Math.max(1,Math.floor(h/8));
+        const cw=w/cols, rh=h/rows, pad=Math.min(cw,rh)*0.22;
+        const litRatio=S.lit*(0.75+P.clar*0.4)*(0.6+near*0.6);
+        for(let cx=0;cx<cols;cx++)for(let ry=0;ry<rows;ry++){
+          const hv=whash(tw.seed,cx,ry,hstr(S.seed));
+          let on=hv<litRatio;
+          let tw2=hv;
+          if(S.anim){const fl=Math.sin(t*3+hv*100);if(hv>litRatio-0.04&&hv<litRatio+0.04)on=fl>0;}
+          if(!on)continue;
+          const wc=mixc(P.glowW, P.neon[(tw2*3|0)%3], tw2<0.06?0.5:0); // rare colored window
+          let a=(0.45+tw2*0.55)*(0.5+near*0.6);
+          if(S.anim)a*=0.75+0.25*Math.sin(t*2+tw2*80);
+          ctx.globalAlpha=Math.min(1,a);ctx.fillStyle=rgb(wc);
+          ctx.fillRect(x+cx*cw+pad, ty+ry*rh+pad, cw-pad*2, rh-pad*2);
+          if(tw2>0.985){bloom(ctx,x+cx*cw+cw/2,ty+ry*rh+rh/2,cw*2.2,wc,0.5*near);}
+        }
+        ctx.globalAlpha=1;
+      }
+      // neon sign bloom
+      if(tw.neon){const col=P.neon[tw.neonC],nx=x+w*0.5,ny=ty+h*0.12+w*0.3;
+        let na=0.5;if(S.anim)na*=0.8+0.2*Math.sin(t*4+tw.seed);
+        ctx.save();ctx.globalCompositeOperation='lighter';ctx.globalAlpha=Math.min(1,na);
+        ctx.fillStyle=rgb(col);ctx.fillRect(nx-w*0.32,ny-2,w*0.64,4);ctx.restore();
+        bloom(ctx,nx,ny,w*2.2,col,0.4*na);}
+    }
+    // atmospheric haze wash over this layer
+    if(hazeA>0.01){const hgg=ctx.createLinearGradient(0,wy*0.3,0,wy);
+      hgg.addColorStop(0,rgba(P.haze,hazeA*0.2));hgg.addColorStop(1,rgba(P.haze,hazeA));
+      ctx.fillStyle=hgg;ctx.fillRect(0,wy*0.3,W,wy*0.7);}
+  }
+  // radio-tower strobe hero
+  if(city.hero.strobe){const rx=city.hero.strobeX*W,ryv=wy-wy*(0.4+city.hero.strobeX*0.3);
+    const blink=S.anim?(Math.sin(t*6)>0.7?1:0.15):0.9;
+    bloom(ctx,rx,ryv,14,[255,60,60],0.7*blink);}
+  // foreground silhouette (strong parallax, near-black)
+  drawForeground(ctx,W,wy,city.fg,P,t);
+  // aircraft beacon
+  if(S.anim){const ax=((t*0.03)%1.2-0.1)*W, ay=wy*0.16;
+    if(ax>0&&ax<W){bloom(ctx,ax,ay,7,[255,80,80],Math.sin(t*5)>0?0.8:0.05);}}
+}
+
+function drawRoof(ctx,tw,x,ty,w,shade,P,near,t){
+  ctx.fillStyle=rgb(shade);
+  const cx=x+w/2;
+  if(tw.roof==='tank'){ctx.fillRect(x+w*0.2,ty-w*0.5,w*0.35,w*0.5);}
+  else if(tw.roof==='antenna'){ctx.fillRect(cx-1,ty-w*1.6,2,w*1.6);
+    if(near>0.5){let a=0.7;if(S.anim)a=Math.sin(t*4+tw.seed)>0?0.9:0.1;bloom(ctx,cx,ty-w*1.6,6,[255,90,90],a*0.6);}}
+  else if(tw.roof==='spire'){ctx.beginPath();ctx.moveTo(cx-w*0.18,ty);ctx.lineTo(cx,ty-w*0.9);ctx.lineTo(cx+w*0.18,ty);ctx.fill();}
+  else if(tw.roof==='setback'){ctx.fillRect(x+w*0.15,ty-w*0.4,w*0.7,w*0.4);}
+  else if(tw.roof==='billboard'){ctx.fillRect(x,ty-w*0.55,w,w*0.1);ctx.fillRect(x,ty-w*0.55,w*0.06,w*0.55);ctx.fillRect(x+w*0.94,ty-w*0.55,w*0.06,w*0.55);}
+}
+
+function drawForeground(ctx,W,wy,fg,P,t){
+  ctx.save();ctx.fillStyle='#020306';ctx.strokeStyle='#020306';
+  const s=fg.scale;
+  if(fg.kind==='crane'){
+    const bx=fg.x*W, by=wy, mastH=wy*0.55*s;
+    ctx.fillRect(bx-3,by-mastH,6,mastH);                    // mast
+    ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(bx-W*0.14*s,by-mastH+8);ctx.lineTo(bx+W*0.08*s,by-mastH+8);ctx.stroke();  // jib
+    ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(bx,by-mastH);ctx.lineTo(bx-W*0.13*s,by-mastH+8);ctx.lineTo(bx,by-mastH+8);ctx.stroke();
+    const hookX=bx-W*0.10*s;ctx.fillRect(hookX-1,by-mastH+8,2,wy*0.18*s);   // cable
+    let a=Math.sin((S.anim?t:1.5)*3)>0?0.9:0.2;bloom(ctx,bx,by-mastH,7,[255,120,60],a*0.6);
+  } else {                                                   // bridge
+    const y=wy-wy*0.06;ctx.fillRect(0,y,W,wy*0.06);
+    ctx.lineWidth=4;ctx.beginPath();
+    for(let i=0;i<=6;i++){const px=W*i/6;ctx.moveTo(px,y);ctx.lineTo(px,y-Math.sin(i/6*Math.PI)*wy*0.22*s);}
+    ctx.stroke();
+    ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(0,y-wy*0.02);
+    for(let i=0;i<=6;i++)ctx.lineTo(W*i/6,y-Math.sin(i/6*Math.PI)*wy*0.22*s);ctx.stroke();
+    for(let i=1;i<6;i++)bloom(ctx,W*i/6,y-Math.sin(i/6*Math.PI)*wy*0.22*s,5,P.glowW,0.5);
+  }
+  ctx.restore();
+}
+
+// cached offscreen canvas for the above-water scene — resized only when dimensions change,
+// so animation frames don't churn a full-resolution allocation through the GC each tick
+const _up=document.createElement('canvas');
+// full compositor: renders scene at W x H into ctx
+function draw(ctx,W,H,city,t){
+  const P=palAt(S.tod);
+  const wy=Math.round(H*0.70);
+  // upper scene rendered to reused temp for reflection reuse
+  const up=_up;if(up.width!==W||up.height!==wy){up.width=W;up.height=wy;}
+  drawUpper(up.getContext('2d'),W,wy,city,P,t);
+  ctx.drawImage(up,0,0);
+  // water base
+  const wg=ctx.createLinearGradient(0,wy,0,H);
+  wg.addColorStop(0,rgb(P.water));wg.addColorStop(1,rgb(mixc(P.water,'#000000',0.4)));
+  ctx.fillStyle=wg;ctx.fillRect(0,wy,W,H-wy);
+  // rippled reflection: copy flipped rows with sinusoidal x-shift, dimmed
+  const refH=H-wy, clar=P.clar;
+  ctx.save();ctx.globalAlpha=0.42*clar+0.12;
+  const step=2;
+  for(let ry=0;ry<refH;ry+=step){
+    const srcY=wy-1-ry*(0.62+(1-clar)*0.2);                 // compress reflection a touch
+    if(srcY<0)break;
+    const amp=(1.5+ry*0.05)*(1.4-clar);
+    const shift=Math.sin(ry*0.09+(S.anim?t*1.2:0)+ry*0.004*W)*amp;
+    ctx.drawImage(up, 0,srcY|0, W,step, shift, wy+ry, W,step);
+  }
+  ctx.restore();
+  // horizontal banding + water tint wash for harbor feel
+  ctx.save();ctx.globalAlpha=0.5;ctx.fillStyle=rgba(P.water,0.55);ctx.fillRect(0,wy,W,refH);
+  ctx.globalAlpha=0.12;ctx.fillStyle=rgb(P.glow);
+  for(let ry=0;ry<refH;ry+=4)ctx.fillRect(0,wy+ry,W,1.2);ctx.restore();
+  // waterline highlight
+  ctx.fillStyle=rgba(P.glow,0.4);ctx.fillRect(0,wy-1,W,2);
+  // subtle vignette
+  const vg=ctx.createRadialGradient(W/2,H*0.45,H*0.3,W/2,H*0.5,H*0.85);
+  vg.addColorStop(0,'rgba(0,0,0,0)');vg.addColorStop(1,'rgba(0,0,0,0.4)');
+  ctx.fillStyle=vg;ctx.fillRect(0,0,W,H);
+}
+
+// ---- render loop ----
+let city=genCity(), t0=performance.now(), raf=null;
+function sizeCanvas(){
+  const st=$("stage"),pad=36;
+  const aw=st.clientWidth-pad, ah=st.clientHeight-pad, ar=16/10;
+  let w=aw, h=w/ar; if(h>ah){h=ah;w=h*ar;}
+  view.width=Math.round(w*Math.min(2,devicePixelRatio||1));
+  view.height=Math.round(view.width/ar);
+  view.style.width=w+"px";view.style.height=h+"px";
+}
+function frame(){const t=(performance.now()-t0)/1000;draw(vx,view.width,view.height,city,t);
+  if(S.anim)raf=requestAnimationFrame(frame);}
+function render(){if(raf)cancelAnimationFrame(raf);raf=null;
+  if(S.anim){t0=performance.now();frame();}else draw(vx,view.width,view.height,city,1.2);}
+function rebuild(){city=genCity();render();scheduleGallery();}
+
+// ---- controls ----
+function fmtTod(v){return v<0.34?'dusk':v<0.5?'twilight':v<0.66?'midnight':v<0.82?'haze':'fog / rain';}
+function syncLabels(){
+  $("vTod").textContent=fmtTod(S.tod);
+  $("vDen").textContent=S.den; $("vLay").textContent=S.lay;
+  $("vHt").textContent=Math.round(S.ht*100)+'%'; $("vLit").textContent=Math.round(S.lit*100)+'%';
+  $("vMoon").textContent=(S.moon<.06||S.moon>.94)?'new':(S.moon>.44&&S.moon<.56)?'full':S.moon<.5?'waxing':'waning';
+}
+function bindRange(id,to,from){const el=$(id);el.addEventListener('input',()=>{S[to]=from(+el.value);syncLabels();writeHash();rebuild();});}
+bindRange('tod','tod',v=>v/1000);
+bindRange('den','den',v=>v);
+bindRange('lay','lay',v=>v);
+bindRange('ht','ht',v=>v/100);
+bindRange('lit','lit',v=>v/100);
+bindRange('moon','moon',v=>v/1000);
+$("anim").addEventListener('change',e=>{S.anim=e.target.checked;render();});
+$("seed").addEventListener('change',e=>{S.seed=e.target.value||'duskwork';writeHash();rebuild();});
+$("reseed").addEventListener('click',reseed);
+$("capOn").addEventListener('change',e=>{S.cap=e.target.checked;});
+function reseed(){S.seed=Math.floor(Math.random()*1e9).toString(36);$("seed").value=S.seed;writeHash();rebuild();}
+
+// ---- export ----
+function renderTo(scale){const W=1600*scale/2|0,H=W/1.6|0;
+  const c=document.createElement('canvas');c.width=W;c.height=H;
+  const a=S.anim;S.anim=false;draw(c.getContext('2d'),W,H,city,1.2);S.anim=a;return c;}
+function download(canvas,name){const a=document.createElement('a');a.download=name;a.href=canvas.toDataURL('image/png');a.click();}
+// strip filesystem-reserved chars from free-text seeds before using in a download name
+const safe=s=>String(s).replace(/[^a-z0-9._-]+/gi,'_').slice(0,60)||'city';
+// brief visual acknowledgment on the heavy export actions
+function withFeedback(btn,fn){const orig=btn.textContent;btn.disabled=true;btn.textContent='Rendering…';
+  setTimeout(()=>{try{fn();}finally{btn.textContent='Saved ✓';
+    setTimeout(()=>{btn.textContent=orig;btn.disabled=false;},900);}},20);}
+$("png").addEventListener('click',()=>withFeedback($("png"),()=>download(renderTo(2),`duskwork_${safe(S.seed)}.png`)));
+$("postcard").addEventListener('click',()=>withFeedback($("postcard"),()=>{
+  const base=renderTo(3), W=base.width, barH=S.cap?Math.round(W*0.05):0;
+  const c=document.createElement('canvas');c.width=W;c.height=base.height+barH;
+  const g=c.getContext('2d');g.drawImage(base,0,0);
+  if(S.cap){g.fillStyle='#0a0c14';g.fillRect(0,base.height,W,barH);
+    g.fillStyle='#ffb14e';g.font=`600 ${barH*0.42|0}px ui-sans-serif,system-ui,sans-serif`;g.textBaseline='middle';
+    g.fillText('DUSKWORK',W*0.03,base.height+barH/2);
+    g.fillStyle='#8a93a8';g.font=`${barH*0.34|0}px ui-monospace,monospace`;g.textAlign='right';
+    g.fillText(`seed ${S.seed} · ${fmtTod(S.tod)}`,W*0.97,base.height+barH/2);}
+  download(c,`duskwork_postcard_${safe(S.seed)}.png`);
+}));
+
+// ---- gallery thumbnails ----
+let galCanvases=[],galTimer=null;
+function buildGallery(){const g=$("gallery");g.innerHTML='';galCanvases=[];
+  GALLERY.forEach(seed=>{const cv=document.createElement('canvas');cv.width=248;cv.height=155;
+    cv.title='seed '+seed;cv.dataset.seed=seed;
+    cv.addEventListener('click',()=>{S.seed=String(seed);$("seed").value=S.seed;writeHash();rebuild();});
+    g.appendChild(cv);galCanvases.push(cv);});
+  renderGallery();}
+// redraw thumbnails under the CURRENT settings so previews match what a click will load,
+// and flag the one matching the active seed
+function renderGallery(){const saved=S.seed;
+  galCanvases.forEach(cv=>{S.seed=cv.dataset.seed;draw(cv.getContext('2d'),248,155,genCity(),1.2);
+    cv.classList.toggle('active',cv.dataset.seed===saved);});
+  S.seed=saved;}
+// debounced so dragging a slider doesn't repaint 8 thumbnails on every input event
+function scheduleGallery(){if(!galCanvases.length)return;clearTimeout(galTimer);galTimer=setTimeout(renderGallery,140);}
+
+// ---- keyboard ----
+addEventListener('keydown',e=>{
+  if(/input|textarea/i.test(e.target.tagName))return;
+  if(e.key==='r'||e.key==='R'){reseed();}
+  else if(e.key==='ArrowLeft'){$("den").value=S.den=Math.max(14,S.den-2);syncLabels();writeHash();rebuild();}
+  else if(e.key==='ArrowRight'){$("den").value=S.den=Math.min(46,S.den+2);syncLabels();writeHash();rebuild();}
+  else if(e.key==='ArrowUp'){S.ht=Math.min(0.9,S.ht+0.05);$("ht").value=S.ht*100;syncLabels();writeHash();rebuild();}
+  else if(e.key==='ArrowDown'){S.ht=Math.max(0.3,S.ht-0.05);$("ht").value=S.ht*100;syncLabels();writeHash();rebuild();}
+  else return; e.preventDefault();
+});
+
+// ---- URL hash ----
+function writeHash(){const p=new URLSearchParams();
+  p.set('s',S.seed);p.set('t',S.tod.toFixed(3));p.set('d',S.den);p.set('l',S.lay);
+  p.set('h',S.ht.toFixed(2));p.set('w',S.lit.toFixed(2));p.set('m',S.moon.toFixed(3));
+  history.replaceState(null,'','#'+p.toString());}
+function readHash(){const p=new URLSearchParams(location.hash.slice(1));if(!p.has('s'))return;
+  const num=(k,d)=>{const v=p.get(k);return v!=null&&v!==''&&isFinite(+v)?+v:d;}; // preserve legit 0
+  S.seed=p.get('s');S.tod=num('t',S.tod);S.den=num('d',S.den);S.lay=num('l',S.lay);
+  S.ht=num('h',S.ht);S.lit=num('w',S.lit);S.moon=num('m',S.moon);}
+function pushToUI(){$("seed").value=S.seed;$("tod").value=S.tod*1000;$("den").value=S.den;
+  $("lay").value=S.lay;$("ht").value=S.ht*100;$("lit").value=S.lit*100;$("moon").value=S.moon*1000;}
+
+// ---- init ----
+readHash();pushToUI();syncLabels();$("seed").value=S.seed;
+addEventListener('resize',()=>{sizeCanvas();render();});
+sizeCanvas();rebuild();buildGallery();writeHash();
+</script>
+</body>
+</html>

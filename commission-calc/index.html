@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Commission Calculator — flat & tiered sales commission</title>
+<meta name="description" content="Calculate sales commission — flat rate or tiered (marginal, bracket-style) — with the total payout and effective rate. Offline, no tracking.">
+<style>
+  :root{
+    --c:#15803d;
+    --bg:#f2f8f4; --card:#ffffff; --fg:#12201a; --muted:#586d63;
+    --line:#dceae2; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#0c140f; --card:#141d17; --fg:#e8f3ec; --muted:#8ea398;
+    --line:#233029; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:800px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.35rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:800px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .mode{display:flex;gap:8px;margin-bottom:16px}
+  .mode button{flex:1;padding:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);
+    border-radius:10px;cursor:pointer;font-weight:600}
+  .mode button.on{background:var(--c);color:#fff;border-color:var(--c)}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  input[type=number]{width:100%;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .tier{display:flex;gap:10px;align-items:end;margin-bottom:8px}
+  .tier .f{flex:1}
+  .rm{background:none;border:1px solid var(--line);color:var(--muted);border-radius:8px;cursor:pointer;padding:11px 12px;font-weight:700}
+  .add{background:var(--bg);border:1px dashed var(--line);color:var(--fg);border-radius:9px;padding:9px 14px;cursor:pointer;font-weight:600;margin-top:4px}
+  .results{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px}
+  @media(max-width:560px){.results{grid-template-columns:1fr}}
+  .stat{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:18px;text-align:center}
+  .stat .k{font-size:.76rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .stat .v{font-size:2rem;font-weight:800;color:var(--c);font-variant-numeric:tabular-nums;margin-top:4px}
+  h2{font-size:.95rem;margin:0 0 10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">💼</div>
+  <div>
+    <h1>Commission Calculator</h1>
+    <p>Flat or tiered sales commission</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="mode">
+      <button id="mFlat" class="on">Flat rate</button>
+      <button id="mTiered">Tiered</button>
+    </div>
+    <label for="sales">Total sales ($)</label>
+    <input type="number" id="sales" value="150000" step="any">
+    <div id="flatBox" style="margin-top:14px">
+      <label for="rate">Commission rate (%)</label>
+      <input type="number" id="rate" value="5" step="any">
+    </div>
+    <div id="tierBox" style="display:none;margin-top:14px">
+      <h2>Tiers (marginal, applied bracket-style)</h2>
+      <div id="tiers"></div>
+      <button class="add" id="addTier">+ Add tier</button>
+    </div>
+    <div class="results">
+      <div class="stat"><div class="k">Commission</div><div class="v" id="commission">—</div></div>
+      <div class="stat"><div class="k">Effective rate</div><div class="v" id="eff">—</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>How tiers work</h2>
+    <p class="note">Tiered commission is <b>marginal</b>, like tax brackets: each portion of sales within a tier earns that tier's rate. E.g. 5% up to $100k, then 10% above — on $150k you earn 5% × $100k + 10% × $50k = $10,000. Leave the top tier's "up to" blank for "and above".</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function toNum(x){ var n = Number(x); if(!isFinite(n)) throw new Error('inputs must be numbers'); return n; }
+  function flatCommission(sales, ratePct){ return toNum(sales) * toNum(ratePct) / 100; }
+  function tieredCommission(sales, tiers){
+    sales = toNum(sales);
+    var prev = 0, total = 0;
+    for(var i = 0; i < tiers.length; i++){
+      var cap = (tiers[i].upTo == null || tiers[i].upTo === '' || !isFinite(tiers[i].upTo)) ? Infinity : toNum(tiers[i].upTo);
+      var portion = Math.max(0, Math.min(sales, cap) - prev);
+      total += portion * toNum(tiers[i].rate) / 100;
+      prev = cap;
+      if(sales <= cap) break;
+    }
+    return total;
+  }
+  function effectiveRate(commission, sales){
+    sales = toNum(sales);
+    return sales === 0 ? 0 : toNum(commission) / sales * 100;
+  }
+
+  if(typeof module !== 'undefined') module.exports = { flatCommission:flatCommission, tieredCommission:tieredCommission, effectiveRate:effectiveRate };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var sales=document.getElementById('sales'), rate=document.getElementById('rate');
+    var mFlat=document.getElementById('mFlat'), mTiered=document.getElementById('mTiered');
+    var flatBox=document.getElementById('flatBox'), tierBox=document.getElementById('tierBox'), tiersHost=document.getElementById('tiers');
+    var mode='flat';
+    function addTier(upTo, r){
+      var d=document.createElement('div'); d.className='tier';
+      d.innerHTML = '<div class="f"><label>Up to ($, blank = ∞)</label><input type="number" step="any" value="'+(upTo==null?'':upTo)+'"></div>' +
+        '<div class="f"><label>Rate (%)</label><input type="number" step="any" value="'+(r||5)+'"></div>' +
+        '<button class="rm">×</button>';
+      d.querySelector('.rm').addEventListener('click', function(){ d.remove(); render(); });
+      d.querySelectorAll('input').forEach(function(el){ el.addEventListener('input', render); });
+      tiersHost.appendChild(d);
+    }
+    function tiers(){
+      return Array.from(tiersHost.querySelectorAll('.tier')).map(function(t){
+        var el=t.querySelectorAll('input');
+        return { upTo: el[0].value === '' ? Infinity : Number(el[0].value), rate: Number(el[1].value) };
+      });
+    }
+    var usd=function(x){ return '$' + Math.round(x).toLocaleString(); };
+    function render(){
+      try{
+        var c = mode==='flat' ? flatCommission(sales.value, rate.value) : tieredCommission(sales.value, tiers());
+        document.getElementById('commission').textContent = usd(c);
+        document.getElementById('eff').textContent = effectiveRate(c, sales.value).toFixed(2) + '%';
+      }catch(e){ document.getElementById('commission').textContent='—'; }
+    }
+    sales.addEventListener('input', render); rate.addEventListener('input', render);
+    document.getElementById('addTier').addEventListener('click', function(){ addTier('', 10); render(); });
+    mFlat.addEventListener('click', function(){ mode='flat'; mFlat.classList.add('on'); mTiered.classList.remove('on'); flatBox.style.display=''; tierBox.style.display='none'; render(); });
+    mTiered.addEventListener('click', function(){ mode='tiered'; mTiered.classList.add('on'); mFlat.classList.remove('on'); flatBox.style.display='none'; tierBox.style.display=''; render(); });
+    addTier(100000, 5); addTier('', 10); render();
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('comm-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('comm-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,1417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emberwake — The Long Ember of Cinderhaven</title>
+<meta name="description" content="A pocket-sized, zero-dependency engine for branching interactive fiction, shipped with an original lamplighter's tragedy you can win, lose, and replay a dozen ways.">
+<style>
+  :root{
+    --bg:#0c0a09; --bg2:#141010; --panel:#1a1512; --panel2:#221a15;
+    --ink:#e8dcc6; --ink-dim:#a8977c; --ink-faint:#93826a;
+    --ember:#ff7a37; --ember-soft:#f0a860; --ember-deep:#c74e1a;
+    --gold:#ffd27a; --frost:#8fb7d4; --blood:#d9534f;
+    --line:#2e2419; --ok:#8bbf6a; --warn:#e6b34a;
+    --shadow:0 8px 40px rgba(0,0,0,.6);
+    --mono:'Courier New',ui-monospace,monospace;
+    --serif:'Iowan Old Style','Palatino Linotype','Book Antiqua',Georgia,serif;
+    --sans:'Segoe UI',system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1200px 700px at 70% -10%, #2a1a0e 0%, transparent 55%),
+      radial-gradient(900px 600px at 10% 110%, #1a0f0a 0%, transparent 60%),
+      var(--bg);
+    color:var(--ink); font-family:var(--serif); line-height:1.65;
+    -webkit-font-smoothing:antialiased; overflow-x:hidden;
+  }
+  body::before{ /* vignette + flicker */
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:1;
+    background:radial-gradient(120% 120% at 50% 40%, transparent 55%, rgba(0,0,0,.55) 100%);
+    animation:flicker 7s infinite ease-in-out;
+  }
+  @keyframes flicker{0%,100%{opacity:.85}45%{opacity:1}55%{opacity:.9}70%{opacity:.97}}
+  @media (prefers-reduced-motion: reduce){ body::before{animation:none} }
+
+  header.topbar{
+    position:sticky; top:0; z-index:20; display:flex; align-items:center; gap:.6rem;
+    padding:.55rem .9rem; background:linear-gradient(180deg,rgba(12,10,9,.96),rgba(12,10,9,.7));
+    border-bottom:1px solid var(--line); backdrop-filter:blur(6px);
+  }
+  .brand{display:flex; align-items:center; gap:.5rem; margin-right:auto; min-width:0}
+  .brand .flame{width:22px;height:26px;flex:none;filter:drop-shadow(0 0 6px var(--ember))}
+  .brand h1{font-size:1.02rem; margin:0; letter-spacing:.04em; font-weight:600; color:var(--gold);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .brand small{color:var(--ink-faint); font-size:.72rem; font-family:var(--sans)}
+  .tools{display:flex; gap:.35rem; flex-wrap:wrap}
+  button.btn{
+    font-family:var(--sans); font-size:.78rem; color:var(--ink-dim); cursor:pointer;
+    background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:.4rem .6rem;
+    transition:.15s; white-space:nowrap;
+  }
+  button.btn:hover{color:var(--gold); border-color:var(--ember-deep); background:var(--panel2)}
+  button.btn.on{color:var(--gold); border-color:var(--ember); box-shadow:0 0 0 1px var(--ember-deep) inset}
+  button.btn:disabled{opacity:.4; cursor:not-allowed}
+
+  .wrap{display:grid; grid-template-columns:1fr 320px; gap:1.4rem; max-width:1180px; margin:0 auto; padding:1.4rem 1.2rem 4rem; position:relative; z-index:2}
+  @media (max-width:880px){ .wrap{grid-template-columns:1fr} }
+
+  /* Story column */
+  .stage{min-width:0}
+  .passage-title{font-size:1.55rem; margin:.2rem 0 1rem; color:var(--ember-soft); letter-spacing:.02em; font-weight:600;
+    text-shadow:0 0 24px rgba(255,122,55,.25); max-width:64ch}
+  #storyText{font-size:1.12rem; max-width:64ch}
+  .choices{max-width:64ch}
+  #storyText p{margin:0 0 1rem}
+  #storyText em{color:var(--ember-soft); font-style:italic}
+  #storyText strong{color:var(--gold); font-weight:600}
+  .reveal{opacity:0}
+  .reveal.shown{opacity:1; transition:opacity .5s ease}
+  .choices{margin-top:1.6rem; display:flex; flex-direction:column; gap:.6rem}
+  .choice{
+    text-align:left; font-family:var(--serif); font-size:1.02rem; color:var(--ink);
+    background:linear-gradient(180deg,var(--panel2),var(--panel)); border:1px solid var(--line);
+    border-left:3px solid var(--ember-deep); border-radius:9px; padding:.75rem .95rem; cursor:pointer;
+    transition:.16s; position:relative;
+  }
+  .choice:hover{border-left-color:var(--ember); color:var(--gold); transform:translateX(3px); box-shadow:-6px 0 24px -12px var(--ember)}
+  .choice .cnum{display:inline-block; min-width:1.2em; margin-right:.55rem; font-family:var(--mono); font-size:.82rem;
+    color:var(--ember-soft); font-weight:700}
+  .choice .hint{display:block; font-family:var(--sans); font-size:.72rem; color:var(--ink-faint); margin-top:.25rem}
+  .choice.locked{cursor:not-allowed; opacity:.55; border-left-color:var(--ink-faint)}
+  .choice.locked:hover{transform:none; color:var(--ink); box-shadow:none}
+  .ending-banner{display:inline-block; font-family:var(--sans); font-size:.72rem; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--ember); border:1px solid var(--ember-deep); border-radius:999px;
+    padding:.2rem .7rem; margin-bottom:.8rem}
+  .end-actions{display:flex; gap:.5rem; flex-wrap:wrap; margin-top:1.4rem}
+
+  /* Sidebar */
+  aside.side{display:flex; flex-direction:column; gap:1rem}
+  .card{background:linear-gradient(180deg,var(--panel),var(--bg2)); border:1px solid var(--line); border-radius:12px; padding:.9rem 1rem; box-shadow:var(--shadow)}
+  .card h2{font-family:var(--sans); font-size:.72rem; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-faint); margin:0 0 .7rem}
+  .meter{margin-bottom:.65rem}
+  .meter .lab{display:flex; justify-content:space-between; font-family:var(--sans); font-size:.78rem; color:var(--ink-dim); margin-bottom:.22rem}
+  .meter .lab b{color:var(--ink); font-weight:600}
+  .bar{height:9px; border-radius:6px; background:#0a0806; overflow:hidden; border:1px solid #241a12}
+  .bar > i{display:block; height:100%; border-radius:6px; transition:width .5s ease}
+  .inv{display:flex; flex-wrap:wrap; gap:.4rem; min-height:1.4rem}
+  .pill{font-family:var(--sans); font-size:.74rem; color:var(--gold); background:#1e1611; border:1px solid var(--ember-deep); border-radius:999px; padding:.18rem .6rem}
+  .empty{color:var(--ink-faint); font-family:var(--sans); font-size:.78rem; font-style:italic}
+  .gallery{display:flex; flex-direction:column; gap:.35rem}
+  .gitem{font-family:var(--sans); font-size:.8rem; display:flex; gap:.5rem; align-items:baseline}
+  .gitem .dot{width:8px;height:8px;border-radius:50%;flex:none;margin-top:.35rem}
+  .gitem.found .dot{background:var(--ember); box-shadow:0 0 8px var(--ember)}
+  .gitem.hidden .dot{background:#2a2018}
+  .gitem.found{color:var(--ink)} .gitem.hidden{color:var(--ink-faint)}
+  .completion{font-family:var(--sans); font-size:.75rem; color:var(--ink-dim); margin-top:.5rem}
+  .completion b{color:var(--gold)}
+
+  /* Overlays */
+  .overlay{position:fixed; inset:0; z-index:50; display:none; align-items:center; justify-content:center; padding:1.2rem;
+    background:rgba(6,4,3,.82); backdrop-filter:blur(4px)}
+  .overlay.show{display:flex}
+  .modal{background:linear-gradient(180deg,var(--panel),var(--bg2)); border:1px solid var(--line); border-radius:14px;
+    box-shadow:var(--shadow); width:min(960px,100%); max-height:90vh; overflow:auto; padding:1.2rem 1.3rem}
+  .modal h2{margin:.1rem 0 1rem; color:var(--gold); font-size:1.2rem}
+  .modal .x{float:right}
+  .row{display:flex; gap:.6rem; flex-wrap:wrap; align-items:center; margin:.6rem 0}
+  input.txt, textarea.ta{width:100%; font-family:var(--mono); font-size:.82rem; color:var(--ink); background:#0a0806;
+    border:1px solid var(--line); border-radius:8px; padding:.6rem}
+  textarea.ta{min-height:340px; resize:vertical; line-height:1.5}
+  .field{flex:1; min-width:180px}
+  label.lb{font-family:var(--sans); font-size:.75rem; color:var(--ink-dim); display:block; margin-bottom:.25rem}
+  .muted{color:var(--ink-faint); font-family:var(--sans); font-size:.82rem}
+  .kbd{font-family:var(--mono); background:#0a0806; border:1px solid var(--line); border-radius:5px; padding:.05rem .35rem; color:var(--ember-soft); font-size:.78rem}
+
+  /* Lint output */
+  .lint{font-family:var(--mono); font-size:.8rem; border-radius:8px; padding:.7rem .8rem; background:#0a0806; border:1px solid var(--line); max-height:200px; overflow:auto}
+  .lint .ok{color:var(--ok)} .lint .err{color:var(--blood)} .lint .wrn{color:var(--warn)} .lint .dim{color:var(--ink-faint)}
+
+  /* Slots */
+  .slotlist{display:flex; flex-direction:column; gap:.5rem; margin-top:.6rem}
+  .slot{display:flex; align-items:center; gap:.6rem; background:#0a0806; border:1px solid var(--line); border-radius:8px; padding:.55rem .7rem}
+  .slot .meta{flex:1; min-width:0}
+  .slot .meta b{color:var(--ink); font-family:var(--sans); font-size:.85rem}
+  .slot .meta span{display:block; color:var(--ink-faint); font-family:var(--sans); font-size:.72rem}
+
+  /* Map svg */
+  .mapwrap{overflow:auto; border:1px solid var(--line); border-radius:10px; background:#080605}
+  svg text{font-family:var(--sans)}
+  .legend{display:flex; gap:1rem; flex-wrap:wrap; font-family:var(--sans); font-size:.75rem; color:var(--ink-dim); margin-top:.7rem}
+  .legend i{display:inline-block; width:11px; height:11px; border-radius:3px; margin-right:.35rem; vertical-align:middle}
+
+  .toast{position:fixed; bottom:1.2rem; left:50%; transform:translateX(-50%); z-index:80;
+    background:var(--panel2); border:1px solid var(--ember-deep); color:var(--gold); font-family:var(--sans);
+    padding:.6rem 1rem; border-radius:10px; box-shadow:var(--shadow); opacity:0; transition:.3s; pointer-events:none; font-size:.85rem}
+  .toast.show{opacity:1}
+  .replaybar{position:fixed; top:56px; left:50%; transform:translateX(-50%); z-index:30;
+    background:var(--panel2); border:1px solid var(--ember-deep); border-radius:10px; padding:.4rem .8rem;
+    font-family:var(--sans); font-size:.8rem; color:var(--gold); display:none; align-items:center; gap:.7rem; box-shadow:var(--shadow)}
+  .replaybar.show{display:flex}
+  a.dl{color:var(--ember-soft)}
+  .cardprev{display:block; max-width:100%; border-radius:10px; border:1px solid var(--line); margin:.6rem 0}
+  code.inline{font-family:var(--mono); color:var(--ember-soft); font-size:.85rem; word-break:break-all}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="flame" viewBox="0 0 24 28" aria-hidden="true"><path fill="var(--ember)" d="M12 0c1 5-3 6-3 11 0 2 1 3 1 3s-3-1-3-4c-3 3-4 6-4 9 0 5 4 9 9 9s9-4 9-9c0-6-6-9-6-14 0-2 1-3 1-5-1 1-3 2-4 5-1-2 0-4 0-5z"/><path fill="var(--gold)" d="M12 14c1 2-1 3-1 5 0 2 1 3 3 3s3-2 3-4c0-3-3-4-3-7-1 1-2 2-2 3z"/></svg>
+    <div style="min-width:0">
+      <h1>Emberwake</h1>
+      <small>The Long Ember of Cinderhaven</small>
+    </div>
+  </div>
+  <div class="tools">
+    <button class="btn" id="btnUndo" title="Undo last choice">&#8630; Undo</button>
+    <button class="btn" id="btnSaves" title="Save / load slots">Saves</button>
+    <button class="btn" id="btnMap" title="Live story map">Map</button>
+    <button class="btn" id="btnShare" title="Share this run">Share</button>
+    <button class="btn" id="btnAuthor" title="Authoring playground">Author</button>
+    <button class="btn" id="btnAudio" title="Toggle ambient audio">&#9834; Audio</button>
+    <button class="btn" id="btnRestart" title="Restart the night">Restart</button>
+  </div>
+</header>
+
+<div class="replaybar" id="replaybar">
+  <span id="replayText">Replaying a shared run&hellip;</span>
+  <button class="btn" id="btnReplaySkip">Skip to end</button>
+  <button class="btn" id="btnReplayTake">Take control</button>
+</div>
+
+<main class="wrap">
+  <section class="stage">
+    <div id="passageTitle" class="passage-title"></div>
+    <div id="storyText"></div>
+    <div id="choices" class="choices"></div>
+  </section>
+
+  <aside class="side">
+    <div class="card">
+      <h2>The Lamplighter</h2>
+      <div id="meters"></div>
+    </div>
+    <div class="card">
+      <h2>Satchel</h2>
+      <div id="inv" class="inv"></div>
+    </div>
+    <div class="card">
+      <h2>Endings Discovered</h2>
+      <div id="gallery" class="gallery"></div>
+      <div class="completion" id="completion"></div>
+    </div>
+  </aside>
+</main>
+
+<!-- ===================== BUNDLED STORY (Twee-like source) ===================== -->
+<script id="story-source" type="text/plain">
+:: start | The Bell Tower
+The bell has not rung in a year. You climb to it anyway, the way you climbed every night of your apprenticeship, because the bell tower is the highest lit place in **Cinderhaven** and tonight the city needs every lit place it can keep.
+
+Below you, the streets are a black tide. This is the **Long Ember** — the solstice, the year's longest night — and the *Gloam* has come early. It is not fog. Fog does not lean toward warm windows. Fog does not put out candles from the inside.
+
+You are the last lamplighter. In your hands: one brass lantern, and an oil can that sloshes with *${oil}* measures of good whale-oil. It will not be enough. It is never enough. But the dark is patient and you are not, so you decide where to begin.
+- Take the Kindled Row — the lamps that guard the sleeping tenements. -> kindled
+- Detour to the Chandler's shop; there may be oil left on his shelves. -> chandler
+- Go straight to the Almshouse, where the frightened have gathered. -> almshouse
+@enter: set(begun)
+
+:: kindled | The Kindled Row
+The Row is a narrow street of iron lamps, each one a small held breath against the tenements where children sleep. Three lamps have already guttered out. In the wet dark between them you hear the Gloam moving like water finding a crack.
+
+You can feel the cold pressing at your collar. Light costs oil, and oil is the whole of your life tonight.
+- Light the entire Row and let the children keep their night. -> kindled_lit | if: oil >= 2 | do: oil -= 2; set(litRow); trust += 1
+- Ration it — light only the crossing lamp, enough to hold the worst of the dark. -> kindled_ration | if: oil >= 1 | do: oil -= 1
+- Leave the Row dark and save your oil for what matters most. -> square | do: resolve -= 1; set(leftRowDark)
+@enter: warmth -= 1
+
+:: kindled_lit | Warm Windows
+Flame runs lamp to lamp until the whole Row glows amber, and behind the glass, faces appear — an old woman, two children, a man with a soldier's jaw and frightened eyes. They press hands to the warm panes. The Gloam retreats to the gutters, sullen.
+
+"Lighter," the soldier calls down. "We'll not forget this." You believe him. Trust, you have learned, is its own kind of fuel.
+- Press on toward the square while the Row still holds. -> square
+
+:: kindled_ration | One Lamp Against the Night
+You light the crossing lamp only. It throws a coin of gold onto the cobbles, and no further. The tenement windows stay dark; behind them, someone begins to weep, quietly, the way people weep when they are trying not to be heard.
+
+You tell yourself it is arithmetic. You tell yourself dawn is a sum you are trying to reach. Neither makes the weeping stop.
+- Move on toward the square. -> square | do: resolve -= 1
+
+:: chandler | The Chandler's Shop
+Corwin the chandler is not here. His door hangs open, which Corwin would never allow, and the shop breathes out a smell of tallow and cold. Shelves of candles stand like little bloodless soldiers. And there — a stoppered crock of lamp-oil he must have overlooked in his fleeing.
+
+Behind the counter, a workshop door stands ajar. Corwin kept his private things back there. It would take time, and time is dark you cannot un-spill.
+- Take the oil crock and go; don't press your luck in a dead man's shop. -> chandler_oil | do: oil += 3
+- Search the workshop — Corwin hoarded better than oil. -> chandler_search
+@enter: warmth -= 1
+
+:: chandler_oil | Three Measures
+The crock is heavy and good; three measures, maybe more. You seal it into your can and the weight of it against your hip is the most honest comfort you have felt all night.
+- Out into the street, toward the square. -> square
+
+:: chandler_search | Corwin's Workshop
+The workshop is a clockmaker's dream gone to a chandler's use: drawers of wick, jars of resin, and pinned to the wall above the bench, a **brass key** worn smooth by a thumb that is not coming back for it. You know that key. It fits the door of the Old Lighthouse on the harbor mole — the beacon that has been dark since before you were born.
+
+You take the oil. You take the key. The dark in the corners seems to lean closer, curious what you'll do with them.
+- Pocket both and head for the square. -> square | do: oil += 3; add('brass key'); set(hasKey); resolve += 1
+
+:: almshouse | The Almshouse
+Forty people in one long room and a single failing stove. The warden is gone; a beggar the district calls **Sable** has taken charge by the simple authority of being unafraid. She has the eyes of someone who has watched the Gloam a long time and learned to stare back.
+
+"Lighter." She does not ask for rescue. "There's children here whose feet have gone the color of the dark. You've oil, I can smell it. What'll you spend it on?"
+- Pour a measure into their stove; buy these people an hour of warmth. -> alms_share | if: oil >= 2 | do: oil -= 2; warmth += 1; trust += 2; set(helpedFolk)
+- Promise them light and mean it — but keep your oil for the lamps. -> alms_promise | do: trust += 1
+- Ask Sable what she knows about the Gloam, and the dark before the dark. -> alms_lore
+
+:: alms_share | An Hour of Warmth
+The oil goes into the stove and the stove answers with a roar of gold. Children uncurl. The color comes back into small feet. Sable watches you the whole time, and when it's done she nods once, as though you have passed a test she sets for very few.
+
+"You spent your own tomorrow to buy them an hour," she says. "I'll remember that. So will they."
+- Ask her about the Gloam before you go. -> alms_lore
+- Take your leave for the square. -> square
+
+:: alms_promise | A Promise Is Not a Flame
+"Light," Sable repeats, and the word sits between you like a coin you cannot yet spend. "Words keep no one warm, Lighter. But go on. Keep your oil. Keep your promise too, if you can carry both."
+
+Her voice is not unkind. It is only tired, and honest, which is worse.
+- Ask her about the Gloam before you go. -> alms_lore
+- Head for the square. -> square
+
+:: alms_lore | What Sable Knows
+"The Gloam's not new," she says, low, so the children won't hear. "It's *old*. Older than the gaslamps, older than the harbor. Before Cinderhaven burned coal, there was one flame — the First Flame, out on the mole, in the old lighthouse. They say a keeper fed it his whole life and the dark never once crossed the water while it burned.
+
+"Then the city got clever. Got cheap. Let it die. And the dark has been coming back ever since, one snuffed candle at a time." She looks at you. "You'd need the keeper's key. And oil. And a spine, which I think you might have."
+- Thank her and go, the lighthouse turning in your mind. -> square | do: set(knowsBeacon); trust += 1
+
+:: square | The Ashen Square
+All roads in Cinderhaven pour into the Ashen Square, and at its center stands the **Great Lamp** — a cast-iron giant that once lit the whole district and now stands cold as a tombstone. Around its base, a knot of survivors has gathered, drawn to open space the way frightened animals are.
+
+It is past midnight. The Gloam has risen to the second-storey windows and where it touches, the world simply stops being there. You have *${oil}* measures left and one lantern's worth of nerve. This is the hinge of the night, and you can feel it.
+- Climb the Great Lamp and try to wake it; light for the whole square. -> greatlamp | if: oil >= 3
+- Gather everyone into the Tavern and bar the door against the dark. -> tavern
+- Take the harbor road to the Old Lighthouse, and the First Flame. -> lighthouse | if: has('brass key')
+- Walk out alone to meet the Gloam and learn what it wants. -> gloam
+@enter: warmth -= 1
+
+:: greatlamp | The Great Lamp
+You climb the iron ladder with the can on your back, the cold biting through your gloves. The reservoir at the top is bone-dry and rimed with old soot, but the wick is sound. Three measures will wake it — and three measures is very nearly everything.
+
+Below, the survivors have gone silent, every face tipped up to watch you. The Gloam has stopped moving. Even it wants to see whether the giant will breathe.
+- Pour it all in and strike the light. Let the square blaze. -> greatlamp_lit | if: oil >= 3 | do: oil -= 3; set(litGreat); trust += 2
+- You cannot. Climb back down and keep the oil for a smaller, surer light. -> square | do: resolve -= 1
+
+:: greatlamp_lit | The Giant Breathes
+The wick catches with a sound like a held breath let go, and then the Great Lamp *roars* — a column of gold that throws your shadow a hundred feet across the rooftops. The survivors cry out, and it is not fear. The Gloam sheets away from the square like a tide going out, hissing where the light finds it.
+
+For the first time tonight, you can see the sky. There are stars in it. There is, impossibly, the faint grey promise of a horizon that will, in some hours, become dawn.
+- Stand the long watch beneath the Great Lamp and hold the square till dawn. -> dawn_watch
+
+:: tavern | The Warm Hearth
+The Sign of the Kindled Cat still has a fire, and a landlord too stubborn to run. You herd the survivors in — twenty, thirty, the Row-folk among them if you lit their windows — and drop the great oak bar across the door. Warmth wraps you like a stolen coat.
+
+Through the shutters you watch the Gloam swallow the square, the streets, the world, until the tavern is a lit ship on a black sea. It is safe in here. It is warm. And every lamp beyond this door is going out.
+- Stay. Keep these people alive. Let the city keep itself. -> end_hearth
+- You cannot sit by the fire while the city drowns. Take up the lantern again. -> square | do: resolve -= 1; warmth += 1
+
+:: lighthouse | The Harbor Mole
+The harbor road is the worst walk of your life. The Gloam lies thick as tar over the water, and only your lantern's coin of light keeps the mole beneath your boots. At the end of it, the **Old Lighthouse** stands — a black finger against a blacker sky, its door bound in a lock you already hold the key to.
+
+You can hear the sea beneath the dark, patient and enormous. You can hear something else, too, breathing in the tower's throat.
+- Turn the brass key and go up. -> beacon_room | if: has('brass key')
+- This is madness. Turn back to the square while you still can. -> square | do: resolve -= 1; warmth -= 1
+@enter: warmth -= 1
+
+:: beacon_room | The First Flame
+The stair spirals up forever and lets you out in a glass room at the top of the world, and there — cradled in a mechanism of brass and mirror older than the city's name — is the **hearth of the First Flame**. Cold now. Dark for sixty years. But whole.
+
+Sable was right. It would take oil, and it would take the last of your warmth to work the frozen mechanism, and it would take everything you have left to strike a light this old back into being. Below, the Gloam pours up the stairwell.
+- Give it the oil, give it your warmth, give it your whole self. Relight the First Flame. -> end_beacon | if: oil >= 2 | do: oil -= 2; warmth -= 1; set(litBeacon)
+- The mechanism is beyond you, and the dark is at your heels. Sink down and let it come. -> end_ashes | if: oil < 2
+
+:: gloam | The Living Dark
+You walk out to the edge of the light and set your lantern down and wait, and the Gloam comes to meet you like something that has wanted to be met. It has no face. It does not need one. When it speaks it uses the small cold voice of every candle you have ever watched die.
+
+*"Lighter,"* it says. *"You cannot win. You have counted the oil. You know the sum. But I am reasonable. Give me the lantern — the last light — and I will let this city sleep. No one else need go out tonight. Only you."*
+- Give it the lantern. Trade your light for their safety. -> end_bargain | do: set(madeBargain)
+- Refuse. Snatch up the lantern and run for a light worth dying beside. -> end_ashes | if: oil < 1
+- Refuse, and burn a measure right in its face as a ward. -> square | if: oil >= 1 | do: oil -= 1; resolve += 1; set(defiedGloam)
+
+:: dawn_watch | The Long Watch
+Now it is only time, and time is the cruelest oil of all. The Great Lamp burns above you, but the small lamps of the district still gutter one by one, and each one that dies lets the dark creep an inch closer to the square. You have *${oil}* measures and *${warmth}* of your own warmth against the last black hours before dawn.
+
+The survivors look to you. Sable, if she lived, would tell you there is no clever answer here. Only what you are willing to spend.
+- Hold the line: ration what's left, walk the lamps, keep the square lit to dawn. -> end_dawn | if: oil >= 2 && resolve >= 2
+- Feed the last measures and the last of your own warmth into the ember, and hold. -> end_ember | do: set(gaveAll)
+- Let the small lamps die. Guard only the Great Lamp and pray it's enough. -> end_dawn | if: oil >= 1 && litGreat && trust >= 3 | do: set(sacrificedRow)
+@enter: warmth -= 1
+
+:: end_dawn | The Dawnkeeper
+@ending: The Dawnkeeper
+You walk the lamps until your hands forget how to be anything but cold, and you count the oil down to its last shining skin, and somewhere in the blackest hour you stop believing in dawn at all — and then the east goes grey, and then rose, and then *gold*, and the Gloam thins like breath off a mirror and is gone.
+
+Cinderhaven wakes to a lamplighter asleep at the foot of the Great Lamp, empty can in his arms, and every soul who trusted him alive to see it. They will tell this night for a hundred years. They will get the details wrong. They will not get the important thing wrong: **the dark came, and the light held.** You kept it. You kept them all.
+- Begin the night again. -> start
+
+:: end_ember | The Last Ember
+@ending: The Last Ember
+You give the ember your oil, and then your gloves, and then the warmth banked in your own chest, feeding the flame the way the old keeper must have, until you cannot feel your feet and the stars smear into long gold lines. The Great Lamp burns on your last breath and does not gutter.
+
+Dawn finds the square lit and the Gloam routed and the lamplighter cold at his post, one hand still raised as if to trim a wick. They bury you beneath the Great Lamp. They keep it burning after that — always, in every weather — and they call it, without ever quite deciding to, **the Long Ember**. It has not gone out since. You would like that, if you could know it. Perhaps you do.
+- Begin the night again. -> start
+
+:: end_beacon | The Lantern Eternal
+@ending: The Lantern Eternal
+You give the First Flame the last of your oil, and when that is not enough you give it the warmth in your hands, and when *that* is not enough you set your palm flat against the frozen striker and give it the small stubborn fire that has kept you walking all night — the one that is not oil at all. The mechanism shudders. Sixty years of rust crack like river ice. And the First Flame *wakes*.
+
+It is not a lamp. It is the memory of every lamp, the idea the dark has been trying to snuff since before the city had a name, and it goes up the glass tower in a spire of white-gold light that reaches clear across the harbor and does not stop. The Gloam does not flee. It simply *ceases*, the way a nightmare ceases when you finally, fully wake.
+
+Cinderhaven never goes fully dark again. The harbor beacon burns on without oil, without a keeper, needing nothing but to have once been believed in. They will say a lamplighter climbed the old lighthouse on the Long Ember and was never seen again — and every child born after will grow up under a light that was, once, a person, holding on. **You did not survive the night. You became the reason there are no more nights like it.**
+- Begin the night again. -> start
+
+:: end_bargain | The Gloam's Bargain
+@ending: The Gloam's Bargain
+You hand it the lantern and the light goes out of your hands and out of your chest and out, it feels, of the whole idea of you. The Gloam keeps its word — that is the terrible thing, it *keeps its word* — and rolls back from the sleeping city like a landlord satisfied.
+
+Cinderhaven wakes safe and does not know why, and never will, and that is the price: not death, but *erasure*. You walk the dawn streets and no eye quite settles on you. You are the draft under the door, the candle that won't stay lit, the name on the tip of a tongue. You saved them all. None of them will ever save you back. You are the dark's now, and the dark is polite about it, which is the worst of all.
+- Begin the night again. -> start
+
+:: end_ashes | Ashes of Cinderhaven
+@ending: Ashes of Cinderhaven
+It comes faster than counting. One lamp, then the next, then the idea of lamps, and you are running down streets that end before your feet reach them, and behind you Cinderhaven is going out like a struck match held too long. You reach the last light — your own guttering lantern — and there is nowhere left to carry it.
+
+Somewhere far off, a wiser lamplighter in a wiser city keeps a small flame burning and never learns your name. Cinderhaven becomes a word people lower their voices to say. *There was a city there once. They let the great flame die, you know. After that it was only ever a matter of time.*
+- Begin the night again. -> start
+
+:: end_hearth | The Warm Hearth
+@ending: The Warm Hearth
+Dawn comes — dawn always comes, even to the drowned — and you unbar the door of the Kindled Cat to a city that is mostly still there. Not all of it. The Row is gone, and the Almshouse, and the names of the people you did not carry in. But thirty souls blink at the grey light beside you, alive, and a child asks if the dark is over and you say *yes* because it is, for now, for them.
+
+You are not the Dawnkeeper. You saved a room, not a city. But the ones you saved are warm and breathing and yours, and when they build Cinderhaven back they will build it around this hearth, and around you, the lighter who knew that a small sure light beats a great one you cannot keep. It is not the ending the ballads want. It is the one the children get to grow up in.
+- Begin the night again. -> start
+
+:: end_frost | The Frostbound
+@ending: The Frostbound
+You spent your warmth the way you spent your oil — measure by measure, for others — and somewhere between one lamp and the next your own fire simply ran out. You sit down in a doorway to rest for just a moment. The cold is not unkind, at the end. It feels like sleep. It feels like the warm windows you lit for other people.
+
+They find you at dawn with frost in your lashes and a spent match between your fingers, pointed at a lamp you never quite reached. The Gloam did not take you. You gave yourself away, one degree at a time, to a city that will light its lamps tomorrow without ever knowing your name kept them alight tonight.
+- Begin the night again. -> start
+
+:: end_hollow | The Hollow Round
+@ending: The Hollow Round
+Somewhere the arithmetic broke you. Too many dark windows, too much weeping you walked past, too many sums that would not add to dawn. Your resolve went out quieter than any lamp, and you found yourself walking — not toward anything, just *away* — into the streets where the Gloam is thickest and the counting finally stops.
+
+They say a lamplighter still walks Cinderhaven on the longest night, lantern cold, lighting nothing, looking for a light he set down somewhere and cannot remember where. If you meet him, they say, do not follow. He has been trying to finish his round for a very long time.
+- Begin the night again. -> start
+</script>
+
+<!-- ===================== OVERLAYS ===================== -->
+<div class="overlay" id="ovSaves">
+  <div class="modal">
+    <button class="btn x" data-close="ovSaves">Close</button>
+    <h2>Saves &amp; Slots</h2>
+    <p class="muted">A rolling <b>autosave</b> keeps your latest state. Named slots let you keep several runs. Everything lives in your browser's <span class="kbd">localStorage</span> — nothing is uploaded.</p>
+    <div class="row">
+      <div class="field"><label class="lb">New slot name</label><input class="txt" id="slotName" placeholder="e.g. before the lighthouse"></div>
+      <button class="btn" id="btnSaveSlot" style="align-self:flex-end">Save current run</button>
+    </div>
+    <div class="slotlist" id="slotList"></div>
+  </div>
+</div>
+
+<div class="overlay" id="ovShare">
+  <div class="modal">
+    <button class="btn x" data-close="ovShare">Close</button>
+    <h2>Share this run</h2>
+    <p class="muted">Two ways to hand your run to a friend. Both are just URLs — no server, no account.</p>
+    <div class="row" style="flex-direction:column; align-items:stretch">
+      <label class="lb"><b>Path seed</b> — a compact, deterministic replay. Your friend watches the engine re-walk your exact choices to the ending you reached.</label>
+      <input class="txt" id="seedLink" readonly>
+      <div class="row"><button class="btn" id="btnCopySeed">Copy seed link</button><span class="muted">Seed: <code class="inline" id="seedRaw"></code></span></div>
+    </div>
+    <div class="row" style="flex-direction:column; align-items:stretch; margin-top:1rem">
+      <label class="lb"><b>Full save</b> — a compressed snapshot of your exact state (stats, inventory, flags, position). Opens instantly, no replay.</label>
+      <input class="txt" id="saveLink" readonly>
+      <div class="row"><button class="btn" id="btnCopySave">Copy save link</button><span class="muted">Compressed via an in-file LZW codec.</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="ovMap">
+  <div class="modal" style="width:min(1080px,100%)">
+    <button class="btn x" data-close="ovMap">Close</button>
+    <h2>Story Map</h2>
+    <p class="muted">Every passage in the graph. Visited nodes glow; your current node pulses; your path is traced in ember. The map doubles as the linter's view — <span style="color:var(--blood)">unreachable</span> or broken nodes are flagged.</p>
+    <div class="mapwrap" id="mapWrap"></div>
+    <div class="legend">
+      <span><i style="background:var(--ember)"></i>visited</span>
+      <span><i style="background:#2a2018;border:1px solid var(--ink-faint)"></i>unvisited</span>
+      <span><i style="background:var(--gold)"></i>current</span>
+      <span><i style="background:transparent;border:1px solid var(--gold)"></i>ending</span>
+      <span><i style="background:var(--blood)"></i>flagged (unreachable / broken)</span>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="ovAuthor">
+  <div class="modal" style="width:min(1080px,100%)">
+    <button class="btn x" data-close="ovAuthor">Close</button>
+    <h2>Authoring Playground</h2>
+    <p class="muted">Write your own gamebook in the compact Twee-like format below. The reachability linter runs live as you type. When it's clean, load your story into the engine and play it — no build step, no server, all in this one file.</p>
+    <div class="row" style="align-items:stretch; gap:1rem; flex-wrap:nowrap" id="authorGrid">
+      <div style="flex:1.6; min-width:0">
+        <label class="lb">Story source <span class="muted">(<span class="kbd">:: id | Title</span>, <span class="kbd">- choice -&gt; target | do: … | if: …</span>, <span class="kbd">@enter:</span>, <span class="kbd">@ending:</span>)</span></label>
+        <textarea class="ta" id="authorTA" spellcheck="false"></textarea>
+      </div>
+      <div style="flex:1; min-width:220px; display:flex; flex-direction:column; gap:.7rem">
+        <div><label class="lb">Live linter</label><div class="lint" id="authorLint">&hellip;</div></div>
+        <div class="row" style="gap:.4rem">
+          <button class="btn" id="btnAuthorPlay">Load &amp; play this story</button>
+          <button class="btn" id="btnAuthorReset">Reset to bundled</button>
+        </div>
+        <p class="muted" style="margin:.2rem 0 0">Effects &amp; conditions use a tiny expression language: stats (<span class="kbd">oil warmth resolve trust</span>), <span class="kbd">has(item)</span>, <span class="kbd">set(flag)</span>, <span class="kbd">add(item)</span>, <span class="kbd">remove(item)</span>, <span class="kbd">visited(id)</span>, and <span class="kbd">+= -= = &gt;= == &amp;&amp; ||</span>.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="ovCard">
+  <div class="modal" style="width:min(720px,100%)">
+    <button class="btn x" data-close="ovCard">Close</button>
+    <h2>Your Ending Card</h2>
+    <img class="cardprev" id="cardImg" alt="Ending achievement card">
+    <div class="row">
+      <button class="btn" id="btnCardPng">Download as PNG</button>
+      <button class="btn" id="btnCardSeed">Copy replay link</button>
+      <span class="muted">Share your ending — the seed replays your exact run.</span>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="ovConfirm">
+  <div class="modal" style="width:min(440px,100%)">
+    <h2 id="confirmTitle">Restart the night?</h2>
+    <p class="muted" id="confirmBody">Your current run will be lost. Your endings gallery is kept.</p>
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn" id="btnConfirmNo">Keep going</button>
+      <button class="btn" id="btnConfirmYes">Restart</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* =========================================================================
+   EMBERWAKE — a zero-dependency branching interactive-fiction engine.
+   All logic, style, and story live in this one file. No network, no build.
+   ========================================================================= */
+
+/* ---------- tiny DOM helpers ---------- */
+const $ = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+const clamp = (n, lo, hi) => n < lo ? lo : n > hi ? hi : n;
+const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),2200); }
+const prefersReducedMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ============================ EXPRESSION ENGINE ============================
+   A small, safe expression language for choice conditions and effects.
+   No eval(). Pure functions of state, which is what makes seed replay exact.
+   ------------------------------------------------------------------------- */
+const STAT_KEYS = ['oil','warmth','resolve','trust'];
+
+function tokenize(src){
+  const toks=[]; let i=0; const n=src.length;
+  const two = ['>=','<=','==','!=','&&','||','+=','-=','*=','/='];
+  while(i<n){
+    const c=src[i];
+    if(/\s/.test(c)){ i++; continue; }
+    if(c==="'"||c==='"'){ let j=i+1,s=''; while(j<n&&src[j]!==c){ s+=src[j++]; } toks.push({t:'str',v:s}); i=j+1; continue; }
+    if(/[0-9]/.test(c)||(c==='.'&&/[0-9]/.test(src[i+1]))){ let j=i,s=''; while(j<n&&/[0-9.]/.test(src[j])) s+=src[j++]; toks.push({t:'num',v:parseFloat(s)}); i=j; continue; }
+    if(/[A-Za-z_]/.test(c)){ let j=i,s=''; while(j<n&&/[A-Za-z0-9_]/.test(src[j])) s+=src[j++]; toks.push({t:'id',v:s}); i=j; continue; }
+    const pair=src.substr(i,2);
+    if(two.includes(pair)){ toks.push({t:'op',v:pair}); i+=2; continue; }
+    if('()+-*/<>=!,'.includes(c)){ toks.push({t: c==='('?'lp':c===')'?'rp':c===','?'comma':'op', v:c}); i++; continue; }
+    throw new Error('Unexpected character: '+c);
+  }
+  toks.push({t:'eof',v:null});
+  return toks;
+}
+
+/* Pratt parser -> AST */
+function parseExpression(toks){
+  let p=0;
+  const peek=()=>toks[p], next=()=>toks[p++];
+  const PREC={'||':1,'&&':2,'==':3,'!=':3,'<':4,'<=':4,'>':4,'>=':4,'+':5,'-':5,'*':6,'/':6};
+  function parsePrimary(){
+    const tk=next();
+    if(tk.t==='num') return {type:'num',value:tk.v};
+    if(tk.t==='str') return {type:'str',value:tk.v};
+    if(tk.t==='op'&&(tk.v==='!'||tk.v==='-')) return {type:'unary',op:tk.v,arg:parsePrimary()};
+    if(tk.t==='lp'){ const e=parseBin(0); if(next().t!=='rp') throw new Error('Expected )'); return e; }
+    if(tk.t==='id'){
+      if(peek().t==='lp'){ next(); const args=[]; if(peek().t!=='rp'){ do{ args.push(parseBin(0)); }while(peek().t==='comma'&&next()); } if(next().t!=='rp') throw new Error('Expected ) after args'); return {type:'call',name:tk.v,args}; }
+      if(tk.v==='true') return {type:'num',value:1};
+      if(tk.v==='false') return {type:'num',value:0};
+      return {type:'id',name:tk.v};
+    }
+    throw new Error('Unexpected token: '+JSON.stringify(tk));
+  }
+  function parseBin(minPrec){
+    let left=parsePrimary();
+    while(true){
+      const tk=peek();
+      if(tk.t!=='op'||!(tk.v in PREC)||PREC[tk.v]<minPrec) break;
+      next();
+      const right=parseBin(PREC[tk.v]+1);
+      left={type:'bin',op:tk.v,left,right};
+    }
+    return left;
+  }
+  const ast=parseBin(0);
+  if(peek().t!=='eof') throw new Error('Trailing tokens in expression');
+  return ast;
+}
+
+/* Cache parsed ASTs so re-eval is cheap. */
+const _astCache=new Map();
+function parseCached(src){ if(_astCache.has(src)) return _astCache.get(src); const ast=parseExpression(tokenize(src)); _astCache.set(src,ast); return ast; }
+
+/* Evaluate an AST against a state context. Returns numbers/booleans as numbers. */
+function evalNode(node, ctx){
+  switch(node.type){
+    case 'num': return node.value;
+    case 'str': return node.value;
+    case 'id': return resolveIdent(node.name, ctx);
+    case 'unary': return node.op==='!' ? (truthy(evalNode(node.arg,ctx))?0:1) : -evalNode(node.arg,ctx);
+    case 'bin': {
+      const {op}=node;
+      if(op==='&&') return truthy(evalNode(node.left,ctx)) ? evalNode(node.right,ctx) : 0;
+      if(op==='||'){ const l=evalNode(node.left,ctx); return truthy(l) ? l : evalNode(node.right,ctx); }
+      const a=evalNode(node.left,ctx), b=evalNode(node.right,ctx);
+      switch(op){
+        case '+':return a+b; case '-':return a-b; case '*':return a*b; case '/':return a/b;
+        case '==':return a==b?1:0; case '!=':return a!=b?1:0;
+        case '<':return a<b?1:0; case '<=':return a<=b?1:0; case '>':return a>b?1:0; case '>=':return a>=b?1:0;
+      }
+    }
+    case 'call': return callFn(node.name, node.args, ctx);
+  }
+  throw new Error('Bad node');
+}
+function truthy(v){ return !(v===0||v===false||v==null||v===''); }
+function argName(node, ctx){ return node.type==='id' ? node.name : String(evalNode(node,ctx)); }
+
+function resolveIdent(name, ctx){
+  const key=name.toLowerCase();
+  if(STAT_KEYS.includes(key)) return ctx.state.stats[key];
+  const f=ctx.state.flags[name];
+  return f===undefined ? 0 : f;
+}
+function callFn(name, args, ctx){
+  const fn=name.toLowerCase();
+  switch(fn){
+    case 'has': return ctx.state.inv.includes(argName(args[0],ctx)) ? 1:0;
+    case 'flag': { const v=ctx.state.flags[argName(args[0],ctx)]; return v===undefined?0:v; }
+    case 'visited': return ctx.state.visited[argName(args[0],ctx)] ? 1:0;
+    case 'seen': return endingsFound().includes(argName(args[0],ctx)) ? 1:0;
+    case 'not': return truthy(evalNode(args[0],ctx))?0:1;
+    case 'min': return Math.min(...args.map(a=>evalNode(a,ctx)));
+    case 'max': return Math.max(...args.map(a=>evalNode(a,ctx)));
+    case 'clamp': return clamp(evalNode(args[0],ctx),evalNode(args[1],ctx),evalNode(args[2],ctx));
+    /* side-effecting (used only inside effects) */
+    case 'add': { const it=argName(args[0],ctx); if(!ctx.state.inv.includes(it)) ctx.state.inv.push(it); return 1; }
+    case 'give': return callFn('add',args,ctx);
+    case 'remove': { const it=argName(args[0],ctx); ctx.state.inv=ctx.state.inv.filter(x=>x!==it); return 1; }
+    case 'take': return callFn('remove',args,ctx);
+    case 'set': { const flag=argName(args[0],ctx); ctx.state.flags[flag]= args.length>1 ? evalNode(args[1],ctx) : 1; return 1; }
+    case 'unset': { delete ctx.state.flags[argName(args[0],ctx)]; return 1; }
+  }
+  throw new Error('Unknown function: '+name);
+}
+
+/* Evaluate a boolean condition string. */
+function evalCond(src, state){ if(!src) return true; return truthy(evalNode(parseCached(src), {state})); }
+/* Interpolate ${expr} in text. */
+function interpolate(text, state){
+  return text.replace(/\$\{([^}]+)\}/g, (_,expr)=>{ try{ return String(evalNode(parseCached(expr.trim()),{state})); }catch(e){ return '?'; } });
+}
+/* Apply a semicolon-separated effect script. Mutates state, clamps stats. */
+function applyEffect(src, state){
+  if(!src) return;
+  const ctx={state};
+  for(let stmt of src.split(';')){
+    stmt=stmt.trim(); if(!stmt) continue;
+    const toks=tokenize(stmt);
+    // assignment?  IDENT (= += -= *= /=) EXPR
+    if(toks[0].t==='id' && toks[1] && toks[1].t==='op' && ['=','+=','-=','*=','/='].includes(toks[1].v)){
+      const name=toks[0].v, op=toks[1].v;
+      const rhsToks=toks.slice(2); rhsToks.push({t:'eof',v:null});
+      const val=evalNode(parseExpression(rhsToks),ctx);
+      assign(name,op,val,state);
+    } else {
+      // expression statement (function call with side effects)
+      evalNode(parseCached(stmt),ctx);
+    }
+  }
+  // clamp stats to their meta bounds
+  for(const s of STORY.stats){ state.stats[s.key]=clamp(state.stats[s.key], s.min, s.max); }
+}
+function assign(name,op,val,state){
+  const key=name.toLowerCase();
+  const isStat=STAT_KEYS.includes(key);
+  const cur = isStat ? state.stats[key] : (state.flags[name]===undefined?0:state.flags[name]);
+  let nv;
+  switch(op){ case '=':nv=val; break; case '+=':nv=cur+val; break; case '-=':nv=cur-val; break; case '*=':nv=cur*val; break; case '/=':nv=cur/val; break; }
+  if(isStat) state.stats[key]=nv; else state.flags[name]=nv;
+}
+
+/* ============================ TWEE PARSER ============================
+   Parses the compact story format into a passage graph.
+   ------------------------------------------------------------------- */
+function parseTwee(src){
+  const lines=src.replace(/\r\n/g,'\n').split('\n');
+  const passages={}; let order=0; let cur=null; const bodyBuf=[];
+  const flush=()=>{ if(cur){ cur.text=bodyBuf.join('\n').trim(); bodyBuf.length=0; } };
+  for(let raw of lines){
+    const line=raw;
+    if(line.startsWith(':: ')){
+      flush();
+      const header=line.slice(3).trim();
+      const barIdx=header.indexOf('|');
+      const id=(barIdx>=0?header.slice(0,barIdx):header).trim();
+      const title=(barIdx>=0?header.slice(barIdx+1):id).trim();
+      cur={id,title,text:'',choices:[],onEnter:'',ending:null,order:order++};
+      passages[id]=cur;
+      continue;
+    }
+    if(!cur) continue;
+    const t=line.trim();
+    if(t.startsWith('//')) continue;
+    if(t.startsWith('@enter:')){ const e=t.slice(7).trim(); cur.onEnter = cur.onEnter ? cur.onEnter+'; '+e : e; continue; }
+    if(t.startsWith('@ending:')){ const rest=t.slice(8).trim(); const bar=rest.indexOf('|'); cur.ending=(bar>=0?rest.slice(0,bar):rest).trim(); continue; }
+    if(t.startsWith('- ')){
+      const content=t.slice(2);
+      const arrow=content.indexOf('->');
+      if(arrow<0){ cur.choices.push({text:content.trim(),to:null,broken:true,idx:cur.choices.length}); continue; }
+      const text=content.slice(0,arrow).trim();
+      const right=content.slice(arrow+2);
+      const parts=right.split('|').map(s=>s.trim());
+      const to=parts[0];
+      const ch={text,to,idx:cur.choices.length};
+      for(let k=1;k<parts.length;k++){
+        const seg=parts[k]; const ci=seg.indexOf(':'); if(ci<0) continue;
+        const key=seg.slice(0,ci).trim().toLowerCase(); const val=seg.slice(ci+1).trim();
+        if(key==='if'||key==='show') ch.if=val;
+        else if(key==='do'||key==='effect') ch.effect=val;
+        else if(key==='enabled') ch.enabled=val;
+        else if(key==='once') ch.once=/^(true|1|yes)$/i.test(val);
+      }
+      cur.choices.push(ch);
+      continue;
+    }
+    bodyBuf.push(raw);
+  }
+  flush();
+  return passages;
+}
+
+/* Build a STORY object (stats meta is defined in code; passages from Twee). */
+const STAT_META=[
+  {key:'oil',    label:'Oil',     min:0, max:12, start:6, color:'linear-gradient(90deg,#c74e1a,#ff7a37,#ffd27a)'},
+  {key:'warmth', label:'Warmth',  min:0, max:6,  start:5, color:'linear-gradient(90deg,#8a3b1a,#ff8a4a,#ffcf8a)'},
+  {key:'resolve',label:'Resolve', min:0, max:6,  start:4, color:'linear-gradient(90deg,#6d4bbf,#b08bff,#e6d6ff)'},
+  {key:'trust',  label:'Trust',   min:0, max:6,  start:1, color:'linear-gradient(90deg,#1a6d5a,#3bbf9a,#a6f0dd)'}
+];
+/* State-driven endings: checked after entering any non-ending passage. */
+const STATE_ENDINGS=[
+  {if:'warmth <= 0', to:'end_frost'},
+  {if:'resolve <= 0', to:'end_hollow'}
+];
+
+let STORY = buildStory(parseTwee($('#story-source').textContent));
+function buildStory(passages){
+  return {
+    meta:{title:'The Long Ember of Cinderhaven', start:'start'},
+    stats: STAT_META,
+    stateEndings: STATE_ENDINGS,
+    passages
+  };
+}
+function endingsList(){ return Object.values(STORY.passages).filter(p=>p.ending).map(p=>({id:p.id,name:p.ending})); }
+
+/* ============================ PERSISTENCE ============================ */
+const LS={ endings:'ew.endings.v1', slots:'ew.slots.v1', auto:'ew.autosave.v1', settings:'ew.settings.v1' };
+function lsGet(k,def){ try{ const v=localStorage.getItem(k); return v==null?def:JSON.parse(v); }catch(e){ return def; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} }
+function endingsFound(){ return lsGet(LS.endings,[]); }
+function recordEnding(id){ const s=new Set(endingsFound()); if(!s.has(id)){ s.add(id); lsSet(LS.endings,[...s]); return true; } return false; }
+
+/* ============================ ENGINE STATE ============================ */
+let state, undoStack=[], replaying=false, replayTimer=null, typewriterTimer=null, revealTimer=null;
+
+function newState(){
+  const stats={}; for(const s of STORY.stats) stats[s.key]=s.start;
+  return { stats, inv:[], flags:{}, current:STORY.meta.start, used:{}, path:[], visited:{}, trail:[] };
+}
+
+function startNewGame(){
+  clearTimers();
+  state=newState();
+  undoStack=[];
+  enter(STORY.meta.start, {initial:true});
+  saveAuto();
+  render();
+}
+
+function clearTimers(){ if(replayTimer){clearInterval(replayTimer);replayTimer=null;} if(typewriterTimer){clearInterval(typewriterTimer);typewriterTimer=null;} if(revealTimer){clearTimeout(revealTimer);revealTimer=null;} }
+
+/* Enter a passage: run onEnter, mark visited, check state endings. */
+function enter(id, opts={}){
+  const p=STORY.passages[id];
+  if(!p){ console.warn('Missing passage',id); return; }
+  state.current=id;
+  state.visited[id]=true;
+  if(state.trail[state.trail.length-1]!==id) state.trail.push(id);
+  if(p.onEnter) applyEffect(p.onEnter, state);
+  // state-driven endings (only from non-ending passages)
+  if(!p.ending && STORY.stateEndings){
+    for(const se of STORY.stateEndings){
+      if(evalCond(se.if,state) && STORY.passages[se.to]){ enter(se.to); return; }
+    }
+  }
+  if(p.ending) onReachEnding(p);
+}
+
+/* Determine availability of a choice given current state. */
+function choiceState(ch, passage){
+  if(ch.broken || !STORY.passages[ch.to]) return {show:false, enabled:false, broken:true};
+  if(ch.once && state.used[passage.id+'#'+ch.idx]) return {show:false};
+  const show = ch.if ? evalCond(ch.if,state) : true;
+  const enabled = show && (ch.enabled ? evalCond(ch.enabled,state) : true);
+  return {show, enabled};
+}
+
+/* Make a choice by its original index within the passage. */
+function choose(idx, opts={}){
+  const p=STORY.passages[state.current];
+  const ch=p.choices[idx];
+  if(!ch) return false;
+  const cs=choiceState(ch,p);
+  if(!cs.show || !cs.enabled) return false;
+  if(!opts.replay) undoStack.push(snapshot());
+  if(ch.once) state.used[p.id+'#'+idx]=true;
+  if(ch.effect) applyEffect(ch.effect, state);
+  state.path.push(idx);
+  enter(ch.to);
+  if(!opts.replay){ saveAuto(); render(); }
+  return true;
+}
+
+function snapshot(){ return JSON.parse(JSON.stringify(state)); }
+function undo(){
+  if(!undoStack.length){ toast('Nothing to undo.'); return; }
+  clearTimers();
+  state=undoStack.pop();
+  saveAuto();
+  render();
+}
+
+/* ============================ ENDINGS ============================ */
+let _lastCardEnding=null;
+function onReachEnding(p){
+  const fresh=recordEnding(p.id);
+  _lastCardEnding=p;
+  if(fresh && !replaying) setTimeout(()=>toast('New ending discovered: '+p.ending), 400);
+}
+
+/* ============================ RENDERING ============================ */
+function render(){
+  renderSidebar();
+  renderPassage();
+  updateAudioFromState();
+  const u=$('#btnUndo'); if(u) u.disabled=!undoStack.length;
+}
+
+function renderPassage(){
+  const p=STORY.passages[state.current];
+  $('#passageTitle').textContent=p.title;
+  const html=formatText(interpolate(p.text,state));
+  const textEl=$('#storyText');
+  const choicesEl=$('#choices');
+  choicesEl.innerHTML='';
+
+  // Clear any in-flight reveal timers from a previous passage before starting.
+  clearInterval(typewriterTimer); typewriterTimer=null;
+  if(revealTimer){ clearTimeout(revealTimer); revealTimer=null; }
+  textEl.onclick=null;
+
+  if(prefersReducedMotion() || replaying){
+    textEl.innerHTML=html;
+    buildChoices(p, choicesEl);
+  } else {
+    // fade paragraphs in sequentially
+    textEl.innerHTML=html;
+    const paras=$$('p, .ending-banner', textEl);
+    paras.forEach(el=>el.classList.add('reveal'));
+    // Skip the animation on click/keydown: reveal everything and show choices now.
+    const finish=()=>{
+      if(p!==STORY.passages[state.current]) return; // stale passage; ignore
+      clearInterval(typewriterTimer); typewriterTimer=null;
+      if(revealTimer){ clearTimeout(revealTimer); revealTimer=null; }
+      paras.forEach(el=>el.classList.add('shown'));
+      textEl.onclick=null;
+      buildChoices(p, choicesEl);
+    };
+    textEl.onclick=finish;
+    textEl.title='Click to reveal the rest';
+    let i=0;
+    const step=()=>{ if(i<paras.length){ paras[i].classList.add('shown'); i++; } else { clearInterval(typewriterTimer); typewriterTimer=null; textEl.onclick=null; buildChoices(p, choicesEl); } };
+    step();
+    typewriterTimer=setInterval(step, 220);
+    // ensure choices appear even if few paragraphs — but only if still on this passage.
+    revealTimer=setTimeout(()=>{ revealTimer=null; if(p===STORY.passages[state.current] && !choicesEl.childElementCount) buildChoices(p, choicesEl); }, paras.length*220+120);
+  }
+  window.scrollTo({top:0, behavior: prefersReducedMotion()?'auto':'smooth'});
+}
+
+function buildChoices(p, container){
+  if(container.childElementCount) return;
+  if(p.ending){
+    const banner=document.createElement('div'); banner.className='ending-banner';
+    banner.textContent=p.ending || 'Ending Reached';
+    container.appendChild(banner);
+    const actions=document.createElement('div'); actions.className='end-actions';
+    const again=btn('Begin the night again', ()=>startNewGame());
+    const card=btn('View ending card', ()=>openCard());
+    const share=btn('Share this run', ()=>openShare());
+    const map=btn('See your path on the map', ()=>openMap());
+    [again,card,share,map].forEach(b=>actions.appendChild(b));
+    container.appendChild(actions);
+    return;
+  }
+  const frag=document.createDocumentFragment();
+  let any=false, num=0;
+  p.choices.forEach((ch,idx)=>{
+    const cs=choiceState(ch,p);
+    if(!cs.show) return;
+    any=true;
+    const b=document.createElement('button');
+    b.className='choice'+(cs.enabled?'':' locked');
+    if(cs.enabled && num<9){ num++; b.dataset.key=String(num);
+      b.innerHTML='<span class="cnum">'+num+'</span>'+escapeHtml(ch.text); }
+    else b.innerHTML=escapeHtml(ch.text);
+    if(!cs.enabled){ const h=document.createElement('span'); h.className='hint'; h.textContent='(not yet within reach)'; b.appendChild(h); }
+    if(cs.enabled) b.addEventListener('click', ()=>choose(idx));
+    frag.appendChild(b);
+  });
+  if(!any){ const d=document.createElement('div'); d.className='empty'; d.textContent='The path ends here. (Restart to begin again.)'; frag.appendChild(d); }
+  container.appendChild(frag);
+}
+
+function btn(label, fn){ const b=document.createElement('button'); b.className='btn'; b.textContent=label; b.addEventListener('click',fn); return b; }
+
+/* Minimal markdown: **bold**, *italic*, paragraphs on blank lines. */
+function formatText(text){
+  const esc=escapeHtml(text);
+  const paras=esc.split(/\n\s*\n/).map(seg=>{
+    let h=seg.replace(/\n/g,'<br>');
+    h=h.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+    h=h.replace(/(^|[^*])\*([^*]+)\*/g,'$1<em>$2</em>');
+    return '<p>'+h+'</p>';
+  });
+  return paras.join('');
+}
+
+function renderSidebar(){
+  const m=$('#meters'); m.innerHTML='';
+  for(const s of STORY.stats){
+    const val=state.stats[s.key], pct=Math.round((val-s.min)/(s.max-s.min)*100);
+    const d=document.createElement('div'); d.className='meter';
+    d.innerHTML=`<div class="lab"><span>${s.label}</span><b>${val} / ${s.max}</b></div>
+      <div class="bar"><i style="width:${pct}%;background:${s.color}"></i></div>`;
+    m.appendChild(d);
+  }
+  const inv=$('#inv'); inv.innerHTML='';
+  if(!state.inv.length){ inv.innerHTML='<span class="empty">Empty but for a brass lantern.</span>'; }
+  else state.inv.forEach(it=>{ const s=document.createElement('span'); s.className='pill'; s.textContent=it; inv.appendChild(s); });
+
+  renderGallery();
+}
+
+function renderGallery(){
+  const list=endingsList(); const found=endingsFound();
+  const g=$('#gallery'); g.innerHTML='';
+  for(const e of list){
+    const has=found.includes(e.id);
+    const row=document.createElement('div'); row.className='gitem '+(has?'found':'hidden');
+    row.innerHTML=`<span class="dot"></span><span>${has?escapeHtml(e.name):'&mdash; undiscovered &mdash;'}</span>`;
+    g.appendChild(row);
+  }
+  const pct=list.length ? Math.round(found.length/list.length*100) : 0;
+  $('#completion').innerHTML=`<b>${found.length} / ${list.length}</b> endings &bull; <b>${pct}%</b> complete`+
+    (found.length<list.length?` &mdash; the night has more shapes than one.`:` &mdash; you have seen every fate of Cinderhaven.`);
+}
+
+/* ============================ SAVE / RESTORE ============================ */
+function saveAuto(){ lsSet(LS.auto, {state, ts:Date.now()}); }
+function loadAuto(){ const a=lsGet(LS.auto,null); if(a&&a.state){ state=a.state; if(!state.trail) state.trail=[state.current]; undoStack=[]; return true; } return false; }
+
+function saveSlot(name){
+  const slots=lsGet(LS.slots,{});
+  const p=STORY.passages[state.current];
+  slots[name]={state:snapshot(), ts:Date.now(), where:p?p.title:state.current};
+  lsSet(LS.slots,slots); renderSlots(); toast('Saved to "'+name+'".');
+}
+function loadSlot(name){
+  const slots=lsGet(LS.slots,{}); const s=slots[name]; if(!s) return;
+  clearTimers(); state=JSON.parse(JSON.stringify(s.state)); if(!state.trail) state.trail=[state.current]; undoStack=[]; saveAuto(); render(); closeOverlay('ovSaves'); toast('Loaded "'+name+'".');
+}
+function deleteSlot(name){ const slots=lsGet(LS.slots,{}); delete slots[name]; lsSet(LS.slots,slots); renderSlots(); }
+function renderSlots(){
+  const slots=lsGet(LS.slots,{}); const wrap=$('#slotList'); wrap.innerHTML='';
+  const names=Object.keys(slots).sort((a,b)=>slots[b].ts-slots[a].ts);
+  if(!names.length){ wrap.innerHTML='<div class="empty">No saved slots yet.</div>'; return; }
+  for(const nm of names){
+    const s=slots[nm]; const row=document.createElement('div'); row.className='slot';
+    const when=new Date(s.ts).toLocaleString();
+    row.innerHTML=`<div class="meta"><b>${escapeHtml(nm)}</b><span>${escapeHtml(s.where||'')} &bull; ${when}</span></div>`;
+    const load=btn('Load',()=>loadSlot(nm)); const del=btn('Delete',()=>deleteSlot(nm));
+    row.appendChild(load); row.appendChild(del); wrap.appendChild(row);
+  }
+}
+
+/* ============================ HASH SHARE CODEC ============================
+   Two share modes:
+     #seed:<chars>  -> deterministic path replay (compact)
+     #save:<packed> -> full compressed state snapshot (LZW + base64url varint)
+   ------------------------------------------------------------------------- */
+const B64='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+const B64IDX=(()=>{ const m={}; for(let i=0;i<B64.length;i++) m[B64[i]]=i; return m; })();
+
+/* Path seed: each choice index -> one base64url char (supports up to 64 choices/passage). */
+function encodeSeed(path){ return path.map(i=>B64[i]).join(''); }
+function decodeSeed(str){ return Array.from(str).map(c=>B64IDX[c]); }
+
+/* LZW compress a string -> array of codes. */
+function lzwCompress(str){
+  const dict=new Map(); for(let i=0;i<256;i++) dict.set(String.fromCharCode(i),i);
+  let next=256, w='', out=[];
+  for(const ch of str){
+    const wc=w+ch;
+    if(dict.has(wc)) w=wc;
+    else { out.push(dict.get(w)); dict.set(wc,next++); w=ch; }
+  }
+  if(w!=='') out.push(dict.get(w));
+  return out;
+}
+function lzwDecompress(codes){
+  const dict=[]; for(let i=0;i<256;i++) dict.push(String.fromCharCode(i));
+  let next=256, w=String.fromCharCode(codes[0]), out=w;
+  for(let i=1;i<codes.length;i++){
+    const k=codes[i]; let entry;
+    if(dict[k]!==undefined) entry=dict[k];
+    else if(k===next) entry=w+w[0];
+    else throw new Error('Bad LZW stream');
+    out+=entry; dict[next++]=w+entry[0]; w=entry;
+  }
+  return out;
+}
+/* Pack unsigned ints into base64url using 5 data bits/char + continuation bit. */
+function packInts(ints){
+  let s='';
+  for(let v of ints){ v=v>>>0; while(v>=32){ s+=B64[(v&31)|32]; v>>>=5; } s+=B64[v&31]; }
+  return s;
+}
+function unpackInts(str){
+  const out=[]; let v=0, shift=0;
+  for(const c of str){ const x=B64IDX[c]; v|=(x&31)<<shift; if(x&32){ shift+=5; } else { out.push(v>>>0); v=0; shift=0; } }
+  return out;
+}
+/* LZW seeds its dictionary with char codes 0-255 only, so any code point > 255
+   would break the stream. Escape all non-ASCII to \uXXXX first (still valid JSON,
+   restored by JSON.parse on decode) so the codec only ever sees bytes 0-255. */
+function encodeSave(st){
+  const json=JSON.stringify(st).replace(/[-￿]/g, c=>'\\u'+c.charCodeAt(0).toString(16).padStart(4,'0'));
+  return packInts(lzwCompress(json));
+}
+function decodeSave(packed){
+  return JSON.parse(lzwDecompress(unpackInts(packed)));
+}
+
+function baseUrl(){ return location.href.split('#')[0]; }
+function seedLink(){ return baseUrl()+'#seed:'+encodeSeed(state.path); }
+function saveLink(){ return baseUrl()+'#save:'+encodeSave(state); }
+
+/* Replay a shared seed: reset and re-walk choices, animating each step. */
+function replaySeed(seedStr){
+  const indices=decodeSeed(seedStr);
+  clearTimers();
+  state=newState(); undoStack=[]; replaying=true;
+  enter(STORY.meta.start,{initial:true});
+  render();
+  showReplayBar(true);
+  let step=0;
+  const doStep=()=>{
+    if(step>=indices.length || STORY.passages[state.current].ending){ finishReplay(); return; }
+    const ok=choose(indices[step], {replay:true});
+    step++;
+    render();
+    if(!ok){ finishReplay(); return; }
+  };
+  const speed=prefersReducedMotion()?450:1100;
+  replayTimer=setInterval(doStep, speed);
+  window._replaySkip=()=>{ clearInterval(replayTimer); while(step<indices.length && !STORY.passages[state.current].ending){ if(!choose(indices[step],{replay:true})) break; step++; } finishReplay(); };
+}
+function finishReplay(){ clearInterval(replayTimer); replayTimer=null; replaying=false; showReplayBar(false); saveAuto(); render(); }
+function showReplayBar(on){ $('#replaybar').classList.toggle('show',on); }
+
+/* ============================ REACHABILITY LINTER ============================
+   Structural reachability from start (ignoring conditions) + state-ending roots.
+   Reports: unreachable passages, broken links, non-ending dead ends,
+   and unreachable endings. Used by both the Author playground and the Map.
+   --------------------------------------------------------------------------- */
+function lint(story){
+  const P=story.passages, ids=Object.keys(P);
+  const roots=[story.meta.start, ...(story.stateEndings||[]).map(s=>s.to)].filter(id=>P[id]);
+  const reachable=new Set(); const stack=[...roots];
+  while(stack.length){ const id=stack.pop(); if(reachable.has(id)||!P[id]) continue; reachable.add(id);
+    for(const ch of P[id].choices){ if(ch.to && P[ch.to]) stack.push(ch.to); } }
+  const broken=[], unreachable=[], deadEnds=[], unreachableEndings=[], missingStart=!P[story.meta.start];
+  for(const id of ids){
+    const p=P[id];
+    for(const ch of p.choices){ if(ch.broken) broken.push({from:id,text:ch.text,to:'(no target)'}); else if(!P[ch.to]) broken.push({from:id,text:ch.text,to:ch.to}); }
+    if(!reachable.has(id)) unreachable.push(id);
+    const liveChoices=p.choices.filter(ch=>ch.to&&P[ch.to]);
+    if(!p.ending && liveChoices.length===0) deadEnds.push(id);
+    if(p.ending && !reachable.has(id)) unreachableEndings.push(id);
+  }
+  const endings=ids.filter(id=>P[id].ending);
+  const errors = broken.length + unreachable.length + unreachableEndings.length + (missingStart?1:0);
+  return {reachable, broken, unreachable, deadEnds, unreachableEndings, endings, missingStart, errors,
+          total:ids.length, roots};
+}
+
+/* ============================ STORY MAP (SVG) ============================
+   Layered BFS layout. Colors nodes by visited/current/ending; flags lint
+   problems in red; traces the player's actual trail in ember.
+   ------------------------------------------------------------------------- */
+function buildMapSVG(story, st){
+  const P=story.passages; const rep=lint(story);
+  // BFS depth layering from start
+  const depth={}; const q=[[story.meta.start,0]]; depth[story.meta.start]=0;
+  while(q.length){ const [id,d]=q.shift(); const p=P[id]; if(!p) continue;
+    for(const ch of p.choices){ if(ch.to&&P[ch.to]&&depth[ch.to]===undefined){ depth[ch.to]=d+1; q.push([ch.to,d+1]); } } }
+  // orphans (unreachable) get placed in a final column
+  const ids=Object.keys(P);
+  let maxD=0; ids.forEach(id=>{ if(depth[id]!==undefined) maxD=Math.max(maxD,depth[id]); });
+  ids.forEach(id=>{ if(depth[id]===undefined) depth[id]=maxD+1; });
+  // group by depth
+  const cols={}; ids.forEach(id=>{ (cols[depth[id]]=cols[depth[id]]||[]).push(id); });
+  Object.values(cols).forEach(list=>list.sort((a,b)=>P[a].order-P[b].order));
+  const colW=190, rowH=64, padX=40, padY=40;
+  const pos={};
+  let maxRows=0;
+  Object.keys(cols).forEach(d=>{ maxRows=Math.max(maxRows,cols[d].length); });
+  Object.keys(cols).forEach(d=>{ const list=cols[d]; list.forEach((id,i)=>{ pos[id]={x:padX+d*colW, y:padY+i*rowH}; }); });
+  const W=padX*2+ (Math.max(...Object.keys(cols).map(Number))+1)*colW;
+  const H=padY*2+ maxRows*rowH;
+  // trail edge set
+  const trailEdges=new Set(); for(let i=0;i<(st.trail||[]).length-1;i++) trailEdges.add(st.trail[i]+'>'+st.trail[i+1]);
+
+  let edges='', nodes='';
+  for(const id of ids){
+    const p=P[id]; const a=pos[id];
+    for(const ch of p.choices){
+      if(!ch.to||!P[ch.to]) continue;
+      const b=pos[ch.to]; if(!b) continue;
+      const onTrail=trailEdges.has(id+'>'+ch.to);
+      const mx=(a.x+b.x)/2;
+      const col = onTrail ? 'var(--ember)' : 'rgba(120,100,80,.35)';
+      const wdt = onTrail ? 2.4 : 1;
+      edges+=`<path d="M${a.x+58} ${a.y+14} C ${mx} ${a.y+14}, ${mx} ${b.y+14}, ${b.x} ${b.y+14}" fill="none" stroke="${col}" stroke-width="${wdt}" opacity="${onTrail?0.95:0.5}"/>`;
+    }
+  }
+  for(const id of ids){
+    const p=P[id]; const a=pos[id];
+    const visited=!!st.visited[id]; const current=st.current===id; const ending=!!p.ending;
+    const flagged = rep.unreachable.includes(id) || rep.unreachableEndings.includes(id) || p.choices.some(ch=>ch.broken||(ch.to&&!P[ch.to]));
+    let fill = visited ? 'rgba(255,122,55,.9)' : '#241a12';
+    let stroke = 'var(--line)'; let sw=1;
+    if(ending) stroke='var(--gold)';
+    if(flagged){ fill='rgba(217,83,79,.85)'; stroke='var(--blood)'; }
+    if(current){ stroke='var(--gold)'; sw=3; }
+    const label=(p.title||id).slice(0,18);
+    const tcol = visited||flagged ? '#120c07' : 'var(--ink-dim)';
+    const shape = ending
+      ? `<rect x="${a.x}" y="${a.y}" width="116" height="28" rx="6" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`
+      : `<rect x="${a.x}" y="${a.y}" width="116" height="28" rx="14" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+    nodes+=`<g>${shape}${current?`<rect x="${a.x-3}" y="${a.y-3}" width="122" height="34" rx="16" fill="none" stroke="var(--gold)" stroke-width="1" opacity="0.6"><animate attributeName="opacity" values="0.2;0.7;0.2" dur="1.6s" repeatCount="indefinite"/></rect>`:''}<text x="${a.x+58}" y="${a.y+18}" text-anchor="middle" font-size="10" fill="${tcol}">${escapeHtml(label)}</text></g>`;
+  }
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="min-width:${W}px">${edges}${nodes}</svg>`;
+}
+
+/* ============================ AUTHORING PLAYGROUND ============================ */
+function openAuthor(){
+  const ta=$('#authorTA');
+  if(!ta.value) ta.value=$('#story-source').textContent.trim();
+  runAuthorLint();
+  openOverlay('ovAuthor');
+}
+function runAuthorLint(){
+  const el=$('#authorLint');
+  let passages;
+  try{ passages=parseTwee($('#authorTA').value); }
+  catch(e){ el.innerHTML=`<span class="err">Parse error: ${escapeHtml(e.message)}</span>`; return null; }
+  const story=buildStory(passages);
+  const rep=lint(story);
+  let html='';
+  html+=`<div class="dim">${rep.total} passages, ${rep.endings.length} endings, ${rep.reachable.size} reachable.</div>`;
+  if(rep.missingStart) html+=`<div class="err">&#10007; missing start passage "${escapeHtml(story.meta.start)}"</div>`;
+  if(rep.broken.length) rep.broken.forEach(b=>html+=`<div class="err">&#10007; broken link in "${escapeHtml(b.from)}": &ldquo;${escapeHtml(b.text)}&rdquo; &rarr; ${escapeHtml(b.to)}</div>`);
+  if(rep.unreachable.length) html+=`<div class="err">&#10007; unreachable: ${rep.unreachable.map(escapeHtml).join(', ')}</div>`;
+  if(rep.unreachableEndings.length) html+=`<div class="err">&#10007; unreachable ending(s): ${rep.unreachableEndings.map(escapeHtml).join(', ')}</div>`;
+  if(rep.deadEnds.length) html+=`<div class="wrn">&#9888; non-ending dead end(s): ${rep.deadEnds.map(escapeHtml).join(', ')}</div>`;
+  if(rep.errors===0 && !rep.deadEnds.length) html+=`<div class="ok">&#10003; clean: every passage reachable, every ending reachable, no broken links.</div>`;
+  else if(rep.errors===0) html+=`<div class="ok">&#10003; reachable &amp; complete (dead-end notes above are advisory).</div>`;
+  el.innerHTML=html;
+  return {story, rep};
+}
+function loadAuthoredStory(){
+  const res=runAuthorLint();
+  if(!res){ toast('Fix the parse error first.'); return; }
+  if(res.rep.missingStart || res.rep.broken.length){ toast('Cannot play: broken links or missing start.'); return; }
+  STORY=res.story;
+  _astCache.clear();
+  closeOverlay('ovAuthor');
+  startNewGame();
+  toast('Loaded your story. (Endings gallery reflects the new graph.)');
+}
+function resetAuthored(){
+  STORY=buildStory(parseTwee($('#story-source').textContent));
+  _astCache.clear();
+  $('#authorTA').value=$('#story-source').textContent.trim();
+  runAuthorLint();
+  startNewGame();
+  toast('Reset to the bundled story.');
+}
+
+/* ============================ ENDING CARD ============================ */
+function buildCardSVG(){
+  const p=_lastCardEnding || STORY.passages[state.current];
+  const found=endingsFound(), list=endingsList();
+  const pct=list.length ? Math.round(found.length/list.length*100) : 0;
+  const seed=encodeSeed(state.path)||'(fresh)';
+  const W=680,H=380;
+  const statRow=STORY.stats.map((s,i)=>{
+    const x=44+i*158; const val=state.stats[s.key];
+    return `<text x="${x}" y="286" font-size="13" fill="#a8977c" font-family="sans-serif">${s.label.toUpperCase()}</text>
+            <text x="${x}" y="316" font-size="26" fill="#ffd27a" font-family="sans-serif" font-weight="bold">${val}</text>`;
+  }).join('');
+  const seedShort = seed.length>46 ? seed.slice(0,46)+'…' : seed;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+    <defs>
+      <radialGradient id="g" cx="70%" cy="0%" r="120%"><stop offset="0%" stop-color="#3a2410"/><stop offset="55%" stop-color="#140f0c"/><stop offset="100%" stop-color="#0a0806"/></radialGradient>
+      <linearGradient id="fl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#c74e1a"/><stop offset="0.5" stop-color="#ff7a37"/><stop offset="1" stop-color="#ffd27a"/></linearGradient>
+    </defs>
+    <rect width="${W}" height="${H}" fill="url(#g)"/>
+    <rect x="10" y="10" width="${W-20}" height="${H-20}" rx="16" fill="none" stroke="#3a2a1a" stroke-width="1.5"/>
+    <text x="44" y="66" font-size="13" letter-spacing="3" fill="#ff7a37" font-family="sans-serif">EMBERWAKE &#183; THE LONG EMBER OF CINDERHAVEN</text>
+    <text x="44" y="132" font-size="42" fill="#ffd27a" font-family="Georgia,serif" font-weight="bold">${escapeHtml(p.ending||'—')}</text>
+    <line x1="44" y1="158" x2="${W-44}" y2="158" stroke="#3a2a1a"/>
+    <text x="44" y="200" font-size="15" fill="#e8dcc6" font-family="sans-serif">Endings discovered: <tspan fill="#ffd27a" font-weight="bold">${found.length} / ${list.length}</tspan></text>
+    <text x="44" y="226" font-size="15" fill="#e8dcc6" font-family="sans-serif">City of Cinderhaven, ${pct}% mapped</text>
+    <rect x="300" y="212" width="336" height="10" rx="5" fill="#0a0806" stroke="#241a12"/>
+    <rect x="300" y="212" width="${Math.round(336*pct/100)}" height="10" rx="5" fill="url(#fl)"/>
+    ${statRow}
+    <text x="44" y="352" font-size="11" fill="#6b5d4a" font-family="monospace">path seed: ${escapeHtml(seedShort)}</text>
+  </svg>`;
+}
+function openCard(){
+  const svg=buildCardSVG();
+  const url='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+  $('#cardImg').src=url;
+  openOverlay('ovCard');
+}
+function downloadCardPNG(){
+  const svg=buildCardSVG();
+  const img=new Image();
+  img.onload=()=>{
+    try{
+      const c=document.createElement('canvas'); c.width=680; c.height=380;
+      const ctx=c.getContext('2d'); ctx.drawImage(img,0,0);
+      c.toBlob(blob=>{
+        if(!blob){ toast('Could not render PNG in this browser.'); return; }
+        const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+        a.download='emberwake-'+((_lastCardEnding&&_lastCardEnding.id)||'run')+'.png';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+      },'image/png');
+    }catch(e){ toast('Could not render PNG in this browser.'); }
+  };
+  img.onerror=()=>toast('Could not render PNG in this browser.');
+  img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+}
+
+/* ============================ AMBIENT AUDIO (WebAudio) ============================
+   Procedural ember-crackle + wind. No assets. Off by default. Reacts to Oil.
+   ------------------------------------------------------------------------------ */
+const Audio_=(()=>{
+  let ctx=null, master=null, windGain=null, windSrc=null, filter=null, on=false, crackleTimer=null;
+  function makeNoise(seconds){
+    const buf=ctx.createBuffer(1, ctx.sampleRate*seconds, ctx.sampleRate);
+    const d=buf.getChannelData(0); let last=0;
+    for(let i=0;i<d.length;i++){ const w=Math.random()*2-1; last=(last+0.02*w)/1.02; d[i]=last*3.5; } // brown-ish
+    return buf;
+  }
+  function start(){
+    if(on) return;
+    ctx=new (window.AudioContext||window.webkitAudioContext)();
+    master=ctx.createGain(); master.gain.value=0.0; master.connect(ctx.destination);
+    // wind bed
+    windSrc=ctx.createBufferSource(); windSrc.buffer=makeNoise(4); windSrc.loop=true;
+    filter=ctx.createBiquadFilter(); filter.type='lowpass'; filter.frequency.value=420;
+    windGain=ctx.createGain(); windGain.gain.value=0.12;
+    windSrc.connect(filter); filter.connect(windGain); windGain.connect(master);
+    windSrc.start();
+    // slow LFO on wind cutoff for movement
+    const lfo=ctx.createOscillator(); const lfoG=ctx.createGain(); lfo.frequency.value=0.08; lfoG.gain.value=180;
+    lfo.connect(lfoG); lfoG.connect(filter.frequency); lfo.start();
+    on=true;
+    master.gain.linearRampToValueAtTime(0.5, ctx.currentTime+1.2);
+    scheduleCrackle();
+    update();
+  }
+  function crackle(intensity){
+    if(!on) return;
+    const t=ctx.currentTime;
+    const src=ctx.createBufferSource(); src.buffer=makeNoise(0.08);
+    const bp=ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=800+Math.random()*2600; bp.Q.value=6;
+    const g=ctx.createGain(); g.gain.setValueAtTime(0.0001,t);
+    g.gain.exponentialRampToValueAtTime(0.25*intensity, t+0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t+0.05+Math.random()*0.09);
+    src.connect(bp); bp.connect(g); g.connect(master); src.start(t); src.stop(t+0.2);
+  }
+  function scheduleCrackle(){
+    clearTimeout(crackleTimer);
+    const oil = state ? state.stats.oil : 6;
+    const oilMax = STORY.stats.find(s=>s.key==='oil').max;
+    const scarcity = 1 - clamp(oil/oilMax,0,1);          // 0 (full) -> 1 (empty)
+    const intensity = 0.5 + scarcity*1.4;                 // crackle harder as oil drops
+    const gap = 90 + Math.random()*(360 - scarcity*260);  // faster when scarce
+    if(Math.random()<0.85) crackle(intensity);
+    crackleTimer=setTimeout(scheduleCrackle, gap);
+  }
+  function update(){
+    if(!on) return;
+    const oil=state?state.stats.oil:6, oilMax=STORY.stats.find(s=>s.key==='oil').max;
+    const scarcity=1-clamp(oil/oilMax,0,1);
+    windGain.gain.setTargetAtTime(0.08+scarcity*0.22, ctx.currentTime, 0.8); // wind rises as light fails
+    filter.frequency.setTargetAtTime(420 - scarcity*180, ctx.currentTime, 0.8);
+  }
+  function stop(){ if(!on) return; on=false; clearTimeout(crackleTimer);
+    try{ master.gain.linearRampToValueAtTime(0, ctx.currentTime+0.4); }catch(e){}
+    setTimeout(()=>{ try{ctx.close();}catch(e){} ctx=null; }, 500);
+  }
+  function toggle(){ if(on){ stop(); return false; } start(); return true; }
+  return { toggle, update, isOn:()=>on };
+})();
+function updateAudioFromState(){ if(Audio_.isOn()) Audio_.update(); }
+
+/* ============================ OVERLAY PLUMBING ============================ */
+function openOverlay(id){
+  const ov=$('#'+id); ov.classList.add('show');
+  // Move focus into the modal for basic keyboard accessibility.
+  const focusable=ov.querySelector('button, input, textarea, [tabindex]');
+  if(focusable) try{ focusable.focus(); }catch(e){}
+}
+function closeOverlay(id){ $('#'+id).classList.remove('show'); }
+$$('.overlay').forEach(ov=>{ ov.addEventListener('click',e=>{ if(e.target===ov) ov.classList.remove('show'); }); });
+$$('[data-close]').forEach(b=>b.addEventListener('click',()=>closeOverlay(b.dataset.close)));
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ $$('.overlay.show').forEach(o=>o.classList.remove('show')); _confirmCb=null; } });
+/* Number keys 1-9 select the corresponding enabled choice (classic IF convention). */
+document.addEventListener('keydown',e=>{
+  if(e.key<'1'||e.key>'9') return;
+  if(e.metaKey||e.ctrlKey||e.altKey) return;
+  const tag=(e.target&&e.target.tagName||'').toLowerCase();
+  if(tag==='input'||tag==='textarea'||(e.target&&e.target.isContentEditable)) return;
+  if($$('.overlay.show').length || replaying) return;
+  const b=$('#choices .choice[data-key="'+e.key+'"]');
+  if(b){ e.preventDefault(); b.click(); }
+});
+
+function openMap(){ $('#mapWrap').innerHTML=buildMapSVG(STORY,state); openOverlay('ovMap'); }
+function openShare(){
+  $('#seedRaw').textContent=encodeSeed(state.path)||'(no choices yet)';
+  $('#seedLink').value=seedLink();
+  $('#saveLink').value=saveLink();
+  openOverlay('ovShare');
+}
+
+/* ============================ WIRING ============================ */
+/* Themed confirmation dialog (replaces native confirm) — resolves via callback. */
+let _confirmCb=null;
+function confirmModal(cb){ _confirmCb=cb; openOverlay('ovConfirm'); const y=$('#btnConfirmYes'); if(y) y.focus(); }
+$('#btnConfirmYes').addEventListener('click',()=>{ closeOverlay('ovConfirm'); const cb=_confirmCb; _confirmCb=null; if(cb) cb(); });
+$('#btnConfirmNo').addEventListener('click',()=>{ closeOverlay('ovConfirm'); _confirmCb=null; });
+
+$('#btnUndo').addEventListener('click',undo);
+$('#btnRestart').addEventListener('click',()=>confirmModal(startNewGame));
+$('#btnSaves').addEventListener('click',()=>{ renderSlots(); openOverlay('ovSaves'); });
+$('#btnMap').addEventListener('click',openMap);
+$('#btnShare').addEventListener('click',openShare);
+$('#btnAuthor').addEventListener('click',openAuthor);
+$('#btnAudio').addEventListener('click',function(){ const on=Audio_.toggle(); this.classList.toggle('on',on); toast(on?'Ambient audio on.':'Ambient audio off.'); });
+
+$('#btnSaveSlot').addEventListener('click',()=>{ const nm=$('#slotName').value.trim()||('run '+new Date().toLocaleTimeString()); saveSlot(nm); $('#slotName').value=''; });
+$('#btnCopySeed').addEventListener('click',()=>copy(seedLink(),'Seed link copied.'));
+$('#btnCopySave').addEventListener('click',()=>copy(saveLink(),'Save link copied.'));
+$('#authorTA').addEventListener('input',()=>{ clearTimeout(window._lintT); window._lintT=setTimeout(runAuthorLint,250); });
+$('#btnAuthorPlay').addEventListener('click',loadAuthoredStory);
+$('#btnAuthorReset').addEventListener('click',resetAuthored);
+$('#btnCardPng').addEventListener('click',downloadCardPNG);
+$('#btnCardSeed').addEventListener('click',()=>copy(seedLink(),'Replay link copied.'));
+$('#btnReplaySkip').addEventListener('click',()=>window._replaySkip&&window._replaySkip());
+$('#btnReplayTake').addEventListener('click',()=>{ finishReplay(); });
+/* Auto-select readonly share fields so the link can be copied by hand easily. */
+['#seedLink','#saveLink'].forEach(sel=>{ const el=$(sel); if(el){ const s=()=>el.select(); el.addEventListener('focus',s); el.addEventListener('click',s); } });
+
+function copy(text,msg){ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(()=>toast(msg),()=>fallbackCopy(text,msg)); } else fallbackCopy(text,msg); }
+function fallbackCopy(text,msg){ const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy'); toast(msg);}catch(e){toast('Copy failed — select the field manually.');} ta.remove(); }
+
+/* ============================ BOOT ============================ */
+function boot(){
+  const hash=location.hash;
+  if(hash.startsWith('#seed:')){
+    const seed=hash.slice(6);
+    state=newState(); enter(STORY.meta.start,{initial:true});
+    try{ history.replaceState(null,'',baseUrl()); }catch(e){}
+    replaySeed(seed);
+    return;
+  }
+  if(hash.startsWith('#save:')){
+    try{
+      const loaded=decodeSave(hash.slice(6));
+      state=loaded; if(!state.trail) state.trail=[state.current]; if(!state.used) state.used={};
+      undoStack=[]; saveAuto(); render();
+      try{ history.replaceState(null,'',baseUrl()); }catch(e){}
+      toast('Loaded a shared save.');
+      return;
+    }catch(e){ toast('That shared save link looks corrupt — starting fresh.'); }
+  }
+  if(loadAuto()){ render(); toast('Resumed your last run.'); }
+  else startNewGame();
+}
+boot();
+
+/* Expose a couple of internals for console tinkering / self-test. */
+window.EMBERWAKE={ lint:()=>lint(STORY), STORY:()=>STORY, state:()=>state, evalCond, applyEffect,
+  encodeSeed, decodeSeed, encodeSave, decodeSave,
+  choose, reset:startNewGame, seedNow:()=>encodeSeed(state.path) };
+</script>
+</body>
+</html>

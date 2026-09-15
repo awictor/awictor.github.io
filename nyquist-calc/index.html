@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nyquist Sampling Calculator — Nyquist frequency, aliasing &amp; PCM data rate</title>
+<meta name="description" content="Find the Nyquist frequency and minimum sample rate, detect aliasing and compute the aliased frequency, and get uncompressed PCM audio data rate. Offline, no tracking.">
+<style>
+  :root{
+    --c:#0891b2;
+    --bg:#e8f5f8; --card:#ffffff; --fg:#07161b; --muted:#436069;
+    --line:#cfe8ee; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#05131a; --card:#0c1d25; --fg:#e0f0f5; --muted:#87a6b1;
+    --line:#173039; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto;font-weight:700}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  input,select{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.1rem;font-weight:600;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus,select:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
+  .stat{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:16px;text-align:center}
+  .stat .v{font-size:1.5rem;font-weight:800;color:var(--c);word-break:break-all}
+  .stat .k{font-size:.78rem;color:var(--muted);margin-top:4px}
+  .warn{color:#dc2626;font-weight:700}
+  .ok{color:#059669;font-weight:700}
+  .err{color:#dc2626;font-size:.86rem;margin-top:10px;text-align:center;min-height:1em}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🎛️</div>
+  <div>
+    <h1>Nyquist Sampling Calculator</h1>
+    <p>Nyquist frequency, aliasing &amp; PCM rate</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="row">
+      <div><label>Sample rate (Hz)</label><input id="sr" inputmode="decimal" value="44100"></div>
+      <div><label>Signal frequency (Hz)</label><input id="sf" inputmode="decimal" value="30000"></div>
+    </div>
+    <div class="grid2">
+      <div class="stat"><div class="v" id="nyq">—</div><div class="k">Nyquist frequency (sr / 2)</div></div>
+      <div class="stat"><div class="v" id="minsr">—</div><div class="k">Min sample rate for this signal</div></div>
+    </div>
+    <div class="grid2">
+      <div class="stat"><div class="v" id="status">—</div><div class="k">Aliasing status</div></div>
+      <div class="stat"><div class="v" id="alias">—</div><div class="k">Perceived (aliased) frequency</div></div>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>Uncompressed PCM data rate</h2>
+    <div class="row">
+      <div><label>Bit depth</label><select id="bd"><option>16</option><option>24</option><option>8</option><option>32</option></select></div>
+      <div><label>Channels</label><select id="ch"><option value="2">2 (stereo)</option><option value="1">1 (mono)</option><option value="6">6 (5.1)</option></select></div>
+    </div>
+    <div class="grid2">
+      <div class="stat"><div class="v" id="rate">—</div><div class="k">Data rate</div></div>
+      <div class="stat"><div class="v" id="permin">—</div><div class="k">Storage per minute</div></div>
+    </div>
+    <div class="err" id="perr"></div>
+  </div>
+
+  <div class="card">
+    <h2>About the Nyquist theorem</h2>
+    <p class="note">The <b>Nyquist-Shannon theorem</b> says a signal can be perfectly reconstructed only if the <b>sample rate is more than twice</b> the highest frequency present. The <b>Nyquist frequency</b> is half the sample rate — the highest frequency you can represent. Anything above it doesn't vanish; it <b>aliases</b> down to a false lower frequency, folding around the Nyquist limit. That's why CD audio uses 44.1 kHz: comfortably above 2× the ~20 kHz limit of human hearing. Uncompressed PCM data rate is simply <code>sample rate × bit depth × channels</code>. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function pos(x, name){ if(typeof x !== 'number' || !isFinite(x) || x <= 0) throw new Error((name || 'value') + ' must be positive'); return x; }
+  // Highest representable frequency = half the sample rate.
+  function nyquistFrequency(sampleRate){ pos(sampleRate, 'sample rate'); return sampleRate / 2; }
+  // Minimum sample rate to capture a signal (strictly, must exceed this).
+  function minSampleRate(maxFreq){ pos(maxFreq, 'frequency'); return 2 * maxFreq; }
+  // Is the signal above the Nyquist frequency (i.e. will it alias)?
+  function isAliased(signalFreq, sampleRate){ pos(signalFreq, 'signal frequency'); pos(sampleRate, 'sample rate'); return signalFreq > sampleRate / 2; }
+  // The apparent frequency after folding into [0, Nyquist].
+  function aliasFrequency(signalFreq, sampleRate){ pos(signalFreq, 'signal frequency'); pos(sampleRate, 'sample rate'); return Math.abs(signalFreq - sampleRate * Math.round(signalFreq / sampleRate)); }
+  // Uncompressed PCM data rate in bits per second.
+  function pcmDataRate(sampleRate, bitDepth, channels){ pos(sampleRate, 'sample rate'); pos(bitDepth, 'bit depth'); pos(channels, 'channels'); return sampleRate * bitDepth * channels; }
+
+  if(typeof module !== 'undefined') module.exports = { nyquistFrequency:nyquistFrequency, minSampleRate:minSampleRate, isAliased:isAliased, aliasFrequency:aliasFrequency, pcmDataRate:pcmDataRate };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var $ = function(id){ return document.getElementById(id); };
+    function hz(x){ return x >= 1000 ? (x / 1000).toFixed(x % 1000 === 0 ? 0 : 2) + ' kHz' : x + ' Hz'; }
+    function bytes(b){ var u = ['B','KB','MB','GB']; var i = 0; while(b >= 1024 && i < u.length - 1){ b /= 1024; i++; } return b.toFixed(2) + ' ' + u[i]; }
+
+    function render(){
+      $('err').textContent = '';
+      try{
+        var sr = Number($('sr').value), sf = Number($('sf').value);
+        $('nyq').textContent = hz(nyquistFrequency(sr));
+        $('minsr').textContent = hz(minSampleRate(sf));
+        if(isAliased(sf, sr)){ $('status').innerHTML = '<span class="warn">Aliased!</span>'; $('alias').textContent = hz(aliasFrequency(sf, sr)); }
+        else { $('status').innerHTML = '<span class="ok">Clean</span>'; $('alias').textContent = hz(sf); }
+      }catch(e){ ['nyq','minsr','status','alias'].forEach(function(id){ $(id).textContent = '—'; }); $('err').textContent = e.message; }
+    }
+    function renderPcm(){
+      $('perr').textContent = '';
+      try{
+        var sr = Number($('sr').value), bd = Number($('bd').value), ch = Number($('ch').value);
+        var rate = pcmDataRate(sr, bd, ch);
+        $('rate').textContent = (rate / 1000).toFixed(1) + ' kbps';
+        $('permin').textContent = bytes(rate * 60 / 8);
+      }catch(e){ $('rate').textContent = '—'; $('permin').textContent = '—'; $('perr').textContent = e.message; }
+    }
+    ['sr','sf'].forEach(function(id){ $(id).addEventListener('input', function(){ render(); renderPcm(); }); });
+    ['bd','ch'].forEach(function(id){ $(id).addEventListener('change', renderPcm); });
+    render(); renderPcm();
+
+    var root = document.documentElement, tb = $('theme');
+    function setTheme(t){ root.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? '☀️' : '🌙'; try{ localStorage.setItem('nyq-theme', t); }catch(e){} }
+    var saved; try{ saved = localStorage.getItem('nyq-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); });
+  }
+</script>
+</body>
+</html>

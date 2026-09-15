@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Skein — Multiscale Truchet Weave Studio</title>
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#12151d; --panel2:#171b25; --line:#242a38;
+    --ink:#e8ebf2; --muted:#8b93a7; --accent:#ff6a3d; --accent2:#5ad1c2;
+    --shadow:0 12px 40px rgba(0,0,0,.45);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:radial-gradient(1200px 800px at 15% -10%, #161b27, var(--bg));
+    color:var(--ink); font:14px/1.45 "Segoe UI",system-ui,-apple-system,sans-serif;
+    overflow:hidden;
+  }
+  #app{display:grid; grid-template-columns:320px 1fr; height:100vh; width:100vw}
+  /* ---- sidebar ---- */
+  aside{
+    background:linear-gradient(180deg,var(--panel),#0e1017);
+    border-right:1px solid var(--line); display:flex; flex-direction:column;
+    min-height:0;
+  }
+  .brand{padding:18px 20px 12px; border-bottom:1px solid var(--line)}
+  .brand h1{margin:0; font-size:22px; letter-spacing:.5px; font-weight:700}
+  .brand h1 b{color:var(--accent)}
+  .brand p{margin:4px 0 0; color:var(--muted); font-size:12px}
+  .scroll{overflow-y:auto; padding:14px 18px 22px; flex:1; min-height:0}
+  .scroll::-webkit-scrollbar{width:10px}
+  .scroll::-webkit-scrollbar-thumb{background:#222836; border-radius:8px; border:2px solid var(--panel)}
+  .grp{margin:0 0 18px}
+  .grp h2{
+    font-size:11px; text-transform:uppercase; letter-spacing:1.4px; color:var(--muted);
+    margin:0 0 10px; font-weight:600;
+  }
+  .row{display:flex; align-items:center; justify-content:space-between; margin:10px 0; gap:10px}
+  .row label{font-size:13px; color:#c7cdda}
+  .val{font-variant-numeric:tabular-nums; color:var(--accent2); font-size:12px; min-width:38px; text-align:right}
+  input[type=range]{-webkit-appearance:none; appearance:none; width:100%; height:4px; border-radius:4px;
+    background:#2a3140; outline:none; margin:8px 0}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:16px; height:16px; border-radius:50%;
+    background:var(--accent); cursor:pointer; box-shadow:0 0 0 3px rgba(255,106,61,.18)}
+  input[type=range]::-moz-range-thumb{width:16px;height:16px;border:none;border-radius:50%;background:var(--accent);cursor:pointer}
+  .rangewrap{width:100%}
+  select,input[type=text]{
+    width:100%; background:var(--panel2); color:var(--ink); border:1px solid var(--line);
+    border-radius:8px; padding:8px 10px; font-size:13px; outline:none;
+  }
+  select:focus,input[type=text]:focus{border-color:var(--accent)}
+  button:focus-visible,.swatch:focus-visible,.gcard:focus-visible,
+  input:focus-visible,select:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  .seg{display:flex; gap:6px; background:var(--panel2); border:1px solid var(--line); border-radius:9px; padding:4px}
+  .seg button{flex:1; background:transparent; border:none; color:var(--muted); padding:7px 4px; border-radius:6px;
+    cursor:pointer; font-size:12px; font-weight:600; transition:.15s}
+  .seg button.on{background:var(--accent); color:#160b06}
+  .toggles{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+  .chk{display:flex; align-items:center; gap:8px; background:var(--panel2); border:1px solid var(--line);
+    border-radius:8px; padding:8px 10px; cursor:pointer; font-size:12.5px; user-select:none}
+  .chk input{accent-color:var(--accent); width:15px; height:15px}
+  .pal{display:grid; grid-template-columns:repeat(4,1fr); gap:8px}
+  .swatch{height:34px; border-radius:8px; cursor:pointer; border:2px solid transparent; position:relative; overflow:hidden}
+  .swatch.on{border-color:var(--accent)}
+  .swatch span{position:absolute; inset:0; display:flex}
+  .swatch span i{flex:1}
+  .btns{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+  button.act{
+    background:var(--panel2); color:var(--ink); border:1px solid var(--line); border-radius:9px;
+    padding:10px; cursor:pointer; font-size:13px; font-weight:600; transition:.15s; display:flex;
+    align-items:center; justify-content:center; gap:6px;
+  }
+  button.act:hover{border-color:var(--accent); color:#fff}
+  button.act.primary{background:linear-gradient(180deg,#ff7a4f,#ef5a2c); color:#180a05; border:none}
+  button.act.primary:hover{filter:brightness(1.06)}
+  button.act.wide{grid-column:1/-1}
+  .seedbox{display:flex; gap:8px}
+  .seedbox input{flex:1; font-family:"Consolas",monospace; font-size:12px}
+  .seedbox button{width:42px}
+  .hint{color:var(--muted); font-size:11.5px; line-height:1.5; margin-top:6px}
+  kbd{background:#222836; border:1px solid #313949; border-bottom-width:2px; border-radius:5px; padding:1px 6px;
+    font-size:11px; font-family:inherit; color:#cfd6e4}
+  /* ---- stage ---- */
+  main{position:relative; display:flex; align-items:center; justify-content:center; min-width:0; min-height:0}
+  #stage{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:28px}
+  #wrap{position:relative; box-shadow:var(--shadow); border-radius:6px; overflow:hidden; background:#000}
+  #wrap.transparent{
+    background-color:#2b2f3a;
+    background-image:
+      linear-gradient(45deg,#3a3f4d 25%,transparent 25%,transparent 75%,#3a3f4d 75%),
+      linear-gradient(45deg,#3a3f4d 25%,transparent 25%,transparent 75%,#3a3f4d 75%);
+    background-size:20px 20px; background-position:0 0,10px 10px;
+  }
+  canvas{display:block; touch-action:none; cursor:crosshair}
+  .topbar{position:absolute; top:16px; left:50%; transform:translateX(-50%); display:flex; gap:8px; z-index:5}
+  .pill{background:rgba(18,21,29,.82); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+    border:1px solid var(--line); color:var(--muted);
+    padding:7px 14px; border-radius:999px; font-size:12px; display:flex; align-items:center; gap:8px}
+  .pill b{color:var(--ink); font-variant-numeric:tabular-nums}
+  .gbtn{position:absolute; right:18px; top:16px; z-index:5}
+  button.gbtn{display:none}
+  /* ---- gallery ---- */
+  #gallery{position:absolute; inset:0; background:rgba(6,8,12,.78); -webkit-backdrop-filter:blur(6px);
+    backdrop-filter:blur(6px); z-index:20;
+    display:none; align-items:center; justify-content:center}
+  #gallery.open{display:flex}
+  .gpanel{width:min(920px,92vw); max-height:86vh; background:var(--panel); border:1px solid var(--line);
+    border-radius:16px; box-shadow:var(--shadow); display:flex; flex-direction:column; overflow:hidden}
+  .ghead{display:flex; align-items:center; justify-content:space-between; padding:18px 22px; border-bottom:1px solid var(--line)}
+  .ghead h2{margin:0; font-size:18px}
+  .ghead p{margin:2px 0 0; color:var(--muted); font-size:12.5px}
+  .gclose{background:var(--panel2); border:1px solid var(--line); color:var(--ink); width:34px; height:34px;
+    border-radius:8px; cursor:pointer; font-size:16px}
+  .ggrid{overflow-y:auto; padding:20px 22px; display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:16px}
+  .gcard{background:var(--panel2); border:1px solid var(--line); border-radius:12px; overflow:hidden; cursor:pointer;
+    transition:.16s; position:relative}
+  .gcard:hover{border-color:var(--accent); transform:translateY(-3px)}
+  .gcard canvas{width:100%; height:auto; display:block; background:#000}
+  .gcard .meta{padding:9px 12px}
+  .gcard .meta h3{margin:0; font-size:13px}
+  .gcard .meta span{color:var(--muted); font-size:11px}
+  /* toast */
+  #toast{position:absolute; bottom:22px; left:50%; transform:translateX(-50%) translateY(20px); background:#1c2130;
+    border:1px solid var(--line); color:var(--ink); padding:10px 18px; border-radius:999px; font-size:13px; z-index:30;
+    opacity:0; pointer-events:none; transition:.28s}
+  #toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+  @media (max-width:820px){
+    #app{grid-template-columns:1fr}
+    aside{position:absolute; z-index:15; width:320px; height:100%; transform:translateX(-100%); transition:.25s}
+    aside.open{transform:none}
+    button.gbtn{display:flex}
+  }
+  @media (prefers-reduced-motion: reduce){
+    *{transition:none !important; animation:none !important}
+    aside{transition:none}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="brand">
+      <h1>Sk<b>ei</b>n</h1>
+      <p>Multiscale Truchet weave studio</p>
+    </div>
+    <div class="scroll">
+      <div class="grp">
+        <h2>Weave</h2>
+        <div class="row"><label>Grid resolution</label><span class="val" id="v-grid">10</span></div>
+        <div class="rangewrap"><input type="range" id="c-grid" min="3" max="40" step="1" value="10"></div>
+        <div class="row"><label>Subdivision chance</label><span class="val" id="v-sub">45%</span></div>
+        <div class="rangewrap"><input type="range" id="c-sub" min="0" max="90" step="1" value="45"></div>
+        <div class="row"><label>Max depth</label><span class="val" id="v-depth">3</span></div>
+        <div class="rangewrap"><input type="range" id="c-depth" min="0" max="4" step="1" value="3"></div>
+        <div class="row"><label>Strand weight</label><span class="val" id="v-stroke">0.34</span></div>
+        <div class="rangewrap"><input type="range" id="c-stroke" min="6" max="60" step="1" value="34"></div>
+      </div>
+
+      <div class="grp">
+        <h2>Tile family</h2>
+        <div class="seg" id="c-family">
+          <button data-fam="arcs" class="on">Arcs</button>
+          <button data-fam="diagonals">Diagonals</button>
+          <button data-fam="triangles">Triangles</button>
+        </div>
+      </div>
+
+      <div class="grp">
+        <h2>Palette</h2>
+        <div class="pal" id="c-palette"></div>
+      </div>
+
+      <div class="grp">
+        <h2>Options</h2>
+        <div class="toggles">
+          <label class="chk"><input type="checkbox" id="c-weave" checked> Two-tone</label>
+          <label class="chk"><input type="checkbox" id="c-seam"> Seamless</label>
+          <label class="chk"><input type="checkbox" id="c-shimmer"> Shimmer</label>
+          <label class="chk"><input type="checkbox" id="c-trans"> No background</label>
+        </div>
+      </div>
+
+      <div class="grp">
+        <h2>Seed</h2>
+        <div class="seedbox">
+          <input type="text" id="c-seed" spellcheck="false" value="skein">
+          <button class="act" id="b-dice" title="Reseed (Space)">⟳</button>
+        </div>
+        <p class="hint">Click a tile to rotate it · right-click to recolor · drag to sweep · <kbd>Space</kbd> reseeds · seed lives in the URL.</p>
+      </div>
+
+      <div class="grp">
+        <h2>Export</h2>
+        <div class="row"><label>PNG scale</label>
+          <div class="seg" id="c-scale" style="max-width:150px">
+            <button data-scale="1" class="on">1×</button>
+            <button data-scale="2">2×</button>
+            <button data-scale="4">4×</button>
+          </div>
+        </div>
+        <div class="btns" style="margin-top:8px">
+          <button class="act" id="b-svg">SVG</button>
+          <button class="act" id="b-png">PNG</button>
+          <button class="act primary wide" id="b-link">Copy permalink</button>
+          <button class="act wide" id="b-gallery">Open gallery</button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <main>
+    <div class="topbar">
+      <div class="pill">tiles <b id="stat-tiles">0</b></div>
+      <div class="pill">seed <b id="stat-seed">skein</b></div>
+    </div>
+    <button class="act gbtn" id="b-menu" aria-label="Toggle controls">☰</button>
+    <div id="stage"><div id="wrap"><canvas id="cv"></canvas></div></div>
+    <div id="toast"></div>
+
+    <div id="gallery">
+      <div class="gpanel">
+        <div class="ghead">
+          <div>
+            <h2>Gallery</h2>
+            <p>Curated seeds &amp; parameters — click any piece to load it.</p>
+          </div>
+          <button class="gclose" id="g-close">✕</button>
+        </div>
+        <div class="ggrid" id="g-grid"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+"use strict";
+/* ============================================================================
+   Skein — a single-file multiscale Truchet weave studio.
+   Everything (geometry, quadtree, RNG, canvas render, SVG serialize, UI)
+   is derived from one shared set of path commands so exports match the screen.
+   ========================================================================== */
+
+/* ---------- deterministic hashing / RNG -------------------------------- */
+function hashStr(s){
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++){ h = Math.imul(h ^ s.charCodeAt(i), 16777619); }
+  return h >>> 0;
+}
+function seededInt(key){ return hashStr(key); }
+function mulberry32(a){
+  return function(){
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* ---------- palettes ---------------------------------------------------- */
+const PALETTES = [
+  {name:"Cord",   bg:"#f4f1ea", colors:["#ef5a2c","#2b2b31"], casing:"#e4ddcf"},
+  {name:"Ink",    bg:"#0f1420", colors:["#7aa2f7","#f7c873"], casing:"#080c15"},
+  {name:"Kelp",   bg:"#062019", colors:["#3ddc97","#ffd166"], casing:"#03110c"},
+  {name:"Rose",   bg:"#1b0f16", colors:["#ff6b9d","#ffd8a8"], casing:"#0e0710"},
+  {name:"Mono",   bg:"#0d0d0f", colors:["#f2f2f2","#7c7c86"], casing:"#000000"},
+  {name:"Sunset", bg:"#2a1150", colors:["#ff8a5b","#ffe27a"], casing:"#160930"},
+  {name:"Sea",    bg:"#eef6f6", colors:["#0e7490","#f97316"], casing:"#d3e6e6"},
+  {name:"Neon",   bg:"#08080f", colors:["#00e5ff","#ff2bd6"], casing:"#040409"}
+];
+
+/* ---------- defaults & presets ----------------------------------------- */
+const DEFAULTS = {
+  seed:"skein", gridN:10, subdivideProb:0.45, maxDepth:3, family:"arcs",
+  strokeW:0.34, paletteIndex:0, weave:true, seamless:false, transparent:false
+};
+
+const PRESETS = [
+  {name:"Ember Loom",   seed:"ember",   gridN:9,  subdivideProb:0.55, maxDepth:3, family:"arcs",      strokeW:0.36, paletteIndex:0, weave:true,  seamless:false},
+  {name:"Midnight Map", seed:"atlas",   gridN:12, subdivideProb:0.5,  maxDepth:3, family:"arcs",      strokeW:0.3,  paletteIndex:1, weave:true,  seamless:false},
+  {name:"Kelp Forest",  seed:"tide7",   gridN:8,  subdivideProb:0.62, maxDepth:4, family:"arcs",      strokeW:0.32, paletteIndex:2, weave:true,  seamless:false},
+  {name:"Rose Circuit", seed:"petal",   gridN:14, subdivideProb:0.4,  maxDepth:2, family:"diagonals", strokeW:0.26, paletteIndex:3, weave:true,  seamless:false},
+  {name:"Mono Mesh",    seed:"graphite",gridN:16, subdivideProb:0.35, maxDepth:2, family:"arcs",      strokeW:0.22, paletteIndex:4, weave:false, seamless:false},
+  {name:"Stained Glass",seed:"chapel",  gridN:7,  subdivideProb:0.5,  maxDepth:3, family:"triangles", strokeW:0.34, paletteIndex:5, weave:true,  seamless:false},
+  {name:"Harbor Tile",  seed:"pier",    gridN:6,  subdivideProb:0.5,  maxDepth:3, family:"arcs",      strokeW:0.38, paletteIndex:6, weave:true,  seamless:true},
+  {name:"Neon Grid",    seed:"vapor",   gridN:11, subdivideProb:0.45, maxDepth:3, family:"diagonals", strokeW:0.24, paletteIndex:7, weave:true,  seamless:false},
+  {name:"Deep Braid",   seed:"knotwork",gridN:5,  subdivideProb:0.75, maxDepth:4, family:"arcs",      strokeW:0.4,  paletteIndex:1, weave:true,  seamless:false},
+  {name:"Coral Facet",  seed:"reef",    gridN:9,  subdivideProb:0.55, maxDepth:3, family:"triangles", strokeW:0.3,  paletteIndex:2, weave:true,  seamless:false},
+  {name:"Paper Weave",  seed:"origami", gridN:10, subdivideProb:0.3,  maxDepth:2, family:"arcs",      strokeW:0.35, paletteIndex:0, weave:true,  seamless:true},
+  {name:"Solar Flux",   seed:"corona",  gridN:8,  subdivideProb:0.6,  maxDepth:3, family:"arcs",      strokeW:0.33, paletteIndex:5, weave:true,  seamless:false}
+];
+
+/* ---------- non-crossing perfect matchings (Truchet orientations) ------- */
+function ncm(indices){
+  if (indices.length === 0) return [[]];
+  const first = indices[0];
+  const out = [];
+  for (let k = 1; k < indices.length; k += 2){
+    const partner = indices[k];
+    const inside = ncm(indices.slice(1, k));
+    const outside = ncm(indices.slice(k + 1));
+    for (const im of inside) for (const om of outside){
+      out.push([[first, partner], ...im, ...om]);
+    }
+  }
+  return out;
+}
+
+/* ---------- scene = quadtree partition + edge ports --------------------- */
+const LEAF_CAP = 40000;   // graceful degradation ceiling for extreme presets
+function buildScene(p){
+  const gridN = p.gridN, cs = 1 / gridN;
+  const rng = mulberry32(hashStr("tree|"+p.seed+"|"+gridN+"|"+p.subdivideProb+"|"+p.maxDepth+"|"+(p.seamless?1:0)));
+  const base = new Array(gridN * gridN);
+  let leafCount = gridN * gridN;   // every base cell starts as a leaf
+
+  // Seamless mode grades the max subdivision depth by Chebyshev distance from
+  // the border ring: the outer ring is pinned to level 0 (so every outer edge
+  // is a single midpoint port and tiled copies line up), and each ring inward
+  // may go one level deeper. Because adjacent base cells' caps differ by at
+  // most 1, the 2:1 balance pass below can always resolve interior transitions
+  // WITHOUT ever needing to subdivide a border cell — keeping both the wrap
+  // guarantee and the edge-port connectivity invariant intact.
+  function capFor(bx, by){
+    if (!p.seamless) return p.maxDepth;
+    return Math.min(p.maxDepth, Math.min(bx, by, gridN-1-bx, gridN-1-by));
+  }
+
+  function node(x, y, size, level){
+    return { x, y, size, level, children:null, id:x.toFixed(6)+"_"+y.toFixed(6)+"_"+level };
+  }
+  function makeChildren(n){
+    const h = n.size / 2;
+    n.children = [
+      node(n.x,     n.y,     h, n.level+1),
+      node(n.x + h, n.y,     h, n.level+1),
+      node(n.x,     n.y + h, h, n.level+1),
+      node(n.x + h, n.y + h, h, n.level+1)
+    ];
+    leafCount += 3;   // one leaf becomes four
+  }
+  function subdivide(n, cap){
+    if (n.level >= cap || leafCount >= LEAF_CAP) return;
+    if (rng() < p.subdivideProb){
+      makeChildren(n);
+      for (const c of n.children) subdivide(c, cap);
+    }
+  }
+  for (let by = 0; by < gridN; by++)
+    for (let bx = 0; bx < gridN; bx++){
+      const n = node(bx * cs, by * cs, cs, 0);
+      subdivide(n, capFor(bx, by));
+      base[by * gridN + bx] = n;
+    }
+
+  function leafAt(px, py){
+    if (px < 0 || py < 0 || px >= 1 || py >= 1) return null;
+    let bx = Math.floor(px * gridN), by = Math.floor(py * gridN);
+    if (bx < 0) bx = 0; if (by < 0) by = 0;
+    if (bx >= gridN) bx = gridN-1; if (by >= gridN) by = gridN-1;
+    let n = base[by * gridN + bx];
+    while (n.children){
+      const mx = n.x + n.size/2, my = n.y + n.size/2;
+      n = n.children[(py >= my ? 2 : 0) + (px >= mx ? 1 : 0)];
+    }
+    return n;
+  }
+  function collect(){
+    const out = [];
+    const walk = n => n.children ? n.children.forEach(walk) : out.push(n);
+    for (const n of base) walk(n);
+    return out;
+  }
+
+  // enforce 2:1 balance so any edge carries at most two ports.
+  const eps = 1e-6;
+  function maxNeighborLevel(leaf){
+    const {x, y, size:s} = leaf; let mx = -1;
+    const probes = [];
+    for (const t of [0.125, 0.375, 0.625, 0.875]){
+      probes.push([x + s*t, y - eps]);     // top
+      probes.push([x + s*t, y + s + eps]);  // bottom
+      probes.push([x - eps, y + s*t]);      // left
+      probes.push([x + s + eps, y + s*t]);  // right
+    }
+    for (const [qx, qy] of probes){
+      const nb = leafAt(qx, qy);
+      if (nb && nb.level > mx) mx = nb.level;
+    }
+    return mx;
+  }
+  let changed = true, guard = 0;
+  while (changed && guard++ < 24){
+    changed = false;
+    if (leafCount >= LEAF_CAP) break;
+    for (const leaf of collect()){
+      if (leaf.children || leaf.level >= p.maxDepth) continue;
+      if (leafCount >= LEAF_CAP) break;
+      // never push a cell past its graded cap (pins the seamless border ring)
+      const bx = Math.min(gridN-1, Math.max(0, Math.floor(leaf.x * gridN + eps)));
+      const by = Math.min(gridN-1, Math.max(0, Math.floor(leaf.y * gridN + eps)));
+      if (leaf.level >= capFor(bx, by)) continue;
+      if (maxNeighborLevel(leaf) >= leaf.level + 2){
+        makeChildren(leaf);
+        changed = true;
+      }
+    }
+  }
+
+  // ports per leaf edge: 1 (midpoint) or 2 (quarter points, when neighbour finer)
+  function portsForEdge(leaf, edge){
+    const {x, y, size:s} = leaf;
+    let qa, qb, mid, p1, p2;
+    if (edge === "T"){ qa=[x+s*0.25,y-eps]; qb=[x+s*0.75,y-eps]; mid={x:x+s/2,y}; p1={x:x+s*0.25,y}; p2={x:x+s*0.75,y}; }
+    else if (edge === "B"){ qa=[x+s*0.25,y+s+eps]; qb=[x+s*0.75,y+s+eps]; mid={x:x+s/2,y:y+s}; p1={x:x+s*0.25,y:y+s}; p2={x:x+s*0.75,y:y+s}; }
+    else if (edge === "L"){ qa=[x-eps,y+s*0.25]; qb=[x-eps,y+s*0.75]; mid={x,y:y+s/2}; p1={x,y:y+s*0.25}; p2={x,y:y+s*0.75}; }
+    else { qa=[x+s+eps,y+s*0.25]; qb=[x+s+eps,y+s*0.75]; mid={x:x+s,y:y+s/2}; p1={x:x+s,y:y+s*0.25}; p2={x:x+s,y:y+s*0.75}; }
+    const la = leafAt(qa[0], qa[1]);
+    const lb = leafAt(qb[0], qb[1]);
+    if (la && lb && la !== lb) return [ {...p1, edge}, {...p2, edge} ];
+    return [ {...mid, edge} ];
+  }
+
+  const leaves = collect();
+  for (const leaf of leaves){
+    const T = portsForEdge(leaf, "T");
+    const R = portsForEdge(leaf, "R");
+    const B = portsForEdge(leaf, "B").slice().reverse();
+    const L = portsForEdge(leaf, "L").slice().reverse();
+    leaf.ports = [...T, ...R, ...B, ...L];   // clockwise order
+  }
+
+  return { params:p, leaves, leafAt };
+}
+
+/* ---------- one connection -> abstract path commands (shared) ----------- */
+function connectionCmds(A, B, leaf, family){
+  const {x, y, size:s} = leaf;
+  const center = { x:x + s/2, y:y + s/2 };
+  const sameEdge = A.edge === B.edge;
+  const opposite = (A.edge==="T"&&B.edge==="B")||(A.edge==="B"&&B.edge==="T")||
+                   (A.edge==="L"&&B.edge==="R")||(A.edge==="R"&&B.edge==="L");
+  const adjacent = !sameEdge && !opposite;
+  let corner = center;
+  if (adjacent){
+    const set = A.edge + B.edge;
+    const has = (a,b) => set.indexOf(a) >= 0 && set.indexOf(b) >= 0;
+    if (has("T","L")) corner = {x, y};
+    else if (has("T","R")) corner = {x:x+s, y};
+    else if (has("B","R")) corner = {x:x+s, y:y+s};
+    else if (has("B","L")) corner = {x, y:y+s};
+  }
+  const mid = { x:(A.x+B.x)/2, y:(A.y+B.y)/2 };
+  const inset = { x:mid.x + (center.x-mid.x)*1.15, y:mid.y + (center.y-mid.y)*1.15 };
+
+  if (family === "diagonals"){
+    if (sameEdge) return { fill:false, cmds:[["M",A.x,A.y],["L",inset.x,inset.y],["L",B.x,B.y]] };
+    return { fill:false, cmds:[["M",A.x,A.y],["L",B.x,B.y]] };
+  }
+  if (family === "triangles"){
+    const apex = adjacent ? corner : (sameEdge ? inset : center);
+    return { fill:true, cmds:[["M",A.x,A.y],["L",apex.x,apex.y],["L",B.x,B.y],["Z"]] };
+  }
+  // arcs (Smith quarter-circle approximation via quadratic through the corner)
+  const cp = adjacent ? corner : (opposite ? center : inset);
+  return { fill:false, cmds:[["M",A.x,A.y],["Q",cp.x,cp.y,B.x,B.y]] };
+}
+
+/* ---------- scene -> ordered draw ops (normalized coordinates) ---------- */
+function computeOps(scene, p, overrides, colorOverrides){
+  const pal = PALETTES[p.paletteIndex];
+  const casing = [], main = [];
+  overrides = overrides || {};
+  colorOverrides = colorOverrides || {};
+
+  for (const leaf of scene.leaves){
+    const ports = leaf.ports;
+    const n = ports.length;
+    if (n < 2) continue;
+
+    let indices = ports.map((_, i) => i);
+    let cap = -1;
+    if (n % 2 === 1){ cap = seededInt(p.seed+"|cap|"+leaf.id) % n; indices = indices.filter(i => i !== cap); }
+
+    const matchings = ncm(indices);
+    let m = [];
+    if (matchings.length){
+      const baseIdx = seededInt(p.seed+"|m|"+leaf.id) % matchings.length;
+      const ov = overrides[leaf.id] || 0;
+      const idx = (((baseIdx + ov) % matchings.length) + matchings.length) % matchings.length;
+      m = matchings[idx];
+    }
+    const w = Math.max(p.strokeW * leaf.size, 0.0006);
+    const cOff = colorOverrides[leaf.id] || 0;
+
+    m.forEach((pair, pi) => {
+      const A = ports[pair[0]], B = ports[pair[1]];
+      const ci = p.weave ? ((pi + cOff) % 2) : 0;
+      const color = pal.colors[ci];
+      const conn = connectionCmds(A, B, leaf, p.family);
+      if (conn.fill){
+        main.push({ type:"fill", color, cmds:conn.cmds });
+        casing.push({ type:"stroke", color:pal.casing, width:w*0.22, cmds:conn.cmds });
+      } else {
+        casing.push({ type:"stroke", color:pal.casing, width:w*1.75, cmds:conn.cmds });
+        main.push({ type:"stroke", color, width:w, cmds:conn.cmds });
+      }
+    });
+
+    if (cap >= 0 && p.family !== "triangles"){
+      const P = ports[cap];
+      const c = { x:leaf.x + leaf.size/2, y:leaf.y + leaf.size/2 };
+      const dx = c.x - P.x, dy = c.y - P.y, len = Math.hypot(dx, dy) || 1;
+      const cmds = [["M",P.x,P.y],["L", P.x + dx/len*leaf.size*0.16, P.y + dy/len*leaf.size*0.16]];
+      const w2 = Math.max(p.strokeW * leaf.size, 0.0006);
+      casing.push({ type:"stroke", color:pal.casing, width:w2*1.75, cmds });
+      main.push({ type:"stroke", color:pal.colors[0], width:w2, cmds });
+    }
+  }
+
+  return p.family === "triangles" ? [...main, ...casing] : [...casing, ...main];
+}
+
+/* ---------- renderers (both consume the same ops) ----------------------- */
+function pathFromCmds(cmds, px){
+  const path = new Path2D();
+  for (const c of cmds){
+    if (c[0] === "M") path.moveTo(c[1]*px, c[2]*px);
+    else if (c[0] === "L") path.lineTo(c[1]*px, c[2]*px);
+    else if (c[0] === "Q") path.quadraticCurveTo(c[1]*px, c[2]*px, c[3]*px, c[4]*px);
+    else if (c[0] === "Z") path.closePath();
+  }
+  return path;
+}
+function paintOps(ctx, ops, px){
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  for (const op of ops){
+    const path = pathFromCmds(op.cmds, px);
+    if (op.type === "stroke"){
+      ctx.strokeStyle = op.color;
+      ctx.lineWidth = Math.max(op.width * px, 0.65);
+      ctx.stroke(path);
+    } else {
+      ctx.fillStyle = op.color;
+      ctx.fill(path);
+    }
+  }
+}
+function opsToSVG(ops, px, bg, transparent){
+  const f = v => (Math.round(v * 100) / 100);
+  let s = `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 ${px} ${px}">`;
+  if (!transparent) s += `<rect width="${px}" height="${px}" fill="${bg}"/>`;
+  s += `<g stroke-linecap="round" stroke-linejoin="round">`;
+  for (const op of ops){
+    let d = "";
+    for (const c of op.cmds){
+      if (c[0] === "M") d += `M${f(c[1]*px)} ${f(c[2]*px)}`;
+      else if (c[0] === "L") d += `L${f(c[1]*px)} ${f(c[2]*px)}`;
+      else if (c[0] === "Q") d += `Q${f(c[1]*px)} ${f(c[2]*px)} ${f(c[3]*px)} ${f(c[4]*px)}`;
+      else if (c[0] === "Z") d += "Z";
+    }
+    if (op.type === "stroke")
+      s += `<path d="${d}" fill="none" stroke="${op.color}" stroke-width="${f(Math.max(op.width*px,0.65))}"/>`;
+    else
+      s += `<path d="${d}" fill="${op.color}"/>`;
+  }
+  return s + "</g></svg>";
+}
+
+/* ======================================================================= *
+ *  Application wiring
+ * ======================================================================= */
+const EXPORT_BASE = 1400;
+const $ = id => document.getElementById(id);
+
+const cv = $("cv");
+const ctx = cv.getContext("2d");
+const cache = document.createElement("canvas");
+const cctx = cache.getContext("2d");
+
+let params = { ...DEFAULTS };
+let overrides = {};        // per-tile rotation offset
+let colorOverrides = {};   // per-tile colour flip
+let scene = null;
+let ops = null;
+let hoverId = null;
+let backingSize = 800;
+
+/* ---- scene lifecycle -------------------------------------------------- */
+function rebuild(resetTiles){
+  if (resetTiles !== false){ overrides = {}; colorOverrides = {}; }
+  scene = buildScene(params);
+  recomputeAndPaint();
+  $("stat-tiles").textContent = scene.leaves.length;
+  $("stat-seed").textContent = params.seed;
+}
+function recomputeAndPaint(){
+  ops = computeOps(scene, params, overrides, colorOverrides);
+  paintCache();
+  render();
+}
+// Coalesce continuous slider input into at most one rebuild per animation
+// frame so dragging grid/subdivision/depth can't queue up dozens of expensive
+// (potentially hundreds-of-thousands-of-leaf) rebuilds and freeze the tab.
+let rebuildQueued = false;
+function scheduleRebuild(){
+  if (rebuildQueued) return;
+  rebuildQueued = true;
+  requestAnimationFrame(() => { rebuildQueued = false; rebuild(); writeHash(); });
+}
+function paintCache(){
+  const px = backingSize;
+  cache.width = px; cache.height = px;
+  if (!params.transparent){ cctx.fillStyle = PALETTES[params.paletteIndex].bg; cctx.fillRect(0,0,px,px); }
+  else cctx.clearRect(0,0,px,px);
+  $("wrap").classList.toggle("transparent", params.transparent);
+  paintOps(cctx, ops, px);
+}
+function render(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.drawImage(cache, 0, 0);
+  if (hoverId){
+    const leaf = leafObjById(hoverId);
+    if (leaf){
+      const px = backingSize;
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,255,255,.9)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(leaf.x*px+1, leaf.y*px+1, leaf.size*px-2, leaf.size*px-2);
+      ctx.fillStyle = "rgba(255,106,61,.12)";
+      ctx.fillRect(leaf.x*px, leaf.y*px, leaf.size*px, leaf.size*px);
+      ctx.restore();
+    }
+  }
+}
+function leafObjById(id){
+  for (const l of scene.leaves) if (l.id === id) return l;
+  return null;
+}
+
+/* ---- sizing ----------------------------------------------------------- */
+function resize(){
+  const stage = $("stage");
+  const pad = 56;
+  const avail = Math.min(stage.clientWidth - pad, stage.clientHeight - pad);
+  const size = Math.max(220, avail);
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  backingSize = Math.min(Math.round(size * dpr), 1600);
+  const wrap = $("wrap");
+  wrap.style.width = size + "px"; wrap.style.height = size + "px";
+  cv.width = backingSize; cv.height = backingSize;
+  cv.style.width = size + "px"; cv.style.height = size + "px";
+  if (window.innerWidth > 820) $("sidebar").classList.remove("open");
+  if (scene){ paintCache(); render(); }
+}
+window.addEventListener("resize", resize);
+
+/* ---- pointer interaction --------------------------------------------- */
+function evtToNorm(e){
+  const r = cv.getBoundingClientRect();
+  return { x:(e.clientX - r.left)/r.width, y:(e.clientY - r.top)/r.height };
+}
+let dragging = false, lastTouched = null;
+cv.addEventListener("pointermove", e => {
+  const {x,y} = evtToNorm(e);
+  const leaf = scene && scene.leafAt(x,y);
+  const id = leaf ? leaf.id : null;
+  if (dragging && leaf && id !== lastTouched){ rotateTile(id); lastTouched = id; }
+  if (id !== hoverId){ hoverId = id; render(); }
+});
+cv.addEventListener("pointerleave", () => { hoverId = null; render(); });
+cv.addEventListener("pointerdown", e => {
+  if (e.button === 2) return;
+  cv.setPointerCapture(e.pointerId);
+  const {x,y} = evtToNorm(e);
+  const leaf = scene.leafAt(x,y);
+  if (leaf){ dragging = true; lastTouched = leaf.id; rotateTile(leaf.id); }
+});
+cv.addEventListener("pointerup", () => { dragging = false; lastTouched = null; });
+cv.addEventListener("contextmenu", e => {
+  e.preventDefault();
+  if (!params.weave){ toast("Enable Two-tone to recolor"); return; }
+  const {x,y} = evtToNorm(e);
+  const leaf = scene.leafAt(x,y);
+  if (leaf){ colorOverrides[leaf.id] = (colorOverrides[leaf.id]||0) + 1; recomputeAndPaint(); }
+});
+function rotateTile(id){ overrides[id] = (overrides[id]||0) + 1; recomputeAndPaint(); }
+
+/* ---- keyboard --------------------------------------------------------- */
+window.addEventListener("keydown", e => {
+  const galleryOpen = $("gallery").classList.contains("open");
+  if (e.code === "Escape" && galleryOpen){ closeGallery(); return; }
+  if (["INPUT","SELECT","BUTTON","TEXTAREA"].includes(e.target.tagName)) return;
+  if (e.code === "Space"){
+    if (galleryOpen) return;           // don't reseed behind the modal
+    e.preventDefault(); reseed();
+  }
+});
+
+/* ---- shimmer ---------------------------------------------------------- */
+let shimmer = false, lastFlip = 0, rafId = 0;
+function tick(t){
+  if (!shimmer) return;
+  if (t - lastFlip > 85){
+    lastFlip = t;
+    const n = scene.leaves.length;
+    const k = Math.max(1, Math.floor(n * 0.02));
+    for (let i = 0; i < k; i++){
+      const leaf = scene.leaves[(Math.random()*n)|0];
+      overrides[leaf.id] = (overrides[leaf.id]||0) + 1;
+    }
+    recomputeAndPaint();
+  }
+  rafId = requestAnimationFrame(tick);
+}
+function setShimmer(on){
+  shimmer = on;
+  if (on){ lastFlip = 0; rafId = requestAnimationFrame(tick); }
+  else cancelAnimationFrame(rafId);
+}
+
+/* ---- seed / hash ------------------------------------------------------ */
+function randomSeed(){ return Math.random().toString(36).slice(2, 9); }
+function reseed(){ params.seed = randomSeed(); $("c-seed").value = params.seed; rebuild(); writeHash(); }
+
+function writeHash(){
+  const q = new URLSearchParams();
+  q.set("seed", params.seed);
+  q.set("g", params.gridN);
+  q.set("sp", Math.round(params.subdivideProb*100));
+  q.set("md", params.maxDepth);
+  q.set("fam", params.family);
+  q.set("sw", Math.round(params.strokeW*100));
+  q.set("pal", params.paletteIndex);
+  q.set("wv", params.weave?1:0);
+  q.set("seam", params.seamless?1:0);
+  q.set("tr", params.transparent?1:0);
+  history.replaceState(null, "", "#" + q.toString());
+}
+function readHash(){
+  const h = location.hash.replace(/^#/, "");
+  if (!h) return null;
+  const q = new URLSearchParams(h);
+  const p = {};
+  const num = (k, lo, hi) => { const v = parseInt(q.get(k),10); return isNaN(v)?null:Math.max(lo,Math.min(hi,v)); };
+  if (q.has("seed")) p.seed = q.get("seed").slice(0,32);
+  let v;
+  if ((v=num("g",3,40))!==null) p.gridN = v;
+  if ((v=num("sp",0,90))!==null) p.subdivideProb = v/100;
+  if ((v=num("md",0,4))!==null) p.maxDepth = v;
+  if (q.has("fam") && ["arcs","diagonals","triangles"].includes(q.get("fam"))) p.family = q.get("fam");
+  if ((v=num("sw",6,60))!==null) p.strokeW = v/100;
+  if ((v=num("pal",0,PALETTES.length-1))!==null) p.paletteIndex = v;
+  if (q.has("wv")) p.weave = q.get("wv") === "1";
+  if (q.has("seam")) p.seamless = q.get("seam") === "1";
+  if (q.has("tr")) p.transparent = q.get("tr") === "1";
+  return p;
+}
+
+/* ---- exports ---------------------------------------------------------- */
+function download(blob, name){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+function exportSVG(){
+  const exOps = computeOps(scene, params, overrides, colorOverrides);
+  const svg = opsToSVG(exOps, EXPORT_BASE, PALETTES[params.paletteIndex].bg, params.transparent);
+  download(new Blob([svg], {type:"image/svg+xml"}), `skein-${params.seed}.svg`);
+  toast("SVG exported");
+}
+let pngScale = 1;
+const PNG_MAX = 4096;   // Safari/iOS cap the canvas area near 4096×4096
+function exportPNG(){
+  const px = Math.min(EXPORT_BASE * pngScale, PNG_MAX);
+  const c = document.createElement("canvas");
+  c.width = px; c.height = px;
+  const g = c.getContext("2d");
+  if (!params.transparent){ g.fillStyle = PALETTES[params.paletteIndex].bg; g.fillRect(0,0,px,px); }
+  const exOps = computeOps(scene, params, overrides, colorOverrides);
+  paintOps(g, exOps, px);
+  c.toBlob(b => {
+    if (!b){ toast("Export too large for this browser"); return; }
+    download(b, `skein-${params.seed}@${pngScale}x.png`);
+    toast(`PNG exported (${px}×${px})`);
+  }, "image/png");
+}
+function copyLink(){
+  writeHash();
+  const url = location.href;
+  const done = () => toast("Permalink copied");
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).then(done, () => fallbackCopy(url, done));
+  } else fallbackCopy(url, done);
+}
+function fallbackCopy(text, cb){
+  const t = document.createElement("textarea");
+  t.value = text; document.body.appendChild(t); t.select();
+  try { document.execCommand("copy"); cb(); } catch(_){ toast("Copy failed — URL in address bar"); }
+  t.remove();
+}
+
+/* ---- toast ------------------------------------------------------------ */
+let toastTimer = 0;
+function toast(msg){
+  const el = $("toast");
+  el.textContent = msg; el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 1900);
+}
+
+/* ---- gallery ---------------------------------------------------------- */
+function buildGallery(){
+  const grid = $("g-grid");
+  grid.innerHTML = "";
+  for (const preset of PRESETS){
+    const p = { ...DEFAULTS, ...preset };
+    const card = document.createElement("div");
+    card.className = "gcard";
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.setAttribute("aria-label", "Load preset: " + preset.name);
+    const c = document.createElement("canvas");
+    c.width = 380; c.height = 380;
+    const g = c.getContext("2d");
+    const sc = buildScene(p);
+    const o = computeOps(sc, p, {}, {});
+    if (!p.transparent){ g.fillStyle = PALETTES[p.paletteIndex].bg; g.fillRect(0,0,380,380); }
+    paintOps(g, o, 380);
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.innerHTML = `<h3>${preset.name}</h3><span>${PALETTES[p.paletteIndex].name} · ${p.family} · ${sc.leaves.length} tiles</span>`;
+    card.appendChild(c); card.appendChild(meta);
+    const load = () => { applyParams(p); closeGallery(); };
+    card.addEventListener("click", load);
+    card.addEventListener("keydown", e => { if (e.code === "Enter" || e.code === "Space"){ e.preventDefault(); load(); } });
+    grid.appendChild(card);
+  }
+}
+function openGallery(){ $("gallery").classList.add("open"); }
+function closeGallery(){ $("gallery").classList.remove("open"); }
+
+/* ---- controls <-> params --------------------------------------------- */
+function applyParams(p){
+  params = { ...DEFAULTS, ...p };
+  syncControls();
+  rebuild();
+  writeHash();
+}
+function syncControls(){
+  $("c-grid").value = params.gridN;      $("v-grid").textContent = params.gridN;
+  $("c-sub").value = Math.round(params.subdivideProb*100); $("v-sub").textContent = Math.round(params.subdivideProb*100)+"%";
+  $("c-depth").value = params.maxDepth;  $("v-depth").textContent = params.maxDepth;
+  $("c-stroke").value = Math.round(params.strokeW*100); $("v-stroke").textContent = params.strokeW.toFixed(2);
+  $("c-seed").value = params.seed;
+  $("c-weave").checked = params.weave;
+  $("c-seam").checked = params.seamless;
+  $("c-trans").checked = params.transparent;
+  document.querySelectorAll("#c-family button").forEach(b => b.classList.toggle("on", b.dataset.fam === params.family));
+  document.querySelectorAll("#c-palette .swatch").forEach((b,i) => b.classList.toggle("on", i === params.paletteIndex));
+}
+function buildPaletteUI(){
+  const box = $("c-palette");
+  box.innerHTML = "";
+  PALETTES.forEach((pal, i) => {
+    const d = document.createElement("div");
+    d.className = "swatch";
+    d.title = pal.name;
+    d.tabIndex = 0;
+    d.setAttribute("role", "button");
+    d.setAttribute("aria-label", "Palette: " + pal.name);
+    d.innerHTML = `<span><i style="background:${pal.bg}"></i><i style="background:${pal.colors[0]}"></i><i style="background:${pal.colors[1]}"></i></span>`;
+    const pick = () => { params.paletteIndex = i; syncControls(); recomputeAndPaint(); writeHash(); };
+    d.addEventListener("click", pick);
+    d.addEventListener("keydown", e => { if (e.code === "Enter" || e.code === "Space"){ e.preventDefault(); pick(); } });
+    box.appendChild(d);
+  });
+}
+
+/* ---- event bindings --------------------------------------------------- */
+function bindControls(){
+  $("c-grid").addEventListener("input", e => { params.gridN = +e.target.value; $("v-grid").textContent = params.gridN; scheduleRebuild(); });
+  $("c-sub").addEventListener("input", e => { params.subdivideProb = +e.target.value/100; $("v-sub").textContent = e.target.value+"%"; scheduleRebuild(); });
+  $("c-depth").addEventListener("input", e => { params.maxDepth = +e.target.value; $("v-depth").textContent = params.maxDepth; scheduleRebuild(); });
+  $("c-stroke").addEventListener("input", e => { params.strokeW = +e.target.value/100; $("v-stroke").textContent = params.strokeW.toFixed(2); recomputeAndPaint(); writeHash(); });
+  document.querySelectorAll("#c-family button").forEach(b =>
+    b.addEventListener("click", () => { params.family = b.dataset.fam; syncControls(); recomputeAndPaint(); writeHash(); }));
+  $("c-weave").addEventListener("change", e => { params.weave = e.target.checked; recomputeAndPaint(); writeHash(); });
+  $("c-seam").addEventListener("change", e => { params.seamless = e.target.checked; rebuild(); writeHash(); });
+  $("c-trans").addEventListener("change", e => { params.transparent = e.target.checked; paintCache(); render(); writeHash(); });
+  $("c-shimmer").addEventListener("change", e => setShimmer(e.target.checked));
+  $("c-seed").addEventListener("change", e => { params.seed = (e.target.value||"skein").trim().slice(0,32) || "skein"; rebuild(); writeHash(); });
+  $("b-dice").addEventListener("click", reseed);
+  document.querySelectorAll("#c-scale button").forEach(b =>
+    b.addEventListener("click", () => { pngScale = +b.dataset.scale; document.querySelectorAll("#c-scale button").forEach(x=>x.classList.toggle("on", x===b)); }));
+  $("b-svg").addEventListener("click", exportSVG);
+  $("b-png").addEventListener("click", exportPNG);
+  $("b-link").addEventListener("click", copyLink);
+  $("b-gallery").addEventListener("click", openGallery);
+  $("g-close").addEventListener("click", closeGallery);
+  $("gallery").addEventListener("click", e => { if (e.target.id === "gallery") closeGallery(); });
+  $("b-menu").addEventListener("click", () => $("sidebar").classList.toggle("open"));
+}
+
+/* ---- boot ------------------------------------------------------------- */
+function init(){
+  buildPaletteUI();
+  bindControls();
+  buildGallery();
+  const fromHash = readHash();
+  params = fromHash ? { ...DEFAULTS, ...fromHash } : { ...DEFAULTS, ...PRESETS[0] };
+  syncControls();
+  resize();
+  rebuild();
+  writeHash();
+}
+init();
+</script>
+</body>
+</html>

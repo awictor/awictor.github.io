@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spoke Length Calculator — build a bicycle wheel</title>
+<meta name="description" content="Calculate bicycle spoke length from ERD, hub flange diameter, flange offset, spoke count, and cross pattern. Uses the exact 3D geometry formula. Offline, no tracking.">
+<style>
+  :root{
+    --c:#4338ca;
+    --bg:#eceafb; --card:#ffffff; --fg:#161334; --muted:#5852a0;
+    --line:#d5d1f4; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#0c0a1e; --card:#15122e; --fg:#ddd9f6; --muted:#948dc6;
+    --line:#251f47; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.78rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .row>div{flex:1 1 130px}
+  .sub{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--c);margin:6px 0 2px}
+  input,select{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.05rem;font-weight:600;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus,select:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .out{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
+  @media(max-width:560px){.out{grid-template-columns:1fr}}
+  .box{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:16px;text-align:center}
+  .box .v{font-family:ui-monospace,monospace;font-size:1.4rem;font-weight:800;color:var(--c)}
+  .box .k{font-size:.72rem;color:var(--muted);margin-top:4px}
+  .err{color:#dc2626;font-size:.86rem;margin-top:10px;text-align:center;min-height:1em}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .note code{background:var(--bg);padding:1px 5px;border-radius:5px}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🚲</div>
+  <div>
+    <h1>Spoke Length</h1>
+    <p>build a bicycle wheel</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="sub">Rim</div>
+    <div class="row">
+      <div><label>ERD — effective rim diameter (mm)</label><input id="erd" value="600"></div>
+    </div>
+    <div class="sub">Hub (this flange)</div>
+    <div class="row">
+      <div><label>Flange diameter (mm)</label><input id="fd" value="45"></div>
+      <div><label>Flange offset from center (mm)</label><input id="off" value="35"></div>
+    </div>
+    <div class="sub">Lacing</div>
+    <div class="row">
+      <div><label>Spoke count</label><input id="n" value="32"></div>
+      <div><label>Crosses</label>
+        <select id="x">
+          <option value="0">0 (radial)</option>
+          <option value="1">1-cross</option>
+          <option value="2">2-cross</option>
+          <option value="3" selected>3-cross</option>
+          <option value="4">4-cross</option>
+        </select>
+      </div>
+    </div>
+    <div class="out">
+      <div class="box"><div class="v" id="len">—</div><div class="k">spoke length (mm)</div></div>
+      <div class="box"><div class="v" id="ang">—</div><div class="k">spoke angle at hub</div></div>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>How spoke length is calculated</h2>
+    <p class="note">A spoke runs from a hub flange hole to a rim hole in 3D. Treat the hub hole as a point at flange radius <b>f = flange diameter / 2</b>, offset <b>h</b> along the axle; the rim hole sits at radius <b>r = ERD / 2</b>, rotated by the lacing angle. The exact length is <code>&radic;(r&sup2; + f&sup2; + h&sup2; &minus; 2&middot;r&middot;f&middot;cos&theta;) &minus; hole/2</code>, where the crossing angle <code>&theta; = 4&pi; &middot; crosses / spokes</code> and <b>hole</b> is the spoke-hole diameter (~2.6 mm). A radial (0-cross) build gives the shortest spoke; more crosses lace the spoke more tangentially and lengthen it. Each flange of a dished wheel has a different offset, so compute the two sides separately. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var SPOKE_HOLE = 2.6; // mm, typical spoke-hole diameter
+
+  function crossAngle(spokeCount, crosses){
+    if(spokeCount <= 0) throw new Error('spoke count must be > 0');
+    if(crosses < 0) throw new Error('crosses must be >= 0');
+    return 4 * Math.PI * crosses / spokeCount;
+  }
+  function spokeLength(erd, flangeDiameter, flangeOffset, spokeCount, crosses, spokeHole){
+    if(spokeHole === undefined) spokeHole = SPOKE_HOLE;
+    if(erd <= 0) throw new Error('ERD must be > 0');
+    if(flangeDiameter <= 0) throw new Error('flange diameter must be > 0');
+    if(flangeOffset < 0) throw new Error('flange offset must be >= 0');
+    var r = erd / 2, f = flangeDiameter / 2, h = flangeOffset;
+    var theta = crossAngle(spokeCount, crosses);
+    return Math.sqrt(r * r + f * f + h * h - 2 * r * f * Math.cos(theta)) - spokeHole / 2;
+  }
+
+  if(typeof module !== 'undefined') module.exports = { crossAngle:crossAngle, spokeLength:spokeLength };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var $ = function(id){ return document.getElementById(id); };
+    function render(){
+      $('err').textContent = '';
+      try{
+        var erd = parseFloat($('erd').value), fd = parseFloat($('fd').value);
+        var off = parseFloat($('off').value), n = parseFloat($('n').value), x = parseFloat($('x').value);
+        $('len').textContent = spokeLength(erd, fd, off, n, x).toFixed(1);
+        $('ang').textContent = (crossAngle(n, x) * 180 / Math.PI).toFixed(1) + '°';
+      }catch(e){ $('len').textContent = '—'; $('ang').textContent = '—'; $('err').textContent = e.message; }
+    }
+    ['erd','fd','off','n','x'].forEach(function(id){ $(id).addEventListener('input', render); $(id).addEventListener('change', render); });
+    render();
+
+    var root = document.documentElement, tb = $('theme');
+    function setTheme(t){ root.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? '☀️' : '🌙'; try{ localStorage.setItem('spoke-theme', t); }catch(e){} }
+    var saved; try{ saved = localStorage.getItem('spoke-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); });
+  }
+</script>
+</body>
+</html>

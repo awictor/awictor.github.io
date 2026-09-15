@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PPICalc — Pixel Density (PPI) Calculator</title>
+<meta name="description" content="Compute pixel density (PPI), dot pitch, megapixels, and aspect ratio from a screen resolution and diagonal size. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('ppi-calc-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#6366f1;
+    --bg:#f5f6f9; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e3e4ea; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#101118; --card:#191b24; --fg:#f0f1f6; --muted:#989aa8; --line:#2a2c39; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#4338ca);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:720px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:14px}
+  .out{text-align:center;margin:4px 0}
+  .big{font-size:3rem;font-weight:800;color:var(--c);letter-spacing:-1px}
+  .big small{font-size:1rem;color:var(--muted);font-weight:600}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:12px}
+  @media(max-width:480px){.stats{grid-template-columns:1fr}}
+  .stat{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+  .stat span{display:block;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .stat b{font-size:1.15rem;font-variant-numeric:tabular-nums}
+  .presets{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .presets button{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:999px;padding:5px 12px;cursor:pointer;font:inherit;font-size:.82rem}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🖥️</div>
+    <div><h1>PPICalc</h1><div class="sub">Pixel density, dot pitch &amp; aspect ratio</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div><label for="w">Width (px)</label><input type="number" id="w" value="1920" min="1"></div>
+      <div><label for="h">Height (px)</label><input type="number" id="h" value="1080" min="1"></div>
+      <div><label for="d">Diagonal (in)</label><input type="number" id="d" value="15.6" min="0.1" step="any"></div>
+    </div>
+    <div class="presets" id="presets"></div>
+  </div>
+  <div class="card">
+    <div class="out"><div class="big"><span id="ppi">—</span> <small>PPI</small></div></div>
+    <div class="stats">
+      <div class="stat"><span>Dot pitch</span><b id="pitch">—</b></div>
+      <div class="stat"><span>Megapixels</span><b id="mp">—</b></div>
+      <div class="stat"><span>Aspect ratio</span><b id="ar">—</b></div>
+    </div>
+  </div>
+</main>
+<footer>
+  100% offline. Nothing leaves your browser. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/ppi-calc">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  function gcd(a, b){ a = Math.abs(a); b = Math.abs(b); while(b){ [a, b] = [b, a % b]; } return a; }
+
+  function ppi(widthPx, heightPx, diagonalIn){
+    if(!(widthPx > 0) || !(heightPx > 0)) throw new Error('resolution must be positive');
+    if(!(diagonalIn > 0)) throw new Error('diagonal must be positive');
+    return Math.sqrt(widthPx * widthPx + heightPx * heightPx) / diagonalIn;
+  }
+
+  function dotPitchMm(ppiValue){
+    if(!(ppiValue > 0)) throw new Error('ppi must be positive');
+    return 25.4 / ppiValue;
+  }
+
+  function megapixels(widthPx, heightPx){
+    if(!(widthPx > 0) || !(heightPx > 0)) throw new Error('resolution must be positive');
+    return widthPx * heightPx / 1e6;
+  }
+
+  function aspectRatio(widthPx, heightPx){
+    if(!(widthPx > 0) || !(heightPx > 0)) throw new Error('resolution must be positive');
+    const g = gcd(widthPx, heightPx);
+    return `${widthPx / g}:${heightPx / g}`;
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('ppi')){
+    const $ = id => document.getElementById(id);
+    const PRESETS = [
+      ['1080p 15.6"', 1920, 1080, 15.6],
+      ['1440p 27"', 2560, 1440, 27],
+      ['4K 32"', 3840, 2160, 32],
+      ['iPhone 15', 2556, 1179, 6.1],
+      ['720p 24"', 1280, 720, 24]
+    ];
+
+    function render(){
+      const w = +$('w').value, h = +$('h').value, d = +$('d').value;
+      try{
+        const p = ppi(w, h, d);
+        $('ppi').textContent = p.toFixed(1);
+        $('pitch').textContent = dotPitchMm(p).toFixed(4) + ' mm';
+        $('mp').textContent = megapixels(w, h).toFixed(2) + ' MP';
+        $('ar').textContent = aspectRatio(w, h);
+      }catch(e){ $('ppi').textContent = '—'; $('pitch').textContent = '—'; $('mp').textContent = '—'; $('ar').textContent = '—'; }
+    }
+
+    $('presets').innerHTML = PRESETS.map((p, i) => `<button type="button" data-i="${i}">${p[0]}</button>`).join('');
+    $('presets').addEventListener('click', e => {
+      const b = e.target.closest('button'); if(!b) return;
+      const [, w, h, d] = PRESETS[+b.dataset.i];
+      $('w').value = w; $('h').value = h; $('d').value = d; render();
+    });
+    ['w', 'h', 'd'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('ppi-calc-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { gcd, ppi, dotPitchMm, megapixels, aspectRatio };
+</script>
+</body>
+</html>

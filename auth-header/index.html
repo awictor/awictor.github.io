@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AuthHeader — HTTP Authorization header builder (Basic &amp; Bearer)</title>
+<meta name="description" content="Free offline HTTP Authorization header tool. Build a Basic auth header from a username and password, decode one back, or wrap a token as Bearer — with a ready-to-paste curl snippet. Runs entirely in your browser. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/auth-header/">
+<style>
+  :root{
+    --c:#166534; --bg:#f8f8f9; --fg:#18181b; --muted:#52525b;
+    --card:#ffffff; --border:#e4e4e7; --code:#efeff1; --bad:#dc2626; --warn:#b45309;
+  }
+  [data-theme="dark"]{
+    --bg:#09090b; --fg:#e7e7ea; --muted:#8b8b93; --card:#151518;
+    --border:#27272a; --code:#1c1c20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#16a34a);display:grid;place-items:center;color:#fff;font-size:14px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:720px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  .tabs{display:flex;gap:8px;margin-bottom:16px}
+  .tab{flex:1;padding:9px;border:1px solid var(--border);border-radius:10px;background:var(--bg);
+    color:var(--muted);cursor:pointer;font-size:.88rem;font-weight:600}
+  .tab.on{background:var(--c);color:#fff;border-color:var(--c)}
+  label{display:block;font-weight:600;font-size:.82rem;margin:12px 0 6px}
+  label:first-child{margin-top:0}
+  input{width:100%;padding:11px 13px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:1rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .out{margin-top:16px}
+  .out .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+  .copy{background:none;border:1px solid var(--border);color:var(--fg);border-radius:8px;padding:4px 10px;cursor:pointer;font-size:.78rem}
+  .box{padding:12px 14px;border:1px solid var(--border);border-radius:11px;background:var(--code);
+    font-family:ui-monospace,monospace;font-size:.92rem;word-break:break-all;min-height:44px}
+  .err{color:var(--bad);font-size:.84rem;margin-top:8px;min-height:18px}
+  .warn{margin-top:16px;background:rgba(180,83,9,.12);border:1px solid var(--warn);border-radius:11px;padding:11px 14px;font-size:.83rem}
+  .warn b{color:var(--warn)}
+  .hint{color:var(--muted);font-size:.82rem;margin:14px 0 0}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('ah.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">Auth</div>
+  <div>
+    <h1>AuthHeader</h1>
+    <p class="sub">HTTP Authorization header builder</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <div class="tabs">
+      <button class="tab on" id="t-basic">Basic (encode)</button>
+      <button class="tab" id="t-decode">Basic (decode)</button>
+      <button class="tab" id="t-bearer">Bearer</button>
+    </div>
+
+    <div id="pane-basic">
+      <label for="user">Username</label><input id="user" spellcheck="false" value="Aladdin">
+      <label for="pass">Password</label><input id="pass" spellcheck="false" value="open sesame">
+    </div>
+    <div id="pane-decode" style="display:none">
+      <label for="dec">Authorization header or base64</label>
+      <input id="dec" spellcheck="false" value="Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==">
+    </div>
+    <div id="pane-bearer" style="display:none">
+      <label for="token">Token</label><input id="token" spellcheck="false" value="eyJhbGciOiJIUzI1NiJ9...">
+    </div>
+
+    <div class="out">
+      <div class="top"><label style="margin:0" id="outLabel">Header</label><button class="copy" id="copyH">Copy</button></div>
+      <div class="box" id="outBox"></div>
+    </div>
+    <div class="out" id="curlWrap">
+      <div class="top"><label style="margin:0">curl</label><button class="copy" id="copyC">Copy</button></div>
+      <div class="box" id="curlBox"></div>
+    </div>
+    <div class="err" id="err"></div>
+
+    <div class="warn"><b>Base64 is encoding, not encryption.</b> Basic credentials are trivially reversible —
+      only ever send them over HTTPS. Nothing here is transmitted; it all runs locally.</div>
+    <p class="hint">Basic auth encodes <code style="font-family:ui-monospace">user:password</code> as base64 per
+      RFC 7617. Decoding splits on the first colon, so passwords may contain colons. 100% local.</p>
+  </div>
+</main>
+<footer>
+  AuthHeader is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/auth-header">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function b64encodeUtf8(str){
+  var bytes = new TextEncoder().encode(String(str));
+  var bin = '';
+  for(var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+function b64decodeUtf8(b64){
+  var bin = atob(String(b64));
+  var bytes = new Uint8Array(bin.length);
+  for(var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+function basicHeader(user, pass){
+  return 'Basic ' + b64encodeUtf8(String(user) + ':' + String(pass));
+}
+function parseBasic(header){
+  var s = String(header).trim();
+  var m = /^Basic\s+(.+)$/i.exec(s);
+  var b64 = m ? m[1] : s;
+  var decoded;
+  try{ decoded = b64decodeUtf8(b64); }catch(e){ return null; }
+  var idx = decoded.indexOf(':');
+  if(idx < 0) return null;
+  return { user: decoded.slice(0, idx), pass: decoded.slice(idx + 1) };
+}
+function bearerHeader(token){ return 'Bearer ' + String(token).trim(); }
+function curlSnippet(url, headerValue){
+  return 'curl -H "Authorization: ' + headerValue + '" ' + (url || 'https://api.example.com');
+}
+
+if(typeof module !== 'undefined') module.exports = { b64encodeUtf8, b64decodeUtf8, basicHeader, parseBasic, bearerHeader, curlSnippet };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var mode = 'basic';
+  var tabs = { basic: document.getElementById('t-basic'), decode: document.getElementById('t-decode'), bearer: document.getElementById('t-bearer') };
+  var panes = { basic: document.getElementById('pane-basic'), decode: document.getElementById('pane-decode'), bearer: document.getElementById('pane-bearer') };
+  var userEl = document.getElementById('user'), passEl = document.getElementById('pass');
+  var decEl = document.getElementById('dec'), tokenEl = document.getElementById('token');
+  var outLabel = document.getElementById('outLabel'), outBox = document.getElementById('outBox');
+  var curlWrap = document.getElementById('curlWrap'), curlBox = document.getElementById('curlBox');
+  var errEl = document.getElementById('err');
+
+  function render(){
+    errEl.textContent = '';
+    var header = '', showCurl = true;
+    if(mode === 'basic'){
+      outLabel.textContent = 'Authorization header';
+      header = basicHeader(userEl.value, passEl.value);
+      outBox.textContent = header;
+    } else if(mode === 'bearer'){
+      outLabel.textContent = 'Authorization header';
+      header = bearerHeader(tokenEl.value);
+      outBox.textContent = header;
+    } else {
+      outLabel.textContent = 'Decoded credentials';
+      var p = parseBasic(decEl.value);
+      if(!p){ outBox.textContent = ''; errEl.textContent = 'Could not decode — not valid Basic base64, or no colon in the decoded value.'; showCurl = false; }
+      else outBox.textContent = 'user: ' + p.user + '\npassword: ' + p.pass;
+    }
+    outBox.style.whiteSpace = mode === 'decode' ? 'pre-wrap' : 'normal';
+    curlWrap.style.display = (showCurl && mode !== 'decode') ? '' : 'none';
+    if(showCurl && mode !== 'decode') curlBox.textContent = curlSnippet('', header);
+    try{ localStorage.setItem('ah.mode', mode); localStorage.setItem('ah.user', userEl.value); localStorage.setItem('ah.pass', passEl.value); localStorage.setItem('ah.dec', decEl.value); localStorage.setItem('ah.token', tokenEl.value); }catch(e){}
+  }
+  function setMode(m){
+    mode = m;
+    Object.keys(tabs).forEach(function(k){ tabs[k].classList.toggle('on', k === m); panes[k].style.display = k === m ? '' : 'none'; });
+    render();
+  }
+  Object.keys(tabs).forEach(function(k){ tabs[k].addEventListener('click', function(){ setMode(k); }); });
+  [userEl, passEl, decEl, tokenEl].forEach(function(x){ x.addEventListener('input', render); });
+  document.getElementById('copyH').addEventListener('click', function(){ if(navigator.clipboard) navigator.clipboard.writeText(outBox.textContent); });
+  document.getElementById('copyC').addEventListener('click', function(){ if(navigator.clipboard) navigator.clipboard.writeText(curlBox.textContent); });
+
+  try{
+    var g;
+    if((g = localStorage.getItem('ah.user')) !== null) userEl.value = g;
+    if((g = localStorage.getItem('ah.pass')) !== null) passEl.value = g;
+    if((g = localStorage.getItem('ah.dec')) !== null) decEl.value = g;
+    if((g = localStorage.getItem('ah.token')) !== null) tokenEl.value = g;
+    var m = localStorage.getItem('ah.mode');
+    setMode(m && tabs[m] ? m : 'basic');
+  }catch(e){ setMode('basic'); }
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('ah.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('ah.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rangefinder — see what an npm semver range means</title>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#161c24; --panel2:#1c242e; --line:#2a3542;
+    --ink:#e6edf3; --dim:#8b98a5; --accent:#58c9ff; --sat:#3fb950; --exc:#4b5560;
+    --sat-bg:rgba(63,185,80,.16); --band:rgba(88,201,255,.20); --band2:rgba(255,166,87,.22);
+    --band-line:#58c9ff; --band2-line:#ffa657; --err:#f85149; --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 70% -10%,#18222e,var(--bg));color:var(--ink);
+    font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:22px 18px 60px}
+  .wrap{max-width:940px;margin:0 auto}
+  h1{font-size:26px;margin:0 0 2px;letter-spacing:-.5px}
+  h1 b{color:var(--accent)}
+  .tag{color:var(--dim);margin:0 0 20px;font-size:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:16px}
+  label{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--dim);margin-bottom:6px}
+  input[type=text],textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+    border-radius:8px;padding:10px 12px;font-family:var(--mono);font-size:15px;outline:none}
+  input[type=text]:focus,textarea:focus{border-color:var(--accent)}
+  input.bad{border-color:var(--err)}
+  textarea{min-height:78px;resize:vertical;font-size:13px}
+  .row{display:flex;gap:14px;flex-wrap:wrap}
+  .row>div{flex:1;min-width:240px}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:7px;
+    padding:7px 12px;font-size:13px;cursor:pointer;transition:.15s}
+  .btn:hover{border-color:var(--accent);color:var(--accent)}
+  .btn:focus-visible,.g:focus-visible,.chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .k{font-family:var(--mono);color:var(--accent)}
+  .eng{font-size:15px;line-height:1.6;white-space:pre-line}
+  .canon{font-family:var(--mono);color:var(--dim);font-size:13px;margin-top:6px;word-break:break-all}
+  .err{color:var(--err);font-family:var(--mono);font-size:13px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+  .chip{font-family:var(--mono);font-size:13px;padding:5px 10px;border-radius:20px;cursor:default;
+    border:1px solid var(--line);background:var(--panel2);color:var(--dim)}
+  .chip.sat{background:var(--sat-bg);border-color:var(--sat);color:#7ee787;cursor:help}
+  .chip.exc{cursor:help}
+  .chip.best{box-shadow:0 0 0 2px var(--sat);font-weight:600}
+  .best-note{margin-top:10px;font-size:14px}
+  .best-note b{color:#7ee787}
+  .reason{margin-top:10px;min-height:20px;font-family:var(--mono);font-size:13px;color:var(--dim)}
+  .reason b{color:var(--err)}
+  .gallery{display:flex;flex-wrap:wrap;gap:8px}
+  .g{border:1px solid var(--line);background:var(--panel2);border-radius:8px;padding:8px 11px;cursor:pointer;transition:.15s;max-width:280px}
+  .g:hover{border-color:var(--accent)}
+  .g .gr{font-family:var(--mono);color:var(--accent);font-size:13px}
+  .g .gd{font-size:11.5px;color:var(--dim);margin-top:2px}
+  svg{width:100%;height:150px;display:block}
+  .legend{display:flex;gap:16px;font-size:12px;color:var(--dim);margin-top:4px;flex-wrap:wrap}
+  .sw{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:-1px;margin-right:5px}
+  .tests{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .badge{font-family:var(--mono);font-weight:700;padding:5px 12px;border-radius:20px}
+  .badge.pass{background:var(--sat-bg);color:#7ee787;border:1px solid var(--sat)}
+  .badge.fail{background:rgba(248,81,73,.16);color:#ff7b72;border:1px solid var(--err)}
+  .testfail{font-family:var(--mono);font-size:12px;color:#ff7b72;margin-top:8px;white-space:pre-wrap}
+  .sub{margin-top:12px;font-size:14px}
+  .sub b{color:var(--accent)}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.8px;color:var(--dim);margin:0 0 12px}
+  .hint{font-size:12px;color:var(--dim);margin-top:6px}
+  a.mini{color:var(--dim);font-size:12px;text-decoration:none;border-bottom:1px dotted var(--dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><b>Range</b>finder</h1>
+  <p class="tag">See exactly what an npm semver range means — and which versions it lets in.</p>
+
+  <div class="card">
+    <label for="range">Semver range</label>
+    <input id="range" type="text" spellcheck="false" placeholder="^1.2.3   or   >=1.5 &lt;3 || 4.0.0">
+    <div id="rangeErr" class="err" style="margin-top:6px"></div>
+    <div id="english" class="eng" style="margin-top:10px"></div>
+    <div id="canon" class="canon"></div>
+    <div class="btnrow">
+      <button class="btn" id="copyLink">Copy link</button>
+      <button class="btn" id="sample">Auto-fill sample versions</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Version number line</h2>
+    <svg id="line" viewBox="0 0 1000 150"></svg>
+    <div class="legend">
+      <span><span class="sw" style="background:var(--band-line)"></span>allowed band (range A)</span>
+      <span><span class="sw" style="background:var(--band2-line)"></span>range B</span>
+      <span><span class="sw" style="background:var(--sat)"></span>satisfied version</span>
+      <span><span class="sw" style="background:var(--exc)"></span>excluded version</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <label for="versions">Candidate versions (one per line)</label>
+    <textarea id="versions" spellcheck="false" placeholder="1.2.3&#10;1.3.0&#10;2.0.0"></textarea>
+    <div id="chips" class="chips"></div>
+    <div id="best" class="best-note"></div>
+    <div id="reason" class="reason">Hover or click any version chip to see why it passed or failed.</div>
+  </div>
+
+  <div class="card">
+    <h2>Gotcha gallery — click to load</h2>
+    <div id="gallery" class="gallery"></div>
+  </div>
+
+  <div class="card">
+    <label for="range2">Compare with a second range (optional)</label>
+    <input id="range2" type="text" spellcheck="false" placeholder=">=1.0.0 &lt;2.0.0">
+    <div id="range2Err" class="err" style="margin-top:6px"></div>
+    <div id="compare" class="sub"></div>
+  </div>
+
+  <div class="card">
+    <h2>Built-in self-test</h2>
+    <div class="tests">
+      <span id="testBadge" class="badge">running…</span>
+      <span class="hint">A fixed table of (version, range) → expected results, run on every load as a regression guard.</span>
+    </div>
+    <div id="testFail" class="testfail"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ---------- semver core ---------- */
+function ver(M,m,p,pre){return{major:M,minor:m,patch:p,pre:pre||[],raw:M+"."+m+"."+p+(pre&&pre.length?"-"+pre.join("."):"")};}
+function parse(v){
+  if(v==null)return null;
+  v=String(v).trim().replace(/^[v=\s]+/,"");
+  var m=v.match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-.]+))?(?:\+[0-9A-Za-z-.]+)?$/);
+  if(!m)return null;
+  return ver(+m[1],+m[2],+m[3],m[4]?m[4].split("."):[]);
+}
+function comparePre(a,b){
+  if(!a.length&&!b.length)return 0;
+  if(!a.length)return 1;      // release outranks prerelease
+  if(!b.length)return -1;
+  for(var i=0;i<Math.max(a.length,b.length);i++){
+    if(i>=a.length)return -1;
+    if(i>=b.length)return 1;
+    var x=a[i],y=b[i],nx=/^\d+$/.test(x),ny=/^\d+$/.test(y);
+    if(nx&&ny){if(+x!==+y)return +x<+y?-1:1;}
+    else if(nx)return -1;
+    else if(ny)return 1;
+    else if(x!==y)return x<y?-1:1;
+  }
+  return 0;
+}
+function compare(a,b){
+  if(a.major!==b.major)return a.major<b.major?-1:1;
+  if(a.minor!==b.minor)return a.minor<b.minor?-1:1;
+  if(a.patch!==b.patch)return a.patch<b.patch?-1:1;
+  return comparePre(a.pre,b.pre);
+}
+
+/* ---------- range parsing ---------- */
+var TOKEN_RE=/^(>=|<=|>|<|=|\^|~)?\s*v?(\d+|x|X|\*)(?:\.(\d+|x|X|\*))?(?:\.(\d+|x|X|\*))?(?:-[0-9A-Za-z-.]+)?(?:\+[0-9A-Za-z-.]+)?$/;
+function num(x){return isNaN(x)?0:x;}
+function parsePart(s){
+  s=s.trim().replace(/^v/,"");
+  var pre=[],plus=s.indexOf("+");if(plus>=0)s=s.slice(0,plus);
+  var dash=s.indexOf("-");if(dash>=0){pre=s.slice(dash+1).split(".");s=s.slice(0,dash);}
+  var p=s.split(".");
+  function wild(x){return x===undefined||x===""||x==="x"||x==="X"||x==="*";}
+  return{M:wild(p[0])?NaN:+p[0],m:wild(p[1])?NaN:+p[1],p:wild(p[2])?NaN:+p[2],
+    MSpec:!wild(p[0]),mSpec:!wild(p[1]),pSpec:!wild(p[2]),pre:pre};
+}
+function expand(op,s){
+  var P=parsePart(s),M=P.M,m=P.m,p=P.p;
+  if(op===""||op==="="){
+    if(!P.MSpec)return[{op:">=",v:ver(0,0,0)}];
+    if(!P.mSpec)return[{op:">=",v:ver(M,0,0)},{op:"<",v:ver(M+1,0,0)}];
+    if(!P.pSpec)return[{op:">=",v:ver(M,m,0)},{op:"<",v:ver(M,m+1,0)}];
+    return[{op:"=",v:ver(M,m,p,P.pre)}];
+  }
+  if(op===">=")return[{op:">=",v:ver(num(M),num(m),num(p),P.pre)}];
+  if(op==="<")return[{op:"<",v:ver(num(M),num(m),num(p),P.pre)}];
+  if(op===">"){
+    if(P.pSpec)return[{op:">",v:ver(M,m,p,P.pre)}];
+    if(P.mSpec)return[{op:">=",v:ver(M,m+1,0)}];
+    if(P.MSpec)return[{op:">=",v:ver(M+1,0,0)}];
+    return[{op:">",v:ver(0,0,0)}];
+  }
+  if(op==="<="){
+    if(P.pSpec)return[{op:"<=",v:ver(M,m,p,P.pre)}];
+    if(P.mSpec)return[{op:"<",v:ver(M,m+1,0)}];
+    if(P.MSpec)return[{op:"<",v:ver(M+1,0,0)}];
+    return[{op:">=",v:ver(0,0,0)}];
+  }
+}
+function caret(s){
+  var P=parsePart(s),M=num(P.M),lo=ver(M,num(P.m),num(P.p),P.pre),hi;
+  if(M!==0)hi=ver(M+1,0,0);
+  else if(P.mSpec&&P.m!==0)hi=ver(0,P.m+1,0);
+  else if(P.mSpec&&P.m===0)hi=P.pSpec?ver(0,0,P.p+1):ver(0,1,0);
+  else hi=ver(1,0,0);
+  return[{op:">=",v:lo},{op:"<",v:hi}];
+}
+function tilde(s){
+  var P=parsePart(s),M=num(P.M),m=num(P.m),lo=ver(M,m,num(P.p),P.pre);
+  return[{op:">=",v:lo},{op:"<",v:P.mSpec?ver(M,m+1,0):ver(M+1,0,0)}];
+}
+function parseGroup(g){
+  g=g.trim();
+  if(g==="")return[{op:">=",v:ver(0,0,0)}];
+  var hy=g.match(/^(\S+)\s+-\s+(\S+)$/);
+  if(hy)return expand(">=",hy[1]).concat(expand("<=",hy[2]));
+  g=g.replace(/([<>]=?|~|\^|=)\s+/g,"$1"); // bind operator to its version: ">= 1.2.3" -> ">=1.2.3"
+  var toks=g.split(/\s+/).filter(Boolean),comps=[];
+  for(var i=0;i<toks.length;i++){
+    var t=toks[i];
+    if(!TOKEN_RE.test(t))return null;
+    var mm=t.match(/^(>=|<=|>|<|=|\^|~)?\s*(.*)$/),op=mm[1]||"",rest=mm[2];
+    var res=op==="^"?caret(rest):op==="~"?tilde(rest):expand(op,rest);
+    if(!res)return null;
+    comps=comps.concat(res);
+  }
+  return comps;
+}
+function parseRange(str){
+  var groups=String(str).split("||"),out=[];
+  for(var i=0;i<groups.length;i++){var c=parseGroup(groups[i]);if(c===null)return null;out.push(c);}
+  return out;
+}
+
+/* ---------- evaluation ---------- */
+function testComp(v,c){var r=compare(v,c.v);return c.op==="="?r===0:c.op===">"?r>0:c.op===">="?r>=0:c.op==="<"?r<0:r<=0;}
+function satGroup(v,comps){
+  for(var i=0;i<comps.length;i++)if(!testComp(v,comps[i]))return{ok:false,fail:comps[i]};
+  if(v.pre.length){
+    var vis=comps.some(function(c){return c.v.pre.length&&c.v.major===v.major&&c.v.minor===v.minor&&c.v.patch===v.patch;});
+    if(!vis)return{ok:false,pre:true};
+  }
+  return{ok:true};
+}
+function satisfies(v,sets){return sets.some(function(g){return satGroup(v,g).ok;});}
+function reasonFor(v,sets){
+  var r=satGroup(v,sets[0]);
+  if(r.ok)return v.raw+" is inside the range.";
+  if(r.pre)return v.raw+" is a prerelease and no comparator targets "+v.major+"."+v.minor+"."+v.patch+" prereleases.";
+  return v.raw+" fails "+r.fail.op+r.fail.v.raw;
+}
+
+/* ---------- intervals ---------- */
+function toInterval(comps){
+  var I={lo:null,loI:true,hi:null,hiI:false};
+  function raiseLo(v,inc){if(I.lo===null||compare(v,I.lo)>0){I.lo=v;I.loI=inc;}else if(compare(v,I.lo)===0)I.loI=I.loI&&inc;}
+  function lowerHi(v,inc){if(I.hi===null||compare(v,I.hi)<0){I.hi=v;I.hiI=inc;}else if(compare(v,I.hi)===0)I.hiI=I.hiI&&inc;}
+  for(var i=0;i<comps.length;i++){var c=comps[i];
+    if(c.op===">=")raiseLo(c.v,true);else if(c.op===">")raiseLo(c.v,false);
+    else if(c.op==="<")lowerHi(c.v,false);else if(c.op==="<=")lowerHi(c.v,true);
+    else if(c.op==="="){raiseLo(c.v,true);lowerHi(c.v,true);}}
+  return I;
+}
+function isEmpty(I){if(I.lo===null||I.hi===null)return false;var c=compare(I.lo,I.hi);return c>0||(c===0&&!(I.loI&&I.hiI));}
+function intervals(sets){var out=[];for(var i=0;i<sets.length;i++){var I=toInterval(sets[i]);if(!isEmpty(I))out.push(I);}return out;}
+function pickLo(a,b){if(a.lo===null)return{lo:b.lo,loI:b.loI};if(b.lo===null)return{lo:a.lo,loI:a.loI};var c=compare(a.lo,b.lo);return c>0?{lo:a.lo,loI:a.loI}:c<0?{lo:b.lo,loI:b.loI}:{lo:a.lo,loI:a.loI&&b.loI};}
+function pickHi(a,b){if(a.hi===null)return{hi:b.hi,hiI:b.hiI};if(b.hi===null)return{hi:a.hi,hiI:a.hiI};var c=compare(a.hi,b.hi);return c<0?{hi:a.hi,hiI:a.hiI}:c>0?{hi:b.hi,hiI:b.hiI}:{hi:a.hi,hiI:a.hiI&&b.hiI};}
+function intersect(a,b){var L=pickLo(a,b),H=pickHi(a,b),I={lo:L.lo,loI:L.loI,hi:H.hi,hiI:H.hiI};return isEmpty(I)?null:I;}
+function covers(b,a){ // does interval b fully contain interval a?
+  var loOk=b.lo===null||(a.lo!==null&&(compare(a.lo,b.lo)>0||(compare(a.lo,b.lo)===0&&(b.loI||!a.loI))));
+  var hiOk=b.hi===null||(a.hi!==null&&(compare(a.hi,b.hi)<0||(compare(a.hi,b.hi)===0&&(b.hiI||!a.hiI))));
+  return loOk&&hiOk;
+}
+function subset(A,B){return A.every(function(a){return B.some(function(b){return covers(b,a);});});}
+function intervalText(I){
+  if(I.lo===null&&I.hi===null)return"everything";
+  if(I.lo&&I.hi&&compare(I.lo,I.hi)===0)return"exactly "+I.lo.raw;
+  var lo=I.lo?(I.loI?"≥":">")+I.lo.raw:"−∞",hi=I.hi?(I.hiI?"≤":"<")+I.hi.raw:"+∞";
+  return lo+" and "+hi;
+}
+
+/* ---------- explanation ---------- */
+function describeGroup(comps){
+  var I=toInterval(comps);
+  if(isEmpty(I))return"Matches no versions (the comparators contradict each other).";
+  if(I.lo&&I.hi&&compare(I.lo,I.hi)===0&&I.loI&&I.hiI)return"Exactly "+I.lo.raw+" — no other version.";
+  if(!I.lo&&!I.hi)return"Any version.";
+  var loT=I.lo?((I.loI?"from ":"above ")+I.lo.raw):"any version",
+      hiT=I.hi?((I.hiI?"up to and including ":"up to but not including ")+I.hi.raw):"and up with no upper bound";
+  var s="Allows "+loT+" "+hiT+".",note=semNote(I);
+  return note?s+" "+note:s;
+}
+function semNote(I){
+  if(!I.lo||!I.hi||!I.loI||I.hiI)return"";
+  var lo=I.lo,hi=I.hi;
+  if(lo.major===0&&lo.minor===0&&hi.major===0&&hi.minor===0&&hi.patch===lo.patch+1)
+    return"Locked to the exact patch 0.0."+lo.patch+" — caret on 0.0.x pins fully.";
+  if(lo.major===0&&hi.major===0&&hi.minor===lo.minor+1&&hi.patch===0)
+    return"Locked to 0."+lo.minor+".x — caret on a 0.x version does NOT allow minor bumps.";
+  if(lo.major>0&&hi.major===lo.major+1&&hi.minor===0&&hi.patch===0)
+    return"Patch and minor updates allowed within major "+lo.major+"; no major bumps.";
+  if(hi.major===lo.major&&hi.minor===lo.minor+1&&hi.patch===0)
+    return"Patch updates only within "+lo.major+"."+lo.minor+"; no minor or major bumps.";
+  return"";
+}
+function english(sets){return sets.map(describeGroup).join("\n  — OR —\n");}
+function canonical(sets){return sets.map(function(g){return g.map(function(c){return c.op+c.v.raw;}).join(" ");}).join(" || ");}
+
+/* ---------- number line ---------- */
+function numval(v){return v.major*1e6+v.minor*1e3+v.patch-(v.pre&&v.pre.length?0.5:0);} // nudge prereleases just below their release so dots/labels don't overlap
+function renderLine(setsA,setsB,cands){
+  var lineEl=document.getElementById("line");
+  var W=Math.max(320,Math.round(lineEl.getBoundingClientRect().width))||1000,H=150,pad=60,y=88,bh=34;
+  var bounds=[];
+  function collect(sets){sets&&intervals(sets).forEach(function(I){if(I.lo)bounds.push(numval(I.lo));if(I.hi)bounds.push(numval(I.hi));});}
+  collect(setsA);collect(setsB);
+  cands.forEach(function(c){if(c.v)bounds.push(numval(c.v));});
+  if(!bounds.length)bounds=[0,2e6];
+  var lo=Math.min.apply(null,bounds),hi=Math.max.apply(null,bounds);
+  if(hi===lo){lo-=1e6;hi+=1e6;}
+  var padv=(hi-lo)*0.12||1e6;lo-=padv;hi+=padv;
+  function X(val){return pad+(val-lo)/(hi-lo)*(W-2*pad);}
+  var svg="";
+  // axis
+  svg+='<line x1="'+pad+'" y1="'+(y+bh+2)+'" x2="'+(W-pad)+'" y2="'+(y+bh+2)+'" stroke="#3a4654" stroke-width="1.5"/>';
+  function band(sets,fill,stroke,off){
+    if(!sets)return;
+    intervals(sets).forEach(function(I){
+      var x1=I.lo?X(numval(I.lo)):pad, x2=I.hi?X(numval(I.hi)):W-pad;
+      svg+='<rect x="'+x1.toFixed(1)+'" y="'+(y+off)+'" width="'+Math.max(2,(x2-x1)).toFixed(1)+'" height="'+(off?bh/2-2:bh)+'" fill="'+fill+'" stroke="'+stroke+'" stroke-width="1.5" rx="4"/>';
+      if(I.lo)svg+=tick(x1,I.lo.raw,stroke,I.loI);
+      if(I.hi)svg+=tick(x2,I.hi.raw,stroke,I.hiI);
+      if(!I.hi)svg+='<text x="'+(x2-4)+'" y="'+(y+bh/2+4)+'" fill="'+stroke+'" font-size="15" text-anchor="end">→</text>';
+      if(!I.lo)svg+='<text x="'+(x1+4)+'" y="'+(y+bh/2+4)+'" fill="'+stroke+'" font-size="15">←</text>';
+    });
+  }
+  function tick(x,label,color,incl){
+    return '<line x1="'+x.toFixed(1)+'" y1="'+(y-6)+'" x2="'+x.toFixed(1)+'" y2="'+(y+bh+6)+'" stroke="'+color+'" stroke-width="1" stroke-dasharray="'+(incl?"0":"3 2")+'"/>'+
+      '<text x="'+x.toFixed(1)+'" y="'+(y-10)+'" fill="'+color+'" font-size="11" text-anchor="middle" font-family="monospace">'+label+'</text>';
+  }
+  band(setsB,"rgba(255,166,87,.22)","#ffa657",bh+3);
+  band(setsA,"rgba(88,201,255,.20)","#58c9ff",0);
+  // candidate markers
+  cands.forEach(function(c){
+    if(!c.v)return;var cx=X(numval(c.v)),col=c.ok?"#3fb950":"#4b5560";
+    svg+='<circle cx="'+cx.toFixed(1)+'" cy="'+(y+bh+2)+'" r="4.5" fill="'+col+'" stroke="#0f1419" stroke-width="1"/>';
+    svg+='<text x="'+cx.toFixed(1)+'" y="'+(y+bh+22)+'" fill="'+col+'" font-size="10.5" text-anchor="middle" font-family="monospace">'+c.raw+'</text>';
+  });
+  lineEl.setAttribute("viewBox","0 0 "+W+" "+H); // 1:1 with rendered px so circles stay round and labels un-squished
+  lineEl.innerHTML=svg;
+}
+
+/* ---------- state / hash ---------- */
+var R=document.getElementById("range"),R2=document.getElementById("range2"),VT=document.getElementById("versions");
+function readHash(){
+  var h=location.hash.slice(1),o={};
+  h.split("&").forEach(function(kv){var i=kv.indexOf("=");if(i>0)o[kv.slice(0,i)]=decodeURIComponent(kv.slice(i+1));});
+  return o;
+}
+function writeHash(){
+  var p=[];
+  if(R.value)p.push("r="+encodeURIComponent(R.value));
+  if(R2.value)p.push("r2="+encodeURIComponent(R2.value));
+  if(VT.value)p.push("v="+encodeURIComponent(VT.value));
+  history.replaceState(null,"","#"+p.join("&"));
+}
+
+/* ---------- sample versions ---------- */
+function sampleFor(sets){
+  var I=toInterval(sets[0]),base=I.lo||ver(1,0,0),out=[],seen={};
+  function add(v){var s=v.raw;if(!seen[s]){seen[s]=1;out.push(s);}}
+  if(base.patch>0)add(ver(base.major,base.minor,base.patch-1));
+  add(ver(base.major,base.minor,base.patch));
+  add(ver(base.major,base.minor,base.patch+1));
+  add(ver(base.major,base.minor+1,0));
+  add(ver(base.major+1,0,0));
+  add(ver(base.major,base.minor,base.patch,["rc","1"]));
+  return out.join("\n");
+}
+
+/* ---------- gotcha gallery ---------- */
+var GOTCHAS=[
+  {r:"^0.2.3",d:"caret on 0.x locks to 0.2.x — no minor bumps"},
+  {r:"^1.2.3",d:"the everyday caret: minor+patch, no major"},
+  {r:"~1.2.3",d:"tilde: patch bumps only, within 1.2.x"},
+  {r:"~1.2",d:"tilde on a partial — still 1.2.x"},
+  {r:"1.x",d:"x-range: any 1.y.z"},
+  {r:"1.2.0 - 2.3.4",d:"inclusive hyphen range"},
+  {r:">=1.5 <3 || 4.0.0",d:"union of an AND-group and a pin"},
+  {r:"^0.0.3",d:"caret on 0.0.x pins the exact patch"}
+];
+
+/* ---------- main render ---------- */
+var lastCands=[],lastSets=null;
+function render(){
+  var rv=R.value.trim(),setsA=rv?parseRange(rv):null;
+  var errEl=document.getElementById("rangeErr");
+  if(rv&&!setsA){R.classList.add("bad");errEl.textContent="Cannot parse this range.";
+    document.getElementById("english").textContent="";document.getElementById("canon").textContent="";
+    document.getElementById("chips").innerHTML="";document.getElementById("best").textContent="";
+    renderLine(null,null,[]);return;}
+  R.classList.remove("bad");errEl.textContent="";
+  lastSets=setsA;
+  if(setsA){
+    document.getElementById("english").textContent=english(setsA);
+    document.getElementById("canon").textContent="Canonical: "+canonical(setsA);
+  } else { // empty input: don't leave the previous range's explanation on screen
+    document.getElementById("english").textContent="";
+    document.getElementById("canon").textContent="";
+  }
+  // candidates
+  var lines=VT.value.split(/\n+/).map(function(s){return s.trim();}).filter(Boolean);
+  var cands=lines.map(function(l){var v=parse(l);return{raw:l,v:v,ok:v&&setsA?satisfies(v,setsA):false,bad:!v};});
+  cands.sort(function(a,b){if(a.bad!==b.bad)return a.bad?1:-1;if(a.bad)return 0;return compare(a.v,b.v);});
+  lastCands=cands;
+  var chips=document.getElementById("chips");chips.innerHTML="";
+  var best=null;
+  cands.forEach(function(c){
+    var el=document.createElement("span");el.className="chip";
+    if(c.bad){el.textContent=c.raw+" ⚠";el.title="Not a valid version";}
+    else if(c.ok){el.className+=" sat";el.textContent="✓ "+c.raw;el.title="Satisfied";if(!best||compare(c.v,best.v)>0)best=c;}
+    else{el.className+=" exc";el.textContent="✕ "+c.raw;el.title=setsA?reasonFor(c.v,setsA):"";}
+    el.dataset.reason=c.bad?(c.raw+" is not a valid semver version."):(setsA?reasonFor(c.v,setsA):"");
+    el.tabIndex=0;el.setAttribute("role","button");
+    var show=function(){document.getElementById("reason").innerHTML=annotate(el.dataset.reason);};
+    el.onclick=show;el.onmouseenter=show;el.onfocus=show;
+    el.onkeydown=function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();show();}};
+    chips.appendChild(el);
+    c._el=el;
+  });
+  if(best){best._el.className+=" best";
+    document.getElementById("best").innerHTML="Highest satisfying version: <b>"+best.v.raw+"</b>";}
+  else document.getElementById("best").textContent=cands.length?"No candidate satisfies this range.":"";
+  // compare
+  renderCompare(setsA);
+  renderLine(setsA,R2.value.trim()?parseRange(R2.value.trim()):null,cands);
+  writeHash();
+}
+function esc(s){return String(s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
+function annotate(t){return esc(t).replace(/fails (\S+)/,"fails <b>$1</b>");} // escape first: invalid-candidate text is arbitrary user input from the URL hash
+
+function renderCompare(setsA){
+  var box=document.getElementById("compare"),rv2=R2.value.trim();
+  var e2=document.getElementById("range2Err");
+  if(!rv2){box.textContent="";e2.textContent="";R2.classList.remove("bad");return;}
+  var setsB=parseRange(rv2);
+  if(!setsB){R2.classList.add("bad");e2.textContent="Cannot parse this range.";box.textContent="";return;}
+  R2.classList.remove("bad");e2.textContent="";
+  if(!setsA){box.textContent="Enter a valid range A to compare.";return;}
+  var IA=intervals(setsA),IB=intervals(setsB),inter=[];
+  IA.forEach(function(a){IB.forEach(function(b){var x=intersect(a,b);if(x)inter.push(x);});});
+  var aInB=subset(IA,IB),bInA=subset(IB,IA),verdict;
+  var ca=canonical(setsA),cb=canonical(setsB);
+  if(aInB&&bInA)verdict="The two ranges are <b>equivalent</b>.";
+  else if(aInB)verdict="<span class='k'>"+ca+"</span> is <b>fully contained in</b> <span class='k'>"+cb+"</span> — any version A allows, B allows too.";
+  else if(bInA)verdict="<span class='k'>"+cb+"</span> is <b>fully contained in</b> <span class='k'>"+ca+"</span>.";
+  else if(inter.length)verdict="Neither contains the other; they <b>overlap</b> but each allows versions the other rejects.";
+  else verdict="The two ranges are <b>disjoint</b> — no version satisfies both.";
+  var interTxt=inter.length?inter.map(intervalText).join(", "):"none";
+  box.innerHTML=verdict+"<br><span class='hint'>Intersection: <span class='k'>"+interTxt+"</span></span>"+
+    "<div class='btnrow'><button class='btn' id='copyProof'>Copy proof link</button></div>";
+  document.getElementById("copyProof").onclick=copyLink;
+}
+
+/* ---------- self test ---------- */
+var CASES=[
+  ["1.3.0","^1.2.3",true],["2.0.0","^1.2.3",false],["1.2.2","^1.2.3",false],
+  ["0.3.0","^0.2.3",false],["0.2.9","^0.2.3",true],["0.0.4","^0.0.3",false],["0.0.3","^0.0.3",true],
+  ["1.2.9","~1.2.3",true],["1.3.0","~1.2.3",false],["1.2.0","~1.2",true],["1.3.0","~1.2",false],
+  ["1.5.2","1.x",true],["2.0.0","1.x",false],
+  ["2.3.4","1.2.0 - 2.3.4",true],["2.3.5","1.2.0 - 2.3.4",false],["1.2.0","1.2.0 - 2.3.4",true],
+  ["4.0.0","1.2.0 - 2.3.4 || 4.0.0",true],["3.0.0","1.2.0 - 2.3.4 || 4.0.0",false],
+  ["1.5.0-rc.1","^1.2.3",false],["1.2.4-rc.1",">=1.2.4-alpha <2.0.0",true],
+  ["1.0.0",">=1.5 <3",false],["2.9.9",">=1.5 <3",true],["3.0.0",">=1.5 <3",false],
+  ["2.0.0-beta","2.0.0-beta",true],["1.0.0","*",true]
+];
+function runTests(){
+  var pass=0,fails=[];
+  CASES.forEach(function(c){
+    var v=parse(c[0]),sets=parseRange(c[1]),got=v&&sets?satisfies(v,sets):null;
+    if(got===c[2])pass++;else fails.push(c[0]+" vs "+c[1]+" → got "+got+", expected "+c[2]);
+  });
+  var b=document.getElementById("testBadge");
+  b.className="badge "+(fails.length?"fail":"pass");
+  b.textContent=pass+"/"+CASES.length+" passing";
+  document.getElementById("testFail").textContent=fails.join("\n");
+}
+
+/* ---------- wiring ---------- */
+function copyLink(e){
+  writeHash();
+  var b=e&&(e.currentTarget||e.target);
+  var orig=b?b.textContent:"";
+  function flash(msg){if(b){b.textContent=msg;setTimeout(function(){b.textContent=orig;},1200);}}
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(location.href).then(function(){flash("Copied!");},function(){flash("Copy failed");});
+  }else{ // older engines: temporary textarea + execCommand, still gate the confirmation on success
+    var ok=false;
+    try{var ta=document.createElement("textarea");ta.value=location.href;ta.style.position="fixed";ta.style.opacity="0";
+      document.body.appendChild(ta);ta.select();ok=document.execCommand("copy");document.body.removeChild(ta);}catch(_){ok=false;}
+    flash(ok?"Copied!":"Copy failed");
+  }
+}
+document.getElementById("copyLink").onclick=copyLink;
+document.getElementById("sample").onclick=function(){
+  var sets=R.value.trim()?parseRange(R.value.trim()):null;
+  if(sets){VT.value=sampleFor(sets);render();}
+};
+(function buildGallery(){
+  var g=document.getElementById("gallery");
+  GOTCHAS.forEach(function(x){
+    var d=document.createElement("div");d.className="g";d.tabIndex=0;d.setAttribute("role","button");
+    d.innerHTML='<div class="gr">'+x.r+'</div><div class="gd">'+x.d+'</div>';
+    var load=function(){R.value=x.r;VT.value=sampleFor(parseRange(x.r));render();window.scrollTo({top:0,behavior:"smooth"});};
+    d.onclick=load;
+    d.onkeydown=function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();load();}};
+    g.appendChild(d);
+  });
+})();
+var timer;
+function schedule(){clearTimeout(timer);timer=setTimeout(render,180);}
+[R,R2,VT].forEach(function(el){el.addEventListener("input",schedule);});
+var rtimer;
+window.addEventListener("resize",function(){clearTimeout(rtimer);rtimer=setTimeout(render,150);}); // keep the SVG geometry 1:1 with its new width
+
+/* ---------- init ---------- */
+(function init(){
+  var h=readHash();
+  R.value=h.r||"^1.2.3";
+  R2.value=h.r2||"";
+  VT.value=h.v||(h.r?"":sampleFor(parseRange(R.value)));
+  runTests();
+  render();
+})();
+</script>
+</body>
+</html>

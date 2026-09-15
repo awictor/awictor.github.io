@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Loadpath — draw a truss, watch the forces flow, break it</title>
+<style>
+  :root{ --bg:#0d1117; --panel:#161b22; --line:#232c38; --ink:#e6edf3; --dim:#8b98a8; --accent:#ffb020; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; overflow:hidden; }
+  #app{ display:flex; height:100%; }
+  #panel{ width:236px; flex:0 0 236px; background:var(--panel); border-right:1px solid var(--line);
+    padding:12px; overflow-y:auto; font-size:12px; }
+  #stage{ position:relative; flex:1; }
+  canvas{ display:block; width:100%; height:100%; cursor:crosshair; }
+  h1{ font-size:15px; margin:0 0 2px; letter-spacing:.3px; }
+  h1 b{ color:var(--accent); }
+  .sub{ color:var(--dim); font-size:11px; margin:0 0 12px; line-height:1.4; }
+  .grp{ border-top:1px solid var(--line); padding:10px 0; }
+  .grp:first-of-type{ border-top:none; padding-top:0; }
+  label{ display:flex; justify-content:space-between; align-items:center; margin:7px 0; color:var(--dim); }
+  label span.v{ color:var(--ink); font-variant-numeric:tabular-nums; }
+  input[type=range]{ width:100%; margin:3px 0 0; accent-color:var(--accent); }
+  .btns{ display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  button, select{ font:inherit; font-size:12px; color:var(--ink); background:#20293a; border:1px solid var(--line);
+    border-radius:6px; padding:7px 6px; cursor:pointer; transition:background .12s; }
+  button:hover, select:hover{ background:#2b3648; }
+  button.pri{ background:var(--accent); color:#231a06; border-color:var(--accent); font-weight:600; }
+  button.pri:hover{ filter:brightness(1.08); }
+  select{ width:100%; cursor:pointer; }
+  .chk{ display:flex; align-items:center; gap:7px; color:var(--dim); margin:6px 0; cursor:pointer; }
+  .chk input{ accent-color:var(--accent); }
+  #status{ font-size:11px; line-height:1.5; color:var(--dim); min-height:14px; white-space:pre-wrap; }
+  #status b{ color:var(--accent); }
+  #status .warn{ color:#ff8a5c; }
+  #hint{ color:var(--dim); font-size:10.5px; line-height:1.5; }
+  #hint code{ color:var(--ink); background:#20293a; padding:1px 4px; border-radius:3px; font-size:10px; }
+  /* overlay HUD */
+  #hud{ position:absolute; left:12px; top:12px; pointer-events:none; font-size:11px; }
+  #legend{ position:absolute; right:12px; top:12px; background:rgba(13,17,23,.78); border:1px solid var(--line);
+    border-radius:8px; padding:8px 10px; font-size:11px; color:var(--dim); }
+  #legend .bar{ height:9px; width:150px; border-radius:5px; margin:5px 0 4px;
+    background:linear-gradient(90deg,#ff4d2e,#e8622e,#3a4658,#2fb6e8,#33e0ff); }
+  #legend .row{ display:flex; justify-content:space-between; }
+  #maxcall{ position:absolute; left:12px; bottom:12px; background:rgba(13,17,23,.78); border:1px solid var(--line);
+    border-radius:8px; padding:6px 10px; font-size:11px; color:var(--ink); font-variant-numeric:tabular-nums; }
+  #maxcall b{ color:var(--accent); }
+  #mode{ position:absolute; right:12px; bottom:12px; font-size:11px; color:var(--dim); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="panel">
+    <h1><b>Load</b>path</h1>
+    <p class="sub">Draw a truss, watch forces flow, break it. Verlet distance-constraint stress sandbox.</p>
+
+    <div class="grp">
+      <div class="btns">
+        <button id="mode-btn">Edit ✎</button>
+        <button id="stress-btn">Stress Test</button>
+        <button id="replay-btn" disabled>Replay ⤾</button>
+        <button id="share-btn">Share URL</button>
+        <button id="reset-btn">Reset</button>
+        <button id="clear-btn">Clear</button>
+      </div>
+    </div>
+
+    <div class="grp">
+      <label>Starter gallery</label>
+      <select id="gallery">
+        <option value="warren">Warren Truss Bridge</option>
+        <option value="cantilever">Cantilever</option>
+        <option value="arch">Arch</option>
+        <option value="suspension">Suspension Deck</option>
+      </select>
+    </div>
+
+    <div class="grp">
+      <label>Gravity <span class="v" id="g-v">0.55</span></label>
+      <input type="range" id="g" min="0" max="1.2" step="0.01" value="0.55">
+      <label>Stiffness <span class="v" id="s-v">6</span></label>
+      <input type="range" id="s" min="1" max="18" step="1" value="6">
+      <label>Beam strength <span class="v" id="b-v">0.12</span></label>
+      <input type="range" id="b" min="0.02" max="0.5" step="0.005" value="0.12">
+      <label>Load mass <span class="v" id="l-v">6</span></label>
+      <input type="range" id="l" min="0" max="120" step="1" value="6">
+    </div>
+
+    <div class="grp">
+      <label class="chk"><input type="checkbox" id="flow" checked> Flow particles</label>
+      <div id="status">Ready. Load path lights up in Run mode.</div>
+    </div>
+
+    <div class="grp">
+      <div id="hint">
+        <b style="color:var(--ink)">Edit mode</b><br>
+        • click grid → add node<br>
+        • drag node→node → add beam<br>
+        • <code>shift</code>/right-click node → pin support<br>
+        • right-click beam → delete<br>
+        • <code>ctrl</code>/<code>⌘</code>-click node → set load point<br>
+        <b style="color:var(--ink)">Run mode</b> • drag any node to poke.
+      </div>
+    </div>
+  </div>
+
+  <div id="stage">
+    <canvas id="c"></canvas>
+    <div id="legend">
+      <div style="color:var(--ink)">Axial force</div>
+      <div class="bar"></div>
+      <div class="row"><span style="color:#ff6a45">compression</span><span style="color:#3fd0ff">tension</span></div>
+    </div>
+    <div id="maxcall">max stress <b id="maxv">0%</b></div>
+    <div id="mode" >—</div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const GRID = 34;
+let W=0, H=0, DPR=1;
+function resize(){
+  DPR = Math.min(2, window.devicePixelRatio||1);
+  const r = cv.parentElement.getBoundingClientRect();
+  W = r.width; H = r.height;
+  cv.width = W*DPR; cv.height = H*DPR;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize', resize);
+
+// ---- model ----
+let nodes = [];   // {x,y,px,py,pin}
+let beams = [];   // {a,b,rest,broken,strain,phase,btime}
+let loadIdx = -1;
+let mode = 'run'; // 'edit' | 'run'
+let supported = [];
+let frameCount = 0;
+
+// ---- ui refs ----
+const G=document.getElementById('g'), S=document.getElementById('s'),
+      B=document.getElementById('b'), L=document.getElementById('l'),
+      flowCB=document.getElementById('flow'), gallery=document.getElementById('gallery'),
+      statusEl=document.getElementById('status'), maxvEl=document.getElementById('maxv'),
+      modeEl=document.getElementById('mode'), modeBtn=document.getElementById('mode-btn'),
+      replayBtn=document.getElementById('replay-btn');
+function bindLabel(inp,id,fmt){ const o=document.getElementById(id);
+  const u=()=>o.textContent=(fmt?fmt(+inp.value):inp.value); inp.addEventListener('input',u); u(); }
+bindLabel(G,'g-v',v=>v.toFixed(2)); bindLabel(S,'s-v'); bindLabel(B,'b-v',v=>v.toFixed(3)); bindLabel(L,'l-v');
+
+// ---- helpers ----
+const snap = v => Math.round(v/GRID)*GRID;
+function addNode(x,y,pin){ nodes.push({x,y,px:x,py:y,pin:pin?1:0}); return nodes.length-1; }
+function addBeam(a,b){
+  if(a===b) return;
+  if(beams.some(e=>(e.a===a&&e.b===b)||(e.a===b&&e.b===a))) return;
+  const dx=nodes[b].x-nodes[a].x, dy=nodes[b].y-nodes[a].y;
+  beams.push({a,b,rest:Math.hypot(dx,dy)||1,broken:false,strain:0,phase:Math.random(),btime:-1});
+}
+function nodeAt(x,y){ let bi=-1,bd=14*14; for(let i=0;i<nodes.length;i++){
+  const dx=nodes[i].x-x, dy=nodes[i].y-y, d=dx*dx+dy*dy; if(d<bd){bd=d;bi=i;} } return bi; }
+function beamAt(x,y){ let bi=-1,bd=8; for(let i=0;i<beams.length;i++){ const e=beams[i]; if(e.broken)continue;
+  const A=nodes[e.a],Bn=nodes[e.b]; const t=segDist(x,y,A.x,A.y,Bn.x,Bn.y); if(t<bd){bd=t;bi=i;} } return bi; }
+function segDist(px,py,ax,ay,bx,by){ const dx=bx-ax,dy=by-ay, l2=dx*dx+dy*dy;
+  let t=l2?((px-ax)*dx+(py-ay)*dy)/l2:0; t=Math.max(0,Math.min(1,t));
+  return Math.hypot(px-(ax+t*dx), py-(ay+t*dy)); }
+
+// ---- physics (Verlet) ----
+function physics(){
+  const g = +G.value*0.42, iters = +S.value|0, brk = +B.value;
+  const load = (stressing||replaying) ? stressLoad : +L.value;
+  for(let i=0;i<nodes.length;i++){ const n=nodes[i];
+    if(n.pin || i===grab) continue;
+    let vx=(n.x-n.px)*0.992, vy=(n.y-n.py)*0.992;
+    vx=Math.max(-9,Math.min(9,vx)); vy=Math.max(-9,Math.min(9,vy));
+    n.px=n.x; n.py=n.y;
+    let a=g; if(i===loadIdx) a+=load*0.014;
+    n.x+=vx; n.y+=vy+a;
+  }
+  for(let k=0;k<iters;k++){
+    for(let bi=0;bi<beams.length;bi++){ const e=beams[bi]; if(e.broken) continue;
+      const A=nodes[e.a], C=nodes[e.b];
+      let dx=C.x-A.x, dy=C.y-A.y, d=Math.hypot(dx,dy)||1e-6;
+      const diff=(d-e.rest)/d;
+      e.strain=(d-e.rest)/e.rest;
+      let cx=dx*0.5*diff, cy=dy*0.5*diff;
+      const cap=e.rest*0.5; const cm=Math.hypot(cx,cy); if(cm>cap){cx*=cap/cm;cy*=cap/cm;}
+      const pa=A.pin?0:1, pc=C.pin?0:1, tot=pa+pc||1;
+      if(pa){ A.x+=cx*(pc?1:2)/ (tot); A.y+=cy*(pc?1:2)/tot; }
+      if(pc){ C.x-=cx*(pa?1:2)/ tot; C.y-=cy*(pa?1:2)/tot; }
+    }
+  }
+  // breaking pass
+  for(let bi=0;bi<beams.length;bi++){ const e=beams[bi];
+    if(e.broken) continue;
+    if(Math.abs(e.strain)>brk){ e.broken=true; e.btime=frameCount;
+      if(stressing || replaying) telemetry.snaps.push({i:bi,load:Math.round(stressLoad),f:frameCount});
+      // recoil impulse
+      const A=nodes[e.a],C=nodes[e.b], dx=C.x-A.x,dy=C.y-A.y,d=Math.hypot(dx,dy)||1;
+      const s=e.strain>0? -1:1;
+      if(!A.pin){A.px+=s*dx/d*1.5;A.py+=s*dy/d*1.5;}
+      if(!C.pin){C.px-=s*dx/d*1.5;C.py-=s*dy/d*1.5;}
+    }
+  }
+}
+
+// ---- support analysis (BFS from pins over unbroken beams) ----
+function computeSupport(){
+  supported = new Array(nodes.length).fill(false);
+  const adj = nodes.map(()=>[]);
+  for(const e of beams){ if(e.broken)continue; adj[e.a].push(e.b); adj[e.b].push(e.a); }
+  const q=[]; for(let i=0;i<nodes.length;i++) if(nodes[i].pin){supported[i]=true;q.push(i);}
+  while(q.length){ const u=q.shift(); for(const v of adj[u]) if(!supported[v]){supported[v]=true;q.push(v);} }
+}
+
+// ---- color ----
+function beamColor(strain){
+  const brk=+B.value, s=Math.max(-1,Math.min(1,strain/brk)), m=Math.abs(s);
+  if(s>=0) return `rgb(${Math.round(58-40*m)},${Math.round(150+55*m)},${Math.round(190+65*m)})`;
+  return `rgb(${Math.round(210+45*m)},${Math.round(120-95*m)},${Math.round(70-55*m)})`;
+}
+
+// ---- interaction state ----
+let mouse={x:0,y:0}, dragBeamFrom=-1, ghost=null, grab=-1;
+function evPos(e){ const r=cv.getBoundingClientRect(); return {x:e.clientX-r.left, y:e.clientY-r.top}; }
+cv.addEventListener('contextmenu',e=>e.preventDefault());
+cv.addEventListener('pointerdown',e=>{
+  const p=evPos(e); mouse=p; const ni=nodeAt(p.x,p.y); cv.setPointerCapture(e.pointerId);
+  // ctrl/⌘-click sets the load point (checked first: on macOS ctrl+click reports button===2)
+  if(e.ctrlKey || e.metaKey){ if(ni>=0){ loadIdx=ni; save(); } return; }
+  if((e.button===2 || e.shiftKey)){               // pin toggle / beam delete
+    if(ni>=0){ nodes[ni].pin^=1; save(); }
+    else { const bi=beamAt(p.x,p.y); if(bi>=0){ beams.splice(bi,1); save(); } }
+    return;
+  }
+  if(mode==='edit'){
+    if(ni>=0){ dragBeamFrom=ni; ghost={x:p.x,y:p.y}; }
+    else { const nx=snap(p.x),ny=snap(p.y); if(nodeAt(nx,ny)<0){ addNode(nx,ny); save(); } }
+  } else { if(ni>=0){ grab=ni; cv.style.cursor='grabbing'; } }
+});
+cv.addEventListener('pointermove',e=>{
+  const p=evPos(e); mouse=p;
+  if(dragBeamFrom>=0){ const ni=nodeAt(p.x,p.y); ghost = ni>=0? {x:nodes[ni].x,y:nodes[ni].y}:{x:snap(p.x),y:snap(p.y)}; }
+  if(grab>=0){ nodes[grab].x=p.x; nodes[grab].y=p.y; }
+});
+cv.addEventListener('pointerup',e=>{
+  const p=evPos(e);
+  if(dragBeamFrom>=0){
+    let ni=nodeAt(p.x,p.y);
+    if(ni<0){ const nx=snap(p.x),ny=snap(p.y); ni=nodeAt(nx,ny); if(ni<0) ni=addNode(nx,ny); }
+    if(ni!==dragBeamFrom) addBeam(dragBeamFrom,ni);
+    dragBeamFrom=-1; ghost=null; save();
+  }
+  grab=-1;
+  if(mode==='run') cv.style.cursor='grab';
+});
+
+// ---- stress test + replay ----
+let stressing=false, replaying=false, stressLoad=0, telemetry={snaps:[],collapseLoad:0,startLoad:0};
+let snapshot=null, replayFrames=0;
+function takeSnapshot(){
+  snapshot={ n:nodes.map(n=>({x:n.x,y:n.y,px:n.x,py:n.y,pin:n.pin})),
+             b:beams.map(e=>({a:e.a,b:e.b,rest:e.rest})), loadIdx };
+}
+function restoreSnapshot(){
+  nodes=snapshot.n.map(n=>({...n})); loadIdx=snapshot.loadIdx;
+  beams=snapshot.b.map(e=>({a:e.a,b:e.b,rest:e.rest,broken:false,strain:0,phase:Math.random(),btime:-1}));
+}
+function startStress(){
+  if(nodes.length<2) return;
+  setMode('run'); takeSnapshot();
+  stressLoad=+L.value;
+  telemetry={snaps:[],collapseLoad:0,startLoad:+L.value};
+  stressing=true; replaying=false; replayBtn.disabled=true;
+  statusEl.innerHTML='Ramping load… <b>'+Math.round(stressLoad)+'</b>';
+}
+function stopStress(collapsed){
+  stressing=false; telemetry.collapseLoad=stressLoad;
+  const seq = telemetry.snaps.map(s=>'#'+s.i).slice(0,8).join(' → ') || 'none';
+  statusEl.innerHTML = collapsed
+    ? `<b>COLLAPSE</b> at load <b>${Math.round(telemetry.collapseLoad)}</b>\nsnaps (${telemetry.snaps.length}): ${seq}`
+    : `Held at max load ${Math.round(stressLoad)} — try lowering strength.`;
+  if(collapsed && snapshot) replayBtn.disabled=false;
+}
+function startReplay(){
+  if(!snapshot) return;
+  restoreSnapshot(); setMode('run');
+  stressLoad=Math.max(telemetry.startLoad, telemetry.collapseLoad);
+  replaying=true; stressing=false; replayFrames=0;
+  telemetry={...telemetry, snaps:[]};
+  statusEl.innerHTML='<b>Replay</b> — slow-motion cascade…';
+}
+
+// ---- serialization ----
+let originalHash='';
+function save(){
+  const s={v:1,g:+G.value,s:+S.value,b:+B.value,l:+L.value,li:loadIdx,
+    n:nodes.map(n=>[Math.round(n.x),Math.round(n.y),n.pin]),
+    e:beams.map(e=>[e.a,e.b])};
+  try{ history.replaceState(null,'', '#'+btoa(JSON.stringify(s))); }catch(_){}
+}
+function applyState(s){
+  G.value=s.g; S.value=s.s; B.value=s.b; L.value=s.l;
+  [G,S,B,L].forEach(i=>i.dispatchEvent(new Event('input')));
+  nodes = s.n.map(a=>({x:a[0],y:a[1],px:a[0],py:a[1],pin:a[2]||0}));
+  beams=[]; for(const e of s.e) addBeam(e[0],e[1]);
+  loadIdx = (s.li!=null)? s.li : -1;
+  stressing=replaying=false; replayBtn.disabled=true;
+}
+function loadHash(){
+  const h=location.hash.slice(1);
+  if(!h) return false;
+  try{ applyState(JSON.parse(atob(h))); return true; }catch(_){ return false; }
+}
+
+// ---- starter gallery (built procedurally, then serialized to hash) ----
+function buildWarren(){
+  const n=[],e=[], sp=GRID*2;
+  const bx=Math.round((W-8*sp)/2/GRID)*GRID, by=snap(H*0.55);
+  for(let i=0;i<=8;i++) n.push([bx+i*sp,by, (i===0||i===8)?1:0]);        // bottom 0..8
+  for(let i=0;i<8;i++)  n.push([bx+sp/2+i*sp, by-sp, 0]);                 // top 9..16
+  for(let i=0;i<8;i++) e.push([i,i+1]);                                   // bottom chord
+  for(let i=0;i<7;i++) e.push([9+i,10+i]);                                // top chord
+  for(let i=0;i<8;i++){ e.push([i,9+i]); e.push([9+i,i+1]); }             // diagonals
+  return {n,e,li:13};
+}
+function buildCantilever(){
+  const n=[],e=[], sp=GRID*2, ox=snap(W*0.22), by=snap(H*0.42);
+  for(let i=0;i<=5;i++) n.push([ox+i*sp,by, i===0?1:0]);                  // top chord 0..5
+  for(let i=0;i<=5;i++) n.push([ox+i*sp,by+sp, i===0?1:0]);               // bottom chord 6..11
+  for(let i=0;i<5;i++){ e.push([i,i+1]); e.push([6+i,7+i]); }             // chords
+  for(let i=0;i<=5;i++) e.push([i,6+i]);                                  // verticals
+  for(let i=0;i<5;i++) e.push([6+i,i+1]);                                 // diagonals
+  return {n,e,li:5};
+}
+function buildArch(){
+  const n=[],e=[], seg=10, R=Math.min(W*0.34, H*0.34), cx=snap(W*0.5), cy=snap(H*0.66);
+  for(let i=0;i<=seg;i++){ const a=Math.PI*(1-i/seg);
+    n.push([snap(cx+R*Math.cos(a)), snap(cy-R*Math.sin(a)), (i===0||i===seg)?1:0]); }
+  for(let i=0;i<seg;i++) e.push([i,i+1]);
+  return {n,e,li:Math.round(seg/2)};
+}
+function buildSuspension(){
+  const n=[],e=[], sp=GRID*2, span=8, ox=Math.round((W-span*sp)/2/GRID)*GRID, by=snap(H*0.6), th=sp*2.2;
+  for(let i=0;i<=span;i++) n.push([ox+i*sp,by, (i===0||i===span)?1:0]);   // deck 0..8
+  for(let i=0;i<=span;i++){ const t=i/span, sag=Math.sin(Math.PI*t);      // cable 9..17
+    n.push([ox+i*sp, snap(by-th*(1-0.65*sag)), 0]); }
+  n[9][2]=1; n[9+span][2]=1;                                              // anchor cable ends
+  for(let i=0;i<span;i++){ e.push([i,i+1]); e.push([9+i,10+i]); }         // deck + cable
+  for(let i=0;i<=span;i++) e.push([i,9+i]);                               // hangers
+  return {n,e,li:4};
+}
+const BUILDERS={warren:buildWarren, cantilever:buildCantilever, arch:buildArch, suspension:buildSuspension};
+function loadPreset(name){
+  const p=BUILDERS[name](); nodes=[]; beams=[];
+  for(const a of p.n) addNode(a[0],a[1],a[2]);
+  for(const e of p.e) addBeam(e[0],e[1]);
+  loadIdx=p.li; stressing=replaying=false; replayBtn.disabled=true;
+  save(); originalHash=location.hash; statusEl.innerHTML=`Loaded <b>${gallery.options[gallery.selectedIndex].text}</b>.`;
+}
+
+// ---- mode ----
+function setMode(m){ mode=m; modeBtn.textContent = m==='edit'?'Run ▶':'Edit ✎'; modeBtn.classList.toggle('pri',m==='edit');
+  cv.style.cursor = m==='edit'?'crosshair':'grab'; modeEl.textContent = m==='edit'?'EDIT — build':'RUN — poke'; }
+
+// ---- buttons ----
+modeBtn.onclick=()=>setMode(mode==='edit'?'run':'edit');
+document.getElementById('stress-btn').onclick=startStress;
+replayBtn.onclick=startReplay;
+document.getElementById('reset-btn').onclick=()=>{ if(originalHash){ location.hash=originalHash.slice(1); if(!loadHash()) loadPreset(gallery.value);} else loadPreset(gallery.value); };
+document.getElementById('clear-btn').onclick=()=>{ nodes=[];beams=[];loadIdx=-1;stressing=replaying=false;replayBtn.disabled=true;setMode('edit');save();statusEl.textContent='Cleared. Edit mode — draw a truss.'; };
+document.getElementById('share-btn').onclick=()=>{ save();
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(location.href)
+      .then(()=>statusEl.innerHTML='URL copied — <b>shareable build</b> in the address bar.')
+      .catch(()=>statusEl.textContent='Copy the URL from the address bar to share.');
+  } else { statusEl.textContent='Copy the URL from the address bar to share.'; }
+};
+gallery.onchange=()=>loadPreset(gallery.value);
+[G,S,B,L].forEach(i=>i.addEventListener('change',save));
+
+// ---- render ----
+function render(){
+  ctx.clearRect(0,0,W,H);
+  // grid dots
+  ctx.fillStyle='#182029';
+  for(let x=GRID; x<W; x+=GRID) for(let y=GRID; y<H; y+=GRID){ ctx.fillRect(x-0.5,y-0.5,1,1); }
+  // beams
+  let maxAbs=0;
+  for(const e of beams){ if(e.broken) continue; if(Math.abs(e.strain)>maxAbs) maxAbs=Math.abs(e.strain); }
+  const brk=+B.value;
+  for(let bi=0;bi<beams.length;bi++){ const e=beams[bi]; if(e.broken) continue;
+    const A=nodes[e.a],C=nodes[e.b], sm=Math.min(1,Math.abs(e.strain)/brk);
+    ctx.lineCap='round'; ctx.lineWidth=2+sm*4.5; ctx.strokeStyle=beamColor(e.strain);
+    ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(C.x,C.y); ctx.stroke();
+    // recently broken highlight (replay/stress)
+    if(e.btime>=0 && frameCount-e.btime<40){ ctx.strokeStyle='#fff'; ctx.globalAlpha=1-(frameCount-e.btime)/40;
+      ctx.lineWidth=3; ctx.stroke(); ctx.globalAlpha=1; }
+    // flow particles
+    if(flowCB.checked && sm>0.04){ const dx=C.x-A.x,dy=C.y-A.y,d=Math.hypot(dx,dy)||1, dir=e.strain>0?1:-1;
+      e.phase=(e.phase+dir*(0.006+sm*0.05))%1; if(e.phase<0)e.phase+=1;
+      for(let k=0;k<3;k++){ const t=(e.phase+k/3)%1; ctx.fillStyle='rgba(255,255,255,'+(0.25+sm*0.5)+')';
+        ctx.beginPath(); ctx.arc(A.x+dx*t,A.y+dy*t, 1.4+sm*1.6, 0, 6.283); ctx.fill(); } }
+  }
+  // ghost preview
+  if(ghost && dragBeamFrom>=0){ const A=nodes[dragBeamFrom];
+    ctx.setLineDash([5,5]); ctx.strokeStyle=(nodeAt(mouse.x,mouse.y)>=0)?'#3fd0ff':'#ffb020';
+    ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(ghost.x,ghost.y); ctx.stroke(); ctx.setLineDash([]);
+    const len=(Math.hypot(ghost.x-A.x,ghost.y-A.y)/GRID).toFixed(2);
+    ctx.fillStyle='#e6edf3'; ctx.font='11px ui-sans-serif'; ctx.fillText(len+' u',(A.x+ghost.x)/2+6,(A.y+ghost.y)/2-6);
+  }
+  // nodes
+  for(let i=0;i<nodes.length;i++){ const n=nodes[i];
+    if(n.pin){ ctx.fillStyle='#e6edf3'; ctx.beginPath();
+      ctx.moveTo(n.x-6,n.y+7); ctx.lineTo(n.x+6,n.y+7); ctx.lineTo(n.x,n.y-5); ctx.closePath(); ctx.fill();
+    } else {
+      ctx.fillStyle = supported[i]? '#9fb0c0' : '#ff8a3c';
+      ctx.beginPath(); ctx.arc(n.x,n.y,4,0,6.283); ctx.fill();
+      if(!supported[i]){ ctx.strokeStyle='#ff8a3c'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(n.x,n.y,7,0,6.283); ctx.stroke(); }
+    }
+    if(i===loadIdx){ ctx.strokeStyle='#ffb020'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(n.x,n.y,9,0,6.283); ctx.stroke();
+      ctx.fillStyle='#ffb020'; ctx.fillRect(n.x-4,n.y-16,8,7); }
+  }
+  maxvEl.textContent = Math.round(maxAbs/brk*100)+'%';
+}
+
+// ---- main loop ----
+function loop(){
+  frameCount++;
+  if(mode==='run'){
+    if(stressing){ stressLoad = stressLoad + 1 + stressLoad*0.012;
+      statusEl.innerHTML='Ramping load… <b>'+Math.round(stressLoad)+'</b>'; }
+    const substeps = replaying? 1 : 2;
+    if(!replaying || frameCount%2===0){ for(let s=0;s<substeps;s++) physics(); }
+    // collapse detection: load node no longer supported OR fell off screen
+    computeSupport();
+    if(stressing){ const ln=nodes[loadIdx];
+      if(loadIdx<0 || !supported[loadIdx] || (ln && ln.y>H+40) || stressLoad>=1400) stopStress(loadIdx>=0 && (!supported[loadIdx]||nodes[loadIdx].y>H+40)); }
+    if(replaying){ replayFrames++; if(replayFrames>720) replaying=false; }
+  } else computeSupport();
+  render();
+  requestAnimationFrame(loop);
+}
+
+// ---- init ----
+resize();
+if(!loadHash()){ loadPreset('warren'); } else { originalHash=location.hash; statusEl.innerHTML='Loaded <b>shared build</b> from URL.'; }
+setMode('run');
+loop();
+</script>
+</body>
+</html>

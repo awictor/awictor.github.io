@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Residua — modular multiplication blooms into cardioids</title>
+<style>
+  :root{
+    --bg:#05070d; --panel:rgba(14,18,30,.82); --line:rgba(120,140,190,.16);
+    --ink:#e8ecf7; --dim:#8894b4; --accent:#6ad6ff; --accent2:#ff7ad6;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;overflow:hidden}
+  #stage{position:fixed;inset:0}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair;touch-action:none}
+  #panel{position:fixed;top:14px;left:14px;width:296px;max-width:calc(100vw - 28px);
+    max-height:calc(100vh - 28px);overflow-y:auto;overscroll-behavior:contain;
+    background:var(--panel);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+    border:1px solid var(--line);
+    border-radius:14px;padding:14px 15px 15px;box-shadow:0 18px 50px rgba(0,0,0,.55);
+    transition:transform .28s ease,opacity .28s ease}
+  #panel.hidden{transform:translateX(-118%);opacity:0}
+  h1{font-size:15px;margin:0 0 2px;letter-spacing:.5px;font-weight:600}
+  h1 b{color:var(--accent)}
+  .sub{font-size:10.5px;color:var(--dim);margin:0 0 12px;line-height:1.4}
+  .row{margin:9px 0}
+  label{display:flex;justify-content:space-between;font-size:11px;color:var(--dim);
+    margin-bottom:4px;letter-spacing:.3px}
+  label b{color:var(--ink);font-weight:600}
+  input[type=range]{-webkit-appearance:none;width:100%;height:4px;border-radius:3px;
+    background:linear-gradient(90deg,var(--accent),var(--accent2));outline:none;margin:2px 0}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;
+    border-radius:50%;background:#fff;cursor:pointer;box-shadow:0 0 8px var(--accent)}
+  input[type=range]::-moz-range-thumb{width:15px;height:15px;border:0;border-radius:50%;
+    background:#fff;cursor:pointer}
+  input[type=number]{width:70px;background:#0b0f1a;border:1px solid var(--line);color:var(--ink);
+    border-radius:7px;padding:4px 6px;font:inherit;font-size:12px}
+  .krow{display:flex;gap:8px;align-items:center}
+  .krow input[type=range]{flex:1}
+  .btns{display:flex;gap:7px;flex-wrap:wrap;margin-top:4px}
+  button{background:#141b2e;border:1px solid var(--line);color:var(--ink);border-radius:8px;
+    padding:6px 9px;font:inherit;font-size:11px;cursor:pointer;transition:.15s;letter-spacing:.2px}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button:focus-visible,.chip:focus-visible,select:focus-visible,
+  input[type=range]:focus-visible,input[type=number]:focus-visible{
+    outline:2px solid var(--accent);outline-offset:2px}
+  input[type=range]:disabled{opacity:.4;cursor:not-allowed}
+  button.on{background:var(--accent);color:#04121a;border-color:var(--accent);font-weight:600}
+  button.rec.on{background:var(--accent2);border-color:var(--accent2);color:#180312}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  .chip{font-size:10.5px;padding:5px 8px;background:#101728;border:1px solid var(--line);
+    border-radius:20px;cursor:pointer;color:var(--dim);transition:.15s}
+  .chip:hover{border-color:var(--accent2);color:var(--accent2)}
+  select{background:#0b0f1a;border:1px solid var(--line);color:var(--ink);border-radius:7px;
+    padding:4px 6px;font:inherit;font-size:11px}
+  .toggles{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:11px;color:var(--dim)}
+  .toggles label{display:inline-flex;gap:5px;align-items:center;cursor:pointer;margin:0}
+  .divider{height:1px;background:var(--line);margin:12px 0}
+  #readout{position:fixed;right:14px;bottom:14px;background:var(--panel);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+    border:1px solid var(--line);border-radius:12px;padding:11px 15px;font-size:12px;line-height:1.7;
+    text-align:right;box-shadow:0 12px 34px rgba(0,0,0,.5);pointer-events:none}
+  #readout .big{font-size:20px;color:var(--accent);font-weight:600}
+  #readout .cusp{color:var(--accent2)}
+  #readout .curve{font-size:10.5px;color:var(--dim);letter-spacing:.4px;text-transform:uppercase}
+  #toggleBtn{position:fixed;top:14px;left:14px;z-index:20;width:34px;height:34px;padding:0;
+    font-size:15px;display:none}
+  #toggleBtn.show{display:block}
+  .hint{position:fixed;bottom:14px;left:14px;font-size:10.5px;color:var(--dim);pointer-events:none;
+    opacity:.7;max-width:40vw}
+  @media(max-width:640px){#readout{font-size:11px;padding:8px 11px}#readout .big{font-size:16px}
+    .hint{max-width:70vw}.hint-more{display:none}}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c"></canvas></div>
+<button id="toggleBtn" title="Show controls">≡</button>
+
+<div id="panel">
+  <h1><b>Residua</b> · times-table blooms</h1>
+  <p class="sub">Place M points on a circle, draw a chord from each i to (i·k mod M). Their envelope is an epicycloid with k−1 cusps.</p>
+
+  <div class="row">
+    <label>modulus M <b id="mVal">240</b></label>
+    <div class="krow">
+      <input id="mRange" type="range" min="2" max="3000" step="1" value="240">
+      <input id="mNum" type="number" min="2" max="3000" value="240">
+    </div>
+  </div>
+
+  <div class="row">
+    <label>multiplier k <b id="kVal">2.000</b></label>
+    <div class="krow">
+      <input id="kRange" type="range" min="0" max="60" step="0.001" value="2">
+      <input id="kNum" type="number" min="0" max="60" step="0.001" value="2">
+    </div>
+  </div>
+
+  <div class="btns">
+    <button id="playBtn">▶ play</button>
+    <button id="dirBtn" title="sweep direction">→</button>
+    <button id="randBtn">🎲 randomize</button>
+  </div>
+
+  <div class="row" style="margin-top:11px">
+    <label>sweep speed <b id="spVal">0.30</b> /s</label>
+    <input id="spRange" type="range" min="0.01" max="3" step="0.01" value="0.3">
+  </div>
+  <div class="row">
+    <label>afterimage trail <b id="trVal">0.55</b></label>
+    <input id="trRange" type="range" min="0" max="0.97" step="0.01" value="0.55">
+  </div>
+
+  <div class="divider"></div>
+  <label>presets</label>
+  <div class="chips" id="chips"></div>
+
+  <div class="divider"></div>
+  <div class="krow" style="justify-content:space-between">
+    <label style="margin:0">color</label>
+    <select id="colorMode">
+      <option value="hue">by angle (hue)</option>
+      <option value="gcd">by gcd(i,M)</option>
+    </select>
+    <select id="palette">
+      <option value="ice">ice</option>
+      <option value="fire">ember</option>
+      <option value="spectrum">spectrum</option>
+    </select>
+  </div>
+  <div class="toggles">
+    <label><input type="checkbox" id="ghostChk"> integer-k ghost</label>
+    <label><input type="checkbox" id="glowChk" checked> bloom glow</label>
+  </div>
+
+  <div class="divider"></div>
+  <div class="btns">
+    <button id="pngBtn">⤓ PNG</button>
+    <button id="recBtn" class="rec">● record webm</button>
+    <button id="shareBtn">🔗 copy link</button>
+    <button id="hideBtn">✕ hide</button>
+  </div>
+</div>
+
+<div id="readout">
+  <div class="big">k = <span id="roK">2.00</span></div>
+  <div>M = <span id="roM">240</span> residues</div>
+  <div>cusps ≈ <span class="cusp" id="roCusp">1</span> · <span id="roChords">240</span> chords</div>
+  <div class="curve" id="roName">cardioid</div>
+</div>
+<div class="hint">drag on canvas to scrub k<span class="hint-more"> · everything lives in the URL</span></div>
+
+<script>
+"use strict";
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let W=0, H=0, DPR=1;
+
+// ---------- state ----------
+const S = {
+  M:240, k:2, speed:0.30, trail:0.55, dir:1,
+  playing:false, colorMode:'hue', palette:'ice', ghost:false, glow:true
+};
+
+// famous curve names by integer cusp count
+const CURVE_NAMES = {1:'cardioid',2:'nephroid',3:'trefoiloid',4:'4-cusp epicycloid',5:'5-petal rose'};
+function curveName(k){
+  const n = Math.round(k)-1;
+  if(k < 1.02) return 'degenerate line';
+  return CURVE_NAMES[n] || (n+'-cusp epicycloid');
+}
+
+// ---------- palettes ----------
+// returns [r,g,b] for a normalized t in [0,1)
+const PAL = {
+  spectrum(t){ return hsl(t*360, 90, 62); },
+  ice(t){ return hsl(180 + t*90, 85, 55 + 12*Math.sin(t*6.283)); },
+  fire(t){ return hsl(t*70 - 10, 92, 55); }
+};
+function hsl(h,s,l){
+  h=((h%360)+360)%360; s/=100; l/=100;
+  const c=(1-Math.abs(2*l-1))*s, x=c*(1-Math.abs((h/60)%2-1)), m=l-c/2;
+  let r,g,b;
+  if(h<60)[r,g,b]=[c,x,0]; else if(h<120)[r,g,b]=[x,c,0];
+  else if(h<180)[r,g,b]=[0,c,x]; else if(h<240)[r,g,b]=[0,x,c];
+  else if(h<300)[r,g,b]=[x,0,c]; else [r,g,b]=[c,0,x];
+  return [(r+m)*255|0,(g+m)*255|0,(b+m)*255|0];
+}
+function gcd(a,b){ while(b){ [a,b]=[b,a%b]; } return a; }
+
+// ---------- rendering ----------
+function resize(){
+  DPR = Math.min(window.devicePixelRatio||1, 2);
+  W = cv.clientWidth; H = cv.clientHeight;
+  cv.width = W*DPR; cv.height = H*DPR;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  clearField(true);
+  requestRender(); // repaint the static frame; the loop owns it while playing
+}
+function clearField(hard){
+  if(hard){ ctx.globalCompositeOperation='source-over'; ctx.fillStyle='#05070d';
+    ctx.fillRect(0,0,W,H); }
+}
+
+// adaptive chord cap keeps the frame budget bounded at large M
+function chordStep(){
+  const cap = S.playing ? 2600 : 6000;
+  return S.M > cap ? Math.ceil(S.M/cap) : 1;
+}
+
+function draw(){
+  const cx=W/2, cy=H/2, R=Math.min(W,H)*0.42;
+  // trail: fade previous frame instead of clearing → elegant afterimages
+  ctx.globalCompositeOperation='source-over';
+  const fade = S.playing ? (1 - S.trail) : 1;
+  ctx.fillStyle = 'rgba(5,7,13,'+fade.toFixed(3)+')';
+  ctx.fillRect(0,0,W,H);
+
+  ctx.globalCompositeOperation = S.glow ? 'lighter' : 'source-over';
+  const M=S.M, k=S.k, step=chordStep();
+  const tau=Math.PI*2, off=-Math.PI/2;
+  let drawn=0;
+  const alpha = S.glow ? 0.5 : 0.72;
+  ctx.lineWidth = M>1200 ? 0.4 : (M>400 ? 0.65 : 0.9);
+
+  for(let i=0;i<M;i+=step){
+    const a1 = off + tau*i/M;
+    const x1 = cx + R*Math.cos(a1), y1 = cy + R*Math.sin(a1);
+    // continuous endpoint: (i*k mod M) as a float → interpolated position on the circle
+    let t = (i*k) % M; if(t<0) t+=M;
+    const a2 = off + tau*t/M;
+    const x2 = cx + R*Math.cos(a2), y2 = cy + R*Math.sin(a2);
+    let col;
+    if(S.colorMode==='gcd'){
+      const g = gcd(i||M, M);
+      col = PAL[S.palette]( (g/M) % 1 );
+    } else {
+      col = PAL[S.palette]( i/M );
+    }
+    ctx.strokeStyle = 'rgba('+col[0]+','+col[1]+','+col[2]+','+alpha+')';
+    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+    drawn++;
+  }
+
+  if(S.ghost) drawGhost(cx,cy,R,k);
+  lastDrawn = drawn;
+}
+
+// mathematical epicycloid envelope of the times table for the nearest integer k:
+//   E(θ) = (kg·e^{iθ} + e^{i·kg·θ}) / (kg+1)
+function drawGhost(cx,cy,R,k){
+  const kg = Math.max(2, Math.round(k));
+  ctx.globalCompositeOperation='source-over';
+  ctx.strokeStyle='rgba(255,255,255,.34)';
+  ctx.lineWidth=1.4; ctx.setLineDash([5,6]);
+  ctx.beginPath();
+  const N=720, off=-Math.PI/2, scale=R; // E already lies within unit disk
+  for(let n=0;n<=N;n++){
+    const th=off + Math.PI*2*n/N;
+    const ex = (kg*Math.cos(th) + Math.cos(kg*th))/(kg+1);
+    const ey = (kg*Math.sin(th) + Math.sin(kg*th))/(kg+1);
+    const x=cx+scale*ex, y=cy+scale*ey;
+    n? ctx.lineTo(x,y): ctx.moveTo(x,y);
+  }
+  ctx.stroke(); ctx.setLineDash([]);
+}
+
+let lastDrawn=0;
+
+// ---------- animation loop (rAF only while playing) ----------
+// When paused/static we render on demand, so an unchanging pattern costs zero CPU/GPU.
+let raf=0, prev=0;
+function frame(ts){
+  if(!prev) prev=ts;
+  const dt=Math.min((ts-prev)/1000, 0.05); prev=ts;
+  S.k += S.dir*S.speed*dt;
+  const KMAX=60;
+  if(S.k>KMAX){ S.k=KMAX; S.dir=-1; }
+  if(S.k<0){ S.k=0; S.dir=1; }
+  syncK(); scheduleHash();
+  draw();
+  updateReadout();
+  if(S.playing) raf=requestAnimationFrame(frame);
+  else raf=0;
+}
+function startLoop(){ if(!raf){ prev=0; raf=requestAnimationFrame(frame); } }
+function stopLoop(){ if(raf){ cancelAnimationFrame(raf); raf=0; } prev=0; }
+// render a single static frame on demand (no-op cost while playing, loop owns it)
+function render(){ draw(); updateReadout(); }
+function requestRender(){ if(!S.playing) render(); }
+
+// ---------- UI wiring ----------
+const el = id => document.getElementById(id);
+const mRange=el('mRange'), mNum=el('mNum'), kRange=el('kRange'), kNum=el('kNum');
+const spRange=el('spRange'), trRange=el('trRange');
+
+function syncM(){ mRange.value=S.M; mNum.value=S.M; el('mVal').textContent=S.M; }
+function syncK(){
+  const v=S.k;
+  kRange.value=Math.min(60,v);
+  if(document.activeElement!==kNum) kNum.value=v.toFixed(3);
+  el('kVal').textContent=v.toFixed(3);
+}
+function setM(v){ v=Math.max(2,Math.min(3000,Math.round(v||2))); S.M=v; syncM(); scheduleHash(); requestRender(); }
+function setK(v){ v=Math.max(0,Math.min(60,+v||0)); S.k=v; syncK(); scheduleHash(); requestRender(); }
+
+mRange.oninput=()=>setM(+mRange.value);
+mNum.onchange=()=>setM(+mNum.value);
+kRange.oninput=()=>setK(+kRange.value);
+kNum.oninput=()=>setK(+kNum.value);
+spRange.oninput=()=>{ S.speed=+spRange.value; el('spVal').textContent=S.speed.toFixed(2); scheduleHash(); };
+trRange.oninput=()=>{ S.trail=+trRange.value; el('trVal').textContent=S.trail.toFixed(2); scheduleHash(); };
+
+const playBtn=el('playBtn');
+function updatePlayUI(){
+  playBtn.classList.toggle('on',S.playing);
+  playBtn.textContent = S.playing?'❚❚ pause':'▶ play';
+  // the afterimage trail only applies during playback, so dim/disable it when paused
+  trRange.disabled = !S.playing;
+}
+playBtn.onclick=()=>{
+  S.playing=!S.playing;
+  updatePlayUI();
+  scheduleHash();
+  if(S.playing){ startLoop(); }
+  else { stopLoop(); clearField(true); render(); }
+};
+const dirBtn=el('dirBtn');
+dirBtn.onclick=()=>{ S.dir*=-1; dirBtn.textContent = S.dir>0?'→':'←'; };
+
+el('colorMode').onchange=e=>{ S.colorMode=e.target.value; clearField(true); scheduleHash(); requestRender(); };
+el('palette').onchange=e=>{ S.palette=e.target.value; clearField(true); scheduleHash(); requestRender(); };
+el('ghostChk').onchange=e=>{ S.ghost=e.target.checked; scheduleHash(); requestRender(); };
+el('glowChk').onchange=e=>{ S.glow=e.target.checked; clearField(true); scheduleHash(); requestRender(); };
+
+// preset chips
+const PRESETS=[
+  {n:'cardioid',      M:240, k:2,    mode:'hue', pal:'ice'},
+  {n:'nephroid',      M:300, k:3,    mode:'hue', pal:'fire'},
+  {n:'3-cusp',        M:360, k:4,    mode:'hue', pal:'spectrum'},
+  {n:'rose',          M:800, k:7,    mode:'hue', pal:'ice'},
+  {n:'moiré',         M:2000,k:51,   mode:'hue', pal:'fire'},
+  {n:'gcd bloom',     M:600, k:34,   mode:'gcd', pal:'spectrum'},
+  {n:'φ spiral',      M:997, k:2.618,mode:'hue', pal:'ice'}
+];
+const chips=el('chips');
+PRESETS.forEach(p=>{
+  const b=document.createElement('button'); b.className='chip'; b.textContent=p.n;
+  b.onclick=()=>{ setM(p.M); setK(p.k); S.colorMode=p.mode; S.palette=p.pal;
+    el('colorMode').value=p.mode; el('palette').value=p.pal; clearField(true); scheduleHash(); requestRender(); };
+  chips.appendChild(b);
+});
+
+el('randBtn').onclick=()=>{
+  setM(50 + Math.floor(Math.random()*2500));
+  setK(2 + Math.random()*40);
+  const modes=['hue','gcd'], pals=['ice','fire','spectrum'];
+  S.colorMode=modes[Math.random()*2|0]; S.palette=pals[Math.random()*3|0];
+  el('colorMode').value=S.colorMode; el('palette').value=S.palette;
+  clearField(true); scheduleHash(); requestRender();
+};
+
+// PNG export
+el('pngBtn').onclick=()=>{
+  const a=document.createElement('a');
+  a.download=`residua_M${S.M}_k${S.k.toFixed(3)}.png`;
+  a.href=cv.toDataURL('image/png'); a.click();
+};
+
+// WebM recording of the live morph
+let rec=null, chunks=[];
+const recBtn=el('recBtn');
+recBtn.onclick=()=>{
+  if(rec && rec.state==='recording'){ rec.stop(); return; }
+  if(!cv.captureStream || !window.MediaRecorder || !MediaRecorder.isTypeSupported){
+    alert('Recording not supported in this browser — use PNG export.'); return;
+  }
+  // feature-detect the actual container, not just the API. Safari has MediaRecorder
+  // but not WebM; fall back to MP4 where available, else bail cleanly.
+  let mime='', ext='webm';
+  if(MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) mime='video/webm;codecs=vp9';
+  else if(MediaRecorder.isTypeSupported('video/webm')) mime='video/webm';
+  else if(MediaRecorder.isTypeSupported('video/mp4')){ mime='video/mp4'; ext='mp4'; }
+  if(!mime){ alert('Video recording not supported in this browser — use PNG export.'); return; }
+  const container = mime.split(';')[0];
+  chunks=[];
+  try{
+    const stream=cv.captureStream(30);
+    rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:8e6});
+  }catch(err){
+    rec=null;
+    recBtn.classList.remove('on'); recBtn.textContent='● record webm';
+    alert('Could not start recording: '+err.message+' — use PNG export.');
+    return;
+  }
+  rec.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data); };
+  rec.onstop=()=>{
+    const blob=new Blob(chunks,{type:container});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.download=`residua_M${S.M}_k${S.k.toFixed(2)}.${ext}`;
+    a.href=url; a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000); // free the blob after the download starts
+    recBtn.classList.remove('on'); recBtn.textContent='● record webm';
+  };
+  rec.start();
+  recBtn.classList.add('on'); recBtn.textContent='■ stop & save';
+  if(!S.playing) playBtn.click();
+};
+
+el('shareBtn').onclick=async()=>{
+  writeHash();
+  try{ await navigator.clipboard.writeText(location.href);
+    el('shareBtn').textContent='✓ copied'; setTimeout(()=>el('shareBtn').textContent='🔗 copy link',1200);
+  }catch(e){ prompt('Copy this link:', location.href); }
+};
+
+// panel show/hide
+const panel=el('panel'), toggleBtn=el('toggleBtn');
+el('hideBtn').onclick=()=>{ panel.classList.add('hidden'); toggleBtn.classList.add('show'); };
+toggleBtn.onclick=()=>{ panel.classList.remove('hidden'); toggleBtn.classList.remove('show'); };
+
+// click-drag scrub of k across canvas width
+let dragging=false;
+function scrub(clientX){
+  const frac=Math.max(0,Math.min(1, clientX / W));
+  setK(frac*60);
+}
+cv.addEventListener('pointerdown',e=>{ dragging=true; cv.setPointerCapture(e.pointerId); scrub(e.clientX); });
+cv.addEventListener('pointermove',e=>{ if(dragging) scrub(e.clientX); });
+cv.addEventListener('pointerup',()=>dragging=false);
+cv.addEventListener('pointercancel',()=>dragging=false);
+
+// keyboard: space toggles play — but only when focus isn't on an interactive control,
+// so Space still activates a focused button/select/input natively.
+window.addEventListener('keydown',e=>{
+  const t=e.target.tagName;
+  if(e.code==='Space' && !['INPUT','SELECT','BUTTON','TEXTAREA'].includes(t)){
+    e.preventDefault(); playBtn.click();
+  }
+});
+
+// ---------- readout ----------
+function updateReadout(){
+  el('roK').textContent=S.k.toFixed(2);
+  el('roM').textContent=S.M;
+  el('roCusp').textContent=Math.max(0,Math.round(S.k)-1);
+  el('roChords').textContent=lastDrawn;
+  el('roName').textContent=curveName(S.k);
+}
+
+// ---------- URL hash sync ----------
+let hashTimer=0;
+function writeHash(){
+  const p=new URLSearchParams();
+  p.set('M',S.M); p.set('k',S.k.toFixed(4)); p.set('sp',S.speed);
+  p.set('tr',S.trail); p.set('c',S.colorMode); p.set('p',S.palette);
+  p.set('g',S.ghost?1:0); p.set('bl',S.glow?1:0); p.set('pl',S.playing?1:0);
+  history.replaceState(null,'','#'+p.toString());
+}
+function scheduleHash(){ clearTimeout(hashTimer); hashTimer=setTimeout(writeHash,180); }
+
+const REDUCE_MOTION = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+function readHash(){
+  if(!location.hash) return;
+  const p=new URLSearchParams(location.hash.slice(1));
+  if(p.has('M')) S.M=Math.max(2,Math.min(3000,Math.round(+p.get('M')||240)));
+  if(p.has('k')) S.k=Math.max(0,Math.min(60,+p.get('k')||2));
+  if(p.has('sp')) S.speed=Math.max(0.01,Math.min(3,+p.get('sp')||0.3));
+  if(p.has('tr')) S.trail=Math.max(0,Math.min(0.97,+p.get('tr')||0.55));
+  if(p.has('c')) S.colorMode = p.get('c')==='gcd'?'gcd':'hue';
+  if(p.has('p') && PAL[p.get('p')]) S.palette=p.get('p');
+  if(p.has('g')) S.ghost = p.get('g')==='1';
+  if(p.has('bl')) S.glow = p.get('bl')==='1';
+  // honor a shared autoplay flag, but never auto-start for users who asked for reduced motion
+  if(p.has('pl')) S.playing = p.get('pl')==='1' && !REDUCE_MOTION;
+}
+
+// ---------- init ----------
+function applyStateToUI(){
+  syncM(); syncK();
+  spRange.value=S.speed; el('spVal').textContent=S.speed.toFixed(2);
+  trRange.value=S.trail; el('trVal').textContent=S.trail.toFixed(2);
+  el('colorMode').value=S.colorMode; el('palette').value=S.palette;
+  el('ghostChk').checked=S.ghost; el('glowChk').checked=S.glow;
+  dirBtn.textContent=S.dir>0?'→':'←';
+  updatePlayUI();
+}
+
+readHash();
+window.addEventListener('resize',resize);
+resize();
+applyStateToUI();
+render();
+if(S.playing) startLoop();
+</script>
+</body>
+</html>

@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Freeboard — a buoyancy sandbox</title>
+<style>
+  :root{
+    --ink:#eef3f7; --dim:#9fb3c2; --line:#22384c;
+    --panel:#0d1c2b; --panel2:#122636; --accent:#57c7ff; --good:#57e0a0; --bad:#ff6b6b;
+  }
+  body.day{ --ink:#0c2233; --dim:#3d6076; --line:#a7c8dd; --panel:#e7f2fa; --panel2:#d3e6f2; --accent:#0a6fb0; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;font-family:'Segoe UI',system-ui,sans-serif;background:#06121e;color:var(--ink);overflow:hidden}
+  body.day{background:#cfe6f4}
+  #wrap{display:flex;flex-direction:column;height:100vh}
+  header{display:flex;align-items:baseline;gap:14px;padding:8px 14px 6px;flex:0 0 auto}
+  h1{font-size:19px;margin:0;letter-spacing:.5px;font-weight:700}
+  h1 b{color:var(--accent)}
+  .tag{font-size:12px;color:var(--dim)}
+  #stage{position:relative;flex:1 1 auto;min-height:0}
+  canvas{display:block;width:100%;height:100%;cursor:grab;touch-action:none}
+  canvas.grabbing{cursor:grabbing}
+  canvas.slap{cursor:crosshair}
+  #bar{flex:0 0 auto;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;
+       padding:8px 14px;background:var(--panel);border-top:1px solid var(--line)}
+  .grp{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .grp+.grp{border-left:1px solid var(--line);padding-left:14px}
+  .lbl{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;margin-right:2px}
+  .sl{display:flex;flex-direction:column;gap:1px;width:104px}
+  .sl span{font-size:10px;color:var(--dim);display:flex;justify-content:space-between}
+  .sl span b{color:var(--ink);font-weight:600}
+  input[type=range]{-webkit-appearance:none;appearance:none;height:4px;border-radius:3px;background:var(--line);outline:none;margin:2px 0}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid var(--panel)}
+  input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid var(--panel)}
+  button{font-family:inherit;font-size:12px;color:var(--ink);background:var(--panel2);border:1px solid var(--line);
+          border-radius:6px;padding:5px 9px;cursor:pointer;transition:.12s}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button.pri{background:var(--accent);color:#04121d;border-color:var(--accent);font-weight:600}
+  button.pri:hover{filter:brightness(1.1)}
+  button:focus-visible,input[type=range]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  label.chk{font-size:11px;color:var(--dim);display:flex;gap:4px;align-items:center;cursor:pointer}
+  #toast{position:absolute;top:12px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--accent);
+         color:var(--ink);padding:7px 14px;border-radius:8px;font-size:12px;opacity:0;transition:.3s;pointer-events:none}
+  #toast.show{opacity:1}
+  .hint{position:absolute;bottom:10px;left:12px;font-size:11px;color:var(--dim);pointer-events:none;text-shadow:0 1px 3px #000a;transition:opacity .5s;max-width:62%}
+  .hint.gone{opacity:0}
+  body.day .hint{text-shadow:none}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <header>
+    <h1>Free<b>board</b></h1>
+    <span class="tag">drag a hull &middot; slap open water &middot; watch it bob, heel, self-right or sink</span>
+  </header>
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div class="hint" id="hint">Click a hull to select it. Drag to fling or hold it under. Slap empty water to make waves.</div>
+    <div id="toast"></div>
+  </div>
+  <div id="bar">
+    <div class="grp">
+      <span class="lbl">spawn</span>
+      <button data-spawn="raft">Wide raft</button>
+      <button data-spawn="tower">Tall tower</button>
+      <button data-spawn="ballast">Dense ballast</button>
+      <button data-spawn="cork">Cork</button>
+    </div>
+    <div class="grp">
+      <span class="lbl">scene</span>
+      <button data-preset="regatta">Regatta</button>
+      <button data-preset="rogue">Rogue wave</button>
+      <button data-preset="barge">Overloaded barge</button>
+      <button id="reset">Reset</button>
+    </div>
+    <div class="grp" id="sliders"></div>
+    <div class="grp">
+      <button id="pour">Pour ballast &#9660;</button>
+      <label class="chk"><input type="checkbox" id="meter" checked>Stability meter</label>
+      <label class="chk"><input type="checkbox" id="theme">Day</label>
+      <button id="share" class="pri">Share ↗</button>
+    </div>
+  </div>
+</div>
+<script>
+"use strict";
+/* ============================================================================
+   Freeboard — a two-way buoyancy sandbox.  Zero dependencies.
+   1) shallow-water height field  2) rigid box bodies + submerged sampling
+   3) two-way water<->body coupling + foam  4) input & params  5) hash + loop
+============================================================================ */
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const toast = document.getElementById('toast');
+let W = 960, H = 520, DPR = 1, Y0 = 210;          // Y0 = rest water line (canvas y)
+const N = 220;                                     // water columns
+const h = new Float32Array(N), vw = new Float32Array(N); // height + velocity
+let dx = W / (N - 1);
+let bodies = [], particles = [], selected = null;
+
+const P = { g:900, rhoF:1.0, rhoB:0.5, stiff:0.24, damp:0.020, wind:0 };
+const DEFAULTS = { ...P };                          // physics baseline for Reset
+
+/* ---- theme palettes (canvas colors) ------------------------------------- */
+const THEME = {
+  dusk:{ bgTop:'#0a1826', bgBot:'#0f2233', wTop:'rgba(70,150,195,.5)', wBot:'rgba(8,34,58,.95)',
+         surf:'#7fd0ff', foam:'#eaf6ff', grid:'rgba(120,180,220,.08)' },
+  day:{  bgTop:'#c3e2f4', bgBot:'#8dc0df', wTop:'rgba(80,170,210,.5)', wBot:'rgba(18,72,112,.9)',
+         surf:'#eafcff', foam:'#ffffff', grid:'rgba(20,60,90,.06)' }
+};
+let theme = 'dusk', COL = THEME.dusk;
+
+/* ---- geometry helpers --------------------------------------------------- */
+const clamp = (x,a,b)=> x<a?a : x>b?b : x;
+function surfaceY(x){                               // interpolated water surface
+  const fx = clamp(x/dx, 0, N-1.001), i = fx|0, f = fx-i;
+  return Y0 - (h[i]*(1-f) + h[i+1]*f);
+}
+function colInject(x, dv){                          // push a water column (wake/splash)
+  const fx = clamp(x/dx, 0, N-1), i = Math.round(fx);
+  vw[i] += dv;
+}
+
+/* ---- rigid box body ----------------------------------------------------- */
+function makeBody(x, y, wd, hh, dens){
+  return { x, y, a:0, vx:0, vy:0, w:0, wdt:wd, hgt:hh, dens, ball:0,
+           subA:0, bx:x, by:y, bm:0 };        // w = angular velocity; bx,by = centre of buoyancy; bm = BM
+}
+function bodyDerived(b){
+  const area = b.wdt*b.hgt, m0 = b.dens*area;
+  const deckY = -b.hgt*0.85, mb = b.ball;      // ballast sits high (on deck) → top-heavy
+  const M = m0 + mb, comY = mb*deckY/M;        // COM offset from geometric centre (local y)
+  const I = m0*(b.wdt*b.wdt + b.hgt*b.hgt)/12 + m0*comY*comY + mb*(deckY-comY)*(deckY-comY);
+  return { area, M, comY, I:Math.max(I,1) };
+}
+
+/* per-frame fixed sub-steps keep the two-way coupling stable */
+const SUB = 4, dt = (1/60)/SUB;
+function stepWater(){
+  for(let i=0;i<N;i++){
+    const l = h[i>0?i-1:0], r = h[i<N-1?i+1:N-1];  // reflective walls
+    vw[i] += (l + r - 2*h[i]) * P.stiff;
+    vw[i] *= (1 - P.damp);
+  }
+  for(let i=0;i<N;i++) h[i] += vw[i];
+}
+
+function stepBody(b){
+  const d = bodyDerived(b);
+  const ca = Math.cos(b.a), sa = Math.sin(b.a);
+  const hw = b.wdt/2, hh = b.hgt/2, nx = 7, ny = 4, dA = d.area/(nx*ny);
+  let Fx = 0, Fy = 0, T = 0;                    // net force + torque about COM
+  let subA = 0, cbx = 0, cby = 0;               // submerged area + centroid (centre of buoyancy)
+  const cd = 0.9;                               // quadratic drag coeff
+  for(let ix=0; ix<nx; ix++){
+    const lx = -hw + (ix+0.5)*b.wdt/nx;
+    for(let iy=0; iy<ny; iy++){
+      const ly = -hh + (iy+0.5)*b.hgt/ny;
+      const qx = lx, qy = ly - d.comY;          // sample relative to COM
+      const rx = qx*ca - qy*sa, ry = qx*sa + qy*ca;   // rotate into world
+      const px = b.x + rx, py = b.y + ry;
+      const depth = py - surfaceY(px);
+      const sub = clamp(depth/6, 0, 1);         // smooth waterline crossing
+      // point velocity  v = vcom + ω×r
+      const vpx = b.vx - b.w*ry, vpy = b.vy + b.w*rx;
+      if(sub > 0){                              // --- submerged: buoyancy + drag + wake
+        const buoy = P.rhoF * P.g * dA * sub;   // Archimedes, up = -y
+        Fy -= buoy; T += rx*(-buoy);
+        subA += dA*sub; cbx += px*dA*sub; cby += py*dA*sub;
+        const sp = Math.hypot(vpx,vpy), fdx = -cd*sp*vpx*dA*sub*0.0016, fdy = -cd*sp*vpy*dA*sub*0.0016;
+        Fx += fdx; Fy += fdy; T += rx*fdy - ry*fdx;
+        colInject(px, clamp(vpy*0.00012, -0.5, 0.5));   // two-way: hull drags water → wake
+        if(depth < 5 && sp > 120 && Math.random()<0.10) spawnFoam(px, surfaceY(px), vpx, vpy);
+      } else {                                  // --- above water: wind heels the freeboard
+        const fw = P.wind * dA * 0.11;
+        Fx += fw; T += -ry*fw;
+      }
+    }
+  }
+  Fy += d.M * P.g;                              // weight at COM
+  // integrate (semi-implicit)
+  b.vx += Fx/d.M*dt; b.vy += Fy/d.M*dt; b.w += T/d.I*dt;
+  b.vx *= (1-0.02*dt); b.w *= (1-0.9*dt);       // mild air/rotational damping
+  b.x += b.vx*dt; b.y += b.vy*dt; b.a += b.w*dt;
+  // tank walls & floor
+  const m = Math.max(b.wdt,b.hgt)/2;
+  if(b.x < m){ b.x = m; b.vx = Math.abs(b.vx)*0.4; }
+  if(b.x > W-m){ b.x = W-m; b.vx = -Math.abs(b.vx)*0.4; }
+  if(b.y > H+m){ b.y = H+m; b.vy = -Math.abs(b.vy)*0.3; }
+  if(subA>0){ b.subA=subA; b.bx=cbx/subA; b.by=cby/subA; b.bm=(b.wdt*b.wdt*b.wdt/12)/subA; }
+  else b.subA = 0;
+}
+
+/* ---- foam / spray particles --------------------------------------------- */
+function spawnFoam(x,y,vx,vy){
+  if(particles.length>260) return;
+  particles.push({ x, y, vx:vx*0.15+(Math.random()-.5)*40, vy:-Math.abs(vy)*0.2-Math.random()*90,
+                   life:1, r:1+Math.random()*2.4 });
+}
+function stepParticles(){
+  for(let i=particles.length-1;i>=0;i--){
+    const p = particles[i];
+    p.vy += 620*(1/60); p.x += p.vx*(1/60); p.y += p.vy*(1/60); p.life -= 0.02;
+    if(p.life<=0 || p.y>H) particles.splice(i,1);
+  }
+}
+
+/* ---- on-canvas hint (state-driven, dismisses after first interaction) ---- */
+const hintEl = document.getElementById('hint');
+let interacted = false;
+function updateHint(){
+  if(bodies.length===0){
+    hintEl.textContent = 'Spawn a hull (Wide raft / Cork / …) to begin, then slap the water to make waves.';
+    hintEl.classList.remove('gone');
+  } else {
+    hintEl.textContent = 'Click a hull to select it. Drag to fling or hold it under. Slap open water to make waves.';
+    hintEl.classList.toggle('gone', interacted);
+  }
+}
+
+/* ---- input -------------------------------------------------------------- */
+let drag = null;   // {b, lx, ly} grab point in body-local coords
+function bodyAt(x,y){
+  for(let i=bodies.length-1;i>=0;i--){
+    const b = bodies[i], ca=Math.cos(-b.a), sa=Math.sin(-b.a), dxp=x-b.x, dyp=y-b.y;
+    const relx = dxp*ca - dyp*sa, rely = dxp*sa + dyp*ca;   // grab point relative to COM
+    const qy = rely + bodyDerived(b).comY;                  // geo-local y for hit test
+    if(Math.abs(relx)<=b.wdt/2+6 && Math.abs(qy)<=b.hgt/2+6) return {b,lx:relx,ly:rely};
+  }
+  return null;
+}
+function evPos(e){
+  const r = cv.getBoundingClientRect();
+  return [ (e.clientX-r.left)*(W/r.width), (e.clientY-r.top)*(H/r.height) ];
+}
+cv.addEventListener('pointerdown', e=>{
+  const [x,y] = evPos(e); const hit = bodyAt(x,y);
+  cv.setPointerCapture(e.pointerId);
+  interacted = true; updateHint();                  // fade the hint once the user acts
+  if(hit){ cv.classList.add('grabbing'); selected = hit.b; drag = {b:hit.b, lx:hit.lx, ly:hit.ly, mx:x, my:y}; }
+  else if(y > surfaceY(x)-30){                      // slap open water → travelling wave
+    for(let k=-6;k<=6;k++){ const i=clamp(Math.round(x/dx)+k,0,N-1); vw[i] += 3.2*Math.exp(-k*k/18); }
+    for(let s=0;s<8;s++) spawnFoam(x+(Math.random()-.5)*40, surfaceY(x), (Math.random()-.5)*120, -160);
+  }
+});
+cv.addEventListener('pointermove', e=>{
+  const [x,y]=evPos(e);
+  if(drag){ drag.mx=x; drag.my=y; return; }
+  cv.classList.toggle('slap', !bodyAt(x,y));        // crosshair over open water, grab over a hull
+});
+function endDrag(e){ drag=null; cv.classList.remove('grabbing'); if(e) cv.releasePointerCapture(e.pointerId); }
+cv.addEventListener('pointerup', endDrag);
+cv.addEventListener('pointercancel', endDrag);
+
+function applyDrag(){                                // cursor spring at the grabbed point
+  if(!drag) return; const b = drag.b, d = bodyDerived(b);
+  const ca=Math.cos(b.a), sa=Math.sin(b.a), qx=drag.lx, qy=drag.ly;   // rel-to-COM
+  const rx=qx*ca-qy*sa, ry=qx*sa+qy*ca, px=b.x+rx, py=b.y+ry;
+  const vpx=b.vx-b.w*ry, vpy=b.vy+b.w*rx;
+  const ks=340, kd=22;
+  const Fx=(drag.mx-px)*ks - vpx*kd, Fy=(drag.my-py)*ks - vpy*kd;
+  b.vx += Fx/d.M*dt; b.vy += Fy/d.M*dt; b.w += (rx*Fy-ry*Fx)/d.I*dt;
+}
+
+/* ---- render ------------------------------------------------------------- */
+function bodyColor(dens){                            // wood (light) → steel (dark) by density
+  const c = clamp(dens,0.2,1.5), hue = 40 + (c-0.2)/1.3*170, l = 62 - (c-0.2)/1.3*34;
+  return `hsl(${hue},42%,${l}%)`;
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const g = ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,COL.bgTop); g.addColorStop(1,COL.bgBot);
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  // faint depth grid
+  ctx.strokeStyle=COL.grid; ctx.lineWidth=1;
+  for(let y=Y0; y<H; y+=42){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+  // bodies below the surface first? draw water over them for translucency
+  bodies.forEach(drawBody);
+  // water body (translucent, depth gradient)
+  const wg = ctx.createLinearGradient(0,Y0-40,0,H); wg.addColorStop(0,COL.wTop); wg.addColorStop(1,COL.wBot);
+  ctx.beginPath(); ctx.moveTo(0,H);
+  for(let i=0;i<N;i++) ctx.lineTo(i*dx, Y0-h[i]);
+  ctx.lineTo(W,H); ctx.closePath(); ctx.fillStyle=wg; ctx.fill();
+  // bright surface line
+  ctx.beginPath(); for(let i=0;i<N;i++){ const x=i*dx,y=Y0-h[i]; i?ctx.lineTo(x,y):ctx.moveTo(x,y);}
+  ctx.strokeStyle=COL.surf; ctx.lineWidth=1.6; ctx.globalAlpha=.7; ctx.stroke(); ctx.globalAlpha=1;
+  // foam
+  particles.forEach(p=>{ ctx.globalAlpha=Math.max(0,p.life); ctx.fillStyle=COL.foam;
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,7); ctx.fill(); }); ctx.globalAlpha=1;
+  if(selected && document.getElementById('meter').checked) drawMeter(selected);
+}
+function drawBody(b){
+  const d = bodyDerived(b);
+  ctx.save(); ctx.translate(b.x,b.y); ctx.rotate(b.a); ctx.translate(0,-d.comY); // to geo centre
+  const hw=b.wdt/2, hh=b.hgt/2, col=bodyColor(b.dens);
+  ctx.fillStyle=col; ctx.strokeStyle='rgba(0,0,0,.45)'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.rect(-hw,-hh,b.wdt,b.hgt); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='rgba(255,255,255,.16)'; ctx.fillRect(-hw,-hh,b.wdt,Math.min(6,hh*0.4)); // deck sheen
+  if(b.ball>0){ ctx.fillStyle='rgba(30,10,10,.55)'; ctx.fillRect(-hw,-hh,b.wdt,Math.min(hh*0.5, b.ball/ (b.dens*b.wdt) )); }
+  if(b===selected){ ctx.strokeStyle=COL.surf; ctx.lineWidth=2; ctx.globalAlpha=.9;
+    ctx.strokeRect(-hw-2,-hh-2,b.wdt+4,b.hgt+4); ctx.globalAlpha=1; }
+  ctx.restore();
+}
+function norm(a){ a%=2*Math.PI; if(a>Math.PI)a-=2*Math.PI; if(a<-Math.PI)a+=2*Math.PI; return a; }
+function drawMeter(b){
+  const heel = Math.abs(norm(b.a))*180/Math.PI;
+  // GM markers along the body's up-axis: G (centre of mass), B (buoyancy), M (metacentre)
+  const d = bodyDerived(b), ca=Math.cos(b.a), sa=Math.sin(b.a);
+  const upx=sa, upy=-ca;                              // body "up" in world
+  if(b.subA>0){
+    const Mx=b.bx+upx*b.bm, My=b.by+upy*b.bm;         // metacentre = B + BM up
+    // draw B, G, M
+    const dot=(x,y,c,r)=>{ctx.fillStyle=c;ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.fill();};
+    ctx.strokeStyle='rgba(255,255,255,.35)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(b.bx,b.by);ctx.lineTo(Mx,My);ctx.stroke();
+    dot(b.bx,b.by,'#57c7ff',3.5);                     // B
+    dot(b.x,b.y,'#ffd166',3.5);                       // G (COM)
+    dot(Mx,My,'#57e0a0',3.5);                         // M (metacentre)
+    ctx.font='10px system-ui,sans-serif'; ctx.fillStyle='#cfe';
+    ctx.fillText('M',Mx+5,My); ctx.fillText('G',b.x+5,b.y+3); ctx.fillText('B',b.bx+5,b.by+3);
+  }
+  // heel readout + capsize bar (top-right of hull)
+  const stable = Math.abs(norm(b.a)) < Math.PI/2;
+  ctx.font='bold 12px system-ui,sans-serif';
+  ctx.fillStyle = stable ? '#57e0a0' : '#ff6b6b';
+  const label = `heel ${heel.toFixed(0)}° · ${stable?'stable':'CAPSIZED'}`;
+  const tx = clamp(b.x-40, 6, W-140), ty = clamp(b.y-b.hgt/2-42, 16, H-30);
+  ctx.fillText(label, tx, ty);
+  // bar
+  ctx.fillStyle='rgba(255,255,255,.15)'; ctx.fillRect(tx,ty+6,120,6);
+  const frac = clamp(heel/90,0,1);
+  ctx.fillStyle = frac<0.55?'#57e0a0':frac<0.85?'#ffd166':'#ff6b6b';
+  ctx.fillRect(tx,ty+6,120*frac,6);
+}
+
+/* ---- main loop ---------------------------------------------------------- */
+function frame(){
+  for(let s=0;s<SUB;s++){
+    stepWater();
+    applyDrag();
+    for(const b of bodies) stepBody(b);
+  }
+  // foam at wave crests
+  for(let i=4;i<N-4;i+=2){ if(vw[i]>0.9 && Math.random()<0.02) spawnFoam(i*dx, Y0-h[i], (Math.random()-.5)*60, -80); }
+  stepParticles();
+  draw();
+  requestAnimationFrame(frame);
+}
+
+/* ---- spawn palette & scenes -------------------------------------------- */
+const SPECS = { raft:[130,26], tower:[34,110], ballast:[70,70], cork:[46,46] };
+const DENS  = { raft:0.45, tower:0.5, ballast:1.35, cork:0.25 };
+function spawn(type, x, y, dens){
+  const s = SPECS[type]; const dv = dens ?? P.rhoB;
+  const b = makeBody(x||W/2, y||Y0-40, s[0], s[1], dv);
+  bodies.push(b); selected = b;
+  P.rhoB = dv; syncSliders();                        // density slider tracks the new hull
+  updateHint(); return b;
+}
+document.querySelectorAll('[data-spawn]').forEach(btn=>{
+  btn.onclick=()=>{ const ty=btn.dataset.spawn; spawn(ty, W/2+(Math.random()-.5)*120, Y0-60, DENS[ty]); syncHash(); };
+});
+document.getElementById('reset').onclick=()=>{
+  bodies=[]; particles=[]; selected=null; h.fill(0); vw.fill(0);
+  Object.assign(P, DEFAULTS); syncSliders();          // physics back to baseline
+  updateHint(); syncHash();
+};
+document.getElementById('pour').onclick=()=>{
+  if(!selected){ flash('Select a hull first'); return; }
+  selected.ball += selected.dens*selected.wdt*selected.hgt*0.35;   // add topside mass → raise COM
+  flash('Ballast poured on deck — watch the metacentre'); syncHash();
+};
+const PRESETS = {
+  regatta(){ bodies=[]; particles=[];
+    spawn('raft', W*0.25, Y0-40, 0.4); spawn('cork', W*0.45, Y0-40, 0.25);
+    spawn('tower', W*0.62, Y0-40, 0.5); spawn('raft', W*0.8, Y0-40, 0.55);
+    P.wind=0.6; selected=bodies[0]; },
+  rogue(){ bodies=[]; particles=[]; spawn('raft', W*0.7, Y0-40, 0.5);
+    for(let k=-10;k<=10;k++){ const i=clamp(Math.round(N*0.12)+k,0,N-1); vw[i]+=6*Math.exp(-k*k/40); }
+    P.wind=0; },
+  barge(){ bodies=[]; particles=[]; const b=spawn('raft', W/2, Y0-30, 0.42);
+    b.wdt=180; b.hgt=34; b.ball=b.dens*b.wdt*b.hgt*1.6; P.wind=0.3; selected=b; }
+};
+document.querySelectorAll('[data-preset]').forEach(btn=>{
+  btn.onclick=()=>{ PRESETS[btn.dataset.preset](); syncSliders(); syncHash(); };
+});
+
+/* ---- sliders ------------------------------------------------------------ */
+const SLDEF = [
+  ['g','Gravity',200,1600,10,v=>v.toFixed(0)],
+  ['rhoF','Fluid density',0.5,1.6,0.01,v=>v.toFixed(2)],
+  ['rhoB','Hull density',0.15,1.6,0.01,v=>v.toFixed(2)],
+  ['stiff','Wave stiffness',0.05,0.4,0.005,v=>v.toFixed(2)],
+  ['damp','Wave damping',0,0.06,0.001,v=>v.toFixed(3)],
+  ['wind','Wind',-1.2,1.2,0.05,v=>v.toFixed(2)]
+];
+const slBox = document.getElementById('sliders');
+slBox.innerHTML = '<span class="lbl">physics</span>';
+const slEls = {};
+for(const [key,name,mn,mx,st,fmt] of SLDEF){
+  const wrap=document.createElement('label'); wrap.className='sl';
+  wrap.innerHTML=`<span>${name}<b></b></span><input type="range" min="${mn}" max="${mx}" step="${st}">`;
+  const inp=wrap.querySelector('input'), out=wrap.querySelector('b');
+  inp.value=P[key]; out.textContent=fmt(P[key]);
+  inp.oninput=()=>{ P[key]=parseFloat(inp.value); out.textContent=fmt(P[key]);
+    if(key==='rhoB' && selected) selected.dens=P.rhoB;   // re-density the selected hull live
+    syncHash(); };
+  slBox.appendChild(wrap); slEls[key]={inp,out,fmt};
+}
+function syncSliders(){ for(const k in slEls){ slEls[k].inp.value=P[k]; slEls[k].out.textContent=slEls[k].fmt(P[k]); } }
+
+/* ---- theme & share ------------------------------------------------------ */
+document.getElementById('theme').onchange=e=>{
+  theme = e.target.checked?'day':'dusk'; COL=THEME[theme];
+  document.body.classList.toggle('day', e.target.checked); syncHash();
+};
+function flash(msg){ toast.textContent=msg; toast.classList.add('show'); clearTimeout(flash.t);
+  flash.t=setTimeout(()=>toast.classList.remove('show'),1600); }
+document.getElementById('share').onclick=()=>{
+  syncHash(); const url=location.href;
+  (navigator.clipboard?navigator.clipboard.writeText(url):Promise.reject())
+    .then(()=>flash('Scene link copied to clipboard'))
+    .catch(()=>flash('Scene saved to URL — copy the address bar'));
+};
+
+/* ---- URL hash serialize / restore -------------------------------------- */
+function syncHash(){
+  // positions are size-independent: x as a fraction of width, y as an offset from the waterline
+  const o = { p:[P.g,P.rhoF,P.rhoB,P.stiff,P.damp,P.wind], th:theme,
+    b: bodies.map(b=>[+(b.x/W).toFixed(4),Math.round(b.y-Y0),b.wdt,b.hgt,+b.dens.toFixed(2),
+                      +b.a.toFixed(2),Math.round(b.ball)]) };
+  history.replaceState(null,'', '#'+encodeURIComponent(JSON.stringify(o)));
+}
+function restore(){
+  try{
+    const raw = decodeURIComponent(location.hash.slice(1)); if(!raw) return false;
+    const o = JSON.parse(raw); if(!o || !Array.isArray(o.p)) return false;
+    // validate + clamp each physics param against its slider bounds; fall back to the default
+    SLDEF.forEach(([k,,mn,mx],i)=>{
+      const v = o.p[i];
+      P[k] = Number.isFinite(v) ? clamp(v, mn, mx) : DEFAULTS[k];
+    });
+    if(o.th==='day'){ theme='day'; COL=THEME.day; document.body.classList.add('day');
+      document.getElementById('theme').checked=true; }
+    bodies = (Array.isArray(o.b)?o.b:[]).map(a=>{
+      if(!Array.isArray(a)) return null;
+      const x  = Number.isFinite(a[0]) ? clamp(a[0],0,1)*W : W/2;
+      const y  = Number.isFinite(a[1]) ? Y0 + a[1] : Y0-40;
+      const wd = Number.isFinite(a[2]) && a[2]>0 ? a[2] : 80;
+      const hg = Number.isFinite(a[3]) && a[3]>0 ? a[3] : 40;
+      const dn = Number.isFinite(a[4]) ? clamp(a[4],0.05,2) : 0.5;
+      const b  = makeBody(x,y,wd,hg,dn);
+      b.a    = Number.isFinite(a[5]) ? a[5] : 0;
+      b.ball = Number.isFinite(a[6]) ? Math.max(0,a[6]) : 0;
+      return b;
+    }).filter(Boolean);
+    selected = bodies[0]||null; return true;
+  }catch(e){ return false; }
+}
+
+/* ---- boot --------------------------------------------------------------- */
+function resize(){
+  const s = document.getElementById('stage'); DPR = window.devicePixelRatio||1;
+  W = s.clientWidth; H = s.clientHeight; dx = W/(N-1); Y0 = H*0.4;
+  cv.width = W*DPR; cv.height = H*DPR; ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize', resize);
+resize();
+if(!restore()){ PRESETS.regatta(); syncSliders(); syncHash(); } else syncSliders();
+updateHint();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

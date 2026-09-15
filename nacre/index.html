@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Nacre — living long-exposures of strange attractors</title>
+<style>
+  :root{ --ink:#e9e6ff; --dim:#8f8ab8; --chip:rgba(20,18,40,.62); --line:rgba(150,140,220,.18); }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:#05050e; color:var(--ink);
+    font:13px/1.4 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif; overflow:hidden; -webkit-user-select:none; user-select:none; }
+  #c{ position:fixed; inset:0; width:100%; height:100%; display:block; cursor:grab; touch-action:none; }
+  #c.drag{ cursor:grabbing; }
+  .panel{ position:fixed; z-index:5; display:flex; flex-wrap:wrap; gap:6px; align-items:center;
+    padding:8px 10px; background:var(--chip); border:1px solid var(--line); border-radius:14px;
+    backdrop-filter:blur(9px); -webkit-backdrop-filter:blur(9px); box-shadow:0 8px 30px rgba(0,0,0,.45); }
+  #top{ top:12px; left:12px; right:12px; max-width:940px; margin:0 auto; }
+  #bottom{ bottom:12px; left:12px; right:12px; max-width:940px; margin:0 auto; }
+  .brand{ font-weight:700; letter-spacing:.14em; text-transform:uppercase; font-size:12px;
+    background:linear-gradient(90deg,#8ad,#c9f,#fca,#fff); -webkit-background-clip:text; background-clip:text; color:transparent; margin-right:2px; }
+  .sep{ width:1px; align-self:stretch; background:var(--line); margin:0 2px; }
+  button{ font:inherit; color:var(--ink); background:rgba(255,255,255,.05); border:1px solid var(--line);
+    padding:5px 9px; border-radius:9px; cursor:pointer; transition:.15s; white-space:nowrap; }
+  button:hover{ background:rgba(160,150,240,.18); border-color:rgba(180,170,255,.4); }
+  button.on{ background:rgba(255,150,90,.22); border-color:rgba(255,160,100,.6); color:#ffdcc0; }
+  .chip{ padding:5px 10px; font-size:12px; }
+  .chip .sw{ display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; vertical-align:baseline; box-shadow:0 0 6px currentColor; }
+  label.sld{ display:inline-flex; align-items:center; gap:6px; color:var(--dim); font-size:11px; }
+  input[type=range]{ width:78px; accent-color:#ff8a4c; }
+  .val{ color:var(--dim); font-size:11px; font-variant-numeric:tabular-nums; min-width:0; }
+  .gallery{ display:flex; gap:6px; overflow-x:auto; flex:1 1 100%; padding-bottom:2px; scrollbar-width:thin; }
+  .hint{ position:fixed; left:0; right:0; bottom:70px; text-align:center; color:var(--dim); font-size:11px;
+    pointer-events:none; z-index:4; text-shadow:0 1px 6px #000; opacity:.9; transition:opacity .8s ease; }
+  .hint.gone{ opacity:0; }
+  @media (max-width:640px){ .hint{ display:none; } input[type=range]{ width:56px; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="top" class="panel">
+  <span class="brand">Nacre</span>
+  <span class="val" id="info">Clifford</span>
+  <span class="sep"></span>
+  <div class="gallery" id="gallery"></div>
+</div>
+
+<div class="hint" id="hint">drag to steer &nbsp;·&nbsp; scroll / pinch to zoom &nbsp;·&nbsp; shift-drag to pan &nbsp;·&nbsp; ←→↑↓ nudge c/d &nbsp;·&nbsp; t/p/b type·palette·breathe &nbsp;·&nbsp; space randomize</div>
+
+<div id="bottom" class="panel">
+  <button id="type">Attractor</button>
+  <button id="pal"><span class="sw" id="palsw"></span>Palette</button>
+  <button id="breathe">Breathe</button>
+  <button id="screen">Screensaver</button>
+  <button id="rand">Randomize</button>
+  <span class="sep"></span>
+  <label class="sld">Sheen<input type="range" id="sheen" min="0" max="1" step="0.01" value="0.55"><span class="val" id="sheenv">0.55</span></label>
+  <label class="sld">Bloom<input type="range" id="bloom" min="0" max="1" step="0.01" value="0.5"><span class="val" id="bloomv">0.50</span></label>
+  <span class="sep"></span>
+  <button id="save">Save PNG</button>
+  <button id="save2">Save 2×</button>
+  <button id="rec">● Record</button>
+  <button id="share">Copy link</button>
+</div>
+
+<script>
+"use strict";
+const $=s=>document.querySelector(s);
+const cvs=$("#c"), ctx=cvs.getContext("2d",{alpha:false});
+const TAU=Math.PI*2, out=[0,0];
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+
+/* ---- attractor map families (write into shared `out`, no per-iter allocation) ---- */
+const MAPS=[
+  {n:"Clifford", f:(x,y,a,b,c,d)=>{ out[0]=Math.sin(a*y)+c*Math.cos(a*x); out[1]=Math.sin(b*x)+d*Math.cos(b*y); }},
+  {n:"De Jong",  f:(x,y,a,b,c,d)=>{ out[0]=Math.sin(a*y)-Math.cos(b*x); out[1]=Math.sin(c*x)-Math.cos(d*y); }},
+  {n:"Svensson", f:(x,y,a,b,c,d)=>{ out[0]=d*Math.sin(a*x)-Math.sin(b*y); out[1]=c*Math.cos(a*x)+Math.cos(b*y); }},
+];
+
+/* ---- palettes: luminance ramps that the iridescent hue is layered over ---- */
+const PALS=[
+  {n:"Nacre",   sw:"#e6a", s:[[6,6,20],[46,22,86],[150,44,144],[244,146,96],[255,244,224]]},
+  {n:"Abalone", sw:"#4ec", s:[[4,10,16],[20,72,92],[42,164,152],[124,224,184],[240,255,232]]},
+  {n:"Aurora",  sw:"#7e6", s:[[6,8,18],[22,64,64],[64,184,124],[184,244,124],[250,250,214]]},
+  {n:"Ember",   sw:"#f74", s:[[10,4,12],[84,10,42],[204,44,44],[255,152,44],[255,246,206]]},
+  {n:"Pearl",   sw:"#aef", s:[[8,10,24],[32,42,94],[84,94,164],[172,182,224],[250,250,255]]},
+];
+function pal(s,t){ t=clamp(t,0,1); const n=s.length-1,f=t*n; let i=f|0; if(i>=n)i=n-1; const u=f-i,A=s[i],B=s[i+1];
+  return [A[0]+(B[0]-A[0])*u, A[1]+(B[1]-A[1])*u, A[2]+(B[2]-A[2])*u]; }
+function hsl(h,s,l){ const q=l<.5?l*(1+s):l+s-l*s, p=2*l-q;
+  const g=x=>{ x=(x+1)%1; return x<1/6?p+(q-p)*6*x : x<.5?q : x<2/3?p+(q-p)*(2/3-x)*6 : p; };
+  return [g(h+1/3),g(h),g(h-1/3)]; }
+
+/* ---- curated seed gallery: hand-picked, guaranteed-gorgeous presets ---- */
+/* [type,a,b,c,d,palette,zoom,cx,cy,name] */
+const PRESETS=[
+  [0,-1.4,1.6,1.0,0.7,0,1.0,0,0,"Opal"],
+  [0,-1.7,1.8,-1.9,-0.4,1,1.0,0,0,"Tidepool"],
+  [0,1.5,-1.8,1.6,0.9,3,1.0,0,0,"Firemoth"],
+  [0,-1.8,-2.0,-0.5,-0.9,4,1.0,0,0,"Frost"],
+  [1,1.4,-2.3,2.4,-2.1,2,0.95,0,0,"Fernlight"],
+  [1,2.01,-2.53,1.61,-0.33,0,0.9,0,0,"Cathedral"],
+  [1,-2.0,-2.0,-1.2,2.0,4,0.95,0,0,"Nightbloom"],
+  [2,1.4,1.56,1.4,-6.56,3,0.28,0,0,"Svensson Classic"],
+  [2,-1.78,1.29,-1.42,-1.29,1,0.9,0,0,"Jellyfish"],
+];
+
+/* ---- state (fully captured in URL hash) ---- */
+const S={ t:0, a:-1.4, b:1.6, c:1.0, d:0.7, p:0, zoom:1, cx:0, cy:0 };
+let SHEEN=0.55, BLOOM=0.5, POINTS=90000;
+let breathe=false, screensaver=false, dtarget=null;
+let cA=S.a,cB=S.b,cC=S.c,cD=S.d;                 // breathe LFO centers
+let G, img, data, last=performance.now(), lastActive=performance.now(), lastLabel=0;
+let recorder=null, chunks=[];
+let hashT=0;
+const bbuf={};
+
+/* ---- grid + rendering (shared by live view and hi-res export) ---- */
+function makeGrid(w,h){ return {w,h,d:new Float32Array(w*h),hc:new Float32Array(w*h),hs:new Float32Array(w*h),px:.1,py:.1}; }
+function clearG(){ G.d.fill(0); G.hc.fill(0); G.hs.fill(0); G.px=.1; G.py=.1; }
+function scaleFor(w,h){ const s=Math.min(w,h)*0.2*S.zoom; return {s,ox:w/2-S.cx*s,oy:h/2-S.cy*s}; }
+
+function accum(g,n){                               // iterate map, subpixel bilinear splat into density + hue vectors
+  const f=MAPS[S.t].f,a=S.a,b=S.b,c=S.c,d=S.d,{s,ox,oy}=scaleFor(g.w,g.h);
+  const W=g.w,H=g.h,D=g.d,HC=g.hc,HS=g.hs; let x=g.px,y=g.py;
+  for(let k=0;k<n;k++){
+    f(x,y,a,b,c,d); let nx=out[0],ny=out[1];
+    if(!isFinite(nx)||!isFinite(ny)||Math.abs(nx)>1e4||Math.abs(ny)>1e4){ nx=Math.random()*.2-.1; ny=Math.random()*.2-.1; }
+    const dx=nx-x,dy=ny-y,ang=Math.atan2(dy,dx),ca=Math.cos(ang),sa=Math.sin(ang);
+    const gx=nx*s+ox,gy=ny*s+oy;
+    if(gx>=0&&gx<W-1&&gy>=0&&gy<H-1){
+      const xi=gx|0,yi=gy|0,fx=gx-xi,fy=gy-yi,i0=yi*W+xi;
+      let w0=(1-fx)*(1-fy); D[i0]+=w0; HC[i0]+=ca*w0; HS[i0]+=sa*w0;
+      let w1=fx*(1-fy);     D[i0+1]+=w1; HC[i0+1]+=ca*w1; HS[i0+1]+=sa*w1;
+      let w2=(1-fx)*fy;     D[i0+W]+=w2; HC[i0+W]+=ca*w2; HS[i0+W]+=sa*w2;
+      let w3=fx*fy;         D[i0+W+1]+=w3; HC[i0+W+1]+=ca*w3; HS[i0+W+1]+=sa*w3;
+    }
+    x=nx; y=ny;
+  }
+  g.px=x; g.py=y;
+}
+
+function tonemap(g,px){                             // log-density -> luminance, iridescent hue over palette base
+  const D=g.d,HC=g.hc,HS=g.hs,N=D.length,W=g.w,st=PALS[S.p].s;
+  let max=0; for(let i=0;i<N;i++) if(D[i]>max) max=D[i];
+  const lm=Math.log(1+max)||1, sheen=SHEEN;
+  for(let i=0,j=0;i<N;i++,j+=4){
+    const dv=D[i];
+    if(dv<=0){ px[j]=5; px[j+1]=6; px[j+2]=14; px[j+3]=255; continue; }
+    let v=Math.pow(Math.log(1+dv)/lm,0.62);
+    const base=pal(st,v);
+    // hue from local step-angle (velocity direction) + a density-gradient shimmer -> thin-film sheen
+    const gr=(D[i+1]||dv)-(i>=1?D[i-1]:dv), ang=Math.atan2(HS[i],HC[i]);
+    const hue=((ang/TAU)+v*0.45+gr*0.015+1)%1;
+    const ir=hsl(hue,0.78,0.55), mx=sheen*Math.pow(v,0.6);
+    px[j]  =base[0]*(1-mx)+ir[0]*255*mx;
+    px[j+1]=base[1]*(1-mx)+ir[1]*255*mx;
+    px[j+2]=base[2]*(1-mx)+ir[2]*255*mx;
+    px[j+3]=255;
+  }
+}
+
+function bloom(px,w,h){                              // separable box-blur of bright pass at half-res, added back for glow
+  if(BLOOM<=0) return;
+  const bw=w>>1,bh=h>>1,key=bw+"x"+bh;
+  let bf=bbuf[key]; if(!bf){ bf=bbuf[key]={a:new Float32Array(bw*bh),b:new Float32Array(bw*bh)}; }
+  const a=bf.a,b=bf.b,R=6;
+  for(let y=0;y<bh;y++) for(let x=0;x<bw;x++){ const si=((y*2)*w+(x*2))*4; const l=(px[si]+px[si+1]+px[si+2])/765; a[y*bw+x]=l>0.55?(l-0.55)*2.2:0; }
+  for(let y=0;y<bh;y++){ const base=y*bw; for(let x=0;x<bw;x++){ let s=0,c=0; for(let k=-R;k<=R;k++){ const xx=x+k; if(xx>=0&&xx<bw){ s+=a[base+xx]; c++; } } b[base+x]=s/c; } }
+  for(let x=0;x<bw;x++) for(let y=0;y<bh;y++){ let s=0,c=0; for(let k=-R;k<=R;k++){ const yy=y+k; if(yy>=0&&yy<bh){ s+=b[yy*bw+x]; c++; } } a[y*bw+x]=s/c; }
+  const g=BLOOM*255;
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){ const bl=a[(y>>1)*bw+(x>>1)]*g,j=(y*w+x)*4;
+    px[j]=Math.min(255,px[j]+bl); px[j+1]=Math.min(255,px[j+1]+bl); px[j+2]=Math.min(255,px[j+2]+bl); }
+}
+
+function render(){ tonemap(G,data); bloom(data,G.w,G.h); ctx.putImageData(img,0,0); }
+
+/* ---- breathe LFO + idle screensaver drift ---- */
+function snapCenters(){ cA=S.a; cB=S.b; cC=S.c; cD=S.d; }
+function morph(now){ const t=now*0.001;
+  S.a=cA+Math.sin(t*0.13)*0.28; S.b=cB+Math.sin(t*0.11+2)*0.28;
+  S.c=cC+Math.sin(t*0.17+4)*0.24; S.d=cD+Math.sin(t*0.07+1)*0.24; }
+function decay(f){ const D=G.d,C=G.hc,Sn=G.hs,N=D.length; for(let i=0;i<N;i++){ D[i]*=f; C[i]*=f; Sn[i]*=f; } }
+const rp=()=>{ const R=()=>+((Math.random()*3.6-1.8).toFixed(3)); return {a:R(),b:R(),c:R(),d:R()}; };
+function drift(dt){ if(!dtarget) dtarget=rp();
+  const k=1-Math.pow(0.5,dt*0.25); cA+=(dtarget.a-cA)*k; cB+=(dtarget.b-cB)*k; cC+=(dtarget.c-cC)*k; cD+=(dtarget.d-cD)*k;
+  if(Math.hypot(dtarget.a-cA,dtarget.b-cB,dtarget.c-cC,dtarget.d-cD)<0.03) dtarget=rp(); }
+
+/* ---- main loop ---- */
+function frame(now){
+  const dt=Math.min(0.05,(now-last)/1000); last=now;
+  if(!breathe && !screensaver && now-lastActive>25000){ screensaver=true; breathe=true; snapCenters(); syncBtns(); }
+  if(screensaver) drift(dt);
+  if(breathe){ morph(now); decay(0.94); if(now-lastLabel>150){ labels(); lastLabel=now; } }
+  accum(G,POINTS);
+  render();
+  requestAnimationFrame(frame);
+}
+
+/* ---- hash serialize / parse for exact reproduction ---- */
+function writeHash(){ location.replace("#"+[S.t,S.a.toFixed(4),S.b.toFixed(4),S.c.toFixed(4),S.d.toFixed(4),S.p,S.zoom.toFixed(3),S.cx.toFixed(3),S.cy.toFixed(3)].join(",")); }
+function scheduleHash(){ clearTimeout(hashT); hashT=setTimeout(writeHash,200); }   // coalesce hot-path writes; interactive frames don't spam location.replace
+function readHash(){ const h=location.hash.slice(1); if(!h) return false; const a=h.split(","); if(a.length<9) return false;
+  S.t=clamp(a[0]|0,0,MAPS.length-1); S.a=+a[1]; S.b=+a[2]; S.c=+a[3]; S.d=+a[4];
+  S.p=clamp(a[5]|0,0,PALS.length-1); S.zoom=clamp(+a[6]||1,0.05,20); S.cx=+a[7]||0; S.cy=+a[8]||0;
+  return [S.a,S.b,S.c,S.d].every(isFinite); }                                       // reject any non-finite param so the preset fallback fully resets
+
+/* ---- export ---- */
+function download(blob,name){ const u=URL.createObjectURL(blob), a=document.createElement("a"); a.href=u; a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(u),4000); }
+function exportPNG(scale){
+  const w=Math.min(4000,Math.round(G.w*scale)),h=Math.min(4000,Math.round(G.h*scale));
+  const g=makeGrid(w,h); accum(g,Math.min(60e6,w*h*10));           // supersampled fresh render for print quality
+  const tc=document.createElement("canvas"); tc.width=w; tc.height=h;
+  const tx=tc.getContext("2d"), im=tx.createImageData(w,h);
+  tonemap(g,im.data); bloom(im.data,w,h); tx.putImageData(im,0,0);
+  tc.toBlob(b=>download(b,"nacre_"+Date.now()+".png"),"image/png");
+}
+function pickMime(){                                                // Safari lacks webm; find a container this browser will actually encode
+  const cands=["video/webm;codecs=vp9","video/webm;codecs=vp8","video/webm","video/mp4"];
+  if(window.MediaRecorder && MediaRecorder.isTypeSupported){ for(const m of cands) if(MediaRecorder.isTypeSupported(m)) return m; }
+  return "";
+}
+function toggleRec(){
+  const btn=$("#rec");
+  if(recorder){ recorder.stop(); return; }
+  if(!cvs.captureStream || !window.MediaRecorder){ btn.textContent="unsupported"; return; }
+  const mime=pickMime(), ext=mime.indexOf("mp4")>=0?"mp4":"webm";
+  chunks=[]; const stream=cvs.captureStream(30);
+  try{ recorder = mime ? new MediaRecorder(stream,{mimeType:mime}) : new MediaRecorder(stream); }
+  catch(err){ recorder=null; btn.textContent="unsupported"; return; }
+  recorder.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data); };
+  recorder.onstop=()=>{ download(new Blob(chunks,{type:mime||"video/webm"}),"nacre_"+Date.now()+"."+ext); recorder=null; btn.textContent="● Record"; btn.classList.remove("on"); };
+  recorder.start(); btn.textContent="■ Stop"; btn.classList.add("on");
+  if(!breathe) toggleBreathe(true);                                 // record the metamorphosis, not a still
+}
+
+/* ---- UI ---- */
+function labels(){ $("#info").textContent=MAPS[S.t].n+" · "+PALS[S.p].n+"  a"+S.a.toFixed(2)+" b"+S.b.toFixed(2)+" c"+S.c.toFixed(2)+" d"+S.d.toFixed(2);
+  $("#palsw").style.color=PALS[S.p].sw; }
+function syncBtns(){ $("#breathe").classList.toggle("on",breathe); $("#screen").classList.toggle("on",screensaver); labels(); }
+function commit(reseed){ if(reseed) clearG(); scheduleHash(); labels(); }
+function apply(pr){ S.t=pr[0]; S.a=pr[1]; S.b=pr[2]; S.c=pr[3]; S.d=pr[4]; S.p=pr[5]; S.zoom=pr[6]; S.cx=pr[7]; S.cy=pr[8]; snapCenters(); commit(true); }
+function toggleBreathe(v){ breathe=(v===undefined)?!breathe:v; if(breathe) snapCenters(); syncBtns(); }
+function toggleScreen(){ screensaver=!screensaver; if(screensaver){ breathe=true; snapCenters(); dtarget=null; } syncBtns(); }
+function coverage(a,b,c,d){                          // quick low-res probe: fraction of cells the attractor touches
+  const f=MAPS[S.t].f,W=120,H=120,seen=new Uint8Array(W*H),s=W*0.2,ox=W/2,oy=H/2; let x=.1,y=.1,nz=0;
+  for(let k=0;k<20000;k++){ f(x,y,a,b,c,d); let nx=out[0],ny=out[1];
+    if(!isFinite(nx)||!isFinite(ny)||Math.abs(nx)>1e4||Math.abs(ny)>1e4){ nx=Math.random()*.2-.1; ny=Math.random()*.2-.1; }
+    const gx=(nx*s+ox)|0,gy=(ny*s+oy)|0; if(gx>=0&&gx<W&&gy>=0&&gy<H){ const i=gy*W+gx; if(!seen[i]){ seen[i]=1; nz++; } }
+    x=nx; y=ny; }
+  return nz/(W*H);
+}
+function randomize(){ let r,cov=0,tries=0;                 // reseed until the frame is neither a degenerate dot nor a full-noise smudge
+  do{ r=rp(); cov=coverage(r.a,r.b,r.c,r.d); }while((cov<0.04||cov>0.55)&&++tries<12);
+  S.a=r.a; S.b=r.b; S.c=r.c; S.d=r.d; snapCenters(); commit(true); }
+function nudge(k,v){ S[k]+=v; if(breathe){ cC=S.c; cD=S.d; } commit(!breathe); }
+
+function buildGallery(){ const g=$("#gallery"); PRESETS.forEach(pr=>{ const b=document.createElement("button"); b.className="chip";
+  b.innerHTML='<span class="sw" style="color:'+PALS[pr[5]].sw+'"></span>'+pr[9]; b.onclick=()=>{ touch(); apply(pr); }; g.appendChild(b); }); }
+
+function touch(){ lastActive=performance.now(); if(screensaver){ screensaver=false; breathe=false; syncBtns(); }
+  if(!touch._faded){ touch._faded=1; const h=$("#hint"); if(h) h.classList.add("gone"); } }
+
+/* zoom about a screen point (cursor / pinch midpoint) so detail grows under the finger, not toward center */
+function zoomAt(clientX,clientY,factor){
+  const r=cvs.getBoundingClientRect();
+  const gx=(clientX-r.left)/r.width*G.w, gy=(clientY-r.top)/r.height*G.h;
+  const {s,ox,oy}=scaleFor(G.w,G.h), wx=(gx-ox)/s, wy=(gy-oy)/s;
+  S.zoom=clamp(S.zoom*factor,0.05,20);
+  const ns=Math.min(G.w,G.h)*0.2*S.zoom;
+  S.cx=wx-(gx-G.w/2)/ns; S.cy=wy-(gy-G.h/2)/ns;
+  commit(true);
+}
+
+/* pointer: drag steers a,b (or breathe centers); shift-drag pans; two-finger pinch zooms */
+let dragging=false,panning=false,sx=0,sy=0,a0=0,b0=0,cx0=0,cy0=0;
+const pointers=new Map(); let pinchDist=0;
+cvs.addEventListener("pointerdown",e=>{ touch(); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY}); cvs.setPointerCapture(e.pointerId);
+  if(pointers.size===2){ dragging=false; panning=false; cvs.classList.remove("drag");
+    const p=[...pointers.values()]; pinchDist=Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y); return; }
+  dragging=true; panning=e.shiftKey; cvs.classList.add("drag");
+  sx=e.clientX; sy=e.clientY; a0=breathe?cA:S.a; b0=breathe?cB:S.b; cx0=S.cx; cy0=S.cy; });
+cvs.addEventListener("pointermove",e=>{
+  if(pointers.has(e.pointerId)) pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pointers.size===2){ touch(); const p=[...pointers.values()], nd=Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y);
+    if(pinchDist>0) zoomAt((p[0].x+p[1].x)/2,(p[0].y+p[1].y)/2,nd/pinchDist); pinchDist=nd; return; }
+  if(!dragging) return; touch();
+  const r=cvs.getBoundingClientRect();
+  if(panning){ const s=scaleFor(G.w,G.h).s/(window.devicePixelRatio||1); S.cx=cx0-(e.clientX-sx)/s*(G.w/r.width); S.cy=cy0-(e.clientY-sy)/s*(G.h/r.height); commit(true); }
+  else{ const na=a0+(e.clientX-sx)/r.width*3, nb=b0+(e.clientY-sy)/r.height*3;
+    if(breathe){ cA=na; cB=nb; S.a=na; S.b=nb; commit(false); } else { S.a=na; S.b=nb; commit(true); } } });
+function endPtr(e){ pointers.delete(e.pointerId); if(pointers.size<2) pinchDist=0; if(pointers.size===0){ dragging=false; panning=false; cvs.classList.remove("drag"); } }
+addEventListener("pointerup",endPtr); addEventListener("pointercancel",endPtr);
+cvs.addEventListener("wheel",e=>{ e.preventDefault(); touch(); zoomAt(e.clientX,e.clientY,Math.exp(-e.deltaY*0.0012)); },{passive:false});
+
+addEventListener("keydown",e=>{ const k=e.key;
+  if(k==="t"){ touch(); S.t=(S.t+1)%MAPS.length; commit(true); }
+  else if(k==="p"){ touch(); S.p=(S.p+1)%PALS.length; commit(false); }
+  else if(k==="b"){ touch(); toggleBreathe(); }
+  else if(k===" "){ e.preventDefault(); touch(); randomize(); }
+  else if(k==="ArrowUp"){ e.preventDefault(); touch(); nudge("c",0.02); }
+  else if(k==="ArrowDown"){ e.preventDefault(); touch(); nudge("c",-0.02); }
+  else if(k==="ArrowLeft"){ e.preventDefault(); touch(); nudge("d",-0.02); }
+  else if(k==="ArrowRight"){ e.preventDefault(); touch(); nudge("d",0.02); }
+});
+
+$("#type").onclick =()=>{ touch(); S.t=(S.t+1)%MAPS.length; commit(true); };
+$("#pal").onclick  =()=>{ touch(); S.p=(S.p+1)%PALS.length; commit(false); };
+$("#breathe").onclick=()=>{ touch(); toggleBreathe(); };
+$("#screen").onclick =()=>{ toggleScreen(); };
+$("#rand").onclick =()=>{ touch(); randomize(); };
+$("#save").onclick =()=>{ touch(); exportPNG(1); };
+$("#save2").onclick=()=>{ touch(); exportPNG(2); };
+$("#rec").onclick  =()=>{ touch(); toggleRec(); };
+$("#share").onclick=()=>{ writeHash(); const t=$("#share");
+  const revert=()=>setTimeout(()=>t.textContent="Copy link",1400);
+  (navigator.clipboard?navigator.clipboard.writeText(location.href):Promise.reject())
+    .then(()=>{ t.textContent="Copied!"; },()=>{ t.textContent="see URL"; })
+    .then(revert,revert); };
+$("#sheen").oninput=e=>{ SHEEN=+e.target.value; $("#sheenv").textContent=SHEEN.toFixed(2); };
+$("#bloom").oninput=e=>{ BLOOM=+e.target.value; $("#bloomv").textContent=BLOOM.toFixed(2); };
+
+/* ---- boot ---- */
+function resize(){
+  const dpr=Math.min((window.devicePixelRatio||1)*1.6,2), r=cvs.getBoundingClientRect();
+  let w=Math.floor(r.width*dpr), h=Math.floor(r.height*dpr);
+  const cap=1500, m=Math.max(w,h); if(m>cap){ const s=cap/m; w=Math.floor(w*s); h=Math.floor(h*s); }
+  cvs.width=w; cvs.height=h; G=makeGrid(w,h); img=ctx.createImageData(w,h); data=img.data;
+}
+addEventListener("resize",()=>{ clearTimeout(resize._t); resize._t=setTimeout(resize,180); });
+
+buildGallery();
+resize();                                   // create the grid BEFORE any apply()/clearG() touches G
+readHash() || apply(PRESETS[0]);
+syncBtns(); labels();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

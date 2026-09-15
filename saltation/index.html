@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Saltation — Abelian Sandpile Lab</title>
+<style>
+  :root{
+    --bg:#0d0f14; --panel:#161a22; --line:#242a36; --ink:#e7ecf3; --dim:#8b96a8;
+    --accent:#ff6100; --accent2:#4fd1e0;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(1200px 800px at 30% -10%,#1a2030,#0d0f14 60%);
+    color:var(--ink);font:14px/1.45 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    display:flex;min-height:100%;
+  }
+  #stage{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:22px;min-width:0}
+  header{position:absolute;top:16px;left:20px;pointer-events:none}
+  header h1{margin:0;font-size:19px;letter-spacing:.04em;font-weight:700}
+  header h1 b{color:var(--accent)}
+  header p{margin:2px 0 0;color:var(--dim);font-size:12px;max-width:520px}
+  #wrap{position:relative;box-shadow:0 20px 60px rgba(0,0,0,.55);border-radius:6px;overflow:hidden;border:1px solid var(--line)}
+  canvas#grid{display:block;width:min(72vh,90vw,640px);height:auto;aspect-ratio:1/1;image-rendering:pixelated;cursor:crosshair;background:#000}
+  #hud{position:absolute;left:8px;bottom:8px;font:11px/1.3 ui-monospace,Menlo,Consolas,monospace;color:var(--dim);
+    background:rgba(0,0,0,.4);padding:4px 8px;border-radius:4px;pointer-events:none;white-space:pre}
+  #overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;
+    color:var(--ink);font-size:13px;letter-spacing:.03em;background:rgba(8,10,14,.5);pointer-events:none;padding:16px}
+  aside{width:308px;flex:0 0 308px;background:var(--panel);border-left:1px solid var(--line);
+    padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:14px}
+  .grp{display:flex;flex-direction:column;gap:8px}
+  .grp>label.h{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--dim)}
+  .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  button{background:#1e2530;color:var(--ink);border:1px solid var(--line);border-radius:5px;
+    padding:7px 10px;font-size:12px;cursor:pointer;transition:.12s;flex:1}
+  button:hover{border-color:var(--accent);color:#fff}
+  button.on{background:var(--accent);border-color:var(--accent);color:#111;font-weight:600}
+  button.pri{background:linear-gradient(180deg,#ff7a26,#e05500);border-color:#e05500;color:#111;font-weight:600}
+  select,input[type=number]{background:#0f131a;color:var(--ink);border:1px solid var(--line);
+    border-radius:5px;padding:6px;font-size:12px;flex:1;min-width:0}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .chip{flex:0 0 auto;padding:5px 9px;font-size:11px;background:#12202a;border:1px solid #22404c}
+  .chip:hover{border-color:var(--accent2);color:#fff}
+  .val{font:11px ui-monospace,monospace;color:var(--accent2);float:right}
+  #hist{width:100%;height:120px;background:#0a0d12;border:1px solid var(--line);border-radius:5px;display:block}
+  .fine{font-size:11px;color:var(--dim)}
+  .fine b{color:var(--accent2)}
+  a.gh{color:var(--dim);font-size:11px;text-decoration:none}
+  a.gh:hover{color:var(--accent)}
+  @media (max-width:900px){
+    body{flex-direction:column}
+    header{position:static;padding:16px 20px 0;pointer-events:auto}
+    #stage{padding:12px}
+    aside{width:100%;flex:1 1 auto;border-left:none;border-top:1px solid var(--line)}
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <header>
+    <h1><b>Saltation</b> · Abelian Sandpile Lab</h1>
+    <p>Drop a grain, start an avalanche. One dumb rule — pile too high, spill to neighbors — crystallizes a fractal.</p>
+  </header>
+  <div id="wrap">
+    <canvas id="grid" width="141" height="141"></canvas>
+    <div id="overlay"></div>
+    <div id="hud"></div>
+  </div>
+</div>
+<aside>
+  <div class="grp">
+    <label class="h">Pour mode</label>
+    <div class="row">
+      <button id="mFountain" class="on">Center fountain</button>
+      <button id="mPour">Free pour</button>
+    </div>
+    <div class="fine" id="modeHint"></div>
+    <div class="row">
+      <button id="play" class="pri">Pause</button>
+      <button id="step">Step</button>
+      <button id="clear">Clear</button>
+    </div>
+    <label class="fine">Fountain rate <span class="val" id="rateV">6</span>
+      <input type="range" id="rate" min="1" max="200" value="6"></label>
+    <label class="fine"><input type="checkbox" id="turbo"> Turbo grow (skip animation)</label>
+  </div>
+
+  <div class="grp">
+    <label class="h">Lattice · symmetry</label>
+    <select id="nb">
+      <option value="4">Von Neumann · threshold 4 · 4-fold</option>
+      <option value="8">Moore · threshold 8 · 8-fold</option>
+    </select>
+    <label class="h" style="margin-top:4px">Palette</label>
+    <select id="pal">
+      <option value="0">Ember</option>
+      <option value="1">Ice</option>
+      <option value="2">Spectral</option>
+      <option value="3">Mono</option>
+    </select>
+    <label class="fine">Height ⇄ Odometer morph <span class="val" id="morphV">0.00</span>
+      <input type="range" id="morph" min="0" max="1" step="0.01" value="0"></label>
+    <div class="fine">Slide right to dissolve the height fractal into the hidden <b>topple-count</b> fractal.</div>
+  </div>
+
+  <div class="grp">
+    <label class="h">Presets</label>
+    <div class="row">
+      <input type="number" id="dumpN" value="40000" min="1" step="1000">
+      <button id="dump">Dump &amp; stabilize</button>
+    </div>
+    <div class="row">
+      <button id="identity">⬦ Identity element</button>
+    </div>
+    <label class="h" style="margin-top:4px">Specimen gallery</label>
+    <div class="row" id="gallery"></div>
+  </div>
+
+  <div class="grp">
+    <label class="h">Self-organized criticality</label>
+    <canvas id="hist" width="276" height="120"></canvas>
+    <div class="fine">Avalanche-size distribution (log–log). A straight line ⇒ power law ⇒ SOC.
+      <span class="val" id="avN">0</span></div>
+  </div>
+
+  <div class="grp">
+    <label class="h">Share / export</label>
+    <div class="row">
+      <select id="scale"><option value="2">2×</option><option value="3">3×</option><option value="4" selected>4×</option></select>
+      <button id="png">Export PNG</button>
+    </div>
+    <div class="row"><button id="share">Copy shareable URL</button></div>
+    <div class="fine" id="msg">Deterministic: every URL is a reproducible specimen.</div>
+  </div>
+  <a class="gh" href="https://en.wikipedia.org/wiki/Abelian_sandpile_model" target="_blank" rel="noopener">What is the Abelian sandpile? ↗</a>
+</aside>
+
+<script>
+"use strict";
+(function(){
+  const N = 141;                       // grid is N×N, capped so synchronous stabilize stays snappy
+  const cv = document.getElementById('grid');
+  const ctx = cv.getContext('2d');
+  const img = ctx.createImageData(N, N);
+  const CENTER = ((N>>1)*N) + (N>>1);
+  const $ = id => document.getElementById(id);
+
+  // ---- state ----------------------------------------------------------
+  let sand = new Int32Array(N*N);      // grains per cell
+  let odo  = new Uint32Array(N*N);     // odometer: lifetime topples per cell
+  let z = 4, NB;                       // toppling threshold + neighbour offsets
+  let stack = new Int32Array(N*N), sp = 0;      // active-cell queue (LIFO)
+  const inQ = new Uint8Array(N*N);
+  const litFrame = new Int32Array(N*N);         // frame index a cell last toppled
+  let frame = 1, running = true, mode = 'fountain';   // frame starts at 1 so the fresh (all-0) litFrame buffer never reads as "lit"
+  let palIdx = 0, morph = 0, rate = 6, turbo = false, busy = false;
+  let curAval = 0;                     // topples accrued since last stable moment
+  const BINS = 34, hist = new Float64Array(BINS); let avCount = 0, odoMax = 1;
+
+  function setNB(v){
+    z = v;
+    NB = v===4 ? [-N, N, -1, 1]
+               : [-N-1,-N,-N+1,-1,1,N-1,N,N+1];
+  }
+  setNB(4);
+
+  // ---- toppling engine -----------------------------------------------
+  function push(i){ if(!inQ[i]){ inQ[i]=1; stack[sp++]=i; } }
+
+  // Process up to `budget` topplings from the active queue. Returns topples done.
+  function process(budget, animate){
+    let done = 0;
+    while(sp>0 && done<budget){
+      const i = stack[--sp]; inQ[i]=0;
+      if(sand[i] < z) continue;
+      const k = (sand[i]/z)|0;          // fire this cell k times at once (Abelian)
+      sand[i] -= k*z; odo[i] += k; done += k; curAval += k;
+      if(animate) litFrame[i] = frame;
+      const x = i % N;
+      for(let d=0; d<NB.length; d++){
+        const off = NB[d], j = i+off;
+        if(j<0 || j>=N*N) continue;                     // top/bottom edge: grains fall off
+        const dx = (j%N) - x;
+        if(dx>1 || dx<-1) continue;                     // left/right wrap guard: grains fall off
+        sand[j] += k;
+        if(sand[j] >= z) push(j);
+      }
+    }
+    if(sp===0 && curAval>0){ record(curAval); curAval = 0; }   // avalanche settled
+    return done;
+  }
+  // Run to completion with no animation (bounded by a hard topple cap to avoid lockups).
+  const HARDCAP = 500000000;   // ~5e8 topples: far beyond any 221² pile, still bounded
+  function stabilize(cap){ cap=cap||HARDCAP; let n=0; while(sp>0 && n<cap) n += process(1<<20, false); }
+
+  function record(size){
+    const b = Math.min(BINS-1, Math.floor(Math.log2(size)));
+    hist[b]++; avCount++;
+  }
+  function drop(i, n){ sand[i]+=n; if(sand[i]>=z) push(i); }
+
+  function clearField(){ sand.fill(0); odo.fill(0); sp=0; inQ.fill(0); curAval=0; hist.fill(0); avCount=0; }
+
+  // ---- famous sandpile-group identity element ------------------------
+  function identity(){
+    clearField();
+    const m = 2*(z-1);                 // twice the max stable height
+    sand.fill(m); for(let i=0;i<N*N;i++) push(i);
+    stabilize();                     // s = stabilize(2·max)
+    for(let i=0;i<N*N;i++) sand[i] = m - sand[i];   // 2·max − s
+    sp=0; inQ.fill(0); odo.fill(0);
+    for(let i=0;i<N*N;i++) if(sand[i]>=z) push(i);
+    stabilize();                     // identity = stabilize(2·max − s)
+    running=false; syncPlay(); dirty=true;
+  }
+
+  // ---- palettes -------------------------------------------------------
+  const P = [
+    [[26,16,8],[122,45,0],[255,97,0],[255,211,138],[255,255,255]],   // ember
+    [[6,10,20],[14,60,110],[40,160,210],[150,230,245],[255,255,255]],// ice
+    [[40,0,60],[190,30,90],[240,150,40],[240,235,120],[240,255,240]],// spectral
+    [[10,10,12],[80,80,86],[160,160,168],[220,220,226],[255,255,255]] // mono
+  ];
+  const ODOP = [[0,0,0],[30,0,45],[120,20,90],[220,90,60],[255,200,90],[255,255,230]]; // magma
+  function grad(stops, t){
+    t = t<0?0:t>1?1:t;
+    const f = t*(stops.length-1), i = Math.min(stops.length-2, f|0), u = f-i;
+    const a=stops[i], b=stops[i+1];
+    return [a[0]+(b[0]-a[0])*u, a[1]+(b[1]-a[1])*u, a[2]+(b[2]-a[2])*u];
+  }
+
+  // ---- rendering ------------------------------------------------------
+  let dirty = true;
+  function render(){
+    const z1 = z-1, d = img.data, sp0 = P[palIdx];
+    // recompute odometer max only when the odometer field is visible
+    if(morph>0){ let m=1; for(let i=0;i<odo.length;i++) if(odo[i]>m) m=odo[i]; odoMax=m; }
+    const lg = Math.log(odoMax+1);
+    for(let i=0,j=0;i<N*N;i++,j+=4){
+      const h = sand[i]; let t = h/z1; if(t>1) t=1;
+      let c = grad(sp0, t);
+      let r=c[0], g=c[1], b=c[2];
+      if(morph>0){
+        const o = grad(ODOP, Math.log(odo[i]+1)/lg);
+        r += (o[0]-r)*morph; g += (o[1]-g)*morph; b += (o[2]-b)*morph;
+      }
+      if(frame>0 && litFrame[i]===frame){ r+=(255-r)*.75; g+=(255-g)*.65; b+=(200-b)*.4; }  // toppling ripple
+      d[j]=r; d[j+1]=g; d[j+2]=b; d[j+3]=255;
+    }
+    ctx.putImageData(img,0,0);
+    updateOverlay();
+  }
+  // Centered on-canvas prompt: busy state, or guidance when the field is empty.
+  function updateOverlay(){
+    const ov=$('overlay');
+    if(busy){ ov.textContent='Computing…'; ov.style.display='flex'; return; }
+    if(total()===0 && sp===0){
+      ov.textContent = mode==='pour' ? 'Drag on the canvas to pour grains'
+                                     : 'Press Play to grow the sandpile';
+      ov.style.display='flex';
+    } else { ov.style.display='none'; }
+  }
+
+  // ---- avalanche histogram (log-log) ---------------------------------
+  const hc = $('hist'), hx = hc.getContext('2d'), HW=hc.width, HH=hc.height;
+  function drawHist(){
+    hx.clearRect(0,0,HW,HH);
+    let mx=1; for(let i=0;i<BINS;i++) if(hist[i]>mx) mx=hist[i];
+    const lmx = Math.log(mx+1), bw = HW/BINS;
+    hx.strokeStyle='#223'; hx.beginPath();
+    for(let g=1;g<4;g++){ const y=HH-g/4*HH; hx.moveTo(0,y); hx.lineTo(HW,y);} hx.stroke();
+    hx.fillStyle='#ff6100'; const pts=[];
+    for(let i=0;i<BINS;i++){
+      if(!hist[i]) continue;
+      const h = Math.log(hist[i]+1)/lmx*(HH-6);
+      hx.fillRect(i*bw+1, HH-h, bw-2, h);
+      pts.push([i*bw+bw/2, HH-h]);
+    }
+    if(pts.length>1){ hx.strokeStyle='#4fd1e0'; hx.lineWidth=1.5; hx.beginPath();
+      hx.moveTo(pts[0][0],pts[0][1]); for(let k=1;k<pts.length;k++) hx.lineTo(pts[k][0],pts[k][1]); hx.stroke(); }
+  }
+
+  // ---- main loop ------------------------------------------------------
+  function tick(){
+    if(running){
+      frame++;
+      if(mode==='fountain'){
+        if(turbo){
+          for(let k=0;k<400;k++){ drop(CENTER, 1); stabilize(); }
+        } else {
+          if(sp===0){ for(let k=0;k<rate;k++) drop(CENTER,1); }  // one clean batch per settle
+          process(45000, true);
+        }
+      } else {
+        process(45000, true);
+      }
+      dirty = true;
+    }
+    if(dirty){ render(); drawHist(); updateHud(); dirty=false; }
+    requestAnimationFrame(tick);
+  }
+
+  function updateHud(){
+    let tot=0; for(let i=0;i<sand.length;i++) tot+=sand[i];
+    $('hud').textContent =
+      'grains '+tot+'   active '+sp+'   avalanches '+avCount;
+    $('avN').textContent = avCount+' samples';
+  }
+
+  // ---- pointer pouring ------------------------------------------------
+  let painting=false;
+  function pour(ev){
+    const r=cv.getBoundingClientRect();
+    const x=Math.floor((ev.clientX-r.left)/r.width*N), y=Math.floor((ev.clientY-r.top)/r.height*N);
+    if(x<0||y<0||x>=N||y>=N) return;
+    drop(y*N+x, 4); dirty=true;
+  }
+  cv.addEventListener('pointerdown',e=>{painting=true; cv.setPointerCapture(e.pointerId);
+    if(!running){ running=true; syncPlay(); }        // pouring resumes the sim so avalanches animate
+    pour(e);});
+  cv.addEventListener('pointermove',e=>{ if(painting) pour(e); });
+  cv.addEventListener('pointerup',()=>painting=false);
+
+  // ---- controls -------------------------------------------------------
+  function syncPlay(){ $('play').textContent = running?'Pause':'Play'; }
+  function setMode(m){ mode=m; $('mFountain').classList.toggle('on',m==='fountain'); $('mPour').classList.toggle('on',m==='pour');
+    $('modeHint').textContent = m==='pour' ? 'Free pour: click-drag on the canvas to drop grains.'
+                                           : 'Center fountain: press Play to grow the pile.';
+    dirty=true; }
+  $('mFountain').onclick=()=>setMode('fountain');
+  $('mPour').onclick=()=>setMode('pour');
+  $('play').onclick=()=>{ running=!running; syncPlay(); };
+  $('step').onclick=()=>{ frame++; if(mode==='fountain'&&sp===0){for(let k=0;k<rate;k++)drop(CENTER,1);} process(45000,true); dirty=true; };
+  $('clear').onclick=()=>{ clearField(); dirty=true; };
+  $('rate').oninput=e=>{ rate=+e.target.value; $('rateV').textContent=rate; };
+  $('turbo').onchange=e=>turbo=e.target.checked;
+  $('morph').oninput=e=>{ morph=+e.target.value; $('morphV').textContent=morph.toFixed(2); dirty=true; };
+  $('pal').onchange=e=>{ palIdx=+e.target.value; dirty=true; };
+  $('nb').onchange=e=>{ setNB(+e.target.value); clearField(); dirty=true; };
+  // Keyboard: Space play/pause, S step, C clear (ignored while typing in a field).
+  window.addEventListener('keydown',e=>{
+    const tag=(e.target&&e.target.tagName)||'';
+    if(tag==='INPUT'||tag==='SELECT'||tag==='TEXTAREA'||busy) return;
+    if(e.code==='Space'){ e.preventDefault(); running=!running; syncPlay(); dirty=true; }
+    else if(e.key==='s'||e.key==='S'){ e.preventDefault(); $('step').click(); }
+    else if(e.key==='c'||e.key==='C'){ e.preventDefault(); clearField(); dirty=true; }
+  });
+  // Run a heavy synchronous op after letting the "computing" message paint first.
+  function heavy(label, fn){ busy=true; document.body.style.cursor='progress'; msg(label); updateOverlay();
+    setTimeout(()=>{ const t=Date.now(); fn(); busy=false; dirty=true; document.body.style.cursor='';
+      msg('Done in '+((Date.now()-t)/1000).toFixed(1)+'s.'); }, 30); }
+  $('dump').onclick=()=>{ const n=Math.max(1,+$('dumpN').value|0);
+    heavy('Dumping '+n+' grains & stabilizing…', ()=>{ drop(CENTER,n); stabilize(); }); };
+  $('identity').onclick=()=>heavy('Computing sandpile-group identity…', identity);
+
+  // ---- PNG export at 2×–4× -------------------------------------------
+  $('png').onclick=()=>{
+    render();
+    const s=+$('scale').value, e=document.createElement('canvas'); e.width=e.height=N*s;
+    const ex=e.getContext('2d'); ex.imageSmoothingEnabled=false; ex.drawImage(cv,0,0,N*s,N*s);
+    const a=document.createElement('a'); a.download='saltation_'+N+'x'+N+'_'+s+'x.png'; a.href=e.toDataURL('image/png'); a.click();
+    msg('Exported '+(N*s)+'×'+(N*s)+' PNG.');
+  };
+
+  // ---- URL specimen serialize / restore ------------------------------
+  function msg(t){ $('msg').textContent=t; }
+  // Works under file:// too — location.origin is "null"/"file://" there, so fall back to the full href.
+  function buildURL(spec){
+    const base=(location.protocol==='http:'||location.protocol==='https:')
+      ? location.origin+location.pathname : location.href.split('#')[0];
+    return base+'#'+Object.entries(spec).map(([k,v])=>k+'='+v).join('&');
+  }
+  function total(){ let t=0; for(let i=0;i<sand.length;i++) t+=sand[i]; return t; }
+  $('share').onclick=()=>{
+    // share a deterministic recipe: dump the current grain count at center
+    const spec={v:1, nb:z, pal:palIdx, morph:morph.toFixed(2), dump:Math.max(0,total())};
+    const url=buildURL(spec);
+    location.hash=url.split('#')[1]||'';
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(url).then(
+        ()=>msg('URL copied to clipboard.'),
+        ()=>msg('URL is in the address bar — copy it manually.'));
+    } else {
+      msg('URL is in the address bar — copy it manually.');
+    }
+  };
+  function applySpec(p){
+    if(p.nb){ setNB(+p.nb); $('nb').value=p.nb; }
+    if(p.pal!=null){ palIdx=+p.pal; $('pal').value=palIdx; }
+    if(p.morph!=null){ morph=+p.morph; $('morph').value=morph; $('morphV').textContent=(+p.morph).toFixed(2); }
+    clearField();
+    if(p.src==='identity' || p.identity){ identity(); return; }
+    const dumpAmt = p.dump!=null ? +p.dump : (p.g!=null ? +p.g : 0);
+    if(dumpAmt>0){ drop(CENTER, dumpAmt); stabilize(); running=false; syncPlay(); }
+    setMode(p.src==='pour'?'pour':'fountain');
+    dirty=true;
+  }
+  function readHash(){
+    const h=location.hash.slice(1); if(!h) return false;
+    const p={}; h.split('&').forEach(kv=>{const [k,v]=kv.split('='); p[k]=v;});
+    applySpec(p); return true;
+  }
+
+  // ---- curated specimen gallery --------------------------------------
+  const SPECIMENS = [
+    {name:'Classic fountain', spec:{nb:4,pal:0,morph:'0.00',dump:40000}},
+    {name:'Identity (VN)',    spec:{nb:4,pal:2,morph:'0.00',identity:1}},
+    {name:'Identity (Moore)', spec:{nb:8,pal:1,morph:'0.00',identity:1}},
+    {name:'Moore bloom',      spec:{nb:8,pal:0,morph:'0.00',dump:30000}},
+    {name:'Odometer ghost',   spec:{nb:4,pal:3,morph:'1.00',dump:40000}},
+    {name:'Ice crystal',      spec:{nb:4,pal:1,morph:'0.35',dump:48000}},
+  ];
+  const gal=$('gallery');
+  SPECIMENS.forEach(s=>{
+    const b=document.createElement('button'); b.className='chip'; b.textContent=s.name;
+    b.onclick=()=>heavy('Loading specimen: '+s.name+'…', ()=>applySpec(s.spec));
+    gal.appendChild(b);
+  });
+
+  // ---- boot -----------------------------------------------------------
+  if(!readHash()) applySpec(SPECIMENS[0].spec);
+  setMode(mode); syncPlay();
+  tick();
+})();
+</script>
+</body>
+</html>

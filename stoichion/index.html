@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stoichion — balance real chemical equations by feel</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#131a22; --panel2:#0f151c; --ink:#dbe6f0; --dim:#7f93a6;
+    --line:#243141; --acc:#38d39f; --bad:#ff5d6c; --good:#38d39f; --warn:#ffb347;
+    --mono:'SF Mono',ui-monospace,'Cascadia Code',Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:radial-gradient(1200px 600px at 50% -10%,#16202b,#0b0f14 60%);
+    color:var(--ink);font:15px/1.4 system-ui,Segoe UI,Roboto,sans-serif;
+    display:flex;flex-direction:column;align-items:center;padding:14px 12px 24px;gap:12px}
+  h1{margin:0;font-size:22px;letter-spacing:.06em;font-weight:700}
+  h1 .z{color:var(--acc)}
+  .sub{color:var(--dim);font-size:12.5px;margin-top:-6px}
+  .wrap{width:100%;max-width:820px;display:flex;flex-direction:column;gap:12px}
+  .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center}
+  select,button,input{font:inherit;color:var(--ink);background:var(--panel);
+    border:1px solid var(--line);border-radius:8px;padding:6px 10px}
+  select{cursor:pointer}
+  button{cursor:pointer;transition:.15s}
+  button:hover{border-color:var(--acc);color:#fff}
+  button.primary{background:var(--acc);color:#04140e;border-color:var(--acc);font-weight:700}
+  button.primary:hover{filter:brightness(1.08)}
+  .stat{font:12.5px var(--mono);color:var(--dim);background:var(--panel2);
+    border:1px solid var(--line);border-radius:8px;padding:6px 10px;white-space:nowrap}
+  .stat b{color:var(--ink)}
+  .stat .hi{color:var(--acc)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .rxn-name{color:var(--dim);font-size:13px;margin-bottom:10px;display:flex;
+    justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .tag{font:11px var(--mono);text-transform:uppercase;letter-spacing:.08em;
+    border:1px solid var(--line);border-radius:20px;padding:2px 9px;color:var(--dim)}
+  .tag.d1{color:#8fe} .tag.d2{color:var(--warn)} .tag.d3{color:var(--bad)}
+  .eq{display:flex;flex-wrap:wrap;align-items:stretch;justify-content:center;gap:6px}
+  .side{display:flex;flex-wrap:wrap;align-items:stretch;gap:6px}
+  .plus,.arrow{display:flex;align-items:center;font:20px var(--mono);color:var(--dim);padding:0 2px}
+  .arrow{font-size:24px;color:var(--dim);transition:.3s;font-weight:700}
+  .arrow.ok{color:var(--good);text-shadow:0 0 14px rgba(56,211,159,.6)}
+  .sp{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+    padding:8px 8px 6px;min-width:78px;text-align:center;transition:.15s;position:relative}
+  .sp.focus{border-color:var(--acc);box-shadow:0 0 0 2px rgba(56,211,159,.25)}
+  .coef{display:flex;align-items:center;gap:2px;justify-content:center}
+  .coef button{padding:2px 7px;border-radius:6px;font-weight:700;line-height:1}
+  .coef input{width:34px;text-align:center;padding:3px 2px;font:15px var(--mono)}
+  .formula{font:16px var(--mono);margin-top:5px;letter-spacing:.02em}
+  .formula sub{font-size:.72em;color:var(--dim)}
+  .mm{font:12px var(--mono);color:#a7bacb;margin-top:3px}
+  .ledger{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
+  .ledger table{width:100%;border-collapse:collapse;font:13px var(--mono)}
+  .ledger th{color:var(--dim);font-weight:500;text-align:center;padding:3px 6px;font-size:11px;
+    text-transform:uppercase;letter-spacing:.06em}
+  .ledger td{text-align:center;padding:3px 6px}
+  .ledger td.el{color:var(--ink);font-weight:700}
+  .cell{display:inline-block;min-width:30px;padding:2px 8px;border-radius:6px;transition:.35s;
+    border:1px solid transparent}
+  .cell.bad{background:rgba(255,93,108,.14);color:var(--bad);border-color:rgba(255,93,108,.3)}
+  .cell.good{background:rgba(56,211,159,.14);color:var(--good);border-color:rgba(56,211,159,.3)}
+  .pop{animation:pop .4s}
+  @keyframes pop{0%{transform:scale(1)}40%{transform:scale(1.28)}100%{transform:scale(1)}}
+  .mass{margin-top:14px}
+  .massrow{display:flex;align-items:center;gap:8px;font:11.5px var(--mono);color:#9fb2c4}
+  .massrow .lbl{min-width:66px}
+  .track{flex:1;height:14px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:8px;overflow:hidden;display:flex}
+  .track .fill{height:100%;transition:width .5s cubic-bezier(.4,1.3,.5,1)}
+  .fill.l{background:linear-gradient(90deg,#2b6cb0,#4299e1)}
+  .fill.r{background:linear-gradient(90deg,#805ad5,#b794f4);margin-left:auto}
+  .verdict{margin-top:12px;text-align:center;font-size:14px;min-height:20px;font-weight:600}
+  .verdict.ok{color:var(--good)} .verdict.no{color:var(--dim)}
+  .controls{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:12px}
+  .custom{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .custom input{flex:1;min-width:220px;font:14px var(--mono)}
+  .help{font:12px/1.6 var(--mono);color:var(--dim);text-align:center;max-width:820px}
+  .help kbd{background:var(--panel);border:1px solid var(--line);border-radius:5px;
+    padding:1px 6px;color:var(--ink);font-size:11px}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+    background:var(--acc);color:#04140e;font-weight:700;padding:10px 20px;border-radius:10px;
+    opacity:0;transition:.3s;pointer-events:none;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(-6px)}
+  a{color:var(--acc)}
+</style>
+</head>
+<body>
+  <div><h1>Stoich<span class="z">ion</span></h1></div>
+  <div class="sub">Balance the equation by feel — nudge coefficients until every atom matches.</div>
+
+  <div class="wrap">
+    <div class="bar">
+      <select id="fClass" title="Reaction class"></select>
+      <select id="fDiff" title="Difficulty">
+        <option value="0">Any difficulty</option>
+        <option value="1">Easy</option>
+        <option value="2">Medium</option>
+        <option value="3">Hard</option>
+      </select>
+      <button id="btnNext" class="primary" title="Deal next (N)">Deal ▸</button>
+      <button id="btnDaily" title="Today's puzzle">Daily</button>
+      <span class="stat">Streak <b class="hi" id="streak">0</b></span>
+      <span class="stat">Moves <b id="moves">0</b> / par <b id="par">–</b></span>
+    </div>
+
+    <div class="card">
+      <div class="rxn-name"><span id="rxnName"></span><span class="tag" id="rxnTag"></span></div>
+      <div class="eq" id="eq"></div>
+
+      <div class="ledger">
+        <table>
+          <thead><tr><th>element</th><th>left</th><th></th><th>right</th></tr></thead>
+          <tbody id="ledger"></tbody>
+        </table>
+      </div>
+
+      <div class="mass">
+        <div class="massrow"><span class="lbl">reactants</span><div class="track"><div class="fill l" id="mL"></div></div><span id="mLv"></span></div>
+        <div class="massrow"><span class="lbl">products</span><div class="track"><div class="fill r" id="mR"></div></div><span id="mRv"></span></div>
+      </div>
+
+      <div class="verdict no" id="verdict">Adjust the coefficients (1–99).</div>
+
+      <div class="controls">
+        <button id="btnReset" title="Reset to all 1s (R)">Reset</button>
+        <button id="btnReveal" title="Reveal the answer — resets your streak">Reveal (resets streak)</button>
+        <button id="btnShare" title="Copy shareable link">Share board</button>
+      </div>
+    </div>
+
+    <div class="custom">
+      <input id="customEq" placeholder="Custom:  C2H5OH + O2 -> CO2 + H2O" spellcheck="false">
+      <button id="btnLoad">Load</button>
+    </div>
+
+    <div class="help">
+      <kbd>←→↑↓</kbd> nudge focused &nbsp; <kbd>1–9</kbd> pick species &nbsp;
+      <kbd>Enter</kbd> check &nbsp; <kbd>R</kbd> reset &nbsp; <kbd>N</kbd> next &nbsp;
+      Solve without <b>Reveal</b> at/under par to keep your streak.
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* ---------- atomic weights (IUPAC standard) ---------- */
+const AW={H:1.008,He:4.0026,Li:6.94,Be:9.0122,B:10.81,C:12.011,N:14.007,O:15.999,
+F:18.998,Ne:20.180,Na:22.990,Mg:24.305,Al:26.982,Si:28.085,P:30.974,S:32.06,Cl:35.45,
+Ar:39.948,K:39.098,Ca:40.078,Sc:44.956,Ti:47.867,V:50.942,Cr:51.996,Mn:54.938,Fe:55.845,
+Co:58.933,Ni:58.693,Cu:63.546,Zn:65.38,Ga:69.723,Ge:72.630,As:74.922,Se:78.971,Br:79.904,
+Kr:83.798,Rb:85.468,Sr:87.62,Y:88.906,Zr:91.224,Nb:92.906,Mo:95.95,Ag:107.868,Cd:112.414,
+Sn:118.710,Sb:121.760,I:126.904,Ba:137.327,Pt:195.084,Au:196.967,Hg:200.592,Pb:207.2,Bi:208.980};
+
+/* ---------- curated deck ---------- */
+const CLASSES={co:"Combustion",sy:"Synthesis",de:"Decomposition",sd:"Single displacement",
+dd:"Double displacement",ab:"Acid–base",rx:"Redox"};
+const DECK=[
+ ["co","Methane combustion",["CH4","O2"],["CO2","H2O"]],
+ ["co","Propane combustion",["C3H8","O2"],["CO2","H2O"]],
+ ["co","Ethane combustion",["C2H6","O2"],["CO2","H2O"]],
+ ["co","Acetylene combustion",["C2H2","O2"],["CO2","H2O"]],
+ ["co","Octane combustion",["C8H18","O2"],["CO2","H2O"]],
+ ["co","Ethanol combustion",["C2H5OH","O2"],["CO2","H2O"]],
+ ["co","Glucose combustion",["C6H12O6","O2"],["CO2","H2O"]],
+ ["sy","Water synthesis",["H2","O2"],["H2O"]],
+ ["sy","Ammonia (Haber)",["N2","H2"],["NH3"]],
+ ["sy","Hydrogen chloride",["H2","Cl2"],["HCl"]],
+ ["sy","Sodium chloride",["Na","Cl2"],["NaCl"]],
+ ["sy","Rusting of iron",["Fe","O2"],["Fe2O3"]],
+ ["sy","Magnesium oxide",["Mg","O2"],["MgO"]],
+ ["sy","Sulfur trioxide",["S","O2"],["SO3"]],
+ ["de","Hydrogen peroxide",["H2O2"],["H2O","O2"]],
+ ["de","Potassium chlorate",["KClO3"],["KCl","O2"]],
+ ["de","Baking soda",["NaHCO3"],["Na2CO3","H2O","CO2"]],
+ ["de","Ammonium nitrate",["NH4NO3"],["N2O","H2O"]],
+ ["de","Copper sulfate hydrate",["CuSO4.5H2O"],["CuSO4","H2O"]],
+ ["de","Aluminium chloride hydrate",["AlCl3.6H2O"],["AlCl3","H2O"]],
+ ["sd","Zinc + acid",["Zn","HCl"],["ZnCl2","H2"]],
+ ["sd","Aluminium + acid",["Al","HCl"],["AlCl3","H2"]],
+ ["sd","Magnesium + acid",["Mg","HCl"],["MgCl2","H2"]],
+ ["sd","Halogen displacement",["Cl2","NaBr"],["NaCl","Br2"]],
+ ["sd","Aluminothermite",["Al","Fe2O3"],["Al2O3","Fe"]],
+ ["dd","Barium sulfate",["BaCl2","Na2SO4"],["BaSO4","NaCl"]],
+ ["dd","Lead(II) iodide",["Pb(NO3)2","KI"],["PbI2","KNO3"]],
+ ["dd","Calcium phosphate",["CaCl2","Na3PO4"],["Ca3(PO4)2","NaCl"]],
+ ["dd","Iron(III) hydroxide",["FeCl3","NaOH"],["Fe(OH)3","NaCl"]],
+ ["ab","Strong acid + base",["HCl","NaOH"],["NaCl","H2O"]],
+ ["ab","Sulfuric neutralization",["H2SO4","NaOH"],["Na2SO4","H2O"]],
+ ["ab","Phosphoric neutralization",["H3PO4","NaOH"],["Na3PO4","H2O"]],
+ ["ab","Lime neutralization",["HCl","Ca(OH)2"],["CaCl2","H2O"]],
+ ["rx","Blast furnace",["Fe2O3","CO"],["Fe","CO2"]],
+ ["rx","Copper + nitric acid",["Cu","HNO3"],["Cu(NO3)2","NO","H2O"]],
+ ["rx","Permanganate + HCl",["KMnO4","HCl"],["KCl","MnCl2","H2O","Cl2"]],
+ ["rx","Thermite of chromium",["Cr2O3","Al"],["Cr","Al2O3"]]
+];
+
+/* ---------- formula parser ---------- */
+function parseSimple(str){
+  const stack=[{}];let i=0;
+  while(i<str.length){
+    const ch=str[i];
+    if(ch==="("||ch==="["){stack.push({});i++;}
+    else if(ch===")"||ch==="]"){
+      i++;let n="";while(i<str.length&&/\d/.test(str[i]))n+=str[i++];
+      const m=n?+n:1,top=stack.pop(),d=stack[stack.length-1];
+      if(!stack.length)throw"paren";
+      for(const e in top)d[e]=(d[e]||0)+top[e]*m;
+    }else if(/[A-Z]/.test(ch)){
+      let s=ch;i++;while(i<str.length&&/[a-z]/.test(str[i]))s+=str[i++];
+      if(!AW[s])throw"element "+s;
+      let n="";while(i<str.length&&/\d/.test(str[i]))n+=str[i++];
+      const d=stack[stack.length-1];d[s]=(d[s]||0)+(n?+n:1);
+    }else throw"char "+ch;
+  }
+  if(stack.length!==1)throw"paren";
+  return stack[0];
+}
+function parseFormula(f){
+  const parts=String(f).replace(/·/g,".").trim().split(".");
+  const t={};
+  for(let p of parts){
+    let mult=1;const md=p.match(/^(\d+)([A-Z(].*)$/);// leading count e.g. 5H2O
+    if(md){mult=+md[1];p=md[2];}
+    const c=parseSimple(p);
+    for(const e in c)t[e]=(t[e]||0)+c[e]*mult;
+  }
+  return t;
+}
+function molarMass(f){const c=parseFormula(f);let m=0;for(const e in c)m+=c[e]*AW[e];return m;}
+function formulaHTML(f){
+  // split on hydrate dot; leading multiplier after a dot is a coefficient, not a subscript
+  return String(f).replace(/·/g,".").split(".").map((part,idx)=>{
+    let out="";
+    if(idx>0){const m=part.match(/^(\d+)(.*)$/);if(m){out="·"+m[1];part=m[2];}else out="·";}
+    return out+part.replace(/(\d+)/g,"<sub>$1</sub>");
+  }).join("");
+}
+
+/* ---------- exact-rational balancer ---------- */
+function gcd(a,b){a=Math.abs(a);b=Math.abs(b);while(b){[a,b]=[b,a%b];}return a;}
+function lcm(a,b){return a/gcd(a,b)*b;}
+const Fr=(n,d=1)=>{if(d<0){n=-n;d=-d;}const g=gcd(n,d)||1;return[n/g,d/g];};
+const fsub=(a,b)=>Fr(a[0]*b[1]-b[0]*a[1],a[1]*b[1]);
+const fmul=(a,b)=>Fr(a[0]*b[0],a[1]*b[1]);
+const fdiv=(a,b)=>Fr(a[0]*b[1],a[1]*b[0]);
+
+function balance(react,prod){
+  const sp=[...react,...prod];
+  const counts=sp.map(parseFormula);
+  const elems=[...new Set(sp.flatMap(s=>Object.keys(counts[sp.indexOf(s)]||{})))];
+  // build matrix rows=elems cols=species (products negated)
+  const M=elems.map(e=>sp.map((s,i)=>Fr((counts[i][e]||0)*(i<react.length?1:-1))));
+  const cols=sp.length,rows=M.length,pivots=[];
+  let r=0;
+  for(let c=0;c<cols&&r<rows;c++){
+    let piv=-1;for(let k=r;k<rows;k++)if(M[k][c][0]!==0){piv=k;break;}
+    if(piv<0)continue;
+    [M[r],M[piv]]=[M[piv],M[r]];
+    const inv=M[r][c];for(let j=0;j<cols;j++)M[r][j]=fdiv(M[r][j],inv);
+    for(let k=0;k<rows;k++)if(k!==r&&M[k][c][0]!==0){
+      const f=M[k][c];for(let j=0;j<cols;j++)M[k][j]=fsub(M[k][j],fmul(f,M[r][j]));
+    }
+    pivots.push(c);r++;
+  }
+  const free=[];for(let c=0;c<cols;c++)if(!pivots.includes(c))free.push(c);
+  const dim=free.length;
+  if(dim===0)return{coeffs:null,dim:0};
+  const f=free[0],vec=sp.map(()=>[0,1]);vec[f]=[1,1];
+  pivots.forEach((pc,k)=>{vec[pc]=Fr(-M[k][f][0],M[k][f][1]);});
+  // to smallest positive integers
+  let L=1;vec.forEach(v=>L=lcm(L,v[1]));
+  let ints=vec.map(v=>v[0]*(L/v[1]));
+  let g=0;ints.forEach(x=>g=gcd(g,x));if(g)ints=ints.map(x=>x/g);
+  if(ints.find(x=>x!==0)<0)ints=ints.map(x=>-x);
+  return{coeffs:ints,dim};
+}
+
+/* ---------- difficulty ---------- */
+function difficulty(ans,dim){
+  if(!ans)return 3;
+  const mx=Math.max(...ans),n=ans.length;
+  if(dim>1||mx>8||n>5)return 3;
+  if(mx>3||n>4)return 2;
+  return 1;
+}
+
+/* ---------- state ---------- */
+let R=[],P=[],coeffs=[],answer=[],dim=1,revealed=false,moves=0,par=0,focus=0;
+const store={get(k){try{return localStorage.getItem(k);}catch(e){return null;}},
+  set(k,v){try{localStorage.setItem(k,v);}catch(e){}}};
+let streak=+store.get("stoichionStreak")||0;
+let name="",cls="",prevLedger={};
+const $=id=>document.getElementById(id);
+
+/* class filter */
+const fClass=$("fClass");fClass.innerHTML='<option value="">All classes</option>'+
+  Object.entries(CLASSES).map(([k,v])=>`<option value="${k}">${v}</option>`).join("");
+
+function seededRand(seed){let s=seed>>>0;return()=>{s=(s*1664525+1013904223)>>>0;return s/4294967296;};}
+
+function loadReaction(react,prod,nm,cl,startCoeffs,parVal){
+  R=react;P=prod;name=nm;cls=cl;
+  const b=balance(R,P);answer=b.coeffs;dim=b.dim;
+  const N=R.length+P.length;
+  coeffs=startCoeffs&&startCoeffs.length===N
+    ?startCoeffs.map(x=>Math.max(1,Math.min(99,x|0)))
+    :new Array(N).fill(1);
+  par=parVal!=null?parVal:(answer?answer.reduce((s,x,i)=>s+Math.abs(x-coeffs[i]),0):0);
+  revealed=false;moves=0;focus=0;prevLedger={};
+  render();writeHash();
+}
+
+function dealNext(daily){
+  const c=fClass.value,d=+$("fDiff").value;
+  let pool=DECK.map((x,i)=>i).filter(i=>{
+    if(c&&DECK[i][0]!==c)return false;
+    const b=balance(DECK[i][2],DECK[i][3]);
+    return d===0||difficulty(b.coeffs,b.dim)===d;
+  });
+  if(!pool.length)pool=DECK.map((x,i)=>i);
+  const rng=daily?seededRand(dateSeed()):Math.random;
+  const idx=pool[Math.floor(rng()*pool.length)];
+  const[cl,nm,rr,pp]=DECK[idx];
+  const b=balance(rr,pp),N=rr.length+pp.length;
+  // scramble start (not already balanced)
+  let start;
+  for(let t=0;t<40;t++){
+    start=new Array(N).fill(0).map((_,i)=>{
+      const a=b.coeffs[i];return Math.max(1,Math.min(99,Math.round(1+rng()*Math.max(3,a*2))));
+    });
+    if(!isBalanced(rr,pp,start))break;
+  }
+  const parV=start.reduce((s,x,i)=>s+Math.abs(x-b.coeffs[i]),0);
+  loadReaction(rr,pp,nm+(daily?" · daily":""),cl,start,parV);
+}
+function dateSeed(){const d=new Date();return d.getFullYear()*372+d.getMonth()*31+d.getDate();}
+
+/* ---------- verdict helpers ---------- */
+function sideCounts(sp,coefs,off){
+  const t={};sp.forEach((s,i)=>{const c=parseFormula(s);for(const e in c)t[e]=(t[e]||0)+c[e]*coefs[off+i];});return t;
+}
+function isBalanced(rr,pp,cf){
+  const l=sideCounts(rr,cf,0),r=sideCounts(pp,cf,rr.length);
+  const es=new Set([...Object.keys(l),...Object.keys(r)]);
+  for(const e of es)if((l[e]||0)!==(r[e]||0))return false;return true;
+}
+
+/* ---------- render ----------
+   Split so typing into a coefficient <input> only refreshes the derived
+   views (ledger/mass/verdict/arrow) and never rebuilds the <input> the
+   user is editing — otherwise focus + caret are lost every keystroke. */
+function render(){renderEq();renderViews();}
+
+function renderEq(){
+  // equation cell (rebuilds inputs — only call when NOT mid-typing)
+  let h="";
+  const cell=(f,gi)=>`<div class="sp${gi===focus?' focus':''}" data-i="${gi}">
+    <div class="coef"><button data-step="${gi}:-1">−</button>
+      <input type="text" inputmode="numeric" data-in="${gi}" value="${coeffs[gi]}">
+      <button data-step="${gi}:1">+</button></div>
+    <div class="formula">${formulaHTML(f)}</div>
+    <div class="mm">${molarMass(f).toFixed(2)}</div></div>`;
+  h+='<div class="side">'+R.map((f,i)=>cell(f,i)).join('<span class="plus">+</span>')+'</div>';
+  const bal=isBalanced(R,P,coeffs);
+  h+=`<span class="arrow${bal?' ok':''}">→</span>`;
+  h+='<div class="side">'+P.map((f,i)=>cell(f,R.length+i)).join('<span class="plus">+</span>')+'</div>';
+  $("eq").innerHTML=h;
+}
+
+function renderViews(){
+  const bal=isBalanced(R,P,coeffs);
+  // arrow (update class in place so the focused input survives)
+  const ar=$("eq").querySelector(".arrow");
+  if(ar)ar.className="arrow"+(bal?" ok":"");
+
+  // ledger
+  const l=sideCounts(R,coeffs,0),r=sideCounts(P,coeffs,R.length);
+  const es=[...new Set([...Object.keys(l),...Object.keys(r)])].sort();
+  $("ledger").innerHTML=es.map(e=>{
+    const lv=l[e]||0,rv=r[e]||0,ok=lv===rv,klass=ok?"good":"bad";
+    const pop=(prevLedger[e]&&(prevLedger[e][0]!==lv||prevLedger[e][1]!==rv))?"pop":"";
+    return `<tr><td class="el">${e}</td>
+      <td><span class="cell ${klass} ${pop}" data-num="${e}L">${lv}</span></td>
+      <td style="color:var(--dim)">${ok?"=":"≠"}</td>
+      <td><span class="cell ${klass} ${pop}" data-num="${e}R">${rv}</span></td></tr>`;
+  }).join("");
+  prevLedger={};es.forEach(e=>prevLedger[e]=[l[e]||0,r[e]||0]);
+
+  // mass bars
+  let mL=0,mR=0;
+  R.forEach((f,i)=>mL+=molarMass(f)*coeffs[i]);
+  P.forEach((f,i)=>mR+=molarMass(f)*coeffs[R.length+i]);
+  const mx=Math.max(mL,mR,1);
+  $("mL").style.width=(mL/mx*100)+"%";
+  $("mR").style.width=(mR/mx*100)+"%";
+  $("mLv").textContent=mL.toFixed(2)+" g";
+  $("mRv").textContent=mR.toFixed(2)+" g";
+
+  // name/tag/stats
+  $("rxnName").textContent=name;
+  const g=coeffs.reduce((a,b)=>gcd(a,b),0);
+  const df=difficulty(answer,dim),tag=$("rxnTag");
+  tag.textContent=(CLASSES[cls]||"Custom")+" · "+["","Easy","Medium","Hard"][df];
+  tag.className="tag d"+df;
+  $("streak").textContent=streak;
+  $("moves").textContent=moves;
+  $("par").textContent=par||"–";
+
+  // verdict
+  const v=$("verdict");
+  if(bal&&g===1){
+    v.textContent=revealed?"✔ Balanced (answer revealed) — deal the next one.":
+      (moves<=par?"✔ Balanced & lowest terms — clean solve! ★":"✔ Balanced & lowest terms!");
+    v.className="verdict ok";
+    if(!revealed&&!R.__won){R.__won=true;onWin();}
+  }else if(bal){
+    v.textContent="Balanced, but not in lowest whole-number terms — divide down.";
+    v.className="verdict no";R.__won=false;
+  }else{
+    const off=es.filter(e=>(l[e]||0)!==(r[e]||0)).length;
+    v.textContent=off+" element"+(off!==1?"s":"")+" still unbalanced.";
+    v.className="verdict no";R.__won=false;
+  }
+}
+
+let wonThisBoard=false;
+function onWin(){
+  if(wonThisBoard)return;wonThisBoard=true;
+  streak++;store.set("stoichionStreak",streak);
+  const bonus=moves<=par?" (at/under par ★)":"";
+  toast("Solved in "+moves+" moves"+bonus+"  •  streak "+streak);
+  render();
+}
+
+/* ---------- interactions ---------- */
+function setCoef(i,val){
+  coeffs[i]=Math.max(1,Math.min(99,val|0));
+  render();writeHash();
+}
+// Only count a move when the value actually changes (clamped no-ops are free).
+function step(i,d){
+  const nv=Math.max(1,Math.min(99,coeffs[i]+d));
+  if(nv===coeffs[i])return;
+  moves++;setCoef(i,nv);
+}
+
+$("eq").addEventListener("click",e=>{
+  const b=e.target.closest("[data-step]");
+  if(b){const[i,d]=b.dataset.step.split(":").map(Number);focus=i;step(i,d);return;}
+  const sp=e.target.closest(".sp");if(sp){focus=+sp.dataset.i;render();}
+});
+// A typed edit counts as ONE move (committed once per focus session), matching
+// a single stepper nudge, so par is fair regardless of input style.
+let editSession=null;
+$("eq").addEventListener("focusin",e=>{
+  const inp=e.target.closest("[data-in]");
+  if(inp){const i=+inp.dataset.in;focus=i;editSession={i,start:coeffs[i],counted:false};}
+});
+$("eq").addEventListener("input",e=>{
+  const inp=e.target.closest("[data-in]");if(!inp)return;
+  const i=+inp.dataset.in,v=parseInt(inp.value,10);
+  if(!isNaN(v)){
+    coeffs[i]=Math.max(1,Math.min(99,v));
+    if(editSession&&editSession.i===i&&!editSession.counted&&coeffs[i]!==editSession.start){
+      moves++;editSession.counted=true;
+    }
+    // refresh derived views only — leave the <input> being typed into intact
+    renderViews();writeHash();
+  }
+});
+$("eq").addEventListener("focusout",e=>{
+  const inp=e.target.closest("[data-in]");
+  if(inp){editSession=null;renderEq();} // resync clamped/blank display
+});
+
+function resetBoard(){wonThisBoard=false;R.__won=false;coeffs=coeffs.map(()=>1);moves=0;render();writeHash();}
+function reveal(){
+  if(!answer){toast("This equation cannot be balanced.");return;}
+  revealed=true;wonThisBoard=true;
+  if(streak>0){streak=0;store.set("stoichionStreak",0);toast("Answer revealed — streak reset to 0.");}
+  else toast("Answer revealed.");
+  coeffs=answer.slice();render();writeHash();
+}
+
+$("btnNext").onclick=()=>{wonThisBoard=false;dealNext(false);};
+$("btnDaily").onclick=()=>{wonThisBoard=false;dealNext(true);};
+$("btnReset").onclick=resetBoard;
+$("btnReveal").onclick=reveal;
+$("btnShare").onclick=()=>{
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(location.href).then(
+      ()=>toast("Board link copied"),
+      ()=>toast("Copy failed — link is in the address bar"));
+  }else toast("Copy unavailable — link is in the address bar");
+};
+$("btnLoad").onclick=loadCustom;
+$("customEq").addEventListener("keydown",e=>{if(e.key==="Enter")loadCustom();});
+
+function loadCustom(){
+  const raw=$("customEq").value.trim();if(!raw)return;
+  const m=raw.split(/->|=|→/);
+  if(m.length!==2){toast("Use  A + B -> C + D");return;}
+  const rr=m[0].split("+").map(s=>s.trim()).filter(Boolean);
+  const pp=m[1].split("+").map(s=>s.trim()).filter(Boolean);
+  try{rr.concat(pp).forEach(parseFormula);}catch(err){toast("Parse error: "+err);return;}
+  wonThisBoard=false;loadReaction(rr,pp,"Custom equation","cu",null,0);
+}
+
+/* keyboard */
+document.addEventListener("keydown",e=>{
+  const k=e.key;
+  if(e.target.tagName==="INPUT"){if(k==="Enter"){e.target.blur();render();}return;}
+  if(k>="1"&&k<="9"){const i=+k-1;if(i<coeffs.length){focus=i;render();e.preventDefault();}return;}
+  if(k==="ArrowUp"||k==="ArrowRight"){step(focus,1);e.preventDefault();}
+  else if(k==="ArrowDown"||k==="ArrowLeft"){step(focus,-1);e.preventDefault();}
+  else if(k==="Enter"){render();}
+  else if(k==="r"||k==="R"){resetBoard();}
+  else if(k==="n"||k==="N"){wonThisBoard=false;dealNext(false);}
+});
+
+/* ---------- hash ---------- */
+function writeHash(){
+  const c=coeffs.join("-");
+  let h;
+  if(cls==="cu")h="eq="+encodeURIComponent(R.join("+")+">"+P.join("+"))+"&c="+c+"&par="+par;
+  else{const id=DECK.findIndex(d=>d[2].join("+")===R.join("+")&&d[3].join("+")===P.join("+"));
+    h="id="+id+"&c="+c+"&par="+par;}
+  history.replaceState(null,"","#"+h);
+}
+function readHash(){
+  const h=location.hash.slice(1);if(!h)return false;
+  const q={};h.split("&").forEach(kv=>{const[a,b]=kv.split("=");q[a]=decodeURIComponent(b||"");});
+  let c=q.c?q.c.split("-").map(Number):null;
+  if(c&&c.some(x=>!Number.isFinite(x)))c=null;
+  const par=q.par!=null?+q.par:null;
+  if(q.id!=null&&DECK[+q.id]){const[cl,nm,rr,pp]=DECK[+q.id];loadReaction(rr,pp,nm,cl,c,par);return true;}
+  if(q.eq){const m=q.eq.split(/>|->|=/);if(m.length===2){
+    const rr=m[0].split("+").filter(Boolean),pp=m[1].split("+").filter(Boolean);
+    try{rr.concat(pp).forEach(parseFormula);loadReaction(rr,pp,"Custom equation","cu",c,par);return true;}catch(e){}
+  }}
+  return false;
+}
+
+/* toast */
+let tt;function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");
+  clearTimeout(tt);tt=setTimeout(()=>t.classList.remove("show"),2600);}
+
+/* ---------- build-time unit check (console) ---------- */
+console.assert(Math.abs(molarMass("H2O")-18.015)<0.01,"H2O");
+console.assert(Math.abs(molarMass("CO2")-44.009)<0.01,"CO2");
+console.assert(balance(["CH4","O2"],["CO2","H2O"]).coeffs+""==="1,2,1,2","CH4 balance");
+
+/* ---------- go ---------- */
+if(!readHash())dealNext(false);
+</script>
+</body>
+</html>

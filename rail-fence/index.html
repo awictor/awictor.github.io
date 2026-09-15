@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RailFence — Rail Fence Cipher Encoder / Decoder</title>
+<meta name="description" content="Encode and decode text with the Rail Fence (zigzag) transposition cipher for any number of rails, with a live zigzag preview. 100% offline, nothing leaves your browser.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('railfence-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#7e22ce;
+    --bg:#f7f4fb; --card:#ffffff; --fg:#1c1526; --muted:#635772; --line:#e9e2f2; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#100b17; --card:#191221; --fg:#f0eaf7; --muted:#998cac; --line:#261d33; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:700px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#581c87);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:700px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  textarea,input{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  textarea{min-height:90px;resize:vertical;font-size:1.05rem}
+  .modes{display:flex;gap:6px;margin:14px 0}
+  .modes button{flex:1;padding:9px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;cursor:pointer;font:inherit}
+  .modes button.active{background:var(--c);color:#fff;border-color:var(--c)}
+  .railrow{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center}
+  .out{margin-top:6px;background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--c);border-radius:8px;padding:12px;min-height:46px;white-space:pre-wrap;word-break:break-all;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  .zig{margin-top:14px;overflow-x:auto;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:.9rem;line-height:1.5;white-space:pre;color:var(--muted)}
+  .zig b{color:var(--c)}
+  .copy{margin-top:10px;background:var(--c);color:#fff;border:0;border-radius:8px;padding:9px 16px;cursor:pointer;font:inherit}
+  .err{color:#dc2626;font-size:.85rem;margin-top:8px}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:700px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🚧</div>
+    <div><h1>RailFence</h1><div class="sub">Rail fence (zigzag) cipher</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="modes">
+      <button id="mEnc" class="active" type="button">Encode</button>
+      <button id="mDec" type="button">Decode</button>
+    </div>
+    <div class="railrow" style="margin-bottom:14px">
+      <div><label for="text">Text</label><textarea id="text" spellcheck="false">WEAREDISCOVEREDFLEEATONCE</textarea></div>
+    </div>
+    <label for="rails">Rails</label>
+    <input type="number" id="rails" value="3" min="1" max="20" step="1">
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card">
+    <label>Result</label>
+    <div class="out mono" id="out"></div>
+    <button class="copy" id="copyBtn" type="button">Copy</button>
+    <div class="zig" id="zig"></div>
+  </div>
+</main>
+<footer>
+  The rail fence cipher writes text in a zigzag across a number of "rails", then reads it off row by row. A transposition cipher — fun and educational, <strong>not secure</strong>. All characters (including spaces) are preserved. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/rail-fence">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  function checkRails(rails){
+    const r = Number(rails);
+    if(!Number.isInteger(r) || r < 1) throw new Error('rails must be a positive integer');
+    return r;
+  }
+
+  // Row index for each position in a zigzag over `rails` rails.
+  function railPattern(length, rails){
+    const pattern = [];
+    let r = 0, dir = 1;
+    for(let i = 0; i < length; i++){
+      pattern.push(r);
+      if(rails > 1){
+        if(r === 0) dir = 1;
+        else if(r === rails - 1) dir = -1;
+        r += dir;
+      }
+    }
+    return pattern;
+  }
+
+  function encode(text, rails){
+    const n = checkRails(rails);
+    const s = String(text);
+    if(n === 1) return s;
+    const rows = Array.from({ length: n }, () => []);
+    railPattern(s.length, n).forEach((row, i) => rows[row].push(s[i]));
+    return rows.map(a => a.join('')).join('');
+  }
+
+  function decode(cipher, rails){
+    const n = checkRails(rails);
+    const s = String(cipher);
+    if(n === 1) return s;
+    const pattern = railPattern(s.length, n);
+    const counts = Array(n).fill(0);
+    pattern.forEach(p => counts[p]++);
+    const rows = []; let idx = 0;
+    for(let k = 0; k < n; k++){ rows.push(s.slice(idx, idx + counts[k]).split('')); idx += counts[k]; }
+    const pos = Array(n).fill(0);
+    return pattern.map(p => rows[p][pos[p]++]).join('');
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('out')){
+    const $ = id => document.getElementById(id);
+    const esc = s => s.replace(/[&<>]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]));
+    let mode = 'enc';
+
+    function drawZig(text, rails){
+      if(rails < 2 || !text){ $('zig').textContent = ''; return; }
+      const pat = railPattern(text.length, rails);
+      const grid = Array.from({ length: rails }, () => Array(text.length).fill(' '));
+      pat.forEach((row, i) => grid[row][i] = text[i]);
+      $('zig').innerHTML = grid.map(r => r.map(c => c === ' ' ? '·' : `<b>${esc(c)}</b>`).join('')).join('\n');
+    }
+    function render(){
+      try{
+        const rails = +$('rails').value;
+        const src = $('text').value;
+        const result = mode === 'enc' ? encode(src, rails) : decode(src, rails);
+        $('out').textContent = result;
+        // preview always shows the encode zigzag of whatever text is in the box
+        drawZig(mode === 'enc' ? src : result, rails);
+        $('err').textContent = '';
+      }catch(e){ $('out').textContent = ''; $('zig').textContent = ''; $('err').textContent = e.message; }
+    }
+    function setMode(m){ mode = m; $('mEnc').classList.toggle('active', m === 'enc'); $('mDec').classList.toggle('active', m === 'dec'); render(); }
+    $('mEnc').addEventListener('click', () => setMode('enc'));
+    $('mDec').addEventListener('click', () => setMode('dec'));
+    ['text', 'rails'].forEach(id => $(id).addEventListener('input', render));
+    $('copyBtn').addEventListener('click', () => {
+      navigator.clipboard?.writeText($('out').textContent);
+      $('copyBtn').textContent = 'Copied!'; setTimeout(() => $('copyBtn').textContent = 'Copy', 1200);
+    });
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('railfence-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { railPattern, encode, decode };
+</script>
+</body>
+</html>

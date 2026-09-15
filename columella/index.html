@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Columella — procedural seashell generator</title>
+<style>
+  :root{
+    --bg:#181410; --panel:#221c15; --panel2:#2c241a; --ink:#f2e9d8; --dim:#a89b82;
+    --accent:#d98a3d; --line:#3a3025;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:radial-gradient(1200px 700px at 70% -10%,#241d14,#141009);color:var(--ink);
+    font:14px/1.45 "Iowan Old Style",Palatino,"Georgia",serif;-webkit-font-smoothing:antialiased}
+  #app{display:grid;grid-template-columns:320px 1fr;min-height:100%}
+  aside{background:linear-gradient(180deg,var(--panel),#1c160f);border-right:1px solid var(--line);
+    padding:18px 18px 40px;overflow:auto}
+  h1{font-size:22px;letter-spacing:.5px;margin:0 0 2px;font-weight:600}
+  h1 span{color:var(--accent)}
+  .tag{color:var(--dim);font-size:12px;font-style:italic;margin-bottom:16px}
+  .grp{margin:14px 0;padding-top:10px;border-top:1px solid var(--line)}
+  .grp>label{display:block;text-transform:uppercase;letter-spacing:1.5px;font-size:10px;color:var(--accent);margin-bottom:8px;font-family:ui-monospace,monospace}
+  .ctl{display:flex;align-items:center;gap:8px;margin:6px 0}
+  .ctl label{flex:0 0 96px;font-size:12px;color:var(--dim)}
+  .ctl input[type=range]{flex:1;accent-color:var(--accent)}
+  .ctl .val{flex:0 0 34px;text-align:right;font-family:ui-monospace,monospace;font-size:11px;color:var(--ink)}
+  select,button{font-family:inherit}
+  select{width:100%;background:var(--panel2);color:var(--ink);border:1px solid var(--line);
+    border-radius:6px;padding:7px 8px;font-size:13px}
+  .btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+  button{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:6px;
+    padding:8px 11px;cursor:pointer;font-size:12px;transition:.15s;flex:1}
+  button:hover{border-color:var(--accent);color:#fff}
+  button.primary{background:var(--accent);color:#1a1207;border-color:var(--accent);font-weight:600}
+  button.primary:hover{filter:brightness(1.08)}
+  .presets{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .presets button{flex:none;font-size:11px;padding:7px 6px}
+  main{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;gap:14px}
+  #stage{border-radius:10px;box-shadow:0 24px 60px rgba(0,0,0,.55);background:#000;max-width:100%;height:auto}
+  .transport{display:flex;align-items:center;gap:12px;width:520px;max-width:100%}
+  .transport input[type=range]{flex:1;accent-color:var(--accent)}
+  .transport button{flex:0 0 auto;width:44px}
+  .cap{font-style:italic;color:var(--dim);font-size:13px;text-align:center;min-height:18px}
+  .cap b{color:var(--ink);font-style:normal}
+  /* gallery */
+  #gallery{position:absolute;inset:0;background:rgba(12,9,6,.96);display:none;flex-direction:column;
+    padding:26px 30px;z-index:5}
+  #gallery.on{display:flex}
+  #gallery h2{margin:0 0 4px;font-size:18px}
+  #gallery .sub{color:var(--dim);font-size:12px;margin-bottom:16px;font-style:italic}
+  #tray{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;flex:1;align-content:start}
+  .cell{background:linear-gradient(180deg,#efe6d2,#e2d6bd);border:1px solid #cbb;border-radius:6px;
+    padding:8px;cursor:pointer;text-align:center;box-shadow:0 6px 16px rgba(0,0,0,.4);transition:.15s}
+  .cell:hover{transform:translateY(-3px);box-shadow:0 12px 26px rgba(0,0,0,.5)}
+  .cell canvas{width:100%;display:block;border-radius:3px}
+  .cell .lbl{color:#2a2015;font-size:11px;margin-top:6px;font-style:italic}
+  .cell .lbl b{font-style:normal}
+  #closeGal{position:absolute;top:18px;right:22px;flex:none;width:auto}
+  .hint{color:var(--dim);font-size:11px;margin-top:8px;line-height:1.4}
+  .tlabel{flex:0 0 auto;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);font-family:ui-monospace,monospace}
+  @media(max-width:760px){
+    #app{grid-template-columns:1fr}
+    aside{border-right:none;border-bottom:1px solid var(--line)}
+    main{padding:16px}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside>
+    <h1><span>Columella</span></h1>
+    <div class="tag">Grow a seashell from a genus grammar and a pigment cellular automaton.</div>
+
+    <div class="grp">
+      <label>Genus grammar</label>
+      <select id="genus"></select>
+    </div>
+
+    <div class="grp">
+      <label>Form</label>
+      <div id="formCtls"></div>
+    </div>
+
+    <div class="grp">
+      <label>Pigment automaton</label>
+      <div id="caCtls"></div>
+    </div>
+
+    <div class="grp">
+      <label>Museum lighting</label>
+      <div id="lightCtls"></div>
+      <div class="ctl"><label>backdrop</label><select id="backdrop" style="flex:1"></select></div>
+    </div>
+
+    <div class="grp">
+      <label>Curated presets</label>
+      <div class="presets" id="presets"></div>
+    </div>
+
+    <div class="grp">
+      <label>Specimen</label>
+      <div class="btns">
+        <button class="primary" id="rand">&#x2684;&#xFE0E; Randomize</button>
+        <button id="galBtn">▦ Gallery</button>
+      </div>
+      <div class="btns">
+        <button id="pngBtn">↓ PNG</button>
+        <button id="svgBtn">↓ SVG</button>
+      </div>
+      <div class="hint">Every knob rides in the URL hash — copy the link to share this exact shell.</div>
+    </div>
+  </aside>
+
+  <main>
+    <canvas id="stage" width="520" height="560"></canvas>
+    <div class="transport">
+      <button id="play" title="Play accretion" aria-label="Play growth animation">▶&#xFE0E;</button>
+      <input type="range" id="grow" min="0" max="1" step="0.001" value="1" title="Scrub shell growth" aria-label="Growth (accretion)">
+      <span class="tlabel">growth</span>
+    </div>
+    <div class="cap" id="caption"></div>
+
+    <div id="gallery">
+      <button id="closeGal">✕ Close</button>
+      <h2>Specimen tray</h2>
+      <div class="sub">Nine related seeds. Click a shell to load it.</div>
+      <div id="tray"></div>
+    </div>
+  </main>
+</div>
+
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const lerp=(a,b,t)=>a+(b-a)*t;
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function hsl2rgb(h,s,l){h/=360;const q=l<.5?l*(1+s):l+s-l*s,p=2*l-q;const f=t=>{t=(t%1+1)%1;return t<1/6?p+(q-p)*6*t:t<.5?q:t<2/3?p+(q-p)*(2/3-t)*6:p;};return[f(h+1/3)*255,f(h)*255,f(h-1/3)*255];}
+
+// ---- Genus grammar: geometric priors per archetype -----------------------
+const GENERA={
+  cone:{name:"Cone",G:1.85,D:0.52,V:1.35,whorls:7,ribs:0},
+  auger:{name:"Auger",G:1.34,D:0.34,V:2.7,whorls:11,ribs:16},
+  whelk:{name:"Whelk",G:1.7,D:0.72,V:1.5,whorls:6,ribs:11},
+  cowrie:{name:"Cowrie",G:2.55,D:0.16,V:0.72,whorls:4,ribs:0},
+  turban:{name:"Turban",G:1.82,D:0.78,V:1.08,whorls:6,ribs:9},
+  olive:{name:"Olive",G:1.56,D:0.4,V:1.75,whorls:8,ribs:0}
+};
+const BACKDROPS={
+  parchment:["#efe6d0","#d9cba8"],
+  studio:["#3a3a40","#141417"],
+  ink:["#20242c","#0a0c10"],
+  slate:["#5a6572","#232a33"],
+  bone:["#f4f1ea","#cfc7b5"]
+};
+const PRESETS=[
+  {name:"Textile Cone",genus:"cone",whorls:7,spire:.95,flare:1.05,ribDensity:0,caRule:.32,caSat:.5,hue:34,gloss:.62,specular:.72,selfShadow:.5,dropShadow:.42,backdrop:"parchment"},
+  {name:"Olive Flame",genus:"olive",whorls:8,spire:1.1,flare:1,ribDensity:0,caRule:.52,caSat:.6,hue:26,gloss:.7,specular:.8,selfShadow:.45,dropShadow:.4,backdrop:"bone"},
+  {name:"Banded Whelk",genus:"whelk",whorls:6,spire:1,flare:1,ribDensity:.6,caRule:.18,caSat:.42,hue:30,gloss:.5,specular:.6,selfShadow:.55,dropShadow:.45,backdrop:"studio"},
+  {name:"Marble Cone",genus:"cone",whorls:8,spire:1.05,flare:1,ribDensity:0,caRule:.7,caSat:.55,hue:205,gloss:.66,specular:.75,selfShadow:.5,dropShadow:.4,backdrop:"slate"},
+  {name:"Auger Tower",genus:"auger",whorls:11,spire:1.15,flare:1,ribDensity:.7,caRule:.25,caSat:.5,hue:20,gloss:.55,specular:.7,selfShadow:.5,dropShadow:.42,backdrop:"parchment"},
+  {name:"Jade Turban",genus:"turban",whorls:6,spire:1,flare:1,ribDensity:.5,caRule:.4,caSat:.5,hue:150,gloss:.6,specular:.72,selfShadow:.55,dropShadow:.4,backdrop:"ink"},
+  {name:"Porcelain Cowrie",genus:"cowrie",whorls:4,spire:.85,flare:1,ribDensity:0,caRule:.45,caSat:.45,hue:305,gloss:.78,specular:.85,selfShadow:.4,dropShadow:.45,backdrop:"bone"},
+  {name:"Tiger Cowrie",genus:"cowrie",whorls:4,spire:.9,flare:1.02,ribDensity:0,caRule:.6,caSat:.62,hue:38,gloss:.72,specular:.82,selfShadow:.42,dropShadow:.44,backdrop:"studio"}
+];
+
+const FORM=[["whorls","whorls",3,10,1],["spire","spire height",.6,1.6,.01],["flare","aperture flare",.85,1.25,.01],["ribDensity","rib density",0,1,.01]];
+const CA=[["caRule","CA rule",0,1,.01],["caSat","pigment",0,1,.01],["hue","hue",0,360,1]];
+const LIGHT=[["gloss","glossiness",0,1,.01],["specular","specular",0,1,.01],["selfShadow","self-shadow",0,1,.01],["dropShadow","drop shadow",0,1,.01]];
+
+const Mcols=170, SPT=36;  // CA columns, spiral steps per turn
+
+// ---- build a shell model from a parameter set ----------------------------
+function buildShell(P){
+  const gp=GENERA[P.genus];
+  const Geff=1+(gp.G-1)*P.flare, k=Math.log(Geff)/(2*Math.PI);
+  const N=Math.max(2,Math.round(P.whorls*SPT)), dth=2*Math.PI/SPT;
+  const disks=[]; let minx=1e9,maxx=-1e9,miny=1e9,maxy=-1e9;
+  for(let i=0;i<N;i++){
+    const th=i*dth, g=Math.exp(k*th);
+    const cx=gp.D*g*Math.cos(th), cy=gp.V*P.spire*(g-1)/k, R=g;
+    disks.push({cx,cy,R,i});
+    minx=Math.min(minx,cx-R);maxx=Math.max(maxx,cx+R);
+    miny=Math.min(miny,cy-R);maxy=Math.max(maxy,cy+R);
+  }
+  const bbox={minx,maxx,miny,maxy,w:maxx-minx,h:maxy-miny};
+  // pigment cellular automaton (activator / inhibitor, wrap-around lip)
+  const rng=mulberry32(P.seed>>>0);
+  const aR=2, iR=Math.round(3+P.caRule*8);
+  const wi=((2*aR+1)/(2*iR+1))*(0.72+0.55*P.caRule);
+  const bias=-0.12+(P.caSat-0.5)*0.95;
+  let row=new Array(Mcols); for(let j=0;j<Mcols;j++)row[j]=rng()<0.5?1:0;
+  const rows=[row.slice()];
+  for(let i=1;i<N;i++){
+    const nx=new Array(Mcols);
+    for(let j=0;j<Mcols;j++){
+      let s=bias;
+      for(let d=-aR;d<=aR;d++)s+=row[(j+d+Mcols)%Mcols];
+      for(let d=-iR;d<=iR;d++)s-=wi*row[(j+d+Mcols)%Mcols];
+      nx[j]=s>0?1:0;
+    }
+    // occasional seeded perturbation keeps fronts alive -> tents/flames
+    if(rng()<0.10){const p=(rng()*Mcols)|0;nx[p]=1-nx[p];}
+    row=nx;rows.push(row.slice());
+  }
+  // bake pigment image (cols x rows) coloured for this hue
+  const cv=document.createElement("canvas");cv.width=Mcols;cv.height=N;
+  const cc=cv.getContext("2d"), img=cc.createImageData(Mcols,N);
+  const base=hsl2rgb(P.hue,0.30,0.83), pig=hsl2rgb((P.hue+8)%360,0.66,0.30);
+  for(let i=0;i<N;i++)for(let j=0;j<Mcols;j++){
+    const o=(i*Mcols+j)*4, c=rows[i][j]?pig:base;
+    img.data[o]=c[0];img.data[o+1]=c[1];img.data[o+2]=c[2];img.data[o+3]=255;
+  }
+  cc.putImageData(img,0,0);
+  return {disks,bbox,ca:cv,N,ribs:Math.round(gp.ribs*P.ribDensity)};
+}
+
+function fit(model,W,H,innerY){
+  const b=model.bbox, pad=0.86;
+  const s=Math.min(W*pad/b.w,H*innerY*pad/b.h);
+  const ox=W/2-(b.minx+b.w/2)*s;
+  return {s,ox,oy:H*innerY/2-(b.miny+b.h/2)*s};
+}
+
+function paintBackdrop(ctx,W,H,name){
+  const c=BACKDROPS[name]||BACKDROPS.parchment;
+  const g=ctx.createRadialGradient(W*0.42,H*0.34,H*0.05,W*0.5,H*0.55,H*0.95);
+  g.addColorStop(0,c[0]);g.addColorStop(1,c[1]);
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  if(name==="parchment"||name==="bone"){ // subtle vignette speckle for paper feel
+    ctx.fillStyle="rgba(90,70,40,.05)";
+    for(let i=0;i<40;i++)ctx.fillRect((i*97%W),(i*61%H),2,2);
+  }
+}
+
+// ---- render a shell model to a context ------------------------------------
+function render(ctx,W,H,model,P,progress,opts){
+  opts=opts||{};
+  const innerY=opts.label?0.80:1;
+  if(opts.bg!==false)paintBackdrop(ctx,W,H,P.backdrop);
+  else{ctx.clearRect(0,0,W,H);}
+  const F=fit(model,W,H,innerY), s=F.s;
+  const D=model.disks, last=Math.max(1,Math.round(progress*D.length));
+  const cxOf=d=>F.ox+d.cx*s, cyOf=d=>F.oy+d.cy*s, rOf=d=>d.R*s;
+  // ground drop shadow
+  if(P.dropShadow>0){
+    const bx=F.ox+((model.bbox.minx+model.bbox.maxx)/2)*s;
+    const by=F.oy+model.bbox.maxy*s;
+    const gw=model.bbox.w*s*0.55, gh=gw*0.22;
+    const g=ctx.createRadialGradient(bx,by,0,bx,by,gw);
+    g.addColorStop(0,`rgba(0,0,0,${0.5*P.dropShadow})`);g.addColorStop(1,"rgba(0,0,0,0)");
+    ctx.save();ctx.translate(bx,by);ctx.scale(1,gh/gw);ctx.fillStyle=g;
+    ctx.beginPath();ctx.arc(0,0,gw,0,7);ctx.fill();ctx.restore();
+  }
+  ctx.imageSmoothingEnabled=true;
+  for(let n=0;n<last;n++){
+    const d=D[n], x=cxOf(d), y=cyOf(d), r=rOf(d);
+    if(r<0.4)continue;
+    ctx.save();
+    ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.clip();
+    // pigment band for this growth step
+    ctx.drawImage(model.ca,0,d.i,Mcols,1,x-r,y-r,2*r,2*r);
+    // cylinder shading (light from upper-left) — multiply
+    ctx.globalCompositeOperation="multiply";
+    const cg=ctx.createLinearGradient(x-r,0,x+r,0);
+    cg.addColorStop(0,"rgb(120,120,120)");cg.addColorStop(0.32,"rgb(255,255,255)");
+    cg.addColorStop(1,"rgb(70,70,70)");
+    ctx.fillStyle=cg;ctx.fillRect(x-r,y-r,2*r,2*r);
+    // axial ribs
+    if(model.ribs>0){
+      ctx.strokeStyle="rgba(60,45,25,0.28)";ctx.lineWidth=Math.max(1,r*0.03);
+      for(let rb=0;rb<model.ribs;rb++){const rx=x-r+(rb+0.5)/model.ribs*2*r;
+        ctx.beginPath();ctx.moveTo(rx,y-r);ctx.lineTo(rx,y+r);ctx.stroke();}
+    }
+    // self-shadow at the whorl seam (top of tube, cast by previous whorl)
+    ctx.globalCompositeOperation="source-over";
+    const sg=ctx.createLinearGradient(0,y-r,0,y+r*0.1);
+    sg.addColorStop(0,`rgba(20,12,4,${0.65*P.selfShadow})`);sg.addColorStop(1,"rgba(0,0,0,0)");
+    ctx.fillStyle=sg;ctx.fillRect(x-r,y-r,2*r,r*1.1);
+    // specular sheen
+    ctx.globalCompositeOperation="lighter";
+    // gloss tightens + brightens the highlight (matte->wet); specular sets its overall strength
+    const hx=x-r*0.42,hy=y-r*0.42, hr=r*(1.2-0.6*P.gloss);
+    const hg=ctx.createRadialGradient(hx,hy,0,hx,hy,hr);
+    hg.addColorStop(0,`rgba(255,252,240,${(0.4+0.4*P.gloss)*P.specular})`);hg.addColorStop(0.5,`rgba(255,252,240,${0.12*P.specular})`);
+    hg.addColorStop(1,"rgba(255,255,255,0)");
+    ctx.fillStyle=hg;ctx.beginPath();ctx.arc(hx,hy,hr,0,7);ctx.fill();
+    ctx.globalCompositeOperation="source-over";
+    ctx.restore();
+    // dark seam rim + a bright gloss rim whose crispness rises with glossiness
+    ctx.strokeStyle=`rgba(30,20,8,${0.25})`;ctx.lineWidth=1;
+    ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.stroke();
+    if(P.gloss>0){
+      ctx.strokeStyle=`rgba(255,248,232,${0.35*P.gloss})`;ctx.lineWidth=Math.max(0.5,r*0.02*P.gloss);
+      ctx.beginPath();ctx.arc(x,y,r*0.985,-2.3,-0.4);ctx.stroke();
+    }
+  }
+  if(progress<0.999){ // highlight live growing lip
+    const d=D[last-1], x=cxOf(d),y=cyOf(d),r=rOf(d);
+    ctx.strokeStyle="rgba(255,235,190,0.9)";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(x,y,r,-1.9,1.9);ctx.stroke();
+  }
+  if(opts.label)drawLabel(ctx,W,H,P);
+}
+
+function labelText(P){
+  return `${GENERA[P.genus].name} · seed ${P.seed} · ${P.whorls} whorls`;
+}
+function drawLabel(ctx,W,H,P){
+  const y=H*0.80;
+  ctx.fillStyle="#efe6d0";ctx.fillRect(0,y,W,H-y);
+  ctx.fillStyle="#d98a3d";ctx.fillRect(0,y,W,3);
+  ctx.textBaseline="middle";
+  ctx.fillStyle="#2a2015";ctx.textAlign="left";
+  ctx.font=`italic 600 ${Math.round(H*0.032)}px Georgia,serif`;
+  ctx.fillText(P.presetName||"Wild specimen",26,y+(H-y)*0.32);
+  ctx.font=`${Math.round(H*0.021)}px Georgia,serif`;ctx.fillStyle="#5a4a33";
+  ctx.fillText(labelText(P),26,y+(H-y)*0.60);
+  ctx.fillText(`flare ${P.flare.toFixed(2)}  spire ${P.spire.toFixed(2)}  CA ${P.caRule.toFixed(2)}/${P.caSat.toFixed(2)}  hue ${Math.round(P.hue)}°`,26,y+(H-y)*0.82);
+  ctx.textAlign="right";ctx.font=`italic ${Math.round(H*0.026)}px Georgia,serif`;ctx.fillStyle="#b06a24";
+  ctx.fillText("COLUMELLA",W-26,y+(H-y)*0.5);
+  ctx.textAlign="left";
+}
+
+// ---- state & UI -----------------------------------------------------------
+let P=null, MODEL=null, progress=1, playing=false, raf=0;
+function defaults(){return{genus:"cone",whorls:7,spire:1,flare:1,ribDensity:0.4,caRule:.35,caSat:.5,hue:34,gloss:.62,specular:.72,selfShadow:.5,dropShadow:.42,backdrop:"parchment",seed:1337,presetName:"Textile Cone"};}
+
+function applySeed(seed){
+  const r=mulberry32(seed>>>0), keys=Object.keys(GENERA);
+  const gp=keys[(r()*keys.length)|0];
+  P={genus:gp,whorls:GENERA[gp].whorls+Math.round((r()-0.5)*4),
+    spire:+lerp(0.75,1.4,r()).toFixed(2),flare:+lerp(0.9,1.18,r()).toFixed(2),
+    ribDensity:+r().toFixed(2),caRule:+r().toFixed(2),caSat:+lerp(0.4,0.66,r()).toFixed(2),
+    hue:Math.round(r()*360),gloss:+lerp(0.45,0.8,r()).toFixed(2),specular:+lerp(0.5,0.9,r()).toFixed(2),
+    selfShadow:+lerp(0.35,0.6,r()).toFixed(2),dropShadow:+lerp(0.35,0.5,r()).toFixed(2),
+    backdrop:Object.keys(BACKDROPS)[(r()*5)|0],seed:seed,presetName:"Wild specimen №"+seed};
+  P.whorls=clamp(P.whorls,3,10);
+}
+
+function buildControls(){
+  $("genus").innerHTML=Object.keys(GENERA).map(k=>`<option value="${k}">${GENERA[k].name}</option>`).join("");
+  $("backdrop").innerHTML=Object.keys(BACKDROPS).map(k=>`<option value="${k}">${k}</option>`).join("");
+  const mk=(host,defs)=>{$(host).innerHTML=defs.map(([k,l,mn,mx,st])=>
+    `<div class="ctl"><label>${l}</label><input type="range" data-k="${k}" min="${mn}" max="${mx}" step="${st}"><span class="val" data-v="${k}"></span></div>`).join("");};
+  mk("formCtls",FORM);mk("caCtls",CA);mk("lightCtls",LIGHT);
+  document.querySelectorAll('input[type=range][data-k]').forEach(inp=>{
+    inp.addEventListener("input",()=>{P[inp.dataset.k]=+inp.value;P.presetName=null;syncVals();rebuild();});
+  });
+  $("genus").addEventListener("change",e=>{P.genus=e.target.value;P.presetName=null;rebuild();});
+  $("backdrop").addEventListener("change",e=>{P.backdrop=e.target.value;draw();});
+  $("presets").innerHTML=PRESETS.map((p,i)=>`<button data-p="${i}">${p.name}</button>`).join("");
+  document.querySelectorAll('#presets button').forEach(b=>b.addEventListener("click",()=>{
+    const src=PRESETS[+b.dataset.p];P=Object.assign(defaults(),src,{seed:P.seed,presetName:src.name});rebuild();syncUI();}));
+}
+function syncVals(){document.querySelectorAll('span[data-v]').forEach(s=>{
+  const v=P[s.dataset.v];s.textContent=(v>=1&&v%1===0)?v:(+v).toFixed(2);});}
+function syncUI(){
+  $("genus").value=P.genus;$("backdrop").value=P.backdrop;
+  document.querySelectorAll('input[type=range][data-k]').forEach(inp=>inp.value=P[inp.dataset.k]);
+  syncVals();
+}
+
+function setupHiDPI(){
+  const c=$("stage"), dpr=Math.min(window.devicePixelRatio||1,2), cssW=520, cssH=560;
+  c.style.width=cssW+"px";            // CSS max-width:100% + height:auto keep it responsive
+  c.width=Math.round(cssW*dpr);c.height=Math.round(cssH*dpr); // crisp backing store on HiDPI
+}
+function rebuild(){MODEL=buildShell(P);draw();updateHash();}
+function draw(){
+  const c=$("stage");render(c.getContext("2d"),c.width,c.height,MODEL,P,progress,{});
+  $("caption").innerHTML=`<b>${P.presetName||GENERA[P.genus].name}</b> — ${labelText(P)}`;
+  $("grow").value=progress;
+}
+function encodeState(){try{return btoa(unescape(encodeURIComponent(JSON.stringify(P)))).replace(/=+$/,"");}catch(e){return String(P.seed);}}
+function decodeState(str){try{const o=JSON.parse(decodeURIComponent(escape(atob(str))));return(o&&o.genus&&GENERA[o.genus])?o:null;}catch(e){return null;}}
+function updateHash(){const h="#"+encodeState();if(location.hash!==h)location.replace(h);}
+
+// ---- animation ------------------------------------------------------------
+function tick(){
+  if(!playing)return;
+  progress+=0.006;
+  if(progress>=1){progress=1;playing=false;$("play").textContent="▶︎";}
+  draw();
+  if(playing)raf=requestAnimationFrame(tick);
+}
+$("play").addEventListener("click",()=>{
+  playing=!playing;
+  if(playing){$("play").textContent="⏸︎";if(progress>=1)progress=0;raf=requestAnimationFrame(tick);}
+  else $("play").textContent="▶︎";
+});
+$("grow").addEventListener("input",e=>{playing=false;$("play").textContent="▶︎";progress=+e.target.value;draw();});
+
+// ---- gallery --------------------------------------------------------------
+$("galBtn").addEventListener("click",openGallery);
+$("closeGal").addEventListener("click",()=>$("gallery").classList.remove("on"));
+$("gallery").addEventListener("click",e=>{if(e.target===$("gallery"))$("gallery").classList.remove("on");});
+document.addEventListener("keydown",e=>{if(e.key==="Escape")$("gallery").classList.remove("on");});
+function openGallery(){
+  const tray=$("tray");tray.innerHTML="";
+  const base=P.seed-4;
+  for(let i=0;i<9;i++){
+    const seed=base+i;
+    const savedP=P;applySeed(seed);const gp=P,gm=buildShell(P);
+    const cell=document.createElement("div");cell.className="cell";
+    const cv=document.createElement("canvas");cv.width=200;cv.height=230;
+    render(cv.getContext("2d"),200,230,gm,gp,1,{});
+    cell.appendChild(cv);
+    const lb=document.createElement("div");lb.className="lbl";
+    lb.innerHTML=`<b>${GENERA[gp.genus].name}</b> · ${seed}`;cell.appendChild(lb);
+    cell.addEventListener("click",()=>{applySeed(seed);rebuild();syncUI();$("gallery").classList.remove("on");});
+    tray.appendChild(cell);
+    P=savedP;
+  }
+  $("gallery").classList.add("on");
+}
+$("rand").addEventListener("click",()=>{applySeed((Math.random()*1e9)|0);progress=1;playing=false;$("play").textContent="▶︎";rebuild();syncUI();});
+
+// ---- export ---------------------------------------------------------------
+function exportCanvas(){
+  const W=900,H=1120,cv=document.createElement("canvas");cv.width=W;cv.height=H;
+  render(cv.getContext("2d"),W,H,MODEL,P,1,{label:true});
+  return cv;
+}
+$("pngBtn").addEventListener("click",()=>{
+  const a=document.createElement("a");
+  a.download=`columella_${P.genus}_${P.seed}.png`;a.href=exportCanvas().toDataURL("image/png");a.click();
+});
+$("svgBtn").addEventListener("click",()=>{
+  const W=900,H=1120,innerY=0.80;
+  // raster the shell (transparent bg) for the pattern fill
+  const sc=document.createElement("canvas");sc.width=W;sc.height=Math.round(H*innerY);
+  render(sc.getContext("2d"),W,sc.height,MODEL,P,1,{bg:false});
+  const png=sc.toDataURL("image/png");
+  // vector silhouette from disk extremes
+  const F=fit(MODEL,W,H,innerY),s=F.s,D=MODEL.disks;
+  const L=[],R2=[];
+  for(const d of D){const x=F.ox+d.cx*s,y=F.oy+d.cy*s,r=d.R*s;L.push([x-r,y]);R2.push([x+r,y]);}
+  const pts=L.concat(R2.reverse());
+  const poly=pts.map((p,i)=>(i?"L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join(" ")+" Z";
+  const bc=BACKDROPS[P.backdrop];
+  const esc=t=>t.replace(/&/g,"&amp;").replace(/</g,"&lt;");
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+<defs><radialGradient id="bg" cx="42%" cy="34%" r="95%"><stop offset="0" stop-color="${bc[0]}"/><stop offset="1" stop-color="${bc[1]}"/></radialGradient>
+<clipPath id="sil"><path d="${poly}"/></clipPath></defs>
+<rect width="${W}" height="${H*innerY}" fill="url(#bg)"/>
+<image clip-path="url(#sil)" x="0" y="0" width="${W}" height="${sc.height}" xlink:href="${png}"/>
+<path d="${poly}" fill="none" stroke="rgba(30,20,8,.35)" stroke-width="1.2"/>
+<rect y="${H*innerY}" width="${W}" height="${H*(1-innerY)}" fill="#efe6d0"/>
+<rect y="${H*innerY}" width="${W}" height="3" fill="#d98a3d"/>
+<text x="26" y="${H*innerY+70}" font-family="Georgia,serif" font-size="34" font-style="italic" font-weight="600" fill="#2a2015">${esc(P.presetName||"Wild specimen")}</text>
+<text x="26" y="${H*innerY+120}" font-family="Georgia,serif" font-size="22" fill="#5a4a33">${esc(labelText(P))}</text>
+<text x="26" y="${H*innerY+156}" font-family="Georgia,serif" font-size="22" fill="#5a4a33">flare ${P.flare.toFixed(2)}  spire ${P.spire.toFixed(2)}  CA ${P.caRule.toFixed(2)}/${P.caSat.toFixed(2)}  hue ${Math.round(P.hue)}°</text>
+<text x="${W-26}" y="${H*innerY+110}" text-anchor="end" font-family="Georgia,serif" font-size="30" font-style="italic" fill="#b06a24">COLUMELLA</text>
+</svg>`;
+  const a=document.createElement("a");
+  a.download=`columella_${P.genus}_${P.seed}.svg`;
+  a.href="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(svg);a.click();
+});
+
+// ---- boot -----------------------------------------------------------------
+buildControls();
+setupHiDPI();
+(function boot(){
+  const raw=location.hash.slice(1);
+  const st=(raw&&/[^0-9]/.test(raw))?decodeState(raw):null;
+  if(st){P=Object.assign(defaults(),st);}
+  else{const hs=parseInt(raw,10);if(!isNaN(hs))applySeed(hs);else P=defaults();}
+})();
+rebuild();syncUI();
+window.addEventListener("resize",()=>{setupHiDPI();draw();});
+</script>
+</body>
+</html>

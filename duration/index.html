@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Duration — humanize &amp; parse time durations</title>
+<meta name="description" content="Free offline duration tool. Convert seconds to a human-readable duration (1d 2h 3m 4s), parse durations like 1h30m or 01:30:00, and show h:mm:ss. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/duration/">
+<style>
+  :root{
+    --c:#0c4a6e; --bg:#f5f9fc; --fg:#0c1b26; --muted:#4e6575;
+    --card:#ffffff; --border:#d7e5ee; --code:#e7f0f6;
+  }
+  [data-theme="dark"]{
+    --bg:#0a141b; --fg:#e4eef4; --muted:#84a0b1; --card:#0f1f2a;
+    --border:#213544; --code:#152836;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#0ea5e9);display:grid;place-items:center;color:#fff;font-size:20px}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:720px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  input{width:100%;padding:13px 15px;border:1px solid var(--border);border-radius:12px;
+    background:var(--bg);color:var(--fg);font-size:1.2rem;font-family:ui-monospace,monospace}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .err{color:#dc2626;font-size:.86rem;margin:12px 0 0;min-height:1.1em}
+  .grid{margin-top:18px;display:grid;grid-template-columns:1fr 1fr;gap:1px;
+    background:var(--border);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .cell{background:var(--card);padding:14px 16px}
+  .cell.wide{grid-column:1 / -1}
+  .cell .k{font-size:.74rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .cell .v{font-family:ui-monospace,monospace;font-weight:700;font-size:1.2rem;margin-top:3px;color:var(--c);word-break:break-all}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+  .chips button{background:var(--code);border:1px solid var(--border);color:var(--fg);
+    border-radius:8px;padding:6px 12px;cursor:pointer;font-size:.8rem;font-family:ui-monospace,monospace}
+  .chips button:hover{border-color:var(--c);color:var(--c)}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('dur.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">⏳</div>
+  <div>
+    <h1>Duration</h1>
+    <p class="sub">Humanize &amp; parse time durations</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <label for="in">Seconds or a duration (e.g. 1h30m, 01:30:00, 90)</label>
+    <input id="in" value="93784" spellcheck="false" autocomplete="off" placeholder="1h 30m">
+    <p class="err" id="err"></p>
+    <div class="grid" id="out"></div>
+    <div class="chips" id="chips">
+      <button data-v="90">90</button>
+      <button data-v="1h30m">1h30m</button>
+      <button data-v="01:30:00">01:30:00</button>
+      <button data-v="2d">2d</button>
+      <button data-v="1.5h">1.5h</button>
+    </div>
+    <p class="hint">Type a number of seconds or a duration in unit form (<code>d h m s</code>) or clock
+      form (<code>hh:mm:ss</code>, <code>mm:ss</code>). Everything runs locally.</p>
+  </div>
+</main>
+<footer>
+  Duration is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/duration">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function humanizeDuration(totalSeconds){
+  totalSeconds = Math.floor(Number(totalSeconds));
+  if(!isFinite(totalSeconds)) return null;
+  var neg = totalSeconds < 0;
+  var rem = Math.abs(totalSeconds);
+  var units = [['d', 86400], ['h', 3600], ['m', 60], ['s', 1]];
+  var parts = [];
+  units.forEach(function(u){
+    var v = Math.floor(rem / u[1]);
+    if(v > 0){ parts.push(v + u[0]); rem -= v * u[1]; }
+  });
+  if(parts.length === 0) parts.push('0s');
+  return (neg ? '-' : '') + parts.join(' ');
+}
+function toClock(totalSeconds){
+  var t = Math.floor(Math.abs(Number(totalSeconds)));
+  var h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+  function p(x){ return (x < 10 ? '0' : '') + x; }
+  return h > 0 ? (h + ':' + p(m) + ':' + p(s)) : (m + ':' + p(s));
+}
+function parseDuration(str){
+  str = String(str).trim().toLowerCase();
+  if(str === '') return null;
+  if(/^\d{1,3}(:\d{1,2}){1,2}$/.test(str)){
+    var p = str.split(':').map(Number);
+    if(p.some(function(x){ return isNaN(x); })) return null;
+    return p.length === 2 ? p[0] * 60 + p[1] : p[0] * 3600 + p[1] * 60 + p[2];
+  }
+  if(/^\d+(\.\d+)?$/.test(str)) return Number(str);
+  var mult = { d: 86400, h: 3600, m: 60, s: 1 };
+  var re = /(\d+(?:\.\d+)?)\s*([dhms])/g, m2, total = 0, matched = false;
+  while((m2 = re.exec(str))){ matched = true; total += parseFloat(m2[1]) * mult[m2[2]]; }
+  if(!matched) return null;
+  var leftover = str.replace(/(\d+(?:\.\d+)?)\s*[dhms]/g, '').replace(/\s+/g, '');
+  if(leftover !== '') return null;
+  return total;
+}
+
+if(typeof module !== 'undefined') module.exports = { humanizeDuration, toClock, parseDuration };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var inEl = document.getElementById('in');
+  var errEl = document.getElementById('err');
+  var outEl = document.getElementById('out');
+  function cell(k, v, wide){
+    return '<div class="cell'+(wide?' wide':'')+'"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>';
+  }
+  function render(){
+    var secs = parseDuration(inEl.value);
+    if(secs === null){
+      errEl.textContent = 'Enter seconds or a duration like 1h30m or 01:30:00.';
+      outEl.innerHTML = '';
+      return;
+    }
+    errEl.textContent = '';
+    outEl.innerHTML =
+      cell('Human readable', humanizeDuration(secs), true) +
+      cell('Clock (h:mm:ss)', toClock(secs)) +
+      cell('Total seconds', secs.toLocaleString()) +
+      cell('Total minutes', (secs / 60).toLocaleString(undefined, { maximumFractionDigits: 4 })) +
+      cell('Total hours', (secs / 3600).toLocaleString(undefined, { maximumFractionDigits: 4 }));
+    try{ localStorage.setItem('dur.in', inEl.value); }catch(e){}
+  }
+  inEl.addEventListener('input', render);
+  document.getElementById('chips').addEventListener('click', function(e){
+    var b = e.target.closest ? e.target.closest('button') : null;
+    if(b){ inEl.value = b.getAttribute('data-v'); render(); }
+  });
+  try{ var s = localStorage.getItem('dur.in'); if(s !== null) inEl.value = s; }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('dur.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('dur.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

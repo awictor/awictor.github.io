@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Karvonen — Heart Rate Training Zone Calculator</title>
+<meta name="description" content="Calculate your five heart-rate training zones with the Karvonen (heart-rate-reserve) method from your resting and max heart rate. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('karvonen-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#e11d48;
+    --bg:#f8f5f6; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#ece2e4; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#161113; --card:#20181b; --fg:#f2eaec; --muted:#a5969a; --line:#332830; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#9f1239);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:720px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+  @media(max-width:520px){.grid{grid-template-columns:1fr}}
+  .hint{color:var(--muted);font-size:.8rem;margin-top:8px}
+  table{width:100%;border-collapse:collapse;font-size:.92rem}
+  th,td{text-align:left;padding:10px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.05em}
+  td.bpm{font-weight:700;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+  .z1{border-left:4px solid #22c55e}.z2{border-left:4px solid #84cc16}.z3{border-left:4px solid #eab308}.z4{border-left:4px solid #f97316}.z5{border-left:4px solid #ef4444}
+  td.zn{padding-left:8px}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">❤️</div>
+    <div><h1>Karvonen</h1><div class="sub">Heart-rate training zones (HR-reserve method)</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div><label for="age">Age</label><input type="number" id="age" value="30" min="5" max="120"></div>
+      <div><label for="max">Max HR (optional)</label><input type="number" id="max" placeholder="220 − age"></div>
+      <div><label for="rest">Resting HR</label><input type="number" id="rest" value="60" min="30" max="120"></div>
+    </div>
+    <div class="hint" id="hint"></div>
+  </div>
+  <div class="card">
+    <table><thead><tr><th>Zone</th><th style="text-align:right">Target heart rate</th></tr></thead><tbody id="rows"></tbody></table>
+  </div>
+</main>
+<footer>
+  Karvonen: target = (maxHR − restHR) × intensity + restHR. Estimates only — not medical advice. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/karvonen">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  function hrMax(age){
+    if(!(age > 0)) throw new Error('age must be positive');
+    return 220 - age;
+  }
+
+  // Karvonen: (maxHR - restHR) * intensity + restHR
+  function targetHr(restHR, maxHR, intensity){
+    if(!(maxHR > restHR)) throw new Error('max HR must exceed resting HR');
+    return Math.round((maxHR - restHR) * intensity + restHR);
+  }
+
+  const ZONES = [
+    ['Zone 1 · Recovery', 0.5, 0.6],
+    ['Zone 2 · Endurance', 0.6, 0.7],
+    ['Zone 3 · Aerobic', 0.7, 0.8],
+    ['Zone 4 · Threshold', 0.8, 0.9],
+    ['Zone 5 · Maximum', 0.9, 1.0]
+  ];
+
+  function zones(restHR, maxHR){
+    return ZONES.map(([name, lo, hi]) => ({
+      name, lowPct: lo, highPct: hi,
+      low: targetHr(restHR, maxHR, lo),
+      high: targetHr(restHR, maxHR, hi)
+    }));
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('rows')){
+    const $ = id => document.getElementById(id);
+
+    function render(){
+      const age = +$('age').value;
+      const rest = +$('rest').value;
+      let max;
+      try{ max = $('max').value ? +$('max').value : hrMax(age); }catch(e){ return; }
+      $('hint').textContent = `Max HR ${max} bpm · resting ${rest} bpm · reserve ${Math.max(0, max - rest)} bpm`;
+      let z;
+      try{ z = zones(rest, max); }catch(e){ $('rows').innerHTML = `<tr><td colspan="2">${e.message}</td></tr>`; return; }
+      $('rows').innerHTML = z.map((zone, i) =>
+        `<tr class="z${i + 1}"><td class="zn">${zone.name}<br><span style="color:var(--muted);font-size:.8rem">${Math.round(zone.lowPct * 100)}–${Math.round(zone.highPct * 100)}% HRR</span></td><td class="bpm">${zone.low}–${zone.high} bpm</td></tr>`
+      ).join('');
+    }
+
+    ['age', 'max', 'rest'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('karvonen-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { hrMax, targetHr, zones, ZONES };
+</script>
+</body>
+</html>

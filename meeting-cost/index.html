@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meeting Cost Calculator — what does this meeting cost?</title>
+<meta name="description" content="Estimate the true cost of a meeting from attendee count, hourly rate (or salary), and duration — plus cost per minute and the annualized cost if it recurs. Offline, no tracking.">
+<style>
+  :root{
+    --c:#059669;
+    --bg:#e9f7f0; --card:#ffffff; --fg:#05231a; --muted:#3c5a4e;
+    --line:#c9eadb; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#03140e; --card:#0a2018; --fg:#dbf4e9; --muted:#89b7a4;
+    --line:#123a2b; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto;font-weight:700}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.78rem;font-weight:600;color:var(--muted);margin:12px 0 5px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:560px){.grid{grid-template-columns:1fr}}
+  input,select{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.05rem;font-weight:600;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus,select:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .big{margin-top:18px;text-align:center;font-size:2.8rem;font-weight:800;color:var(--c)}
+  .tag{text-align:center;color:var(--muted);font-size:.9rem}
+  .out{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
+  @media(max-width:560px){.out{grid-template-columns:1fr}}
+  .box{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:14px;text-align:center}
+  .box .v{font-family:ui-monospace,monospace;font-size:1.2rem;font-weight:800;color:var(--c)}
+  .box .k{font-size:.72rem;color:var(--muted);margin-top:4px}
+  .err{color:#dc2626;font-size:.86rem;margin-top:10px;text-align:center;min-height:1em}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .note code{background:var(--bg);padding:1px 5px;border-radius:5px}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">💸</div>
+  <div>
+    <h1>Meeting Cost</h1>
+    <p>what is this meeting really costing?</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div><label>Attendees</label><input id="people" value="6"></div>
+      <div><label>Duration (minutes)</label><input id="mins" value="60"></div>
+      <div>
+        <label>Rate basis</label>
+        <select id="basis"><option value="hourly">Average hourly rate ($/h)</option><option value="salary">Average annual salary ($/yr)</option></select>
+      </div>
+      <div><label id="rateLabel">Hourly rate</label><input id="rate" value="75"></div>
+    </div>
+    <div class="big" id="cost">—</div>
+    <div class="tag">total cost of this meeting</div>
+    <div class="out">
+      <div class="box"><div class="v" id="permin">—</div><div class="k">Cost per minute</div></div>
+      <div class="box"><div class="v" id="annual">—</div><div class="k">Per year if held weekly</div></div>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>About</h2>
+    <p class="note">A meeting's cost is simply <code>attendees × hourly rate × hours</code>. Salaries convert to an hourly rate by dividing by <b>2080</b> working hours per year (40 h × 52 weeks). Seeing the number — and the per-minute burn rate, or what a weekly recurring meeting costs over a year — makes it easy to decide whether a meeting is worth everyone's time or could be an email. These are salary-cost estimates and exclude overhead. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var WORK_HOURS_PER_YEAR = 2080;
+  function hourlyFromSalary(annual, hoursPerYear){ if(hoursPerYear === undefined) hoursPerYear = WORK_HOURS_PER_YEAR; if(hoursPerYear <= 0) throw new Error('hours per year must be positive'); return annual / hoursPerYear; }
+  function meetingCost(attendees, hourlyRate, hours){ return attendees * hourlyRate * hours; }
+  function costPerMinute(attendees, hourlyRate){ return attendees * hourlyRate / 60; }
+  function annualCost(costPerMeeting, perWeek, weeks){ if(weeks === undefined) weeks = 52; return costPerMeeting * perWeek * weeks; }
+
+  if(typeof module !== 'undefined') module.exports = { hourlyFromSalary:hourlyFromSalary, meetingCost:meetingCost, costPerMinute:costPerMinute, annualCost:annualCost, WORK_HOURS_PER_YEAR:WORK_HOURS_PER_YEAR };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var $ = function(id){ return document.getElementById(id); };
+    function num(id){ var v = parseFloat($(id).value); if(!isFinite(v)) throw new Error('enter valid numbers'); return v; }
+    function money(x){ return '$' + (Math.round(x * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+    function render(){
+      $('err').textContent = '';
+      $('rateLabel').textContent = $('basis').value === 'salary' ? 'Average annual salary' : 'Average hourly rate';
+      try{
+        var people = num('people'), mins = num('mins'), rateInput = num('rate');
+        var hourly = $('basis').value === 'salary' ? hourlyFromSalary(rateInput) : rateInput;
+        var hours = mins / 60;
+        var cost = meetingCost(people, hourly, hours);
+        $('cost').textContent = money(cost);
+        $('permin').textContent = money(costPerMinute(people, hourly));
+        $('annual').textContent = money(annualCost(cost, 1));
+      }catch(e){ ['cost','permin','annual'].forEach(function(id){ $(id).textContent = '—'; }); $('err').textContent = e.message; }
+    }
+    ['people','mins','rate'].forEach(function(id){ $(id).addEventListener('input', render); });
+    $('basis').addEventListener('change', render);
+    render();
+
+    var root = document.documentElement, tb = $('theme');
+    function setTheme(t){ root.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? '☀️' : '🌙'; try{ localStorage.setItem('meetcost-theme', t); }catch(e){} }
+    var saved; try{ saved = localStorage.getItem('meetcost-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); });
+  }
+</script>
+</body>
+</html>

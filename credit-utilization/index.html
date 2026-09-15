@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CreditUtilization — Credit Card Utilization Ratio Calculator</title>
+<meta name="description" content="Calculate per-card and overall credit utilization, see where you land against the 30%/10% guidelines, and how much to pay down to hit a target ratio. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('cutil-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#0284c7;
+    --bg:#f1f7fb; --card:#ffffff; --fg:#121a22; --muted:#556773; --line:#dde9f0; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#08121a; --card:#0f1a24; --fg:#e7f1f8; --muted:#849aa8; --line:#1a2a36; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:660px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#0369a1);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:660px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.78rem;color:var(--muted);margin-bottom:5px;font-weight:600}
+  .cardrow{display:grid;grid-template-columns:1fr 1fr auto auto;gap:10px;align-items:end;margin-bottom:10px}
+  input{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  .util{font-weight:800;text-align:center;min-width:52px}
+  .rm{padding:10px 12px;border:1px solid var(--line);background:var(--bg);color:var(--muted);border-radius:8px;cursor:pointer;font:inherit}
+  .add{margin-top:4px;background:none;border:1px dashed var(--line);color:var(--c);border-radius:8px;padding:9px 14px;cursor:pointer;font:inherit;width:100%}
+  .out{text-align:center}
+  .big{font-size:3.2rem;font-weight:800;line-height:1}
+  .cat{display:inline-block;margin-top:10px;padding:5px 16px;border-radius:999px;color:#fff;font-weight:700}
+  .bar{height:12px;border-radius:6px;background:var(--line);overflow:hidden;margin-top:16px}
+  .bar > div{height:100%;border-radius:6px}
+  .target{margin-top:16px;display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end}
+  .paydown{color:var(--muted);font-size:.9rem;margin-top:8px;text-align:center}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:660px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.8rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">💳</div>
+    <div><h1>CreditUtilization</h1><div class="sub">Card utilization ratio</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div id="cards"></div>
+    <button class="add" id="add" type="button">+ Add card</button>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card out">
+    <div class="big" id="overall">—</div>
+    <div class="sub">overall utilization</div>
+    <div><span class="cat" id="cat"></span></div>
+    <div class="bar"><div id="fill" style="width:0"></div></div>
+    <div class="target">
+      <div style="text-align:left"><label for="tgt">Target utilization %</label><input type="number" id="tgt" value="30" min="0" max="100" step="1"></div>
+    </div>
+    <div class="paydown" id="paydown"></div>
+  </div>
+</main>
+<footer>
+  Utilization = balance ÷ credit limit. Credit scoring favors keeping overall (and per-card) utilization low — under 30%, ideally under 10%. Guidance only — <strong>not financial advice</strong>. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/credit-utilization">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  function utilization(balance, limit){
+    const b = Number(balance), l = Number(limit);
+    if(!Number.isFinite(b) || !Number.isFinite(l)) throw new Error('enter numbers');
+    if(b < 0) throw new Error('balance must be ≥ 0');
+    if(l <= 0) throw new Error('limit must be > 0');
+    return b / l;
+  }
+
+  function totals(cards){
+    let bal = 0, lim = 0;
+    for(const c of cards){
+      const b = Number(c.balance), l = Number(c.limit);
+      if(!Number.isFinite(b) || !Number.isFinite(l)) throw new Error('enter numbers');
+      if(b < 0) throw new Error('balance must be ≥ 0');
+      if(l <= 0) throw new Error('limit must be > 0');
+      bal += b; lim += l;
+    }
+    if(lim <= 0) throw new Error('add at least one card with a limit');
+    return { balance: bal, limit: lim };
+  }
+
+  function overallUtilization(cards){
+    const t = totals(cards);
+    return t.balance / t.limit;
+  }
+
+  const CATS = [
+    { max: 0.10,     name: 'Excellent', color: '#16a34a' },
+    { max: 0.30,     name: 'Good',      color: '#65a30d' },
+    { max: 0.50,     name: 'Fair',      color: '#ca8a04' },
+    { max: 0.75,     name: 'High',      color: '#ea580c' },
+    { max: Infinity, name: 'Very high', color: '#dc2626' }
+  ];
+  function category(ratio){ return CATS.find(c => Number(ratio) < c.max); }
+
+  // Amount to pay down so overall utilization ≤ targetRatio.
+  function paydownToTarget(cards, targetRatio){
+    const t = totals(cards);
+    const r = Number(targetRatio);
+    if(!Number.isFinite(r) || r < 0) throw new Error('invalid target');
+    return Math.max(0, t.balance - r * t.limit);
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('cards')){
+    const $ = id => document.getElementById(id);
+    const money = n => '$' + Math.round(n).toLocaleString('en-US');
+    const pct = x => (x * 100).toFixed(1) + '%';
+    let rows = [{ balance: 300, limit: 1000 }, { balance: 200, limit: 2000 }];
+
+    function draw(){
+      $('cards').innerHTML = rows.map((r, i) => {
+        let u = '';
+        try{ u = pct(utilization(r.balance, r.limit)); }catch(_){ u = '—'; }
+        return `<div class="cardrow">
+          <div><label>Balance</label><input type="number" min="0" step="10" data-i="${i}" data-f="balance" value="${r.balance}"></div>
+          <div><label>Limit</label><input type="number" min="1" step="100" data-i="${i}" data-f="limit" value="${r.limit}"></div>
+          <div class="util" title="this card">${u}</div>
+          <button class="rm" data-rm="${i}" type="button" ${rows.length === 1 ? 'style="visibility:hidden"' : ''}>✕</button>
+        </div>`;
+      }).join('');
+      $('cards').querySelectorAll('input').forEach(el =>
+        el.addEventListener('input', () => { rows[+el.dataset.i][el.dataset.f] = el.value; draw(); compute(); }));
+      $('cards').querySelectorAll('[data-rm]').forEach(el =>
+        el.addEventListener('click', () => { rows.splice(+el.dataset.rm, 1); draw(); compute(); }));
+    }
+
+    function compute(){
+      try{
+        const u = overallUtilization(rows);
+        const cat = category(u);
+        $('overall').textContent = pct(u);
+        $('overall').style.color = cat.color;
+        $('cat').textContent = cat.name;
+        $('cat').style.background = cat.color;
+        $('fill').style.width = Math.min(100, u * 100) + '%';
+        $('fill').style.background = cat.color;
+        const pay = paydownToTarget(rows, Number($('tgt').value) / 100);
+        $('paydown').textContent = pay > 0
+          ? `Pay down ${money(pay)} to reach ${$('tgt').value}% utilization.`
+          : `Already at or below ${$('tgt').value}% utilization. ✓`;
+        $('err').textContent = '';
+      }catch(e){ $('overall').textContent = '—'; $('cat').textContent = ''; $('fill').style.width = '0'; $('paydown').textContent = ''; $('err').textContent = e.message; }
+    }
+    $('add').addEventListener('click', () => { rows.push({ balance: 0, limit: 1000 }); draw(); compute(); });
+    $('tgt').addEventListener('input', compute);
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('cutil-theme', cur); }catch(e){}
+    });
+    draw(); compute();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { utilization, overallUtilization, category, paydownToTarget };
+</script>
+</body>
+</html>

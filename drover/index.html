@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drover — herd the panicking flock</title>
+<style>
+  :root{ --bg:#0d1220; --pen:#7ee787; --hot:#ff4d3d; --cool:#5fd0ff; --ink:#e8eef7; }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{ height:100%; background:var(--bg); overflow:hidden; font-family:"Segoe UI",system-ui,sans-serif; color:var(--ink); }
+  #wrap{ position:fixed; inset:0; display:grid; place-items:center; }
+  canvas{ display:block; cursor:none; background:radial-gradient(120% 120% at 50% 30%, #16203a 0%, #0b0f1c 100%); box-shadow:0 0 80px rgba(0,0,0,.6) inset; border:1px solid #ffffff1f; border-radius:12px; }
+  #hud{ position:fixed; top:0; left:0; right:0; padding:12px 18px; display:flex; gap:22px; align-items:center; font-size:14px; pointer-events:none; text-shadow:0 1px 3px #000; }
+  #hud .v{ font-weight:700; font-variant-numeric:tabular-nums; }
+  #hTime.urgent{ display:inline-block; color:var(--hot); animation:pulse .6s ease-in-out infinite; }
+  @keyframes pulse{ 0%,100%{ transform:scale(1); } 50%{ transform:scale(1.28); } }
+  .meter{ width:150px; height:9px; border-radius:6px; background:#ffffff22; overflow:hidden; box-shadow:0 0 0 1px #ffffff22; }
+  .meter>i{ display:block; height:100%; width:0; background:linear-gradient(90deg,var(--cool),#ffd23d 55%,var(--hot)); transition:width .12s; }
+  .tag{ opacity:.6; font-size:11px; letter-spacing:.08em; text-transform:uppercase; }
+  #tele{ position:fixed; top:46%; left:0; right:0; text-align:center; font-size:30px; font-weight:800; letter-spacing:.04em; color:#ffd23d; text-shadow:0 2px 12px #000; opacity:0; transition:opacity .25s; pointer-events:none; }
+  #bark{ position:fixed; bottom:14px; left:18px; font-size:12px; pointer-events:none; text-shadow:0 1px 3px #000; }
+  #bark b{ color:var(--cool); }
+  #card{ position:fixed; inset:0; display:none; place-items:center; background:#0a0e1ccc; -webkit-backdrop-filter:blur(4px); backdrop-filter:blur(4px); z-index:5; }
+  #card .inner{ background:#131b30; border:1px solid #ffffff1f; border-radius:16px; padding:28px 32px; width:360px; box-shadow:0 20px 60px #000a; text-align:center; }
+  #card h1{ font-size:26px; margin-bottom:2px; }
+  #card .sub{ opacity:.6; font-size:12px; margin-bottom:18px; }
+  #card table{ width:100%; font-size:14px; border-collapse:collapse; margin-bottom:18px; }
+  #card td{ padding:5px 0; text-align:left; }
+  #card td:last-child{ text-align:right; font-weight:700; font-variant-numeric:tabular-nums; }
+  #card .score{ font-size:40px; font-weight:800; color:var(--pen); margin:6px 0 2px; }
+  button{ font:inherit; font-weight:700; border:0; border-radius:10px; padding:11px 16px; margin:4px; cursor:pointer; background:#2b3c63; color:var(--ink); transition:transform .08s,background .15s; }
+  button:hover{ background:#375083; } button:active{ transform:scale(.96); }
+  button.go{ background:var(--pen); color:#08210f; }
+  #seedline{ font-size:11px; opacity:.5; margin-top:12px; word-break:break-all; }
+  #toast{ position:fixed; bottom:26px; left:50%; transform:translateX(-50%); background:#000a; padding:8px 16px; border-radius:20px; font-size:13px; opacity:0; transition:opacity .3s; pointer-events:none; }
+  #start{ position:fixed; inset:0; display:grid; place-items:center; text-align:center; z-index:4; background:radial-gradient(60% 60% at 50% 45%, #0d1220cc, #0d1220ee); transition:opacity .4s; pointer-events:none; }
+  #start.hidden{ opacity:0; }
+  #start .big{ font-size:54px; font-weight:800; letter-spacing:.12em; color:var(--cool); text-shadow:0 3px 20px #000; }
+  #start .lead{ margin-top:14px; font-size:20px; font-weight:700; color:var(--ink); animation:pulse 1.6s ease-in-out infinite; }
+  #start .sub2{ margin-top:10px; font-size:13px; opacity:.7; }
+  #start .sub2 b{ color:var(--cool); }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas></div>
+<div id="hud">
+  <div><span class="tag">Wave</span> <span class="v" id="hWave">1</span></div>
+  <div><span class="tag">Score</span> <span class="v" id="hScore">0</span></div>
+  <div><span class="tag">Combo</span> <span class="v" id="hCombo">x1</span></div>
+  <div><span class="tag">Penned</span> <span class="v" id="hPen">0</span></div>
+  <div><span class="tag">Time</span> <span class="v" id="hTime">30</span></div>
+  <div style="display:flex;gap:8px;align-items:center"><span class="tag">Herd calm</span><span class="meter"><i id="hMeter"></i></span></div>
+</div>
+<div id="tele"></div>
+<div id="start"><div>
+  <div class="big">DROVER</div>
+  <div class="lead">Move your cursor onto the field to begin</div>
+  <div class="sub2"><b>SPACE</b> = bark (hard shove, spikes panic) · gentle arcs beat brute force</div>
+</div></div>
+<div id="bark">Move to herd · <b>SPACE</b> = bark (hard shove, spikes panic) · gentle arcs beat brute force</div>
+<div id="card"><div class="inner">
+  <h1 id="cTitle">Wave cleared</h1>
+  <div class="sub" id="cSub"></div>
+  <div class="score" id="cScore">0</div>
+  <table><tbody id="cRows"></tbody></table>
+  <button class="go" id="cNext">Next wave ▶</button>
+  <button id="cCopy">Copy replay link</button>
+  <div id="seedline"></div>
+</div></div>
+<div id="toast"></div>
+<script>
+"use strict";
+// ---- Tunables (near the top on purpose) --------------------------------
+const CFG = {
+  dogRadius:118, dogForce:1.9, barkRadius:210, barkForce:9, barkCd:1.6,
+  sepR:22, sep:1.5, ali:0.55, coh:0.9, maxSpd:2.7, maxF:0.09,
+  panicProx:150, panicRate:2.4, panicDecay:0.55, panicMaxSpd:5.0, panicBolt:2.2,
+  hawkR:120, waveTime:30, trail:6
+};
+// ---- Seeded RNG (mulberry32) -------------------------------------------
+function rng(seed){ let a=seed>>>0; return ()=>{ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function hashSeed(s){ let h=2166136261; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619); } return h>>>0; }
+// ---- Canvas ------------------------------------------------------------
+const cv=document.getElementById("c"), ctx=cv.getContext("2d");
+let W=0,H=0;
+function resize(){ W=Math.min(innerWidth,1100); H=Math.min(innerHeight,760);
+  const dpr=Math.min(window.devicePixelRatio||1,2);
+  cv.width=W*dpr; cv.height=H*dpr; cv.style.width=W+"px"; cv.style.height=H+"px";
+  ctx.setTransform(dpr,0,0,dpr,0,0); // draw in CSS pixels, crisp on Retina
+}
+addEventListener("resize",resize); resize();
+// ---- State -------------------------------------------------------------
+const $=id=>document.getElementById(id);
+const mouse={x:W/2,y:H/2,inside:false};
+let boids=[], pen, hawk=null, seed, R, wave=1, score=0, combo=1;
+let timeLeft=CFG.waveTime, penned=0, scattered=0, peakCombo=1, barkReady=0, shake=0;
+let running=false, lastT=0, particles=[], startPenned=0, started=false;
+function beginPlay(){ // fired on first cursor entry — stops the timer bleeding pre-engagement
+  if(started) return; started=true;
+  const el=$("start"); el.classList.add("hidden"); setTimeout(()=>el.style.display="none",400);
+  timeLeft=CFG.waveTime; running=true;
+}
+cv.addEventListener("mousemove",e=>{ const r=cv.getBoundingClientRect(); mouse.x=e.clientX-r.left; mouse.y=e.clientY-r.top; mouse.inside=true; if(!started) beginPlay(); });
+cv.addEventListener("mouseleave",()=>mouse.inside=false);
+addEventListener("keydown",e=>{ if(e.code==="Space"){ e.preventDefault(); bark(); } });
+// ---- Setup a wave from seed --------------------------------------------
+function seedForWave(base,w){ return (hashSeed(base)+w*2654435761)>>>0; }
+function loadRun(){
+  let h="";
+  try{ h=decodeURIComponent(location.hash.slice(1)); }
+  catch(e){ h=""; } // mangled percent-sequence in a shared link — fall back to fresh run
+  const m=h.match(/s=([^&]+)&w=(\d+)/);
+  if(m){ seed=m[1]; wave=parseInt(m[2],10)||1; }
+  else { seed=Math.random().toString(36).slice(2,9); wave=1; }
+}
+function saveHash(){ history.replaceState(null,"", "#s="+encodeURIComponent(seed)+"&w="+wave); }
+function spawnWave(){
+  R=rng(seedForWave(seed,wave));
+  const n=Math.min(60+wave*14,140);
+  boids=[];
+  const cx=W*0.28, cy=H*(0.35+R()*0.3);
+  for(let i=0;i<n;i++){
+    boids.push({ x:cx+(R()-.5)*180, y:cy+(R()-.5)*180,
+      vx:(R()-.5)*2, vy:(R()-.5)*2, panic:0, tr:[] });
+  }
+  pen={ x:W*(0.72+R()*0.12), y:H*(0.3+R()*0.4), r:74,
+        dx:(R()-.5)*0.5*Math.min(wave-1,4), dy:(R()-.5)*0.5*Math.min(wave-1,4) };
+  hawk = wave>=2 ? { x:W*R(), y:H*R(), t:R()*99, spd:0.4+wave*0.06 } : null;
+  timeLeft=CFG.waveTime; penned=0; scattered=0; peakCombo=combo; particles=[]; barkReady=0;
+  startPenned=0; saveHash();
+  telegraph(wave===1 ? "WAVE 1 — herd them in" :
+    (hawk? "WAVE "+wave+" — hawk incoming!" : "WAVE "+wave));
+}
+// ---- Telegraph / toast -------------------------------------------------
+let teleTO;
+function telegraph(t){ const el=$("tele"); el.textContent=t; el.style.opacity=1; clearTimeout(teleTO); teleTO=setTimeout(()=>el.style.opacity=0,1400); }
+let toastTO;
+function toast(t){ const el=$("toast"); el.textContent=t; el.style.opacity=1; clearTimeout(toastTO); toastTO=setTimeout(()=>el.style.opacity=0,1600); }
+// ---- Bark --------------------------------------------------------------
+function bark(){
+  if(!running || barkReady>0) return;
+  barkReady=CFG.barkCd;
+  for(const b of boids){
+    if(b.penned) continue;
+    const dx=b.x-mouse.x, dy=b.y-mouse.y, d=Math.hypot(dx,dy)||1;
+    if(d<CFG.barkRadius){ const f=CFG.barkForce*(1-d/CFG.barkRadius);
+      b.vx+=dx/d*f; b.vy+=dy/d*f; b.panic=Math.min(1,b.panic+0.5*(1-d/CFG.barkRadius)); }
+  }
+  for(let i=0;i<14;i++){ const a=Math.PI*2*i/14; particles.push({x:mouse.x,y:mouse.y,vx:Math.cos(a)*3,vy:Math.sin(a)*3,life:1,c:"#5fd0ff"}); }
+  shake=Math.max(shake,4);
+}
+// ---- Spatial hash -------------------------------------------------------
+const CELL=Math.max(CFG.sepR,40); const grid=new Map();
+function key(x,y){ return ((x/CELL)|0)+","+((y/CELL)|0); }
+function rebuild(){ grid.clear(); for(const b of boids){ if(b.penned)continue; const k=key(b.x,b.y); let a=grid.get(k); if(!a){a=[];grid.set(k,a);} a.push(b); } }
+function near(b){ const out=[]; const cx=(b.x/CELL)|0, cy=(b.y/CELL)|0;
+  for(let i=-1;i<=1;i++)for(let j=-1;j<=1;j++){ const a=grid.get((cx+i)+","+(cy+j)); if(a)for(const o of a)out.push(o); } return out; }
+// ---- Simulation step ---------------------------------------------------
+function step(dt){
+  timeLeft-=dt; if(timeLeft<=0){ timeLeft=0; return endWave(); }
+  barkReady=Math.max(0,barkReady-dt);
+  if(pen){ pen.x+=pen.dx; pen.y+=pen.dy;
+    if(pen.x<W*0.5||pen.x>W-90){pen.dx*=-1;} if(pen.y<90||pen.y>H-90){pen.dy*=-1;}
+  }
+  if(hawk){ hawk.t+=dt*hawk.spd; hawk.x=W*0.5+Math.cos(hawk.t)*W*0.4; hawk.y=H*0.5+Math.sin(hawk.t*1.3)*H*0.35; }
+  rebuild();
+  let calmSum=0, alive=0;
+  for(const b of boids){
+    if(b.penned) continue;
+    alive++;
+    let sx=0,sy=0,ax=0,ay=0,cxs=0,cys=0,cnt=0;
+    const nb=near(b);
+    for(const o of nb){ if(o===b)continue; const dx=b.x-o.x, dy=b.y-o.y; const d2=dx*dx+dy*dy;
+      if(d2<CFG.sepR*CFG.sepR && d2>0){ const d=Math.sqrt(d2); sx+=dx/d; sy+=dy/d; }
+      if(d2<40*40){ ax+=o.vx; ay+=o.vy; cxs+=o.x; cys+=o.y; cnt++; }
+    }
+    // flocking (panicked boids abandon cohesion/alignment)
+    const cohW=CFG.coh*(1-b.panic), aliW=CFG.ali*(1-b.panic*0.8);
+    b.vx+=sx*CFG.sep*CFG.maxF; b.vy+=sy*CFG.sep*CFG.maxF;
+    if(cnt){ b.vx+=(ax/cnt-b.vx)*aliW*CFG.maxF*4; b.vy+=(ay/cnt-b.vy)*aliW*CFG.maxF*4;
+      b.vx+=(cxs/cnt-b.x)*cohW*0.0012; b.vy+=(cys/cnt-b.y)*cohW*0.0012; }
+    // sheepdog pressure
+    let press=0;
+    if(mouse.inside){ const dx=b.x-mouse.x, dy=b.y-mouse.y, d=Math.hypot(dx,dy)||1;
+      if(d<CFG.dogRadius){ const f=CFG.dogForce*(1-d/CFG.dogRadius); b.vx+=dx/d*f; b.vy+=dy/d*f; press=(1-d/CFG.dogRadius); } }
+    // hawk spikes panic + flee
+    if(hawk){ const dx=b.x-hawk.x, dy=b.y-hawk.y, d=Math.hypot(dx,dy)||1;
+      if(d<CFG.hawkR){ const f=(1-d/CFG.hawkR); b.vx+=dx/d*f*2.6; b.vy+=dy/d*f*2.6; b.panic=Math.min(1,b.panic+f*CFG.panicRate*dt*1.6); } }
+    // panic dynamics: proximity + speed
+    const spd=Math.hypot(b.vx,b.vy);
+    const proxP = mouse.inside ? press : 0;
+    b.panic += (proxP*CFG.panicRate*1.3 + Math.max(0,spd-CFG.maxSpd)*0.4)*dt;
+    b.panic -= CFG.panicDecay*dt;
+    b.panic=Math.max(0,Math.min(1,b.panic));
+    if(b.panic>0.5){ b.vx+=(R()-.5)*CFG.panicBolt*b.panic; b.vy+=(R()-.5)*CFG.panicBolt*b.panic; }
+    // speed clamp (raised when panicked = bolting)
+    const cap=CFG.maxSpd+(CFG.panicMaxSpd-CFG.maxSpd)*b.panic;
+    const s=Math.hypot(b.vx,b.vy); if(s>cap){ b.vx=b.vx/s*cap; b.vy=b.vy/s*cap; }
+    b.x+=b.vx; b.y+=b.vy;
+    // soft walls
+    if(b.x<8){b.x=8;b.vx=Math.abs(b.vx);} if(b.x>W-8){b.x=W-8;b.vx=-Math.abs(b.vx);}
+    if(b.y<8){b.y=8;b.vy=Math.abs(b.vy);} if(b.y>H-8){b.y=H-8;b.vy=-Math.abs(b.vy);}
+    // trail
+    b.tr.push(b.x,b.y); if(b.tr.length>CFG.trail*2) b.tr.splice(0,2);
+    // penning
+    if(pen && Math.hypot(b.x-pen.x,b.y-pen.y)<pen.r){
+      b.penned=true; penned++;
+      for(let i=0;i<8;i++){ const a=Math.PI*2*i/8; particles.push({x:b.x,y:b.y,vx:Math.cos(a)*2,vy:Math.sin(a)*2,life:1,c:"#7ee787"}); }
+    }
+    calmSum+=(1-b.panic);
+  }
+  const herdCalm = alive? calmSum/alive : 1;
+  $("hMeter").style.width=(herdCalm*100)+"%";
+  // update particles
+  for(const p of particles){ p.x+=p.vx; p.y+=p.vy; p.vx*=0.94; p.vy*=0.94; p.life-=dt*1.6; }
+  particles=particles.filter(p=>p.life>0);
+  shake*=0.86;
+  // HUD
+  $("hWave").textContent=wave; $("hScore").textContent=score;
+  $("hCombo").textContent="x"+combo; $("hPen").textContent=penned+"/"+boids.length;
+  $("hTime").textContent=Math.ceil(timeLeft);
+  $("hTime").classList.toggle("urgent", timeLeft<=5);
+  if(penned>startPenned && penned===boids.length) return endWave();
+  startPenned=penned;
+}
+// ---- End of wave / scorecard -------------------------------------------
+function endWave(){
+  running=false;
+  scattered=boids.length-penned;
+  let calmSum=0; for(const b of boids) calmSum+=(1-b.panic);
+  const calmMult=Math.max(0.2, calmSum/boids.length); // 0.2..1
+  const cleared=penned>=Math.ceil(boids.length*0.6);
+  if(cleared){ combo++; } else { combo=1; }
+  peakCombo=Math.max(peakCombo,combo);
+  const gained=Math.round(penned*10*calmMult*combo);
+  score+=gained;
+  $("cTitle").textContent = cleared? (penned===boids.length?"Perfect herd!":"Wave "+wave+" cleared") : "Flock scattered";
+  $("cSub").textContent = cleared? "Combo streak continues" : "Combo reset — deliver ≥60% next time";
+  $("cScore").textContent="+"+gained;
+  $("cRows").innerHTML=
+    row("Delivered",penned+" / "+boids.length)+
+    row("Scattered",scattered)+
+    row("Calmness multiplier","x"+calmMult.toFixed(2))+
+    row("Combo",(cleared?"x"+combo:"reset"))+
+    row("Peak combo","x"+peakCombo)+
+    row("Total score",score);
+  $("seedline").textContent="seed "+seed+" · wave "+wave;
+  $("cNext").textContent = cleared? "Next wave ▶" : "Retry wave ↻";
+  $("card").style.display="grid";
+}
+function row(k,v){ return "<tr><td>"+k+"</td><td>"+v+"</td></tr>"; }
+$("cNext").onclick=()=>{ const cleared=$("cTitle").textContent.indexOf("scatter")<0; if(cleared)wave++; $("card").style.display="none"; spawnWave(); running=true; };
+$("cCopy").onclick=()=>{
+  const url=location.href;
+  // navigator.clipboard is undefined on file:// and non-secure origins; guard the sync throw.
+  try{
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(url).then(()=>toast("Replay link copied — same seed & wave"),()=>showLink(url));
+    } else { showLink(url); }
+  }catch(e){ showLink(url); }
+};
+function showLink(url){ toast("Copy failed — link shown below"); const el=$("seedline"); el.textContent=url; try{ const r=document.createRange(); r.selectNodeContents(el); const s=getSelection(); s.removeAllRanges(); s.addRange(r); }catch(e){} }
+// ---- Render ------------------------------------------------------------
+function draw(){
+  ctx.save();
+  if(shake>0.4){ ctx.translate((Math.random()-.5)*shake,(Math.random()-.5)*shake); }
+  ctx.clearRect(-20,-20,W+40,H+40);
+  // pen
+  if(pen){ const t=performance.now()/600;
+    ctx.beginPath(); ctx.arc(pen.x,pen.y,pen.r,0,7); ctx.fillStyle="#7ee78722"; ctx.fill();
+    ctx.lineWidth=3; ctx.setLineDash([10,8]); ctx.lineDashOffset=-t*14; ctx.strokeStyle="#7ee787"; ctx.stroke(); ctx.setLineDash([]);
+    ctx.globalAlpha=0.35+0.25*Math.sin(t*2); ctx.beginPath(); ctx.arc(pen.x,pen.y,pen.r+6,0,7); ctx.strokeStyle="#7ee787"; ctx.lineWidth=1; ctx.stroke(); ctx.globalAlpha=1;
+    ctx.fillStyle="#7ee787cc"; ctx.font="12px Segoe UI"; ctx.textAlign="center"; ctx.fillText("PEN",pen.x,pen.y-pen.r-10);
+  }
+  // hawk shadow
+  if(hawk){ const g=ctx.createRadialGradient(hawk.x,hawk.y,0,hawk.x,hawk.y,CFG.hawkR);
+    g.addColorStop(0,"#ff4d3d55"); g.addColorStop(1,"#ff4d3d00"); ctx.fillStyle=g;
+    ctx.beginPath(); ctx.arc(hawk.x,hawk.y,CFG.hawkR,0,7); ctx.fill();
+    ctx.fillStyle="#1a0d12"; ctx.save(); ctx.translate(hawk.x,hawk.y); ctx.rotate(hawk.t*1.3);
+    ctx.beginPath(); ctx.moveTo(0,-6); ctx.quadraticCurveTo(-16,-2,-22,6); ctx.quadraticCurveTo(-8,2,0,8);
+    ctx.quadraticCurveTo(8,2,22,6); ctx.quadraticCurveTo(16,-2,0,-6); ctx.fill(); ctx.restore();
+  }
+  // boids
+  for(const b of boids){ if(b.penned)continue;
+    // trail
+    if(b.tr.length>3){ ctx.beginPath(); ctx.moveTo(b.tr[0],b.tr[1]);
+      for(let i=2;i<b.tr.length;i+=2) ctx.lineTo(b.tr[i],b.tr[i+1]);
+      ctx.strokeStyle=boidCol(b.panic,0.28); ctx.lineWidth=2; ctx.stroke(); }
+    const ang=Math.atan2(b.vy,b.vx);
+    ctx.save(); ctx.translate(b.x,b.y); ctx.rotate(ang);
+    ctx.fillStyle=boidCol(b.panic,1);
+    ctx.beginPath(); ctx.moveTo(6,0); ctx.lineTo(-4,3); ctx.lineTo(-4,-3); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  // particles
+  for(const p of particles){ ctx.globalAlpha=Math.max(0,p.life); ctx.fillStyle=p.c;
+    ctx.beginPath(); ctx.arc(p.x,p.y,3*p.life+1,0,7); ctx.fill(); } ctx.globalAlpha=1;
+  // sheepdog pressure ring + dog
+  if(mouse.inside){
+    ctx.beginPath(); ctx.arc(mouse.x,mouse.y,CFG.dogRadius,0,7);
+    ctx.strokeStyle="#ffffff44"; ctx.lineWidth=1.5; ctx.stroke();
+    ctx.fillStyle="#ffffff10"; ctx.fill();
+    if(barkReady>0){ ctx.beginPath(); ctx.arc(mouse.x,mouse.y,CFG.dogRadius,0,7*(1-barkReady/CFG.barkCd));
+      ctx.strokeStyle="#5fd0ff"; ctx.lineWidth=3; ctx.stroke(); }
+    ctx.beginPath(); ctx.arc(mouse.x,mouse.y,7,0,7); ctx.fillStyle=barkReady>0?"#88a0c0":"#ffffff"; ctx.fill();
+    ctx.beginPath(); ctx.arc(mouse.x,mouse.y,3,0,7); ctx.fillStyle="#1b2440"; ctx.fill();
+  }
+  ctx.restore();
+}
+function boidCol(p,a){ // cool -> hot gradient
+  const r=Math.round(95+160*p), g=Math.round(208-150*p), b=Math.round(255-215*p);
+  return "rgba("+r+","+g+","+b+","+a+")";
+}
+// ---- Loop --------------------------------------------------------------
+function frame(t){
+  const dt=Math.min(0.05,(t-lastT)/1000)||0.016; lastT=t;
+  if(running) step(dt);
+  draw();
+  requestAnimationFrame(frame);
+}
+// ---- Boot --------------------------------------------------------------
+loadRun(); spawnWave(); running=false; lastT=performance.now(); // start gate: wait for cursor entry
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

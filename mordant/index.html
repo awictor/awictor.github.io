@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Mordant — a subtractive-color dye-vat arcade</title>
+<style>
+  :root{ --ink:#141018; --paper:#f3efe6; --accent:#ff6a3d; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:radial-gradient(circle at 50% -10%,#2b2440,#0d0a13 70%); color:var(--paper);
+    font-family:"Segoe UI",system-ui,sans-serif; -webkit-user-select:none; user-select:none; overflow:hidden; }
+  #wrap{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; }
+  canvas{ background:#0f0c16; border-radius:14px; box-shadow:0 20px 60px rgba(0,0,0,.55); touch-action:none; max-width:96vw; max-height:82vh; }
+  #bar{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center; font-size:13px; }
+  button{ background:#221b30; color:var(--paper); border:1px solid #4a3d63; border-radius:9px; padding:7px 12px;
+    font-size:13px; cursor:pointer; font-weight:600; }
+  button:hover{ background:#2f2543; border-color:var(--accent); }
+  #hint{ color:#9c92ad; font-size:12px; }
+  b{ color:var(--accent); }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c" width="760" height="720"></canvas>
+  <div id="bar">
+    <button id="deliver">Deliver ⎵</button>
+    <button id="rinse" title="Resets the vat to white, but dries every order ~2s faster">Rinse-dump R</button>
+    <button id="cb">Colorblind aid C</button>
+    <button id="share">Share seed</button>
+    <span id="hint"><b>←/→ or A/D</b> steer vat · catch the lane's pigment · match an order within tolerance · deliver</span>
+  </div>
+</div>
+<script>
+"use strict";
+const cv=document.getElementById("c"),X=cv.getContext("2d"),W=cv.width,H=cv.height;
+const FONT="'Segoe UI',system-ui,sans-serif";                       // mirror the CSS stack so canvas text matches on every OS
+const RM=matchMedia("(prefers-reduced-motion: reduce)").matches;    // honor reduced-motion: no shake, no full-screen flash
+
+/* ---- seeded RNG (mulberry32) + URL hash state ---- */
+function hp(){const o={};location.hash.slice(1).split("&").forEach(p=>{const[k,v]=p.split("=");if(k)o[k]=v;});return o;}
+const H0=hp();
+let SEED=("s" in H0)?(H0.s>>>0):(Math.random()*1e9>>>0);   // honor a shared seed of 0 instead of treating it as falsy
+let best=+H0.b||0;
+function mkrng(s){return function(){s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function saveHash(){location.replace("#s="+SEED+"&b="+best);}
+
+/* ---- color science: sRGB<->Lab, CIE76 delta-E ---- */
+function lin(c){return c<=.04045?c/12.92:Math.pow((c+.055)/1.055,2.4);}
+function rgb2lab(r,g,b){
+  r=lin(r);g=lin(g);b=lin(b);
+  let x=(r*.4124+g*.3576+b*.1805)/.95047,y=r*.2126+g*.7152+b*.0722,z=(r*.0193+g*.1192+b*.9505)/1.08883;
+  const f=t=>t>.008856?Math.cbrt(t):7.787*t+16/116;
+  x=f(x);y=f(y);z=f(z);
+  return[116*y-16,500*(x-y),200*(y-z)];
+}
+function dE(a,b){const A=rgb2lab(a.r,a.g,a.b),B=rgb2lab(b.r,b.g,b.b);return Math.hypot(A[0]-B[0],A[1]-B[1],A[2]-B[2]);}
+function css(c){return`rgb(${c.r*255|0},${c.g*255|0},${c.b*255|0})`;}
+function hsl(c){const mx=Math.max(c.r,c.g,c.b),mn=Math.min(c.r,c.g,c.b),d=mx-mn;let h=0;
+  if(d){if(mx===c.r)h=((c.g-c.b)/d)%6;else if(mx===c.g)h=(c.b-c.r)/d+2;else h=(c.r-c.g)/d+4;h*=60;if(h<0)h+=360;}
+  const l=(mx+mn)/2,s=d?d/(1-Math.abs(2*l-1)):0;return[h|0,(s*100)|0,(l*100)|0];}
+
+/* ---- subtractive mixing engine ---- */
+const K=0.34, SOLV=0.34;                       // stir strength
+const LANES=[{t:"c",col:{r:0,g:.75,b:.9}},{t:"m",col:{r:.9,g:0,b:.55}},{t:"y",col:{r:1,g:.85,b:0}},{t:"s",col:{r:.85,g:.9,b:1}}];
+const NL=LANES.length, laneStep=W/NL, laneX=i=>laneStep*(i+.5);
+function stir(vat,t){                            // real multiply-toward absorption / solvent lift
+  const v={r:vat.r,g:vat.g,b:vat.b};
+  if(t==="c")v.r*=1-K; else if(t==="m")v.g*=1-K; else if(t==="y")v.b*=1-K;
+  else{v.r+=SOLV*(1-v.r);v.g+=SOLV*(1-v.g);v.b+=SOLV*(1-v.b);}
+  return v;
+}
+
+/* ---- game state ---- */
+let rng,vat,vatX,orders,drops,spawnT,orderT,score,lives,combo,over,flash,shake,cb=false,last=0,started=false;
+let plvl=0,toast="",toastT=0;
+const catchY=H-150;
+function reset(){
+  rng=mkrng(SEED); vat={r:1,g:1,b:1}; vatX=laneX(1);
+  orders=[]; drops=[]; spawnT=0; orderT=.6; score=0; lives=3; combo=0; over=false; flash=0; shake=0;
+  plvl=0; toast=""; toastT=0;
+  for(let i=0;i<3;i++)newOrder();
+  started=true;
+}
+function lvl(){return Math.floor(score/280);}
+function tol(){return Math.max(24-lvl()*2.2,9);}      // shrinking delta-E tolerance
+function maxOrders(){return Math.min(3+lvl(),6);}
+function newOrder(){
+  const steps=[.14,.32,.5,.68,.9];const pk=()=>steps[rng()*steps.length|0];
+  let c;do{c={r:pk(),g:pk(),b:pk()};}while(c.r+c.g+c.b>2.55||dE(c,vat)<14);
+  const dry=Math.max(13-lvl(),6.5);
+  orders.push({tg:c,dry:dry,max:dry,pat:rng()*3|0});
+}
+
+/* ---- audio (procedural, escalating pitch on streaks) ---- */
+let ac;function beep(f,d,ty){try{ac=ac||new(window.AudioContext||window.webkitAudioContext)();const o=ac.createOscillator(),g=ac.createGain();
+  o.type=ty||"triangle";o.frequency.value=f;o.connect(g);g.connect(ac.destination);
+  g.gain.setValueAtTime(.16,ac.currentTime);g.gain.exponentialRampToValueAtTime(.0001,ac.currentTime+d);
+  o.start();o.stop(ac.currentTime+d);}catch(e){}}
+
+/* ---- input ---- */
+const keys={};
+addEventListener("keydown",e=>{
+  if(e.key===" ")e.preventDefault();
+  if(!started){reset();return;}                                     // first key starts the run (and unlocks audio on the gesture)
+  if(over&&(e.key==="Enter"||e.key===" ")){SEED=Math.random()*1e9>>>0;reset();return;}
+  keys[e.key.toLowerCase()]=true;
+  if(e.key===" ")deliver();
+  if(e.key.toLowerCase()==="r")rinse();
+  if(e.key.toLowerCase()==="c")cb=!cb;
+});
+addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+cv.addEventListener("pointermove",e=>{if(!started)return;const r=cv.getBoundingClientRect();vatX=(e.clientX-r.left)/r.width*W;});
+cv.addEventListener("pointerdown",e=>{if(!started){reset();return;}if(over){SEED=Math.random()*1e9>>>0;reset();}else deliver();});
+document.getElementById("deliver").onclick=()=>{if(!started){reset();return;}deliver();};
+document.getElementById("rinse").onclick=()=>{if(!started){reset();return;}rinse();};
+document.getElementById("cb").onclick=()=>cb=!cb;
+document.getElementById("share").onclick=()=>{saveHash();const b=document.getElementById("share");
+  const done=ok=>{b.textContent=ok?"Copied!":"URL updated — copy it";setTimeout(()=>b.textContent="Share seed",1600);};
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(location.href).then(()=>done(true),()=>done(false));
+  else done(false);};                                               // saveHash() put the seed in the URL, so it's shareable even if the clipboard is blocked (file://)
+
+function curLane(){return Math.max(0,Math.min(NL-1,Math.round(vatX/laneStep-.5)));}
+function deliver(){
+  if(over)return;let bi=-1,bd=1e9;
+  orders.forEach((o,i)=>{const d=dE(vat,o.tg);if(d<bd){bd=d;bi=i;}});
+  if(bi<0)return;const T=tol();
+  if(bd<=T){
+    const prox=(T-bd)/T;let pts=Math.round(90*(1+combo*.5)+prox*140);
+    const perfect=bd<T*.4;
+    if(perfect){combo++;pts=Math.round(pts*(1+combo*.25));flash=1;shake=8;beep(440*(1+Math.min(combo,8)*.16),.18);}
+    else{combo=0;beep(300,.12);}
+    score+=pts;orders.splice(bi,1);vat={r:1,g:1,b:1};
+    if(orders.length<maxOrders())newOrder();
+  }else{combo=0;shake=4;beep(150,.14,"sawtooth");}
+}
+function rinse(){if(over)return;vat={r:1,g:1,b:1};orders.forEach(o=>o.dry=Math.max(o.dry-2,0));beep(220,.2,"sine");}
+
+/* ---- update ---- */
+function update(dt){
+  if(!started||over)return;
+  if(toastT>0)toastT-=dt;
+  if(lvl()>plvl){plvl=lvl();toast="LEVEL "+(plvl+1)+" — tighter tolerance, more orders";toastT=2.4;}
+  if(keys.arrowleft||keys.a)vatX-=520*dt;
+  if(keys.arrowright||keys.d)vatX+=520*dt;
+  vatX=Math.max(laneStep*.5,Math.min(W-laneStep*.5,vatX));
+  const spd=110+lvl()*14;
+  spawnT-=dt;
+  if(spawnT<=0){spawnT=Math.max(1.5-lvl()*.13,.55)*(.6+rng()*.8);drops.push({lane:rng()*NL|0,y:120,v:spd*(.85+rng()*.4)});}
+  for(let i=drops.length-1;i>=0;i--){const d=drops[i];d.y+=d.v*dt;
+    if(d.y>=catchY){if(d.lane===curLane())vat=stir(vat,LANES[d.lane].t);drops.splice(i,1);}
+  }
+  orderT-=dt;
+  if(orderT<=0&&orders.length<maxOrders()){orderT=Math.max(4.2-lvl()*.35,1.9);newOrder();}
+  for(let i=orders.length-1;i>=0;i--){orders[i].dry-=dt;
+    if(orders[i].dry<=0){orders.splice(i,1);lives--;combo=0;shake=10;beep(120,.3,"sawtooth");
+      if(lives<=0){over=true;if(score>best){best=score;saveHash();}}}}
+  if(flash>0)flash-=dt*2.2;if(shake>0)shake-=dt*40;
+}
+
+/* ---- render ---- */
+function rr(x,y,w,h,r){X.beginPath();X.moveTo(x+r,y);X.arcTo(x+w,y,x+w,y+h,r);X.arcTo(x+w,y+h,x,y+h,r);
+  X.arcTo(x,y+h,x,y,r);X.arcTo(x,y,x+w,y,r);X.closePath();}
+function stripes(x,y,w,h,pat){if(pat===0)return;X.save();rr(x,y,w,h,8);X.clip();X.globalAlpha=.28;X.strokeStyle="#0a0710";X.lineWidth=4;
+  X.beginPath();if(pat===1){for(let o=-h;o<w;o+=11){X.moveTo(x+o,y+h);X.lineTo(x+o+h,y);}}
+  else{for(let o=0;o<w+h;o+=11){X.moveTo(x+o,y);X.lineTo(x+o-h,y+h);}}X.stroke();X.restore();}
+function draw(){
+  X.clearRect(0,0,W,H);
+  if(!started){title();return;}
+  X.save();if(shake>0&&!RM)X.translate((Math.random()-.5)*shake,(Math.random()-.5)*shake);
+  const T=tol();
+  // lanes + predictor ghosts
+  for(let i=0;i<NL;i++){const x=laneX(i),L=LANES[i];
+    X.fillStyle=i===curLane()?"rgba(255,106,61,.07)":"rgba(255,255,255,.025)";X.fillRect(laneStep*i,116,laneStep,catchY-116);
+    const g=stir(vat,L.t),lab=["C","M","Y","Rinse"][i];
+    X.fillStyle="#0d0a13";rr(x-30,128,60,44,9);X.fill();
+    X.fillStyle=css(g);rr(x-26,132,52,26,6);X.fill();               // ghost: vat AFTER catching this lane
+    X.strokeStyle=css(L.col);X.lineWidth=2;rr(x-26,132,52,26,6);X.stroke();
+    X.fillStyle="#c8bfd6";X.font="10px "+FONT;X.textAlign="center";X.fillText("→ catch "+lab,x,168);
+  }
+  // best-match order = the one Space will fill; compute its index once and reuse for the vat ring
+  let bi=-1,bd=1e9;orders.forEach((o,i)=>{const d=dE(vat,o.tg);if(d<bd){bd=d;bi=i;}});
+  // orders band
+  const n=orders.length,ow=Math.min(150,(W-24)/Math.max(n,1)-8);
+  orders.forEach((o,i)=>{const x=12+i*(ow+8),y=10,h=88,d=dE(vat,o.tg),near=d<=T;
+    X.fillStyle="#1a1526";rr(x,y,ow,h,10);X.fill();
+    if(i===bi){X.strokeStyle="#ff6a3d";X.lineWidth=2;rr(x-2,y-2,ow+4,h+4,12);X.stroke();   // delivery target: distinct accent outline + marker
+      X.fillStyle="#ff6a3d";X.font="bold 15px "+FONT;X.textAlign="right";X.fillText("▸",x+ow-6,y+16);}
+    X.fillStyle=css(o.tg);rr(x+8,y+8,ow-16,34,7);X.fill();stripes(x+8,y+8,ow-16,34,cb?o.pat:0);
+    if(near){X.strokeStyle="#7CFFB2";X.lineWidth=2.5;rr(x+7,y+7,ow-14,36,8);X.stroke();}
+    X.fillStyle="#0e0b14";X.fillRect(x+8,y+48,ow-16,7);            // dry timer
+    X.fillStyle=o.dry/o.max<.3?"#ff5a5a":"#ffb46a";X.fillRect(x+8,y+48,(ow-16)*(o.dry/o.max),7);
+    X.fillStyle=near?"#7CFFB2":"#b7aec7";X.font="bold 12px "+FONT;X.textAlign="left";
+    X.fillText("ΔE "+d.toFixed(1),x+8,y+70);
+    if(cb){const hh=hsl(o.tg);X.fillStyle="#8f86a3";X.font="10px "+FONT;X.fillText("H"+hh[0]+" S"+hh[1]+" L"+hh[2],x+8,y+83);}
+  });
+  // falling drops
+  drops.forEach(d=>{const x=laneX(d.lane),L=LANES[d.lane];
+    X.fillStyle=css(L.col);X.beginPath();X.arc(x,d.y,12,0,7);X.fill();
+    X.globalAlpha=.35;X.beginPath();X.arc(x,d.y,17,0,7);X.fill();X.globalAlpha=1;});
+  // vat + proximity ring (tightens toward best order; bd computed above)
+  const near=bd<=T;
+  const rr0=52,ringR=rr0+Math.min(bd,60)*1.5;                      // ring visibly tightens as ΔE drops
+  X.strokeStyle=near?"#7CFFB2":"rgba(255,255,255,.4)";X.lineWidth=near?5:3;
+  X.beginPath();X.arc(vatX,catchY,ringR,0,7);X.stroke();
+  X.fillStyle=css(vat);X.beginPath();X.arc(vatX,catchY,rr0,0,7);X.fill();
+  X.strokeStyle="#0d0a13";X.lineWidth=4;X.beginPath();X.arc(vatX,catchY,rr0,0,7);X.stroke();
+  X.fillStyle=(vat.r+vat.g+vat.b)/3>.5?"#141018":"#f3efe6";X.font="bold 13px "+FONT;X.textAlign="center";
+  X.fillText("VAT",vatX,catchY-2);
+  X.fillStyle="#e7dff2";X.font="11px "+FONT;X.fillText("ΔE "+bd.toFixed(1)+" / tol "+T.toFixed(0),vatX,catchY+rr0+18);
+  if(cb){const hh=hsl(vat);X.fillText("H"+hh[0]+" S"+hh[1]+" L"+hh[2],vatX,catchY+rr0+34);}
+  // HUD
+  X.fillStyle="#f3efe6";X.font="bold 15px "+FONT;X.textAlign="left";
+  X.fillText("SCORE "+score,14,H-14);
+  X.textAlign="center";X.fillStyle="#ff6a3d";X.fillText(combo>1?"COMBO x"+combo:"",W/2,H-14);
+  X.textAlign="right";X.fillStyle="#ff8f6f";X.fillText("♥".repeat(Math.max(lives,0))+"  Lv"+(lvl()+1),W-14,H-14);
+  if(toastT>0){X.globalAlpha=Math.min(1,toastT);X.textAlign="center";X.fillStyle="#ff6a3d";
+    X.font="bold 22px "+FONT;X.fillText(toast,W/2,catchY-120);X.globalAlpha=1;}
+  X.restore();
+  if(flash>0){                                                      // reduced-motion: accent border pulse instead of a full-screen flash
+    if(RM){X.strokeStyle="rgba(255,106,61,"+Math.min(flash,1)+")";X.lineWidth=10;X.strokeRect(5,5,W-10,H-10);}
+    else{X.fillStyle="rgba(255,255,255,"+(flash*.4)+")";X.fillRect(0,0,W,H);}
+  }
+  if(over)endcard();
+}
+function title(){
+  X.textAlign="center";
+  X.fillStyle="#ff6a3d";X.font="bold 52px "+FONT;X.fillText("MORDANT",W/2,H/2-120);
+  X.fillStyle="#e7dff2";X.font="17px "+FONT;
+  X.fillText("Catch falling pigments · mix the exact hue · deliver before it dries",W/2,H/2-84);
+  // demo swatch strip: C, M, Y, solvent
+  const cols=[{r:0,g:.75,b:.9},{r:.9,g:0,b:.55},{r:1,g:.85,b:0},{r:.85,g:.9,b:1}],lab=["C","M","Y","Rinse"];
+  cols.forEach((c,i)=>{const x=W/2-110+i*56;X.fillStyle=css(c);rr(x,H/2-56,44,44,8);X.fill();
+    X.fillStyle="#9c92ad";X.font="12px "+FONT;X.fillText(lab[i],x+22,H/2+8);});
+  X.fillStyle="#c8bfd6";X.font="15px "+FONT;
+  X.fillText("←/→ or A/D steer   ·   ⎵ deliver   ·   R rinse-dump   ·   C colorblind aid",W/2,H/2+44);
+  X.fillStyle="#9c92ad";X.font="13px "+FONT;
+  X.fillText("Rinse-dump resets the vat to white but dries every order ~2s faster",W/2,H/2+70);
+  X.fillStyle="#ff8f6f";X.font="bold 18px "+FONT;X.fillText("Press any key or tap to start",W/2,H/2+112);
+}
+function endcard(){
+  X.fillStyle="rgba(10,7,16,.86)";X.fillRect(0,0,W,H);
+  X.textAlign="center";X.fillStyle="#ff6a3d";X.font="bold 40px "+FONT;X.fillText("VAT DRIED OUT",W/2,H/2-70);
+  X.fillStyle="#f3efe6";X.font="bold 26px "+FONT;X.fillText("Score "+score,W/2,H/2-24);
+  X.font="16px "+FONT;X.fillStyle="#c8bfd6";X.fillText("Best "+best+"   ·   Seed "+SEED,W/2,H/2+8);
+  // swatch snapshot strip encoding the run visually
+  const cols=[{r:0,g:.75,b:.9},{r:.9,g:0,b:.55},{r:1,g:.85,b:0},vat];
+  cols.forEach((c,i)=>{X.fillStyle=css(c);rr(W/2-104+i*54,H/2+30,44,44,8);X.fill();});
+  X.fillStyle="#9c92ad";X.font="14px "+FONT;X.fillText('"Share seed" copies this run · press Enter / click to replay',W/2,H/2+108);
+}
+
+/* ---- loop ---- */
+function frame(t){const dt=Math.min((t-last)/1000||0,.05);last=t;update(dt);draw();requestAnimationFrame(frame);}
+requestAnimationFrame(frame);                                       // title screen renders until the first input calls reset()
+</script>
+</body>
+</html>

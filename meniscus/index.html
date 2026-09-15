@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meniscus — thermometer logic puzzle</title>
+<style>
+  :root{ --bg:#0e131a; --panel:#151d27; --edge:#243243; --ink:#dfe8f2; --dim:#8ba0b6; --accent:#ff6a45; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:radial-gradient(1200px 700px at 50% -10%,#1b2733,#0e131a 70%);color:var(--ink);
+    font:15px/1.45 "Segoe UI",system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100%;padding:18px 12px 40px}
+  h1{font-size:26px;letter-spacing:.5px;margin:2px 0 0;font-weight:700}
+  h1 span{color:var(--accent)}
+  .sub{color:var(--dim);font-size:12.5px;margin:2px 0 12px;text-align:center;max-width:560px}
+  .panel{background:linear-gradient(180deg,#182231,#121a24);border:1px solid var(--edge);border-radius:16px;
+    padding:14px;box-shadow:0 20px 50px -20px #000,inset 0 1px 0 #ffffff10}
+  .bar{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;align-items:center;margin-bottom:10px;max-width:600px}
+  button,.seg{background:#1d2836;color:var(--ink);border:1px solid var(--edge);border-radius:9px;padding:7px 11px;
+    font-size:13px;cursor:pointer;transition:.15s;font-weight:600}
+  button:hover,.seg:hover{background:#26374a;border-color:#375065}
+  button:active{transform:translateY(1px)}
+  button.pri{background:linear-gradient(180deg,#ff7a55,#e8542f);border-color:#ff8a68;color:#160b06}
+  button.on{background:#2a6bd0;border-color:#4d8bef;color:#fff}
+  .sizes{display:inline-flex;border:1px solid var(--edge);border-radius:9px;overflow:hidden}
+  .sizes .seg{border:0;border-radius:0;border-right:1px solid var(--edge);padding:7px 10px}
+  .sizes .seg:last-child{border-right:0}
+  .sizes .seg.on{background:var(--accent);color:#160b06}
+  canvas{display:block;border-radius:12px;touch-action:manipulation;cursor:pointer}
+  .status{margin-top:10px;min-height:20px;text-align:center;font-size:13px;color:var(--dim);max-width:560px}
+  .status b{color:var(--ink)}
+  .foot{color:#5f7288;font-size:11.5px;margin-top:14px;text-align:center}
+</style>
+</head>
+<body>
+  <h1>Meni<span>scus</span></h1>
+  <div class="sub">Raise mercury in each glass tube so every row and column matches its number. Mercury only rises from the bulb — click a cell to fill up to it, click a filled cell to drain.</div>
+  <div class="panel">
+    <div class="bar">
+      <span class="sizes" id="sizes"></span>
+      <button id="new" class="pri" title="Generate a fresh random puzzle at the selected size">New</button>
+      <button id="daily" title="Play today's shared daily puzzle (same board for everyone)">Daily</button>
+      <button id="hint" title="Reveal one forced cell and explain why it's forced">Hint</button>
+      <button id="explain" title="Step through the solver's forced-deduction chain (restarts from an empty board)">Explain</button>
+      <button id="check" title="Flag any filled cells that shouldn't be filled — non-destructive">Check</button>
+      <button id="reset" title="Clear all your fills on this board">Reset</button>
+      <button id="cb" title="Toggle colorblind-safe palette (Okabe-Ito blue/orange)">◑ CB</button>
+      <button id="share" title="Copy an emoji-grid result and the shareable board link">Share</button>
+    </div>
+    <canvas id="cv"></canvas>
+  </div>
+  <div class="status" id="status">Fill the thermometers so every clue is satisfied.</div>
+  <div class="foot">Every board is generated with a logic-verified unique solution and encoded in the URL — copy the address to share the exact puzzle.</div>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const cv=$("cv"), ctx=cv.getContext("2d");
+
+/* ---------- deterministic RNG ---------- */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function hashStr(s){let h=2166136261>>>0;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
+
+/* ---------- logic solver / deducer ----------
+   Cell states: 0 unknown, 1 filled, 2 empty. A tube fills contiguously from the bulb (index 0).
+   Rules: monotonic within a tube (filled implies earlier filled; empty implies later empty),
+   plus row/column count saturation. Returns ordered forced steps for the teaching mode. */
+function deduce(tubes,rowClue,colClue,N){
+  const st=Array.from({length:N},()=>new Int8Array(N));
+  const own=Array.from({length:N},()=>Array(N).fill(null));
+  tubes.forEach((t,ti)=>t.forEach((c,i)=>{own[c.r][c.c]={t:ti,i};}));
+  const steps=[]; let ok=true;
+  function set(r,c,v,reason){
+    if(st[r][c]===v)return; if(st[r][c]!==0){ok=false;return;}
+    st[r][c]=v; const o=own[r][c]; steps.push({r,c,v,t:o.t,i:o.i,reason});
+    const tube=tubes[o.t];
+    if(v===1){for(let k=o.i-1;k>=0;k--)set(tube[k].r,tube[k].c,1,"mercury below this cell must also be filled");}
+    else{for(let k=o.i+1;k<tube.length;k++)set(tube[k].r,tube[k].c,2,"mercury above an empty cell can't exist");}
+  }
+  let changed=true;
+  while(changed&&ok){
+    changed=false;
+    for(let r=0;r<N;r++){
+      let f=0,u=[]; for(let c=0;c<N;c++){if(st[r][c]===1)f++;else if(st[r][c]===0)u.push(c);}
+      if(!u.length)continue;
+      if(f===rowClue[r]){u.forEach(c=>set(r,c,2,`row ${r+1} already has all ${rowClue[r]} filled cells`));changed=true;}
+      else if(f+u.length===rowClue[r]){u.forEach(c=>set(r,c,1,`row ${r+1} needs every remaining cell filled`));changed=true;}
+    }
+    for(let c=0;c<N;c++){
+      let f=0,u=[]; for(let r=0;r<N;r++){if(st[r][c]===1)f++;else if(st[r][c]===0)u.push(r);}
+      if(!u.length)continue;
+      if(f===colClue[c]){u.forEach(r=>set(r,c,2,`column ${c+1} already has all ${colClue[c]} filled cells`));changed=true;}
+      else if(f+u.length===colClue[c]){u.forEach(r=>set(r,c,1,`column ${c+1} needs every remaining cell filled`));changed=true;}
+    }
+  }
+  let solved=ok; for(let r=0;r<N&&solved;r++)for(let c=0;c<N;c++)if(st[r][c]===0){solved=false;break;}
+  return {steps,solved};
+}
+
+/* ---------- board generator (self-avoiding tube tiling + logic-uniqueness filter) ---------- */
+function buildBoard(seed,N){
+  const rng=mulberry32(seed), ri=n=>Math.floor(rng()*n); let last=null;
+  const maxAdd=Math.max(3,N-1);
+  for(let attempt=0;attempt<1500;attempt++){
+    const own=Array.from({length:N},()=>Array(N).fill(-1)); const tubes=[];
+    for(let r=0;r<N;r++)for(let c=0;c<N;c++){
+      if(own[r][c]!==-1)continue;
+      const tube=[{r,c}]; own[r][c]=tubes.length; let cr=r,cc=c; const maxLen=2+ri(maxAdd);
+      while(tube.length<maxLen){
+        const nb=[];
+        for(const[dr,dc]of[[1,0],[-1,0],[0,1],[0,-1]]){const nr=cr+dr,nc=cc+dc;
+          if(nr>=0&&nr<N&&nc>=0&&nc<N&&own[nr][nc]===-1)nb.push([nr,nc]);}
+        if(!nb.length)break; const[nr,nc]=nb[ri(nb.length)];
+        own[nr][nc]=tubes.length; tube.push({r:nr,c:nc}); cr=nr; cc=nc;
+      }
+      tubes.push(tube);
+    }
+    const fill=tubes.map(t=>ri(t.length+1));
+    const rowClue=Array(N).fill(0), colClue=Array(N).fill(0);
+    tubes.forEach((t,ti)=>{for(let i=0;i<fill[ti];i++){rowClue[t[i].r]++;colClue[t[i].c]++;}});
+    const res=deduce(tubes,rowClue,colClue,N);
+    last={N,tubes,rowClue,colClue,solutionFill:fill,steps:res.steps};
+    if(res.solved)return last;
+  }
+  return last; // fallback (still has a valid solution)
+}
+
+/* ---------- game state ---------- */
+let S=null, cell=56, gx=0, gy=0, dpr=1, cb=false;
+let flashes=[]; // {r,c,t0,color}
+let winT=0, logicIdx=0, status=$("status");
+const WIN_MS=1500; // win banner: fade in, hold, fade fully out
+
+function layout(){
+  const N=S.N;
+  const vw=document.documentElement.clientWidth||window.innerWidth||540;
+  const vh=document.documentElement.clientHeight||window.innerHeight||720;
+  const avail=Math.min(540, vw-40, vh-220);
+  cell=Math.max(28,Math.floor(avail/(N+1)));
+  gx=cell; gy=cell; const W=(N+1)*cell, H=(N+1)*cell;
+  dpr=Math.min(2,window.devicePixelRatio||1);
+  cv.width=W*dpr; cv.height=H*dpr; cv.style.width=W+"px"; cv.style.height=H+"px";
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+
+function rowFilled(r){let s=0;S.tubes.forEach((t,ti)=>{for(let i=0;i<S.fill[ti];i++)if(t[i].r===r)s++;});return s;}
+function colFilled(c){let s=0;S.tubes.forEach((t,ti)=>{for(let i=0;i<S.fill[ti];i++)if(t[i].c===c)s++;});return s;}
+// A win is the one true solution, not merely any clue-satisfying fill. This keeps
+// isWon() consistent with Check/Hint/Explain even on a rare non-unique fallback board.
+function isWon(){for(let i=0;i<S.fill.length;i++){if(S.fill[i]!==S.solutionFill[i])return false;}return true;}
+
+/* vector helpers */
+const mid=(a,b)=>({x:(a.x+b.x)/2,y:(a.y+b.y)/2});
+const sub=(a,b)=>({x:a.x-b.x,y:a.y-b.y});
+const add=(a,b)=>({x:a.x+b.x,y:a.y+b.y});
+const mul=(a,k)=>({x:a.x*k,y:a.y*k});
+const lerp=(a,b,t)=>({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t});
+function norm(v){const m=Math.hypot(v.x,v.y)||1;return{x:v.x/m,y:v.y/m};}
+
+function pal(){
+  return cb
+    ? {merc0:"#7fd0ff",merc1:"#1667c8",good:"#0072b2",bad:"#e69f00"}
+    : {merc0:"#ff8a63",merc1:"#d81f3f",good:"#2ec16b",bad:"#e6483d"};
+}
+
+function drawTube(ti){
+  const cells=S.tubes[ti], len=cells.length;
+  const pts=cells.map(c=>({x:gx+c.c*cell+cell/2,y:gy+c.r*cell+cell/2}));
+  const X=[],E=[];
+  for(let i=0;i<len;i++){
+    if(i<len-1)X[i]=mid(pts[i],pts[i+1]);
+    else X[i]=len>1?add(pts[i],mul(sub(pts[i],pts[i-1]),0.5)):{x:pts[i].x,y:pts[i].y+cell*0.42};
+  }
+  for(let i=0;i<len;i++)E[i]=i>0?X[i-1]:(len>1?sub(mul(pts[0],2),X[0]):{x:pts[0].x,y:pts[0].y-cell*0.42});
+  const glass=[E[0]]; for(let i=0;i<len;i++)glass.push(X[i]);
+  const tw=cell*0.6, rb=cell*0.44;
+  let minY=1e9,maxY=-1e9; pts.forEach(p=>{minY=Math.min(minY,p.y);maxY=Math.max(maxY,p.y);});
+
+  // glass tube body
+  ctx.lineCap="round"; ctx.lineJoin="round";
+  ctx.beginPath(); ctx.moveTo(glass[0].x,glass[0].y); for(let i=1;i<glass.length;i++)ctx.lineTo(glass[i].x,glass[i].y);
+  const gg=ctx.createLinearGradient(0,minY-cell/2,0,maxY+cell/2); gg.addColorStop(0,"#e7eef6");gg.addColorStop(1,"#aab8c7");
+  ctx.strokeStyle=gg; ctx.lineWidth=tw; ctx.stroke();
+  ctx.strokeStyle="#0e131a"; ctx.lineWidth=tw+3; ctx.globalCompositeOperation="destination-over"; ctx.stroke();
+  ctx.globalCompositeOperation="source-over";
+  // bulb glass
+  ctx.beginPath(); ctx.arc(pts[0].x,pts[0].y,rb,0,7); ctx.fillStyle=gg; ctx.fill();
+  ctx.lineWidth=2; ctx.strokeStyle="#0e131a"; ctx.stroke();
+  // glass reflection
+  ctx.beginPath(); ctx.moveTo(glass[0].x,glass[0].y); for(let i=1;i<glass.length;i++)ctx.lineTo(glass[i].x,glass[i].y);
+  ctx.strokeStyle="#ffffff55"; ctx.lineWidth=tw*0.16; ctx.stroke();
+
+  // mercury
+  const f=S.df[ti]; const P=pal();
+  const mg=ctx.createLinearGradient(0,minY-cell/2,0,maxY+cell/2); mg.addColorStop(0,P.merc0);mg.addColorStop(1,P.merc1);
+  const pointAt=s=>{let i=Math.min(Math.floor(s),len-1),t=s-i; if(s>=len){i=len-1;t=1;} return lerp(E[i],X[i],t);};
+  if(f>0.001){
+    const k=Math.floor(f+1e-9), mp=[E[0]];
+    for(let i=0;i<k&&i<len;i++)mp.push(X[i]);
+    if(f>k)mp.push(pointAt(f));
+    // bulb mercury
+    ctx.beginPath(); ctx.arc(pts[0].x,pts[0].y,rb*0.82*Math.min(1,f),0,7); ctx.fillStyle=mg; ctx.fill();
+    if(mp.length>=2){
+      ctx.beginPath(); ctx.moveTo(mp[0].x,mp[0].y); for(let i=1;i<mp.length;i++)ctx.lineTo(mp[i].x,mp[i].y);
+      ctx.strokeStyle=mg; ctx.lineWidth=tw*0.86; ctx.stroke();
+    }
+    // animated meniscus at the leading edge
+    if(f<len-1e-6){
+      const fp=pointAt(f), i=Math.min(Math.floor(f),len-1), d=norm(sub(X[i],E[i])), pn={x:-d.y,y:d.x};
+      const w=tw*0.43, a=add(fp,mul(pn,w)), b=sub(fp,mul(pn,w)), c=add(fp,mul(d,tw*0.34));
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.quadraticCurveTo(c.x,c.y,b.x,b.y);
+      ctx.lineTo(b.x-d.x*2,b.y-d.y*2); ctx.lineTo(a.x-d.x*2,a.y-d.y*2); ctx.closePath();
+      ctx.fillStyle=P.merc0; ctx.fill();
+    }
+  }
+}
+
+function draw(){
+  if(!S)return;
+  const N=S.N, P=pal();
+  ctx.clearRect(0,0,cv.width,cv.height);
+  // grid guides
+  ctx.strokeStyle="#ffffff0e"; ctx.lineWidth=1;
+  for(let i=0;i<=N;i++){ctx.beginPath();ctx.moveTo(gx+i*cell,gy);ctx.lineTo(gx+i*cell,gy+N*cell);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(gx,gy+i*cell);ctx.lineTo(gx+N*cell,gy+i*cell);ctx.stroke();}
+  // clues
+  ctx.font='bold '+Math.floor(cell*0.36)+'px "Segoe UI",system-ui,sans-serif'; ctx.textAlign="center"; ctx.textBaseline="middle";
+  for(let r=0;r<N;r++){const cur=rowFilled(r),tgt=S.rowClue[r];
+    ctx.fillStyle=cur>tgt?P.bad:(cur===tgt?P.good:"#9fb3c8");
+    ctx.fillText(tgt, gx-cell/2, gy+r*cell+cell/2);}
+  for(let c=0;c<N;c++){const cur=colFilled(c),tgt=S.colClue[c];
+    ctx.fillStyle=cur>tgt?P.bad:(cur===tgt?P.good:"#9fb3c8");
+    ctx.fillText(tgt, gx+c*cell+cell/2, gy-cell/2);}
+  // tubes
+  for(let i=0;i<S.tubes.length;i++)drawTube(i);
+  // flashes
+  const now=performance.now();
+  flashes=flashes.filter(f=>now-f.t0<1100);
+  flashes.forEach(f=>{const a=1-(now-f.t0)/1100; ctx.strokeStyle=f.color; ctx.globalAlpha=a; ctx.lineWidth=3;
+    ctx.strokeRect(gx+f.c*cell+3,gy+f.r*cell+3,cell-6,cell-6); ctx.globalAlpha=1;});
+  // win overlay: fade in, hold, then fade fully out to a clean finished board
+  if(winT){
+    const t=(now-winT)/WIN_MS;
+    if(t<1){
+      const a = t<0.2 ? t/0.2 : (t>0.6 ? Math.max(0,1-(t-0.6)/0.4) : 1);
+      const cx=gx+N*cell/2, cy=gy+N*cell/2, label="✓ Solved";
+      ctx.globalAlpha=a;
+      ctx.font='bold '+Math.floor(cell*0.5)+'px "Segoe UI",system-ui,sans-serif';
+      ctx.textAlign="center"; ctx.textBaseline="middle";
+      const pw=ctx.measureText(label).width+cell*0.7, ph=cell*0.9, rr=ph/2;
+      ctx.fillStyle="#0e131aE0"; ctx.beginPath();
+      ctx.moveTo(cx-pw/2+rr,cy-ph/2);
+      ctx.arcTo(cx+pw/2,cy-ph/2,cx+pw/2,cy+ph/2,rr);
+      ctx.arcTo(cx+pw/2,cy+ph/2,cx-pw/2,cy+ph/2,rr);
+      ctx.arcTo(cx-pw/2,cy+ph/2,cx-pw/2,cy-ph/2,rr);
+      ctx.arcTo(cx-pw/2,cy-ph/2,cx+pw/2,cy-ph/2,rr);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle=P.good; ctx.fillText(label, cx, cy);
+      ctx.globalAlpha=1;
+    }
+  }
+}
+
+/* spring-eased animation */
+let raf=0;
+function animate(){
+  let active=false;
+  for(let i=0;i<S.fill.length;i++){
+    const d=S.fill[i]-S.df[i];
+    S.dv[i]=(S.dv[i]+d*0.28)*0.62; S.df[i]+=S.dv[i];
+    if(Math.abs(d)>0.002||Math.abs(S.dv[i])>0.002)active=true;
+    else{S.df[i]=S.fill[i];S.dv[i]=0;}
+    S.df[i]=Math.max(0,Math.min(S.tubes[i].length,S.df[i]));
+  }
+  if(flashes.length||(winT&&performance.now()-winT<WIN_MS))active=true;
+  draw();
+  raf=active?requestAnimationFrame(animate):0;
+}
+function kick(){ if(!raf)raf=requestAnimationFrame(animate); else draw(); }
+
+/* ---------- interaction ---------- */
+function cellAt(px,py){const c=Math.floor((px-gx)/cell),r=Math.floor((py-gy)/cell);
+  if(r<0||c<0||r>=S.N||c>=S.N)return null; return{r,c};}
+function tubeAt(r,c){for(let ti=0;ti<S.tubes.length;ti++){const t=S.tubes[ti];
+  for(let i=0;i<t.length;i++)if(t[i].r===r&&t[i].c===c)return{t:ti,i};}return null;}
+
+cv.addEventListener("click",e=>{
+  if(!S)return; const p=cellAt(e.offsetX,e.offsetY); if(!p)return;
+  const o=tubeAt(p.r,p.c); if(!o)return;
+  const cur=S.fill[o.t];
+  S.fill[o.t]= (o.i<cur)? o.i : o.i+1;   // filled cell -> drain to here; empty -> fill through here
+  afterMove();
+});
+
+function afterMove(){ syncHash(); kick();
+  if(isWon()){ if(!winT){winT=performance.now(); onWin();} }
+  else{winT=0; if(!status.dataset.lock)setStatus("");}
+}
+function onWin(){
+  if(S.isDaily)recordStreak();
+  setStatus(S.isDaily?`<b>Daily solved!</b> Streak: ${loadStreak().streak} 🔥 — hit Share.`:"<b>Solved!</b> Every clue balanced.");
+}
+
+/* ---------- features ---------- */
+function hint(){
+  for(const s of S.steps){
+    const filledNow = s.i < S.fill[s.t];
+    const shouldFill = s.v===1;
+    if(filledNow!==shouldFill){
+      S.fill[s.t]= shouldFill? Math.max(S.fill[s.t],s.i+1) : Math.min(S.fill[s.t],s.i);
+      flash(s.r,s.c,pal().good);
+      setStatus(`Hint: <b>R${s.r+1}C${s.c+1}</b> — ${s.reason}.`,true);
+      afterMove(); return;
+    }
+  }
+  setStatus("No forced move differs from your board — you're on track.",true);
+}
+function explain(){
+  if(logicIdx===0){
+    if(S.fill.some(v=>v>0) && !confirm("Explain restarts from an empty board and clears your current fills. Continue?")) return;
+    S.fill=S.tubes.map(()=>0);
+  }
+  if(logicIdx>=S.steps.length){ setStatus("<b>Logic complete.</b> That chain of forced cells fully solves the board.",true); logicIdx=0; return; }
+  const s=S.steps[logicIdx++];
+  S.fill[s.t]= s.v===1? Math.max(S.fill[s.t],s.i+1) : Math.min(S.fill[s.t],s.i);
+  flash(s.r,s.c, s.v===1?pal().good:pal().bad);
+  setStatus(`Step ${logicIdx}/${S.steps.length}: <b>R${s.r+1}C${s.c+1}</b> is ${s.v===1?"FILLED":"EMPTY"} — ${s.reason}.`,true);
+  afterMove();
+}
+function check(){
+  let wrong=0;
+  S.tubes.forEach((t,ti)=>{ const sol=S.solutionFill[ti];
+    for(let i=0;i<t.length;i++){ const now=i<S.fill[ti], correct=i<sol;
+      if(now&&!correct){flash(t[i].r,t[i].c,pal().bad);wrong++;} }});
+  setStatus(wrong?`Check: <b>${wrong}</b> filled cell${wrong>1?"s":""} shouldn't be filled (highlighted).`:"Check: no mistakes so far. 👍",true);
+  kick();
+}
+function flash(r,c,color){flashes.push({r,c,t0:performance.now(),color});}
+function setStatus(html,lock){status.innerHTML=html||"Fill the thermometers so every clue is satisfied."; status.dataset.lock=lock?"1":"";}
+
+/* ---------- streak (localStorage) ---------- */
+function todayStr(){const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+function loadStreak(){try{return JSON.parse(localStorage.getItem("meniscus_streak"))||{last:"",streak:0};}catch(e){return{last:"",streak:0};}}
+function recordStreak(){const t=todayStr(),s=loadStreak(); if(s.last===t)return;
+  const n=new Date(); const y=new Date(n.getFullYear(),n.getMonth(),n.getDate()-1); // DST-safe: step back one calendar day
+  const ys=y.getFullYear()+"-"+String(y.getMonth()+1).padStart(2,"0")+"-"+String(y.getDate()).padStart(2,"0");
+  s.streak=(s.last===ys)?s.streak+1:1; s.last=t; localStorage.setItem("meniscus_streak",JSON.stringify(s));}
+
+function share(){
+  const N=S.N, P=cb?"🟦":"🟥"; let grid="";
+  for(let r=0;r<N;r++){for(let c=0;c<N;c++){const o=tubeAt(r,c); grid+=(o.i<S.solutionFill[o.t])?P:"⬜";}grid+="\n";}
+  const head=S.isDaily?`Meniscus Daily ${todayStr()} — streak ${loadStreak().streak}🔥`:`Meniscus ${N}×${N}`;
+  const txt=`${head}\n${grid}${location.href}`;
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(()=>setStatus("Result copied to clipboard.",true),()=>prompt("Copy:",txt));
+  else prompt("Copy your result:",txt);
+}
+
+/* ---------- URL hash: reproducible board + resumable state ---------- */
+function syncHash(){
+  const f=S.fill.map(x=>x.toString(36)).join("");
+  const h=`#s=${S.seed}&n=${S.N}${S.isDaily?"&d=1":""}&f=${f}`;
+  history.replaceState(null,"",h);
+}
+function parseHash(){const h=location.hash.slice(1); if(!h)return null; const q={};
+  h.split("&").forEach(p=>{const[k,v]=p.split("=");q[k]=v;}); if(q.s===undefined)return null;
+  let n=parseInt(q.n,10); if(!Number.isFinite(n))n=6; // guard against garbled/truncated links -> NaN board size
+  return{seed:parseInt(q.s,10)>>>0,N:Math.max(5,Math.min(9,n)),daily:q.d==="1",f:q.f||""};}
+
+function loadBoard(seed,N,isDaily,fillStr){
+  const b=buildBoard(seed,N);
+  S=Object.assign({seed,isDaily:!!isDaily},b);
+  S.fill=S.tubes.map(()=>0); S.df=S.tubes.map(()=>0); S.dv=S.tubes.map(()=>0);
+  if(fillStr&&fillStr.length===S.tubes.length){for(let i=0;i<fillStr.length;i++){const v=parseInt(fillStr[i],36);if(v>=0&&v<=S.tubes[i].length)S.fill[i]=v;}}
+  logicIdx=0; winT=0; flashes=[]; layout();
+  for(let i=0;i<S.df.length;i++)S.df[i]=S.fill[i];
+  buildSizes(); syncHash(); setStatus(isDaily?`Daily puzzle for ${todayStr()} — streak ${loadStreak().streak}🔥`:"");
+  if(isWon()){winT=performance.now();onWin();}
+  kick();
+}
+function newBoard(N){loadBoard((Math.random()*4294967296)>>>0,N,false,"");}
+function daily(){loadBoard(hashStr("meniscus|"+todayStr()),6,true,"");}
+
+/* ---------- toolbar ---------- */
+function buildSizes(){const box=$("sizes");box.innerHTML="";[5,6,7,8,9].forEach(n=>{
+  const b=document.createElement("span");b.className="seg"+(S&&S.N===n&&!S.isDaily?" on":"");b.textContent=n+"×"+n;
+  b.onclick=()=>newBoard(n);box.appendChild(b);});
+  $("daily").classList.toggle("on", !!(S&&S.isDaily));}
+$("new").onclick=()=>newBoard(S?(S.isDaily?6:S.N):6);
+$("daily").onclick=daily;
+$("hint").onclick=hint;
+$("explain").onclick=explain;
+$("check").onclick=check;
+$("reset").onclick=()=>{S.fill=S.tubes.map(()=>0);logicIdx=0;afterMove();setStatus("Board cleared.",false);};
+$("share").onclick=share;
+$("cb").onclick=()=>{cb=!cb;$("cb").classList.toggle("on",cb);draw();};
+
+window.addEventListener("resize",()=>{if(S){layout();draw();}});
+window.addEventListener("hashchange",()=>{const q=parseHash();if(q&&(!S||q.seed!==S.seed))loadBoard(q.seed,q.N,q.daily,q.f);});
+
+/* ---------- boot ---------- */
+(function(){const q=parseHash(); if(q)loadBoard(q.seed,q.N,q.daily,q.f); else newBoard(6);})();
+</script>
+</body>
+</html>

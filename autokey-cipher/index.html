@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autokey Cipher — self-keying Vigenère encoder & decoder</title>
+<meta name="description" content="Encrypt and decrypt with the Autokey cipher — a Vigenère variant that extends the key with the plaintext itself, defeating the repeating-key weakness. Offline, no tracking.">
+<style>
+  :root{
+    --c:#6d28d9;
+    --bg:#f4f1fb; --card:#ffffff; --fg:#170e28; --muted:#5f5378;
+    --line:#e4dcf3; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#0f0a1a; --card:#181026; --fg:#ece6f8; --muted:#a698c0;
+    --line:#2b2040; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .mode{display:flex;gap:8px;margin-bottom:16px}
+  .mode button{flex:1;padding:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:10px;cursor:pointer;font-weight:600}
+  .mode button.on{background:var(--c);color:#fff;border-color:var(--c)}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  input[type=text],textarea{width:100%;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  textarea{min-height:90px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  input:focus,textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .out{margin-top:14px}
+  .out textarea{background:var(--bg);font-size:1.05rem;letter-spacing:.06em}
+  .btn{background:var(--c);color:#fff;border:0;border-radius:9px;padding:9px 14px;font-weight:600;cursor:pointer;font-size:.88rem;margin-top:12px}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🗝️</div>
+  <div>
+    <h1>Autokey Cipher</h1>
+    <p>A Vigenère that keys itself with the message</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="mode">
+      <button id="mEnc" class="on">Encrypt</button>
+      <button id="mDec">Decrypt</button>
+    </div>
+    <label id="inLbl">Plaintext</label>
+    <textarea id="in" spellcheck="false">meet me at the fountain</textarea>
+    <div style="margin-top:14px"><label>Keyword</label><input type="text" id="key" value="KILT" spellcheck="false"></div>
+    <div class="out">
+      <label id="outLbl">Ciphertext</label>
+      <textarea id="out" readonly spellcheck="false"></textarea>
+    </div>
+    <button class="btn" id="copy">Copy result</button>
+  </div>
+
+  <div class="card">
+    <h2>How the Autokey cipher works</h2>
+    <p class="note">Blaise de Vigenère's <b>autokey</b> cipher (1586) fixes the big weakness of the ordinary Vigenère: instead of repeating the keyword over and over — which leaks a period an attacker can find — it uses the keyword <b>once</b>, then continues the keystream with the <b>plaintext itself</b>. Each letter is shifted by its keystream letter (A=0…Z=25, mod 26). Decryption is sequential: you recover a plaintext letter, then feed it back to decrypt the next. Non-letters are dropped and everything is upper-cased. Everything runs locally.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  // Keep only A-Z, uppercased.
+  function clean(text){
+    return String(text == null ? '' : text).toUpperCase().replace(/[^A-Z]/g, '');
+  }
+  function code(ch){ return ch.charCodeAt(0) - 65; }
+  function chr(n){ return String.fromCharCode(65 + ((n % 26) + 26) % 26); }
+  // Encrypt: keystream = keyword followed by the plaintext.
+  function autokeyEncrypt(plaintext, keyword){
+    var pt = clean(plaintext), key = clean(keyword);
+    if(key.length === 0) throw new Error('keyword must contain at least one letter');
+    var stream = key + pt;
+    var out = '';
+    for(var i = 0; i < pt.length; i++){
+      out += chr(code(pt[i]) + code(stream[i]));
+    }
+    return out;
+  }
+  // Decrypt: recover each letter, feeding it back into the keystream.
+  function autokeyDecrypt(ciphertext, keyword){
+    var ct = clean(ciphertext), key = clean(keyword);
+    if(key.length === 0) throw new Error('keyword must contain at least one letter');
+    var out = '';
+    for(var i = 0; i < ct.length; i++){
+      var k = i < key.length ? code(key[i]) : code(out[i - key.length]);
+      out += chr(code(ct[i]) - k);
+    }
+    return out;
+  }
+
+  if(typeof module !== 'undefined') module.exports = { clean:clean, autokeyEncrypt:autokeyEncrypt, autokeyDecrypt:autokeyDecrypt };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var mode = 'enc';
+    var mEnc = document.getElementById('mEnc'), mDec = document.getElementById('mDec');
+    function render(){
+      var text = document.getElementById('in').value, key = document.getElementById('key').value;
+      try{
+        document.getElementById('out').value = mode === 'enc' ? autokeyEncrypt(text, key) : autokeyDecrypt(text, key);
+      }catch(e){ document.getElementById('out').value = ''; }
+    }
+    mEnc.addEventListener('click', function(){ mode='enc'; mEnc.classList.add('on'); mDec.classList.remove('on'); document.getElementById('inLbl').textContent='Plaintext'; document.getElementById('outLbl').textContent='Ciphertext'; render(); });
+    mDec.addEventListener('click', function(){ mode='dec'; mDec.classList.add('on'); mEnc.classList.remove('on'); document.getElementById('inLbl').textContent='Ciphertext'; document.getElementById('outLbl').textContent='Plaintext'; render(); });
+    ['in','key'].forEach(function(id){ document.getElementById(id).addEventListener('input', render); });
+    document.getElementById('copy').addEventListener('click', function(){
+      var t = document.getElementById('out').value;
+      if(navigator.clipboard) navigator.clipboard.writeText(t);
+      this.textContent = 'Copied!'; var b = this; setTimeout(function(){ b.textContent = 'Copy result'; }, 1200);
+    });
+    render();
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('autokey-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('autokey-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

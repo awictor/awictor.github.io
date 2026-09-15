@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpacingScale — Design-Token Spacing Scale Generator</title>
+<meta name="description" content="Generate a spacing scale for a design system — linear (4/8-pt) or geometric ratio — with px, rem and copy-ready CSS custom properties. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('spacing-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#14b8a6;
+    --bg:#f1f9f8; --card:#ffffff; --fg:#12211f; --muted:#556b67; --line:#daece9; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#07130f; --card:#0f1d19; --fg:#e7f4f1; --muted:#84a39c; --line:#1a2c27; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:680px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#0f766e);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:680px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.78rem;color:var(--muted);margin-bottom:5px;font-weight:600}
+  .controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px}
+  input,select{width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  .row{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+  .bar{height:14px;background:var(--c);border-radius:4px}
+  .lbl{width:130px;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:.85rem;flex-shrink:0}
+  .css{margin-top:14px;background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--c);border-radius:8px;padding:12px;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:.85rem;white-space:pre;overflow-x:auto}
+  .copy{margin-top:10px;background:var(--c);color:#04302b;border:0;border-radius:8px;padding:9px 16px;cursor:pointer;font:inherit;font-weight:700}
+  .err{color:#dc2626;font-size:.85rem;margin-top:8px}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:680px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">📏</div>
+    <div><h1>SpacingScale</h1><div class="sub">Design-token spacing scale</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="controls">
+      <div><label for="base">Base (px)</label><input type="number" id="base" value="4" min="1" step="1"></div>
+      <div><label for="mode">Mode</label><select id="mode"><option value="linear">Linear (×1,2,3…)</option><option value="ratio">Ratio (geometric)</option></select></div>
+      <div id="ratioWrap" style="display:none"><label for="ratio">Ratio</label><input type="number" id="ratio" value="1.5" min="1.01" step="0.05"></div>
+      <div><label for="count">Steps</label><input type="number" id="count" value="8" min="1" max="20" step="1"></div>
+      <div><label for="root">Root font (px, for rem)</label><input type="number" id="root" value="16" min="1" step="1"></div>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card">
+    <div id="preview"></div>
+  </div>
+  <div class="card">
+    <div class="css mono" id="css"></div>
+    <button class="copy" id="copyBtn" type="button">Copy CSS variables</button>
+  </div>
+</main>
+<footer>
+  A spacing scale is the set of gaps/paddings a design system allows. Linear (multiples of a 4- or 8-px base) keeps everything on a grid; a ratio scale grows faster. Output as CSS custom properties in px and rem. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/spacing-scale">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  function chk(base, count){
+    const b = Number(base), n = Number(count);
+    if(!Number.isFinite(b) || b <= 0) throw new Error('base must be > 0');
+    if(!Number.isInteger(n) || n < 1) throw new Error('steps must be a positive integer');
+    return [b, n];
+  }
+
+  // Linear: base × 1, 2, 3 … count.
+  function linearScale(base, count){
+    const [b, n] = chk(base, count);
+    return Array.from({ length: n }, (_, i) => b * (i + 1));
+  }
+
+  // Geometric: base × ratio^0 … ratio^(count-1), rounded to whole px.
+  function ratioScale(base, ratio, count){
+    const [b, n] = chk(base, count);
+    const r = Number(ratio);
+    if(!(r > 1)) throw new Error('ratio must be > 1');
+    return Array.from({ length: n }, (_, i) => Math.round(b * Math.pow(r, i)));
+  }
+
+  // CSS custom properties: [--prefix-1: 4px;, …].
+  function tokens(values, { prefix = 'space', root = 16 } = {}){
+    return values.map((v, i) => `--${prefix}-${i + 1}: ${v}px; /* ${(v / root)}rem */`);
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('preview')){
+    const $ = id => document.getElementById(id);
+
+    function values(){
+      return $('mode').value === 'ratio'
+        ? ratioScale($('base').value, $('ratio').value, $('count').value)
+        : linearScale($('base').value, $('count').value);
+    }
+    function render(){
+      try{
+        const vals = values();
+        const max = Math.max(...vals);
+        $('preview').innerHTML = vals.map((v, i) =>
+          `<div class="row"><span class="lbl">--space-${i + 1}: ${v}px</span><div class="bar" style="width:${(v / max) * 100}%"></div></div>`).join('');
+        $('css').textContent = tokens(vals, { root: +$('root').value }).join('\n');
+        $('err').textContent = '';
+      }catch(e){ $('preview').innerHTML = ''; $('css').textContent = ''; $('err').textContent = e.message; }
+    }
+    $('mode').addEventListener('change', () => { $('ratioWrap').style.display = $('mode').value === 'ratio' ? '' : 'none'; render(); });
+    [...document.querySelectorAll('input')].forEach(el => el.addEventListener('input', render));
+    $('copyBtn').addEventListener('click', () => {
+      navigator.clipboard?.writeText($('css').textContent);
+      $('copyBtn').textContent = 'Copied!'; setTimeout(() => $('copyBtn').textContent = 'Copy CSS variables', 1200);
+    });
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('spacing-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { linearScale, ratioScale, tokens };
+</script>
+</body>
+</html>

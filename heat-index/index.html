@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HeatIndex — Feels-Like Temperature (NWS)</title>
+<meta name="description" content="Compute the apparent 'feels-like' temperature from air temperature and relative humidity using the NWS heat-index regression. °F and °C, with risk category. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('heatindex-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#f97316;
+    --bg:#fbf6f1; --card:#ffffff; --fg:#211a13; --muted:#6b5c4c; --line:#efe4d7; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#14100b; --card:#1e1810; --fg:#f6efe6; --muted:#a89377; --line:#2d2418; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:640px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#c2410c);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:640px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  .units{display:flex;gap:6px;margin-bottom:14px}
+  .units button{flex:1;padding:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;cursor:pointer;font:inherit}
+  .units button.active{background:var(--c);color:#fff;border-color:var(--c)}
+  .pair{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  input[type=number]{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.1rem;text-align:center}
+  input[type=range]{width:100%;accent-color:var(--c)}
+  .out{text-align:center;margin-top:4px}
+  .big{font-size:3.4rem;font-weight:800;color:var(--c);letter-spacing:-1px}
+  .alt{color:var(--muted);font-size:.95rem}
+  .cat{display:inline-block;margin-top:10px;padding:5px 14px;border-radius:999px;font-weight:700;color:#fff}
+  .note{color:var(--muted);font-size:.85rem;margin-top:10px;text-align:center}
+  .err{color:var(--c);font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:640px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.8rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🥵</div>
+    <div><h1>HeatIndex</h1><div class="sub">Feels-like temperature</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="units">
+      <button id="uF" class="active" type="button">°F</button>
+      <button id="uC" type="button">°C</button>
+    </div>
+    <div class="pair">
+      <div><label for="temp">Air temperature (<span id="unitLbl">°F</span>)</label><input type="number" id="temp" value="90" step="1"></div>
+      <div><label for="rh">Humidity: <span id="rhVal">70</span>%</label><input type="range" id="rh" min="0" max="100" value="70"></div>
+    </div>
+  </div>
+  <div class="card out">
+    <div class="big" id="hi">—</div>
+    <div class="alt" id="alt"></div>
+    <div><span class="cat" id="cat"></span></div>
+    <div class="note" id="note"></div>
+    <div class="err" id="err"></div>
+  </div>
+</main>
+<footer>
+  Uses the U.S. National Weather Service (Rothfusz) heat-index regression, valid mainly for warm, humid conditions. Below ~80&deg;F the apparent temperature is close to the air temperature. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/heat-index">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  const cToF = c => c * 9 / 5 + 32;
+  const fToC = f => (f - 32) * 5 / 9;
+
+  // NWS heat index in °F, given air temp (°F) and relative humidity (%).
+  function heatIndexF(tempF, rh){
+    const T = Number(tempF), R = Number(rh);
+    if(!Number.isFinite(T) || !Number.isFinite(R)) throw new Error('enter numbers for temperature and humidity');
+    if(R < 0 || R > 100) throw new Error('humidity must be 0–100%');
+
+    // Simple formula, averaged with temperature (NWS procedure).
+    const simple = 0.5 * (T + 61.0 + ((T - 68.0) * 1.2) + (R * 0.094));
+    let HI = (simple + T) / 2;
+
+    if(HI >= 80){
+      HI = -42.379 + 2.04901523 * T + 10.14333127 * R
+         - 0.22475541 * T * R - 0.00683783 * T * T - 0.05481717 * R * R
+         + 0.00122874 * T * T * R + 0.00085282 * T * R * R
+         - 0.00000199 * T * T * R * R;
+      if(R < 13 && T >= 80 && T <= 112)
+        HI -= ((13 - R) / 4) * Math.sqrt((17 - Math.abs(T - 95)) / 17);
+      else if(R > 85 && T >= 80 && T <= 87)
+        HI += ((R - 85) / 10) * ((87 - T) / 5);
+    }
+    return HI;
+  }
+
+  // Heat index taking Celsius in and returning Celsius.
+  function heatIndexC(tempC, rh){
+    return fToC(heatIndexF(cToF(Number(tempC)), rh));
+  }
+
+  // NWS risk category from a heat index in °F.
+  const CATS = [
+    { max:80,       name:'Comfortable',     color:'#16a34a' },
+    { max:91,       name:'Caution',         color:'#ca8a04' },
+    { max:104,      name:'Extreme Caution', color:'#ea580c' },
+    { max:126,      name:'Danger',          color:'#dc2626' },
+    { max:Infinity, name:'Extreme Danger',  color:'#991b1b' }
+  ];
+  function category(hiF){
+    return CATS.find(c => Number(hiF) < c.max);
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('hi')){
+    const $ = id => document.getElementById(id);
+    let unit = 'F';
+
+    function render(){
+      try{
+        const t = $('temp').value;
+        const rh = +$('rh').value;
+        $('rhVal').textContent = rh;
+        const hiF = unit === 'F' ? heatIndexF(t, rh) : heatIndexF(cToF(+t), rh);
+        const shown = unit === 'F' ? hiF : fToC(hiF);
+        $('hi').textContent = Math.round(shown) + '°' + unit;
+        $('alt').textContent = 'That is ' + (unit === 'F' ? Math.round(fToC(hiF)) + '°C' : Math.round(hiF) + '°F');
+        const cat = category(hiF);
+        $('cat').textContent = cat.name;
+        $('cat').style.background = cat.color;
+        $('note').textContent = hiF < 80 ? 'Below the heat-index range — feels close to the air temperature.' : '';
+        $('err').textContent = '';
+      }catch(e){
+        $('hi').textContent = '—'; $('alt').textContent = ''; $('cat').textContent = ''; $('note').textContent = '';
+        $('err').textContent = e.message;
+      }
+    }
+    function setUnit(u){
+      unit = u;
+      $('uF').classList.toggle('active', u === 'F');
+      $('uC').classList.toggle('active', u === 'C');
+      $('unitLbl').textContent = '°' + u;
+      render();
+    }
+    $('uF').addEventListener('click', () => setUnit('F'));
+    $('uC').addEventListener('click', () => setUnit('C'));
+    ['temp', 'rh'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('heatindex-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { cToF, fToC, heatIndexF, heatIndexC, category };
+</script>
+</body>
+</html>

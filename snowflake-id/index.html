@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SnowflakeId — Decode Discord / Twitter Snowflake IDs</title>
+<meta name="description" content="Decode a 64-bit Snowflake ID (Discord, Twitter/X) into its timestamp, worker, process and increment, or build one from a date. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('snowflake-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#5865f2;
+    --bg:#f4f5fb; --card:#ffffff; --fg:#171a26; --muted:#5c6072; --line:#e4e6f1; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#0c0d15; --card:#161824; --fg:#eef0f7; --muted:#9296ac; --line:#242737; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:680px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#4045b8);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:680px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  input.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:1.15rem}
+  .epochs{display:flex;gap:6px;margin-top:12px}
+  .epochs button{flex:1;padding:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;cursor:pointer;font:inherit;font-size:.85rem}
+  .epochs button.active{background:var(--c);color:#fff;border-color:var(--c)}
+  .ts{text-align:center;margin-bottom:12px}
+  .ts .d{font-size:1.5rem;font-weight:800;color:var(--c)}
+  .ts .r{color:var(--muted);font-size:.85rem}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .box{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+  .box .v{font-size:1.4rem;font-weight:800}
+  .box .k{color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:680px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">❄️</div>
+    <div><h1>SnowflakeId</h1><div class="sub">Decode Discord / Twitter IDs</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="id">Snowflake ID</label>
+    <input class="mono" id="id" value="175928847299117063" spellcheck="false" inputmode="numeric">
+    <div class="epochs">
+      <button id="eDiscord" class="active" type="button">Discord (2015)</button>
+      <button id="eTwitter" type="button">Twitter/X (2010)</button>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card">
+    <div class="ts"><div class="d" id="date">—</div><div class="r mono" id="raw"></div></div>
+    <div class="grid">
+      <div class="box"><div class="v" id="worker">—</div><div class="k">Worker</div></div>
+      <div class="box"><div class="v" id="process">—</div><div class="k">Process</div></div>
+      <div class="box"><div class="v" id="increment">—</div><div class="k">Increment</div></div>
+    </div>
+  </div>
+</main>
+<footer>
+  A Snowflake packs a millisecond timestamp (bits 63–22, offset by an epoch) with a worker id, process id, and a per-ms increment. Discord epoch = 2015-01-01; Twitter = 2010-11-04. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/snowflake-id">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  const DISCORD_EPOCH = 1420070400000;   // 2015-01-01T00:00:00Z
+  const TWITTER_EPOCH = 1288834974657;   // 2010-11-04T01:42:54.657Z
+
+  function toId(id){
+    let big;
+    try{ big = BigInt(String(id).trim()); }
+    catch{ throw new Error('enter a numeric snowflake id'); }
+    if(big < 0n) throw new Error('id must be non-negative');
+    return big;
+  }
+
+  // Decode a snowflake to { timestamp (ms), worker, process, increment }.
+  function decode(id, epoch = DISCORD_EPOCH){
+    const s = toId(id);
+    return {
+      timestamp: Number((s >> 22n) + BigInt(epoch)),
+      worker: Number((s >> 17n) & 0x1Fn),
+      process: Number((s >> 12n) & 0x1Fn),
+      increment: Number(s & 0xFFFn)
+    };
+  }
+
+  // Build a snowflake from parts (returns a decimal string).
+  function encode({ timestamp, worker = 0, process = 0, increment = 0 }, epoch = DISCORD_EPOCH){
+    const s = ((BigInt(timestamp) - BigInt(epoch)) << 22n)
+      | (BigInt(worker) << 17n)
+      | (BigInt(process) << 12n)
+      | BigInt(increment);
+    return s.toString();
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('date')){
+    const $ = id => document.getElementById(id);
+    let epoch = DISCORD_EPOCH;
+
+    function render(){
+      try{
+        const d = decode($('id').value, epoch);
+        const date = new Date(d.timestamp);
+        $('date').textContent = date.toISOString().replace('T', ' ').replace('.000Z', 'Z').replace('Z', ' UTC');
+        $('raw').textContent = d.timestamp + ' ms';
+        $('worker').textContent = d.worker;
+        $('process').textContent = d.process;
+        $('increment').textContent = d.increment;
+        $('err').textContent = '';
+      }catch(e){ ['date','worker','process','increment'].forEach(x => $(x).textContent = '—'); $('raw').textContent = ''; $('err').textContent = e.message; }
+    }
+    function setEpoch(e, btn){ epoch = e; $('eDiscord').classList.toggle('active', btn === 'd'); $('eTwitter').classList.toggle('active', btn === 't'); render(); }
+    $('eDiscord').addEventListener('click', () => setEpoch(DISCORD_EPOCH, 'd'));
+    $('eTwitter').addEventListener('click', () => setEpoch(TWITTER_EPOCH, 't'));
+    $('id').addEventListener('input', render);
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('snowflake-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { DISCORD_EPOCH, TWITTER_EPOCH, decode, encode };
+</script>
+</body>
+</html>

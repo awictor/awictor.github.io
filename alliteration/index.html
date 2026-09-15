@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alliteration Finder — spot repeated initial sounds</title>
+<meta name="description" content="Find alliteration in your writing — runs of nearby words that begin with the same letter. Great for poems, headlines, brand names and tongue-twisters. Offline, no tracking.">
+<style>
+  :root{
+    --c:#9d174d;
+    --bg:#fdf1f5; --card:#ffffff; --fg:#240a15; --muted:#754c5c;
+    --line:#f2d6df; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#15070d; --card:#210e16; --fg:#f7e6ec; --muted:#c08fa0;
+    --line:#3a1c26; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  textarea{width:100%;min-height:140px;font:inherit;padding:14px;border:1px solid var(--line);border-radius:10px;
+    background:var(--bg);color:var(--fg);resize:vertical;line-height:1.6}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .controls{display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin-top:14px}
+  .controls label{font-size:.84rem;color:var(--muted);font-weight:600}
+  input[type=range]{accent-color:var(--c);vertical-align:middle}
+  .controls .chk{display:flex;gap:6px;align-items:center}
+  .run{padding:10px 12px;border:1px solid var(--line);border-radius:9px;margin-bottom:8px;font-size:.95rem}
+  .run .letter{display:inline-block;width:24px;height:24px;line-height:24px;text-align:center;background:var(--c);color:#fff;border-radius:6px;font-weight:800;margin-right:8px;text-transform:uppercase}
+  .run b{color:var(--c)}
+  .empty{color:var(--muted);font-size:.9rem}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🔤</div>
+  <div>
+    <h1>Alliteration Finder</h1>
+    <p>Spot repeated initial sounds</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <textarea id="in" placeholder="Paste your writing here…">Peter Piper picked a peck of pickled peppers. She sells sea shells by the sea shore. The big bad wolf blew the house down. A dozen dizzy ducks danced daintily.</textarea>
+    <div class="controls">
+      <label>Minimum run: <span id="mv">3</span> words <input type="range" id="minrun" min="2" max="6" value="3"></label>
+      <label class="chk"><input type="checkbox" id="stop" checked> Skip small words</label>
+    </div>
+  </div>
+  <div class="card">
+    <h2 id="count">Alliterative runs</h2>
+    <div id="out"></div>
+  </div>
+
+  <div class="card">
+    <h2>About alliteration</h2>
+    <p class="note">Alliteration is the repetition of the same starting sound across nearby words — "<i>Peter Piper picked a peck of pickled peppers</i>". It makes phrases catchy, which is why it's everywhere in poetry, headlines, brand names and tongue-twisters. This finder groups consecutive words that share a first letter into runs; raise the <b>minimum run</b> to show only stronger alliteration, and "skip small words" ignores the/a/of so they don't break a run. It matches by letter (not phonetics), so "phone/fun" won't group. Everything runs locally.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var STOP = new Set('a an the of to in on at by for and or but with as is are was were be'.split(' '));
+  function tokenize(text){
+    var m = String(text == null ? '' : text).match(/[A-Za-z]+(?:'[A-Za-z]+)?/g);
+    return m || [];
+  }
+  // First alphabetic letter, lowercased.
+  function firstLetter(word){ return String(word).toLowerCase().charAt(0); }
+  // Find maximal runs of consecutive words sharing a first letter (length >= minRun).
+  function findAlliterations(text, opts){
+    opts = opts || {};
+    var minRun = opts.minRun == null ? 3 : Number(opts.minRun);
+    var ignoreStop = opts.ignoreStopwords !== false;
+    if(minRun < 2) throw new Error('minimum run must be at least 2');
+    var words = tokenize(text);
+    if(ignoreStop) words = words.filter(function(w){ return !STOP.has(w.toLowerCase()); });
+    var runs = [], cur = [];
+    function flush(){
+      if(cur.length >= minRun) runs.push({ letter: firstLetter(cur[0]), words: cur.slice(), length: cur.length });
+      cur = [];
+    }
+    words.forEach(function(w){
+      if(cur.length === 0 || firstLetter(w) === firstLetter(cur[cur.length - 1])) cur.push(w);
+      else { flush(); cur = [w]; }
+    });
+    flush();
+    return runs;
+  }
+
+  if(typeof module !== 'undefined') module.exports = { tokenize:tokenize, firstLetter:firstLetter, findAlliterations:findAlliterations, STOP:STOP };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var inEl = document.getElementById('in');
+    function opts(){ return { minRun: Number(document.getElementById('minrun').value), ignoreStopwords: document.getElementById('stop').checked }; }
+    function render(){
+      document.getElementById('mv').textContent = document.getElementById('minrun').value;
+      var runs;
+      try{ runs = findAlliterations(inEl.value, opts()); }catch(e){ runs = []; }
+      document.getElementById('count').textContent = runs.length ? (runs.length + ' alliterative run' + (runs.length === 1 ? '' : 's')) : 'Alliterative runs';
+      var out = document.getElementById('out');
+      if(!runs.length){ out.innerHTML = '<div class="empty">No alliteration found with these settings.</div>'; return; }
+      out.innerHTML = runs.map(function(r){
+        return '<div class="run"><span class="letter">' + r.letter + '</span><b>' + r.length + ' words</b> — ' + r.words.join(' ') + '</div>';
+      }).join('');
+    }
+    ['in','minrun','stop'].forEach(function(id){ document.getElementById(id).addEventListener('input', render); });
+    render();
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('allit-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('allit-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

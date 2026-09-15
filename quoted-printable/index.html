@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QuotedPrintable — Quoted-Printable Encoder / Decoder</title>
+<meta name="description" content="Encode and decode Quoted-Printable (RFC 2045) — the =XX encoding used in email headers and bodies. UTF-8 safe, handles soft line breaks. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('qp-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#6366f1;
+    --bg:#f4f4fb; --card:#ffffff; --fg:#171826; --muted:#5c6072; --line:#e4e4f0; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#0c0d16; --card:#161824; --fg:#eef0f7; --muted:#9296ac; --line:#242736; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:700px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#4338ca);display:flex;align-items:center;justify-content:center;font-size:18px;color:#fff;font-weight:800}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:700px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  .modes{display:flex;gap:6px;margin-bottom:14px}
+  .modes button{flex:1;padding:9px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;cursor:pointer;font:inherit}
+  .modes button.active{background:var(--c);color:#fff;border-color:var(--c)}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  textarea{width:100%;min-height:110px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1rem;resize:vertical}
+  textarea.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  .out{min-height:80px;background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--c);border-radius:8px;padding:12px;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  .copy{margin-top:10px;background:var(--c);color:#fff;border:0;border-radius:8px;padding:9px 16px;cursor:pointer;font:inherit}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:700px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo mono">=XX</div>
+    <div><h1>QuotedPrintable</h1><div class="sub">RFC 2045 encoder / decoder</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="modes" id="modes">
+      <button data-m="enc" class="active" type="button">Encode</button>
+      <button data-m="dec" type="button">Decode</button>
+    </div>
+    <label for="input" id="inLabel">Text</label>
+    <textarea id="input" spellcheck="false">Café — déjà vu costs €5 = a lot!</textarea>
+  </div>
+  <div class="card">
+    <label id="outLabel">Quoted-Printable</label>
+    <div class="out" id="out"></div>
+    <button class="copy" id="copyBtn" type="button">Copy</button>
+  </div>
+</main>
+<footer>
+  Quoted-Printable keeps ASCII readable while escaping non-printable and 8-bit bytes as <span class="mono">=XX</span> (and <span class="mono">=</span> as <span class="mono">=3D</span>). UTF-8 safe; decode handles soft line breaks (<span class="mono">=</span> at end of line). 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/quoted-printable">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic (RFC 2045 §6.7) ----------
+  const hx = b => '=' + b.toString(16).toUpperCase().padStart(2, '0');
+
+  function encodeLine(line){
+    const bytes = [...new TextEncoder().encode(line)];
+    let out = '';
+    bytes.forEach((b, i) => {
+      const last = i === bytes.length - 1;
+      if(b === 61) out += '=3D';                              // '='
+      else if(b >= 33 && b <= 126) out += String.fromCharCode(b);
+      else if(b === 32 || b === 9) out += last ? hx(b) : String.fromCharCode(b); // trailing space/tab escaped
+      else out += hx(b);                                       // control / 8-bit
+    });
+    return out;
+  }
+  function encode(text){
+    return String(text).split('\n').map(encodeLine).join('\n');
+  }
+
+  function decode(qp){
+    const s = String(qp).replace(/=\r?\n/g, '');   // remove soft line breaks
+    const bytes = [];
+    for(let i = 0; i < s.length; i++){
+      const c = s[i];
+      if(c === '='){
+        const h = s.substr(i + 1, 2);
+        if(/^[0-9A-Fa-f]{2}$/.test(h)){ bytes.push(parseInt(h, 16)); i += 2; }
+        else bytes.push(61);   // lone '=' kept literally
+      }else{
+        bytes.push(c.charCodeAt(0) & 0xff);
+      }
+    }
+    return new TextDecoder().decode(Uint8Array.from(bytes));
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('out')){
+    const $ = id => document.getElementById(id);
+    let mode = 'enc';
+
+    function render(){
+      $('out').textContent = mode === 'enc' ? encode($('input').value) : decode($('input').value);
+    }
+    $('modes').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+      mode = b.dataset.m;
+      $('modes').querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
+      $('inLabel').textContent = mode === 'enc' ? 'Text' : 'Quoted-Printable';
+      $('outLabel').textContent = mode === 'enc' ? 'Quoted-Printable' : 'Decoded text';
+      render();
+    }));
+    $('input').addEventListener('input', render);
+    $('copyBtn').addEventListener('click', () => {
+      navigator.clipboard?.writeText($('out').textContent);
+      $('copyBtn').textContent = 'Copied!'; setTimeout(() => $('copyBtn').textContent = 'Copy', 1200);
+    });
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('qp-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { encode, decode };
+</script>
+</body>
+</html>

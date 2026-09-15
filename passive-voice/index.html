@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PassiveVoice — Passive Voice Detector</title>
+<meta name="description" content="Highlight passive-voice constructions in your writing (a form of 'to be' plus a past participle) and see how many sentences use them. 100% offline, nothing leaves your browser.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('passive-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#9333ea;
+    --bg:#f8f5fb; --card:#ffffff; --fg:#1e1826; --muted:#655c70; --line:#ece5f2; --shadow:0 1px 3px rgba(0,0,0,.08);
+    --hl:#f59e0b;
+  }
+  [data-theme="dark"]{
+    --bg:#120e18; --card:#1b1522; --fg:#f1ecf6; --muted:#a293b0; --line:#2a2033; --shadow:0 1px 3px rgba(0,0,0,.5);
+    --hl:#fbbf24;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#6b21a8);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:720px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  textarea{width:100%;min-height:150px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem;resize:vertical;line-height:1.7}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:4px}
+  .stat{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+  .stat .v{font-size:1.6rem;font-weight:800;color:var(--c)}
+  .stat .k{color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+  h2{font-size:.82rem;margin:0 0 10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  .render{line-height:1.9;font-size:1.05rem;word-wrap:break-word}
+  .render mark{background:color-mix(in srgb,var(--hl) 35%,transparent);color:inherit;border-radius:3px;padding:1px 2px;font-weight:600}
+  .list{margin-top:12px;display:flex;flex-direction:column;gap:6px}
+  .list .item{background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--hl);border-radius:6px;padding:7px 10px;font-size:.9rem}
+  .none{color:var(--muted);font-size:.9rem}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">✍️</div>
+    <div><h1>PassiveVoice</h1><div class="sub">Passive voice detector</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="text">Your writing</label>
+    <textarea id="text" spellcheck="false">The report was written by the committee. The team completed the work on time. Mistakes were made, and the deadline was quickly missed.</textarea>
+    <div class="stats">
+      <div class="stat"><div class="v" id="sPassive">—</div><div class="k">Passive phrases</div></div>
+      <div class="stat"><div class="v" id="sSent">—</div><div class="k">Sentences</div></div>
+      <div class="stat"><div class="v" id="sPct">—</div><div class="k">Words</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Highlighted</h2>
+    <div class="render" id="render"></div>
+    <div class="list" id="list"></div>
+  </div>
+</main>
+<footer>
+  Flags a form of <em>to be</em> (is, are, was, were, be, been, being, am) followed by a past participle — the classic passive tell. A heuristic, so trust your ear too. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/passive-voice">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  const BE = new Set(['am', 'is', 'are', 'was', 'were', 'be', 'been', 'being']);
+  const IRREGULAR = new Set([
+    'thrown','written','made','done','gone','seen','taken','given','known','shown',
+    'broken','chosen','spoken','stolen','driven','eaten','fallen','forgotten','hidden',
+    'built','bought','caught','taught','brought','sold','told','held','kept','left',
+    'lost','meant','sent','spent','won','found','paid','said','read','heard','felt',
+    'begun','drawn','worn','torn','sworn','frozen','risen','beaten','bitten','ridden',
+    'cut','put','set','hit','let','shut','cost','hurt','beat'
+  ]);
+
+  const norm = w => String(w).toLowerCase().replace(/[^a-z]/g, '');
+
+  // Is this word a likely past participle?
+  function isParticiple(word){
+    const w = norm(word);
+    if(!w) return false;
+    if(IRREGULAR.has(w)) return true;
+    return w.length >= 4 && /ed$/.test(w) && !BE.has(w);
+  }
+
+  // Analyse text: tokenize, find "be + (adverb?) + participle" spans.
+  function analyze(text){
+    const raw = String(text);
+    const tokens = raw.split(/\s+/).filter(Boolean);
+    const wordCount = tokens.filter(t => norm(t)).length;
+    const sentenceCount = Math.max((raw.match(/[.!?]+/g) || []).length, wordCount > 0 ? 1 : 0);
+
+    const matches = [];
+    const flagged = new Set();
+    for(let i = 0; i < tokens.length; i++){
+      if(!BE.has(norm(tokens[i]))) continue;
+      if(/[.!?]$/.test(tokens[i])) continue;       // sentence ended right after the be-verb
+      let j = i + 1;
+      // allow a single adverb (…ly) between the be-verb and the participle
+      if(j < tokens.length && /ly$/.test(norm(tokens[j])) && !isParticiple(tokens[j])) j++;
+      if(j < tokens.length && isParticiple(tokens[j])){
+        for(let k = i; k <= j; k++) flagged.add(k);
+        matches.push({ start: i, end: j, phrase: tokens.slice(i, j + 1).join(' ').replace(/[.,;:!?]+$/, '') });
+        i = j; // don't re-scan inside a match
+      }
+    }
+    return { tokens, wordCount, sentenceCount, matches, passiveCount: matches.length, flagged };
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('text')){
+    const $ = id => document.getElementById(id);
+    const esc = s => s.replace(/[&<>]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]));
+
+    function render(){
+      const a = analyze($('text').value);
+      $('sPassive').textContent = a.passiveCount;
+      $('sSent').textContent = a.sentenceCount;
+      $('sPct').textContent = a.wordCount;
+
+      $('render').innerHTML = a.tokens.map((t, i) =>
+        a.flagged.has(i) ? `<mark>${esc(t)}</mark>` : esc(t)
+      ).join(' ') || '<span class="none">Type or paste some text.</span>';
+
+      $('list').innerHTML = a.matches.length
+        ? a.matches.map(m => `<div class="item">“${esc(m.phrase)}”</div>`).join('')
+        : (a.wordCount ? '<div class="none">No passive voice detected. Nice and direct!</div>' : '');
+    }
+    $('text').addEventListener('input', render);
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('passive-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { BE, IRREGULAR, isParticiple, analyze };
+</script>
+</body>
+</html>

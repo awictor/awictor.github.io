@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Sunaba — pocket zen garden</title>
+<style>
+  :root{ --ink:#3a2f22; --panel:rgba(250,244,232,.86); --edge:rgba(120,96,60,.28); --hot:#b9702e; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; overflow:hidden; background:#d9cbb2;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; color:var(--ink);
+    -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent; }
+  #c{ position:fixed; inset:0; display:block; touch-action:none; cursor:crosshair; }
+  #bar{ position:fixed; left:50%; bottom:14px; transform:translateX(-50%);
+    display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:center;
+    max-width:calc(100vw - 20px); padding:8px 10px; border-radius:16px;
+    background:var(--panel); border:1px solid var(--edge);
+    box-shadow:0 6px 26px rgba(70,50,20,.20); -webkit-backdrop-filter:blur(9px); backdrop-filter:blur(9px); font-size:13px; }
+  .grp{ display:flex; gap:4px; align-items:center; padding:0 6px; border-right:1px solid var(--edge); }
+  .grp:last-child{ border-right:none; }
+  button,select{ font:inherit; color:var(--ink); background:transparent; border:1px solid transparent;
+    border-radius:9px; padding:5px 8px; cursor:pointer; line-height:1; transition:background .15s,border-color .15s; }
+  button:hover,select:hover{ background:rgba(185,112,46,.12); }
+  button.on{ background:var(--hot); color:#fff5e8; }
+  button:disabled{ opacity:.4; cursor:default; }
+  button:disabled:hover{ background:transparent; }
+  select{ border:1px solid var(--edge); }
+  label{ display:flex; align-items:center; gap:5px; font-size:12px; opacity:.85; white-space:nowrap; }
+  input[type=range]{ width:74px; accent-color:var(--hot); cursor:pointer; }
+  #hint{ position:fixed; top:12px; left:50%; transform:translateX(-50%); font-size:12.5px;
+    color:#6c5a3e; background:var(--panel); padding:5px 12px; border-radius:20px;
+    border:1px solid var(--edge); opacity:0; transition:opacity .5s; pointer-events:none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hint">Drag to rake the sand</div>
+<div id="bar">
+  <div class="grp" id="modes">
+    <button data-m="rake" class="on" title="Rake (R)">↝ Rake</button>
+    <button data-m="stone" title="Stones (S)">● Stone</button>
+    <button data-m="moss" title="Moss (M)">✿ Moss</button>
+    <button data-m="ripple" title="Ripple (P)">◎ Ripple</button>
+  </div>
+  <div class="grp">
+    <label>Comb <input type="range" id="comb" min="1" max="7" step="1" value="3"><span id="combn">3</span></label>
+    <button data-sp="10" title="Tight spacing">Tight</button>
+    <button data-sp="18" class="on" title="Wide spacing">Wide</button>
+  </div>
+  <div class="grp">
+    <label>Light <input type="range" id="light" min="0" max="1" step="0.01" value="0.28"></label>
+  </div>
+  <div class="grp">
+    <select id="garden" title="Load a garden">
+      <option value="">Gardens…</option>
+      <option value="ryoanji">Ryōan-ji (15)</option>
+      <option value="triad">Three-stone triad</option>
+      <option value="flow">Island flow</option>
+      <option value="blank">Blank sand</option>
+    </select>
+  </div>
+  <div class="grp">
+    <button id="undo" title="Undo last rake stroke">↶ Undo</button>
+    <button id="clear" title="Clear all">Clear</button>
+    <button id="export" title="Save PNG">⤓ PNG</button>
+    <button id="sound" title="Toggle ambient sound">♪ Off</button>
+  </div>
+</div>
+<script>
+"use strict";
+const cv=document.getElementById('c'), ctx=cv.getContext('2d');
+const RM=matchMedia('(prefers-reduced-motion: reduce)').matches;
+let W=0,H=0,DPR=1,oldW=0,oldH=0;
+let stones=[], moss=[], rings=[], strokes=[];
+let comb=3, spacing=18, light=0.28, mode='rake', audioOn=false;
+let fillComb=0; // comb of the auto-generated rake fill (0 = none); not persisted point-by-point
+let field=null, fcols=0, frows=0; const fcell=14, INFL=46;
+let geomVer=0, dirty=true, animating=false;
+let sandCanvas=document.createElement('canvas'), noiseTile=null;
+
+/* ---------- distance field (obstacles + walls) ---------- */
+function buildField(){
+  fcols=Math.ceil(W/fcell)+1; frows=Math.ceil(H/fcell)+1;
+  field=new Float32Array(fcols*frows);
+  for(let j=0;j<frows;j++)for(let i=0;i<fcols;i++){
+    const x=i*fcell, y=j*fcell;
+    let d=Math.min(x,y,W-x,H-y);
+    for(const s of stones){ const dd=Math.hypot(x-s.x,y-s.y)-s.r-6; if(dd<d)d=dd; }
+    for(const m of moss){ const dd=Math.hypot(x-m.x,y-m.y)-m.r-2; if(dd<d)d=dd; }
+    field[j*fcols+i]=d;
+  }
+  geomVer++;
+}
+function sampleD(x,y){
+  let fx=x/fcell, fy=y/fcell, i=Math.floor(fx), j=Math.floor(fy);
+  if(i<0)i=0; if(j<0)j=0; if(i>fcols-2)i=fcols-2; if(j>frows-2)j=frows-2;
+  const tx=fx-i, ty=fy-j, b=j*fcols+i;
+  const a=field[b], c=field[b+1], e=field[b+fcols], g=field[b+fcols+1];
+  return (a*(1-tx)+c*tx)*(1-ty)+(e*(1-tx)+g*tx)*ty;
+}
+// push a point away from nearby obstacles so tines flow around them
+function displace(x,y){
+  for(let it=0;it<2;it++){
+    const d=sampleD(x,y);
+    if(d<INFL){
+      const gx=sampleD(x+fcell,y)-sampleD(x-fcell,y);
+      const gy=sampleD(x,y+fcell)-sampleD(x,y-fcell);
+      const gl=Math.hypot(gx,gy)||1, amt=(INFL-d)*0.45;
+      x+=gx/gl*amt; y+=gy/gl*amt;
+    }
+  }
+  return {x,y};
+}
+
+/* ---------- stroke → field-following tines ---------- */
+function buildTines(s){
+  const p=s.pts;
+  const path=new Path2D();
+  if(p.length>1){
+    const c=s.comb, sp=s.spacing;
+    for(let k=0;k<c;k++){
+      const off=(k-(c-1)/2)*sp; let started=false;
+      for(let i=0;i<p.length;i++){
+        const a=p[Math.max(0,i-1)], b=p[Math.min(p.length-1,i+1)];
+        let tx=b.x-a.x, ty=b.y-a.y; const tl=Math.hypot(tx,ty)||1; tx/=tl; ty/=tl;
+        const q=displace(p[i].x-ty*off, p[i].y+tx*off);
+        if(started) path.lineTo(q.x,q.y); else { path.moveTo(q.x,q.y); started=true; }
+      }
+    }
+  }
+  s._path=path; s._gv=geomVer;
+}
+
+/* ---------- palette (single light/time-of-day control) ---------- */
+function mix(a,b,t){ return [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t]; }
+function rgb(c){ return `rgb(${c[0]|0},${c[1]|0},${c[2]|0})`; }
+function palette(t){
+  const sand=mix([237,225,201],[203,206,209],t);
+  const edge=mix([176,150,110],[120,132,150],t);
+  const ang=(202+t*150)*Math.PI/180;
+  return {
+    sand:rgb(sand),
+    vig:`rgba(${edge[0]*0.55|0},${edge[1]*0.55|0},${edge[2]*0.55|0},0.55)`,
+    hi:`rgba(255,251,242,${0.42+0.10*(1-t)})`,
+    sh:`rgba(${72-t*22|0},${54-t*4|0},${34+t*14|0},0.30)`,
+    ang, Lx:Math.cos(ang), Ly:Math.sin(ang),
+    stHi:rgb(mix([132,128,120],[116,122,132],t)),
+    stLo:rgb(mix([58,55,50],[50,54,62],t))
+  };
+}
+
+/* ---------- sand base: cached noise grain + vignette ---------- */
+function makeNoise(){
+  const n=document.createElement('canvas'); n.width=n.height=200;
+  const c=n.getContext('2d'), id=c.createImageData(200,200), d=id.data;
+  for(let i=0;i<d.length;i+=4){ const v=205+(Math.random()*50|0); d[i]=d[i+1]=d[i+2]=v; d[i+3]=Math.random()*20|0; }
+  c.putImageData(id,0,0); return n;
+}
+function paintSand(P){
+  const s=sandCanvas.getContext('2d');
+  s.fillStyle=P.sand; s.fillRect(0,0,W,H);
+  s.fillStyle=s.createPattern(noiseTile,'repeat'); s.fillRect(0,0,W,H);
+  const g=s.createRadialGradient(W/2,H/2,Math.min(W,H)*0.18,W/2,H/2,Math.max(W,H)*0.72);
+  g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,P.vig);
+  s.fillStyle=g; s.fillRect(0,0,W,H);
+}
+
+/* ---------- render ---------- */
+function embossPath(g,path,P,w){
+  g.lineWidth=w; g.lineCap='round'; g.lineJoin='round';
+  g.strokeStyle=P.sh; g.save(); g.translate(P.Lx*1.15,P.Ly*1.15); g.stroke(path); g.restore();
+  g.strokeStyle=P.hi; g.save(); g.translate(-P.Lx*1.15,-P.Ly*1.15); g.stroke(path); g.restore();
+}
+function stoneOutline(g,s){
+  const n=16; g.beginPath();
+  for(let k=0;k<=n;k++){ const a=k/n*Math.PI*2;
+    const rr=s.r*(0.85+0.14*Math.sin(a*3+s.seed)+0.05*Math.sin(a*5+s.seed*2));
+    const x=s.x+Math.cos(a)*rr, y=s.y+Math.sin(a)*rr; k?g.lineTo(x,y):g.moveTo(x,y); }
+  g.closePath();
+}
+function draw(g){
+  g=g||ctx;
+  const P=palette(light);
+  g.drawImage(sandCanvas,0,0,W,H);
+  const all=strokes.slice(); if(cur) all.push(cur);
+  for(const s of all){ if(s._gv!==geomVer) buildTines(s); embossPath(g,s._path,P,1.7); }
+  for(const r of rings){
+    const t=RM||!r.born?1:Math.min(1,(performance.now()-r.born)/750);
+    if(t<1) animating=true;
+    const e=1-Math.pow(1-t,3), path=new Path2D();
+    for(let k=1;k<=4;k++){ const rad=(12+k*15)*e; path.moveTo(r.x+rad,r.y); path.arc(r.x,r.y,rad,0,Math.PI*2); }
+    embossPath(g,path,P,1.6);
+  }
+  for(const m of moss){
+    const gr=g.createRadialGradient(m.x,m.y,0,m.x,m.y,m.r);
+    gr.addColorStop(0,'rgba(122,142,72,.85)'); gr.addColorStop(.7,'rgba(96,120,54,.55)'); gr.addColorStop(1,'rgba(90,112,50,0)');
+    g.fillStyle=gr; g.beginPath(); g.arc(m.x,m.y,m.r,0,7); g.fill();
+  }
+  for(const s of stones){
+    g.save(); stoneOutline(g,s);
+    g.shadowColor='rgba(38,28,16,.38)'; g.shadowBlur=14; g.shadowOffsetX=-P.Lx*7; g.shadowOffsetY=-P.Ly*7;
+    const gr=g.createLinearGradient(s.x+P.Lx*s.r,s.y+P.Ly*s.r,s.x-P.Lx*s.r,s.y-P.Ly*s.r);
+    gr.addColorStop(0,P.stHi); gr.addColorStop(1,P.stLo);
+    g.fillStyle=gr; g.fill(); g.restore();
+  }
+}
+function markDirty(){ dirty=true; }
+function frame(){ if(dirty){ animating=false; draw(); dirty=animating; } requestAnimationFrame(frame); }
+
+/* ---------- interaction ---------- */
+let cur=null, dragS=null, downPt=null, lpTimer=0;
+function pt(e){ const r=cv.getBoundingClientRect(); return {x:e.clientX-r.left, y:e.clientY-r.top}; }
+function hitStone(p){ for(let i=stones.length-1;i>=0;i--){ const s=stones[i]; if(Math.hypot(p.x-s.x,p.y-s.y)<s.r+4) return s; } return null; }
+function addStone(p){ stones.push({x:p.x,y:p.y,r:22+Math.random()*22,seed:Math.random()*6.28}); buildField(); markDirty(); saveHash(); }
+function addMoss(p,rebuild=true){ moss.push({x:p.x,y:p.y,r:15+Math.random()*13}); if(rebuild)buildField(); markDirty(); }
+
+cv.addEventListener('pointerdown',e=>{
+  cv.setPointerCapture(e.pointerId); const p=pt(e); downPt=p; ensureAudio();
+  if(mode==='rake'){ cur={comb,spacing,pts:[p],_gv:-1}; }
+  else if(mode==='stone'){ const s=hitStone(p); if(s){ dragS=s; lpTimer=setTimeout(()=>{ removeAt(p); dragS=null; },600); } else addStone(p); }
+  else if(mode==='moss'){ addMoss(p,false); }
+  else if(mode==='ripple'){ rings.push({x:p.x,y:p.y,born:performance.now()}); if(rings.length>40)rings.shift(); bowl(); markDirty(); saveHash(); }
+});
+cv.addEventListener('pointermove',e=>{
+  if(!downPt)return; const p=pt(e), d=Math.hypot(p.x-downPt.x,p.y-downPt.y);
+  if(mode==='rake'&&cur){ const l=cur.pts[cur.pts.length-1], dd=Math.hypot(p.x-l.x,p.y-l.y);
+    if(dd>7){ cur.pts.push(p); cur._gv=-1; rakeAudio(dd); markDirty(); } }
+  else if(mode==='stone'&&dragS){ if(d>4){ clearTimeout(lpTimer); dragS.x=p.x; dragS.y=p.y; cv.style.cursor='grabbing'; buildField(); markDirty(); } }
+  else if(mode==='moss'){ const l=moss[moss.length-1]; if(!l||Math.hypot(p.x-l.x,p.y-l.y)>11) addMoss(p,false); }
+});
+// hover affordance: show a grab cursor when Stone mode hovers a movable rock
+cv.addEventListener('pointermove',e=>{ if(downPt||mode!=='stone')return; cv.style.cursor=hitStone(pt(e))?'grab':'default'; });
+function endStroke(){
+  if(mode==='rake'&&cur){ if(cur.pts.length>1){ strokes.push(cur); if(strokes.length>90)strokes.shift(); } cur=null; markDirty(); saveHash(); updateUndo(); }
+  else if(mode==='stone'){ if(dragS){ buildField(); saveHash(); } dragS=null; cv.style.cursor=CUR[mode]; }
+  else if(mode==='moss'){ buildField(); markDirty(); saveHash(); }
+  clearTimeout(lpTimer); fadeAudio(); downPt=null;
+}
+cv.addEventListener('pointerup',endStroke);
+cv.addEventListener('pointercancel',endStroke);
+cv.addEventListener('contextmenu',e=>{ e.preventDefault(); removeAt(pt(e)); });
+function removeAt(p){
+  const s=hitStone(p); if(s){ stones.splice(stones.indexOf(s),1); buildField(); markDirty(); saveHash(); return; }
+  for(let i=moss.length-1;i>=0;i--){ const m=moss[i]; if(Math.hypot(p.x-m.x,p.y-m.y)<m.r){ moss.splice(i,1); buildField(); markDirty(); saveHash(); return; } }
+}
+
+/* ---------- ambient audio (WebAudio, no assets, muted default) ---------- */
+let AC=null, rakeGain=null, rakeFilt=null, audioReady=false;
+function ensureAudio(){
+  if(!audioOn||audioReady)return;
+  try{
+    AC=new (window.AudioContext||window.webkitAudioContext)();
+    const n=AC.sampleRate*2, buf=AC.createBuffer(1,n,AC.sampleRate), d=buf.getChannelData(0);
+    for(let i=0;i<n;i++)d[i]=Math.random()*2-1;
+    const src=AC.createBufferSource(); src.buffer=buf; src.loop=true;
+    rakeFilt=AC.createBiquadFilter(); rakeFilt.type='lowpass'; rakeFilt.frequency.value=500;
+    rakeGain=AC.createGain(); rakeGain.gain.value=0;
+    src.connect(rakeFilt).connect(rakeGain).connect(AC.destination); src.start(); audioReady=true;
+  }catch(err){}
+}
+function rakeAudio(sp){ if(!audioReady)return; const s=Math.min(1,sp/40), t=AC.currentTime;
+  rakeGain.gain.setTargetAtTime(0.03+s*0.11,t,0.05); rakeFilt.frequency.setTargetAtTime(300+s*2200,t,0.05); }
+function fadeAudio(){ if(audioReady) rakeGain.gain.setTargetAtTime(0,AC.currentTime,0.12); }
+function bowl(){ if(!audioReady)return; const t=AC.currentTime;
+  [1,2.01,2.76].forEach((m,i)=>{ const o=AC.createOscillator(), g=AC.createGain();
+    o.type='sine'; o.frequency.value=328*m; o.connect(g).connect(AC.destination);
+    g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(0.12/(i+1),t+0.02);
+    g.gain.exponentialRampToValueAtTime(0.0004,t+2.5); o.start(t); o.stop(t+2.6); }); }
+
+/* ---------- state in URL hash ---------- */
+const r3=n=>Math.round(n*1000)/1000;
+function saveHash(){
+  try{
+    const enc={
+      st:stones.map(s=>[r3(s.x/W),r3(s.y/H),r3(s.r/W),r3(s.seed)]),
+      ms:moss.map(m=>[r3(m.x/W),r3(m.y/H),r3(m.r/W)]),
+      rg:rings.map(r=>[r3(r.x/W),r3(r.y/H)]),
+      sk:strokes.filter(s=>!s._auto).map(s=>{ const a=[s.comb,s.spacing]; for(const p of s.pts){ a.push(r3(p.x/W),r3(p.y/H)); } return a; }),
+      fc:fillComb||undefined, // reconstruct the auto rake fill on load instead of serializing every tine point
+      lt:r3(light)
+    };
+    history.replaceState(null,'','#'+encodeURIComponent(JSON.stringify(enc)));
+  }catch(err){}
+}
+function loadHash(){
+  if(!location.hash||location.hash.length<3)return false;
+  try{
+    const d=JSON.parse(decodeURIComponent(location.hash.slice(1)));
+    stones=(d.st||[]).map(a=>({x:a[0]*W,y:a[1]*H,r:a[2]*W,seed:a[3]||0}));
+    moss=(d.ms||[]).map(a=>({x:a[0]*W,y:a[1]*H,r:a[2]*W}));
+    rings=(d.rg||[]).map(a=>({x:a[0]*W,y:a[1]*H,born:0}));
+    const us=(d.sk||[]).map(a=>{ const pts=[]; for(let i=2;i<a.length;i+=2)pts.push({x:a[i]*W,y:a[i+1]*H});
+      return {comb:a[0],spacing:a[1],pts,_gv:-1}; });
+    strokes=[]; fillComb=0;
+    if(d.fc){ rakeFill(d.fc); } // regenerate the auto fill under any user strokes
+    strokes.push(...us);
+    if(d.lt!=null){ light=d.lt; document.getElementById('light').value=light; }
+    return true;
+  }catch(err){ return false; }
+}
+
+/* ---------- curated starter gardens ---------- */
+const GARDENS={
+  ryoanji:{ comb:3, stones:[
+    [0.09,0.40,0.058,0.5],[0.14,0.53,0.038,1.2],[0.175,0.38,0.028,2.1],[0.11,0.61,0.026,3.0],[0.205,0.48,0.022,4.0],
+    [0.31,0.66,0.043,1.7],[0.355,0.60,0.024,2.4],
+    [0.50,0.35,0.048,0.9],[0.55,0.44,0.028,3.3],[0.585,0.33,0.020,1.1],
+    [0.70,0.63,0.042,2.8],[0.75,0.55,0.026,0.7],
+    [0.86,0.42,0.050,1.5],[0.905,0.52,0.028,2.2],[0.83,0.53,0.022,3.9] ],
+    moss:[[0.145,0.62,0.03],[0.55,0.50,0.028],[0.885,0.61,0.026]] },
+  triad:{ comb:2, stones:[
+    [0.40,0.45,0.066,1.0],[0.52,0.58,0.044,2.3],[0.585,0.40,0.030,3.1] ],
+    moss:[[0.46,0.55,0.032]] },
+  flow:{ comb:4, stones:[
+    [0.25,0.40,0.050,1.0],[0.50,0.55,0.060,2.0],[0.72,0.42,0.045,3.0],[0.60,0.69,0.030,4.0] ] }
+};
+function rakeFill(cb){
+  fillComb=cb;
+  const gap=46;
+  for(let y=gap;y<H-gap*0.4;y+=gap){
+    const pts=[]; for(let x=10;x<=W-10;x+=16)pts.push({x,y});
+    strokes.push({comb:cb,spacing:13,pts,_gv:-1,_auto:true});
+  }
+}
+function loadGarden(name){
+  stones=[]; moss=[]; rings=[]; strokes=[]; fillComb=0;
+  if(name!=='blank'){
+    const g=GARDENS[name]; const md=Math.min(W,H);
+    for(const s of g.stones) stones.push({x:s[0]*W,y:s[1]*H,r:s[2]*md,seed:s[3]});
+    if(g.moss) for(const m of g.moss) moss.push({x:m[0]*W,y:m[1]*H,r:m[2]*md});
+    buildField(); rakeFill(g.comb);
+  } else buildField();
+  markDirty(); saveHash(); updateUndo();
+}
+
+/* ---------- export ---------- */
+function exportPNG(){
+  const MAXA=16e6; // keep under browser max-canvas-area caps (e.g. iOS Safari ~16.7M px)
+  let sc=2; if(W*sc*H*sc>MAXA) sc=Math.max(1,Math.sqrt(MAXA/(W*H)));
+  const off=document.createElement('canvas'); off.width=Math.round(W*sc); off.height=Math.round(H*sc);
+  const g=off.getContext('2d'); g.scale(sc,sc); draw(g);
+  off.toBlob(b=>{ if(!b){ alert('PNG export failed — image too large for this browser.'); return; }
+    const a=document.createElement('a'); a.download='sunaba-garden.png';
+    a.href=URL.createObjectURL(b); a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),4000); },'image/png');
+}
+
+/* ---------- resize ---------- */
+function resize(){
+  const nw=window.innerWidth, nh=window.innerHeight; DPR=Math.min(2,window.devicePixelRatio||1);
+  if(oldW){ const sx=nw/oldW, sy=nh/oldH, sr=(sx+sy)/2;
+    const scale=arr=>arr.forEach(o=>{ o.x*=sx; o.y*=sy; if(o.r)o.r*=sr; });
+    scale(stones); scale(moss); scale(rings);
+    strokes.forEach(s=>{ s.pts.forEach(p=>{ p.x*=sx; p.y*=sy; }); s._gv=-1; });
+  }
+  W=nw; H=nh; oldW=W; oldH=H;
+  cv.width=W*DPR; cv.height=H*DPR; cv.style.width=W+'px'; cv.style.height=H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  sandCanvas.width=W; sandCanvas.height=H;
+  buildField(); paintSand(palette(light)); markDirty();
+}
+window.addEventListener('resize',resize);
+
+/* ---------- UI wiring ---------- */
+const modeBtns=[...document.querySelectorAll('#modes button')];
+const hint=document.getElementById('hint');
+const CUR={rake:'crosshair',stone:'grab',moss:'crosshair',ripple:'pointer'};
+const HINTS={
+  rake:'Drag to rake the sand',
+  stone:'Tap to place a stone · drag to move · long-press or right-click to remove',
+  moss:'Drag to paint moss patches',
+  ripple:'Tap empty sand to send a ripple'
+};
+let hintTimer=0;
+function showHint(txt){
+  hint.textContent=txt;
+  if(RM) hint.style.transition='none'; // show instructions instantly, no vestibular fade
+  hint.style.opacity='1';
+  clearTimeout(hintTimer); hintTimer=setTimeout(()=>{ hint.style.opacity='0'; },3800);
+}
+function setMode(m){ mode=m; modeBtns.forEach(b=>b.classList.toggle('on',b.dataset.m===m)); cv.style.cursor=CUR[m]||'crosshair'; showHint(HINTS[m]); }
+modeBtns.forEach(b=>b.onclick=()=>setMode(b.dataset.m));
+const undoBtn=document.getElementById('undo');
+function updateUndo(){ undoBtn.disabled=!strokes.some(s=>!s._auto); }
+const combR=document.getElementById('comb'), combN=document.getElementById('combn');
+combR.oninput=()=>{ comb=+combR.value; combN.textContent=comb; };
+const spBtns=[...document.querySelectorAll('[data-sp]')];
+spBtns.forEach(b=>b.onclick=()=>{ spacing=+b.dataset.sp; spBtns.forEach(x=>x.classList.toggle('on',x===b)); });
+const lightR=document.getElementById('light');
+lightR.oninput=()=>{ light=+lightR.value; paintSand(palette(light)); markDirty(); };
+lightR.onchange=saveHash;
+document.getElementById('garden').onchange=e=>{ const v=e.target.value; if(v){ loadGarden(v); e.target.value=''; } };
+undoBtn.onclick=()=>{ for(let i=strokes.length-1;i>=0;i--){ if(!strokes[i]._auto){ strokes.splice(i,1); break; } } updateUndo(); markDirty(); saveHash(); };
+document.getElementById('clear').onclick=()=>{ stones=[]; moss=[]; rings=[]; strokes=[]; fillComb=0; buildField(); updateUndo(); markDirty(); saveHash(); };
+document.getElementById('export').onclick=exportPNG;
+const soundBtn=document.getElementById('sound');
+soundBtn.onclick=()=>{ audioOn=!audioOn; soundBtn.textContent='♪ '+(audioOn?'On':'Off'); soundBtn.classList.toggle('on',audioOn); if(audioOn)ensureAudio(); };
+addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase(); const mm={r:'rake',s:'stone',m:'moss',p:'ripple'};
+  if(mm[k])setMode(mm[k]);
+  else if(k==='u')document.getElementById('undo').click();
+  else if(k>='1'&&k<='7'){ comb=+k; combR.value=k; combN.textContent=k; }
+});
+
+/* ---------- boot ---------- */
+noiseTile=makeNoise();
+W=window.innerWidth; H=window.innerHeight; oldW=W; oldH=H; DPR=Math.min(2,window.devicePixelRatio||1);
+cv.width=W*DPR; cv.height=H*DPR; cv.style.width=W+'px'; cv.style.height=H+'px'; ctx.setTransform(DPR,0,0,DPR,0,0);
+sandCanvas.width=W; sandCanvas.height=H;
+if(!loadHash()){ paintSand(palette(light)); loadGarden('ryoanji'); }
+else { buildField(); paintSand(palette(light)); }
+updateUndo(); markDirty(); requestAnimationFrame(frame);
+setTimeout(()=>showHint(HINTS.rake),400); // instructional copy shown for all users, incl. reduced-motion
+</script>
+</body>
+</html>

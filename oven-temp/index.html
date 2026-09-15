@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OvenTemp — Oven Temperature (°C / °F / Gas Mark) Converter</title>
+<meta name="description" content="Convert oven temperatures between Celsius, Fahrenheit and UK gas marks, with the nearest gas mark and a heat description. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('oven-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#ea580c;
+    --bg:#fbf6f1; --card:#ffffff; --fg:#211812; --muted:#6b5a4c; --line:#efe5da; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#140f0a; --card:#1e1710; --fg:#f5efe6; --muted:#a89279; --line:#2c2318; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:640px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#c2410c);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:640px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  .pair{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  input{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.2rem;text-align:center}
+  .gm{text-align:center;margin-top:16px}
+  .gm .v{font-size:2.2rem;font-weight:800;color:var(--c)}
+  .gm .k{color:var(--muted);font-size:.8rem}
+  .desc{text-align:center;margin-top:6px;color:var(--muted)}
+  .marks{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px;justify-content:center}
+  .marks button{padding:6px 10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;cursor:pointer;font:inherit;font-size:.82rem}
+  .marks button:hover{border-color:var(--c);color:var(--c)}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:640px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.8rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🔥</div>
+    <div><h1>OvenTemp</h1><div class="sub">°C · °F · gas mark</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="pair">
+      <div><label for="c">Celsius (°C)</label><input type="number" id="c" value="180" step="5"></div>
+      <div><label for="f">Fahrenheit (°F)</label><input type="number" id="f" value="356" step="5"></div>
+    </div>
+    <div class="gm"><div class="v" id="gm">—</div><div class="k">nearest gas mark</div></div>
+    <div class="desc" id="desc"></div>
+    <div class="marks" id="marks"></div>
+    <div class="err" id="err"></div>
+  </div>
+</main>
+<footer>
+  Fahrenheit ⇄ Celsius is exact; UK gas marks are discrete steps (Gas Mark N ≈ 250 + 25N °F), so the nearest mark is shown. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/oven-temp">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  const cToF = c => Number(c) * 9 / 5 + 32;
+  const fToC = f => (Number(f) - 32) * 5 / 9;
+
+  // UK gas marks in °F. Whole marks follow 250 + 25·N; fractional marks are fixed.
+  const GAS_MARKS = [
+    { mark: '1/4', f: 225 }, { mark: '1/2', f: 250 },
+    { mark: '1', f: 275 }, { mark: '2', f: 300 }, { mark: '3', f: 325 }, { mark: '4', f: 350 },
+    { mark: '5', f: 375 }, { mark: '6', f: 400 }, { mark: '7', f: 425 }, { mark: '8', f: 450 }, { mark: '9', f: 475 }
+  ];
+
+  function gasMarkToF(mark){
+    const g = GAS_MARKS.find(x => x.mark === String(mark));
+    if(!g) throw new Error('unknown gas mark: ' + mark);
+    return g.f;
+  }
+
+  // Nearest gas mark for a Fahrenheit temperature.
+  function fToGasMark(f){
+    const t = Number(f);
+    if(!Number.isFinite(t)) throw new Error('enter a temperature');
+    return GAS_MARKS.reduce((best, x) => Math.abs(x.f - t) < Math.abs(best.f - t) ? x : best);
+  }
+
+  // Heat description by °C.
+  function describe(c){
+    const t = Number(c);
+    if(t < 140) return 'Very cool';
+    if(t < 170) return 'Cool / slow';
+    if(t < 190) return 'Moderate';
+    if(t < 220) return 'Moderately hot';
+    if(t < 240) return 'Hot';
+    return 'Very hot';
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('gm')){
+    const $ = id => document.getElementById(id);
+    const r = n => Math.round(n);
+
+    $('marks').innerHTML = GAS_MARKS.map(g => `<button data-f="${g.f}" type="button">GM ${g.mark} · ${g.f}°F</button>`).join('');
+
+    function fromC(){ $('f').value = r(cToF($('c').value)); update(); }
+    function fromF(){ $('c').value = r(fToC($('f').value)); update(); }
+    function update(){
+      try{
+        const g = fToGasMark($('f').value);
+        $('gm').textContent = 'GM ' + g.mark;
+        $('desc').textContent = describe($('c').value) + ` — closest mark is ${g.f}°F`;
+        $('err').textContent = '';
+      }catch(e){ $('gm').textContent = '—'; $('desc').textContent = ''; $('err').textContent = e.message; }
+    }
+    $('c').addEventListener('input', fromC);
+    $('f').addEventListener('input', fromF);
+    $('marks').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+      $('f').value = b.dataset.f; $('c').value = r(fToC(b.dataset.f)); update();
+    }));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('oven-theme', cur); }catch(e){}
+    });
+    update();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { cToF, fToC, GAS_MARKS, gasMarkToF, fToGasMark, describe };
+</script>
+</body>
+</html>

@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Poise — Magnetic-Pendulum Basin Explorer</title>
+<style>
+  :root{ --bg:#0a0c12; --panel:#12151f; --line:#232838; --ink:#e7ecf5; --dim:#8a93a8; --accent:#ff7a3c; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font:13px/1.45 "Segoe UI",system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+  #app{ display:flex; gap:18px; padding:18px; min-height:100%; align-items:flex-start; flex-wrap:wrap; }
+  #stage{ position:relative; flex:0 0 auto; }
+  canvas#c{ display:block; width:min(72vh,640px); height:min(72vh,640px); max-width:100%;
+    border-radius:12px; background:#000; box-shadow:0 12px 40px rgba(0,0,0,.55); cursor:crosshair;
+    touch-action:none; }
+  #hint{ position:absolute; left:12px; bottom:10px; color:var(--dim); font-size:11px; pointer-events:none;
+    text-shadow:0 1px 3px #000; }
+  #panel{ flex:1 1 300px; max-width:360px; background:var(--panel); border:1px solid var(--line);
+    border-radius:12px; padding:16px 16px 20px; }
+  h1{ margin:0 0 2px; font-size:19px; letter-spacing:.5px; }
+  h1 b{ color:var(--accent); }
+  .sub{ color:var(--dim); margin:0 0 14px; font-size:12px; }
+  .row{ margin:11px 0; }
+  .row label{ display:flex; justify-content:space-between; color:var(--dim); font-size:11px;
+    text-transform:uppercase; letter-spacing:.6px; margin-bottom:4px; }
+  .row label span{ color:var(--ink); text-transform:none; letter-spacing:0; font-variant-numeric:tabular-nums; }
+  input[type=range]{ width:100%; accent-color:var(--accent); height:4px; }
+  .btns{ display:flex; gap:8px; flex-wrap:wrap; margin:14px 0 4px; }
+  button,select{ background:#1c2130; color:var(--ink); border:1px solid var(--line); border-radius:7px;
+    padding:7px 11px; font-size:12px; cursor:pointer; transition:border-color .15s,background .15s; }
+  button:hover{ border-color:var(--accent); }
+  button.primary{ background:var(--accent); color:#12151f; border-color:var(--accent); font-weight:600; }
+  button:disabled{ opacity:.4; cursor:not-allowed; border-color:var(--line); }
+  button:disabled:hover{ border-color:var(--line); }
+  input:disabled{ opacity:.4; cursor:not-allowed; }
+  button:focus-visible, select:focus-visible, input:focus-visible, .preset:focus-visible{
+    outline:2px solid var(--accent); outline-offset:2px; }
+  .field{ display:flex; align-items:center; gap:6px; color:var(--dim); font-size:11px; }
+  .divider{ height:1px; background:var(--line); margin:16px 0 12px; }
+  .lbl{ color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:.6px; margin-bottom:8px; }
+  #presets{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .preset{ background:none; border:1px solid var(--line); border-radius:8px; padding:5px; text-align:center;
+    display:flex; flex-direction:column; gap:4px; align-items:center; }
+  .preset canvas{ width:100%; aspect-ratio:1; border-radius:5px; background:#000; image-rendering:auto; }
+  .preset span{ font-size:10px; color:var(--dim); }
+  .preset:hover span{ color:var(--ink); }
+  #status{ margin-top:12px; height:3px; border-radius:2px; background:#1c2130; overflow:hidden; }
+  #bar{ height:100%; width:0; background:var(--accent); transition:width .1s linear; }
+  .foot{ color:var(--dim); font-size:11px; margin-top:10px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <canvas id="c" width="640" height="640"></canvas>
+    <div id="hint">drag magnets · shift-click to add · double-click to remove · click empty space to release a pendulum</div>
+  </div>
+  <div id="panel">
+    <h1><b>Poise</b></h1>
+    <p class="sub">Every pixel is one release point of a damped magnetic pendulum, tinted by the magnet it settles on.</p>
+    <div id="sliders"></div>
+    <div class="btns">
+      <button id="add" title="Add a magnet (max 6) — or shift-click the canvas">+ Magnet</button>
+      <button id="rem" title="Remove a magnet (min 2) — or double-click a magnet on the canvas">– Magnet</button>
+      <button id="reset">Reset</button>
+    </div>
+    <div class="btns">
+      <button id="export" class="primary">Export PNG</button>
+      <select id="scale" title="Export supersample"><option value="1">1×</option><option value="2" selected>2×</option><option value="3">3×</option></select>
+      <label class="field" title="Include the traced pendulum path in the exported PNG (release a pendulum first)"><input type="checkbox" id="withpath" disabled> trace path</label>
+    </div>
+    <div id="status"><div id="bar"></div></div>
+    <div class="divider"></div>
+    <div class="lbl">Preset gallery</div>
+    <div id="presets"></div>
+    <p class="foot">Fully deterministic. Every knob is packed into the trailing <b>#hash</b> of the URL — copy it onto any Poise link to share the exact image.</p>
+  </div>
+</div>
+<script>
+"use strict";
+(function(){
+const SIZE=640, A=1.5, GRAB=0.14;
+const HUES=[20,46,138,192,268,326];
+const c=document.getElementById('c'), ctx=c.getContext('2d');
+const bc=document.createElement('canvas'), bctx=bc.getContext('2d');
+
+// ---- state ----
+const P={STR:0.6,CENTER:0.32,FRIC:0.20,H:0.22,DT:0.10};
+let MAXIT=300, RW=280;
+let magnets=triangle();
+let idx, itr, img;
+let trace=null, dragging=-1, hashTimer=0;
+let _si=0,_st=1;
+
+function triangle(){ return poly(3,0.9,-90); }
+function poly(n,r,deg){ const a=[]; for(let i=0;i<n;i++){ const t=(deg+i*360/n)*Math.PI/180; a.push({x:r*Math.cos(t),y:r*Math.sin(t)}); } return a; }
+
+// ---- physics: integrate one release point ----
+function simulate(x,y,path){
+  let vx=0,vy=0; const n=magnets.length,dt=P.DT,h2=P.H*P.H,C=P.CENTER,F=P.FRIC,S=P.STR;
+  for(let k=0;k<MAXIT;k++){
+    let ax=-C*x-F*vx, ay=-C*y-F*vy;
+    for(let m=0;m<n;m++){ const dx=magnets[m].x-x, dy=magnets[m].y-y;
+      const r=Math.sqrt(dx*dx+dy*dy+h2), inv=S/(r*r*r); ax+=dx*inv; ay+=dy*inv; }
+    vx+=ax*dt; vy+=ay*dt; x+=vx*dt; y+=vy*dt;
+    if(path && (k&1)===0) path.push(x,y);
+    if(vx*vx+vy*vy<2e-3){
+      let best=0,bd=1e9; for(let m=0;m<n;m++){ const dx=magnets[m].x-x,dy=magnets[m].y-y,d=dx*dx+dy*dy; if(d<bd){bd=d;best=m;} }
+      if(bd<0.02){ _si=best; _st=k/MAXIT; return; }
+    }
+  }
+  let best=0,bd=1e9; for(let m=0;m<n;m++){ const dx=magnets[m].x-x,dy=magnets[m].y-y,d=dx*dx+dy*dy; if(d<bd){bd=d;best=m;} }
+  _si=best; _st=1;
+}
+
+// ---- color ----
+function hsl(h,s,l,out,o){ // h:0..1 -> out[o..o+2] 0..255
+  let r,g,b; if(s===0){ r=g=b=l; }
+  else{ const q=l<0.5?l*(1+s):l+s-l*s, p=2*l-q;
+    const hk=(t)=>{ t=(t+1)%1; if(t<1/6)return p+(q-p)*6*t; if(t<0.5)return q; if(t<2/3)return p+(q-p)*(2/3-t)*6; return p; };
+    r=hk(h+1/3); g=hk(h); b=hk(h-1/3); }
+  out[o]=r*255|0; out[o+1]=g*255|0; out[o+2]=b*255|0;
+}
+const _bc=[0,0,0];
+function baseColor(i,t,out,o){ hsl(HUES[i]/360,0.62,0.30+0.42*(1-t),out,o); }
+const glowCol=[];
+function rebuildGlow(){ glowCol.length=0; for(let i=0;i<HUES.length;i++){ const a=[0,0,0]; hsl(HUES[i]/360,0.85,0.9,a,0); glowCol.push(a); } }
+rebuildGlow();
+
+// escape-time boundary glow using per-pixel settle data
+function glowAt(i,j,mi,ti,r,g,b,d,p){
+  let e=0,di=0; const o=j*RW+i;
+  const ck=(no)=>{ if(idx[no]!==mi)e++; const dd=Math.abs(itr[no]-ti); if(dd>di)di=dd; };
+  if(i+1<RW)ck(o+1); if(i>0)ck(o-1);
+  if(j+1<RW)ck(o+RW); if(j>0)ck(o-RW);
+  const gl=Math.min(1,(e/4)*1.15+di*0.5)*0.92, gc=glowCol[mi];
+  d[p]=r+(gc[0]-r)*gl; d[p+1]=g+(gc[1]-g)*gl; d[p+2]=b+(gc[2]-b)*gl; d[p+3]=255;
+}
+
+// ---- progressive render ----
+const cp={pass:0,cur:0,active:false};
+let pendingSS=false, ssCur=0, idleAt=0;
+const PASSES=[8,4,2,1];
+
+function alloc(){ const N=RW*RW; if(!idx||idx.length!==N){ idx=new Int16Array(N); itr=new Float32Array(N); }
+  bc.width=RW; bc.height=RW; img=bctx.createImageData(RW,RW); }
+
+function startCompute(){ alloc(); cp.pass=0; cp.cur=0; cp.active=true; pendingSS=false; scheduleHash(); }
+
+function wbuf(i){ return (i/(RW-1)*2-1)*A; }
+
+function stepCompute(){
+  const t0=performance.now(), d=img.data;
+  while(cp.active && performance.now()-t0<14){
+    const s=PASSES[cp.pass], cols=Math.ceil(RW/s), rows=Math.ceil(RW/s);
+    if(cp.cur>=cols*rows){ cp.pass++; cp.cur=0;
+      if(cp.pass>=PASSES.length){ cp.active=false; colorizeFull(); idleAt=performance.now()+450; pendingSS=true; ssCur=0; }
+      continue; }
+    const gi=cp.cur%cols, gj=(cp.cur/cols)|0; cp.cur++;
+    const px=gi*s, py=gj*s;
+    if(cp.pass>0 && px%(s*2)===0 && py%(s*2)===0) continue;
+    simulate(wbuf(px),wbuf(py),null);
+    const mi=_si, mt=_st; baseColor(mi,mt,_bc,0);
+    for(let yy=py; yy<py+s && yy<RW; yy++) for(let xx=px; xx<px+s && xx<RW; xx++){
+      const oo=yy*RW+xx; idx[oo]=mi; itr[oo]=mt; const pp=oo*4;
+      d[pp]=_bc[0]; d[pp+1]=_bc[1]; d[pp+2]=_bc[2]; d[pp+3]=255;
+    }
+  }
+  bctx.putImageData(img,0,0);
+}
+
+function colorizeFull(){ const d=img.data;
+  for(let j=0;j<RW;j++) for(let i=0;i<RW;i++){ const o=j*RW+i, mi=idx[o], ti=itr[o];
+    baseColor(mi,ti,_bc,0); glowAt(i,j,mi,ti,_bc[0],_bc[1],_bc[2],d,o*4); }
+  bctx.putImageData(img,0,0);
+}
+
+// idle anti-alias: 2x2 supersample near detected boundaries only
+function ssChunk(){ const t0=performance.now(), d=img.data, dp=A/(RW-1)*0.25, sc=[0,0,0], N=RW*RW;
+  while(ssCur<N && performance.now()-t0<10){
+    const o=ssCur++, i=o%RW, j=(o/RW)|0, mi=idx[o];
+    const bnd=(i+1<RW&&idx[o+1]!==mi)||(i>0&&idx[o-1]!==mi)||(j+1<RW&&idx[o+RW]!==mi)||(j>0&&idx[o-RW]!==mi);
+    if(!bnd) continue;
+    const wx=wbuf(i), wy=wbuf(j); let r=0,g=0,b=0;
+    const off=[[-dp,-dp],[dp,-dp],[-dp,dp],[dp,dp]];
+    for(let k=0;k<4;k++){ simulate(wx+off[k][0],wy+off[k][1],null); baseColor(_si,_st,sc,0); r+=sc[0];g+=sc[1];b+=sc[2]; }
+    glowAt(i,j,mi,itr[o],r/4,g/4,b/4,d,o*4);
+  }
+  bctx.putImageData(img,0,0);
+  if(ssCur>=N) pendingSS=false;
+}
+
+// ---- overlays + main loop ----
+function cx(wx){ return ((wx/A)+1)/2*(SIZE-1); }
+function cy(wy){ return ((wy/A)+1)/2*(SIZE-1); }
+function wx(px){ return (px/(SIZE-1)*2-1)*A; }
+
+function draw(){
+  ctx.imageSmoothingEnabled=true;
+  ctx.drawImage(bc,0,0,SIZE,SIZE);
+  // trajectory
+  if(trace){ const Pt=trace.pts, n=Pt.length/2, top=Math.min(trace.bob,n);
+    if(top>1){ ctx.lineWidth=1.6; ctx.strokeStyle='rgba(255,255,255,0.42)'; ctx.beginPath();
+      for(let i=0;i<top;i++){ const X=cx(Pt[i*2]),Y=cy(Pt[i*2+1]); i?ctx.lineTo(X,Y):ctx.moveTo(X,Y); } ctx.stroke();
+      ctx.lineWidth=2.4; ctx.strokeStyle='rgba(120,230,255,0.95)'; ctx.beginPath();
+      for(let i=Math.max(0,top-46);i<top;i++){ const X=cx(Pt[i*2]),Y=cy(Pt[i*2+1]); i===Math.max(0,top-46)?ctx.moveTo(X,Y):ctx.lineTo(X,Y); } ctx.stroke();
+    }
+    const bi=Math.min(top,n-1)*2, bx=cx(Pt[bi]||0), by=cy(Pt[bi+1]||0);
+    const gr=ctx.createRadialGradient(bx,by,0,bx,by,11); gr.addColorStop(0,'rgba(180,245,255,1)'); gr.addColorStop(1,'rgba(120,230,255,0)');
+    ctx.fillStyle=gr; ctx.beginPath(); ctx.arc(bx,by,11,0,7); ctx.fill();
+    if(trace.bob<n) trace.bob+=4;
+  }
+  // magnets
+  for(let m=0;m<magnets.length;m++){ const X=cx(magnets[m].x), Y=cy(magnets[m].y), h=HUES[m];
+    const gr=ctx.createRadialGradient(X,Y,0,X,Y,20); gr.addColorStop(0,`hsla(${h},90%,72%,.95)`); gr.addColorStop(1,`hsla(${h},90%,55%,0)`);
+    ctx.fillStyle=gr; ctx.beginPath(); ctx.arc(X,Y,20,0,7); ctx.fill();
+    ctx.lineWidth=2; ctx.strokeStyle='rgba(255,255,255,.85)'; ctx.beginPath(); ctx.arc(X,Y,6,0,7); ctx.stroke();
+    ctx.fillStyle=`hsl(${h},90%,60%)`; ctx.beginPath(); ctx.arc(X,Y,3,0,7); ctx.fill();
+  }
+  document.getElementById('bar').style.width=(cp.active? Math.round(progress()*100):(pendingSS?100:0))+'%';
+}
+function progress(){ let done=0,tot=0; for(let p=0;p<PASSES.length;p++){ const s=PASSES[p], t=Math.ceil(RW/s)**2; tot+=t; if(p<cp.pass)done+=t; else if(p===cp.pass)done+=cp.cur; } return done/tot; }
+
+function frame(){ if(cp.active) stepCompute(); else if(pendingSS && performance.now()>idleAt) ssChunk(); draw(); requestAnimationFrame(frame); }
+
+// ---- interaction ----
+function evPos(e){ const r=c.getBoundingClientRect(), s=SIZE/r.width; return {x:(e.clientX-r.left)*s, y:(e.clientY-r.top)*s}; }
+function hit(worldX,worldY){ for(let m=0;m<magnets.length;m++){ const dx=magnets[m].x-worldX, dy=magnets[m].y-worldY; if(dx*dx+dy*dy<GRAB*GRAB) return m; } return -1; }
+c.addEventListener('pointerdown',e=>{ e.preventDefault(); c.setPointerCapture(e.pointerId);
+  const p=evPos(e), X=wx(p.x), Y=wx(p.y), m=hit(X,Y);
+  if(e.shiftKey && magnets.length<6){ magnets.push({x:X,y:Y}); updateMagnetButtons(); startCompute(); return; }
+  if(m>=0){ dragging=m; pendingSS=false; }
+  else{ const pts=[]; simulate(X,Y,pts); trace={pts,bob:0}; updatePathBox(); }
+});
+c.addEventListener('pointermove',e=>{ if(dragging<0)return; const p=evPos(e);
+  magnets[dragging].x=Math.max(-A,Math.min(A,wx(p.x))); magnets[dragging].y=Math.max(-A,Math.min(A,wx(p.y))); startCompute(); });
+c.addEventListener('pointerup',()=>{ if(dragging>=0){ dragging=-1; scheduleHash(); } });
+c.addEventListener('dblclick',e=>{ const p=evPos(e), m=hit(wx(p.x),wx(p.y)); if(m>=0 && magnets.length>2){ magnets.splice(m,1); updateMagnetButtons(); startCompute(); } });
+
+// ---- controls ----
+const CTRLS=[['STR','Magnet strength',0.05,1.5,0.01],['CENTER','Center pull',0,1,0.01],
+  ['FRIC','Friction',0,0.5,0.005],['H','Drop height',0.05,0.6,0.01],['DT','Integration step',0.03,0.2,0.005]];
+const sc=document.getElementById('sliders'); const valEls={};
+function mkSlider(key,name,lo,hi,st,get,set){ const row=document.createElement('div'); row.className='row';
+  const lab=document.createElement('label'); const nm=document.createElement('span'); nm.style.color='var(--dim)'; nm.textContent=name;
+  const vv=document.createElement('span'); lab.appendChild(nm); lab.appendChild(vv);
+  const inp=document.createElement('input'); inp.type='range'; inp.min=lo; inp.max=hi; inp.step=st;
+  const sync=()=>{ inp.value=get(); vv.textContent=(+get()).toFixed(key==='Q'?0:3); };
+  inp.addEventListener('input',()=>{ set(parseFloat(inp.value)); vv.textContent=(+get()).toFixed(key==='Q'?0:3); startCompute(); });
+  row.appendChild(lab); row.appendChild(inp); sc.appendChild(row); valEls[key]=sync; sync(); return inp; }
+CTRLS.forEach(([k,n,lo,hi,st])=>mkSlider(k,n,lo,hi,st,()=>P[k],v=>P[k]=v));
+mkSlider('Q','Resolution / quality',160,440,40,()=>RW,v=>{ RW=v|0; alloc(); });
+function syncUI(){ for(const k in valEls) valEls[k](); }
+
+const addBtn=document.getElementById('add'), remBtn=document.getElementById('rem'), pathBox=document.getElementById('withpath');
+function updateMagnetButtons(){ addBtn.disabled=magnets.length>=6; remBtn.disabled=magnets.length<=2; }
+function updatePathBox(){ pathBox.disabled=!trace; if(!trace) pathBox.checked=false; }
+addBtn.onclick=()=>{ if(magnets.length<6){ magnets.push({x:0.5,y:0}); updateMagnetButtons(); startCompute(); } };
+remBtn.onclick=()=>{ if(magnets.length>2){ magnets.pop(); updateMagnetButtons(); startCompute(); } };
+document.getElementById('reset').onclick=()=>applyPreset(PRESETS[0]);
+
+// ---- URL hash ----
+function scheduleHash(){ clearTimeout(hashTimer); hashTimer=setTimeout(writeHash,250); }
+function writeHash(){ const m=magnets.map(p=>p.x.toFixed(3)+','+p.y.toFixed(3)).join('_');
+  const h=`STR=${P.STR}&CENTER=${P.CENTER}&FRIC=${P.FRIC}&H=${P.H}&DT=${P.DT}&Q=${RW}&M=${m}`;
+  try{ history.replaceState(null,'','#'+h); }catch(e){ try{ location.hash=h; }catch(_){} } }
+function readHash(str){ const q={}; str.replace(/^#/,'').split('&').forEach(kv=>{ const i=kv.indexOf('='); if(i>0)q[kv.slice(0,i)]=kv.slice(i+1); });
+  if(!q.M) return false;
+  const RNG={STR:[0.05,1.5],CENTER:[0,1],FRIC:[0,0.5],H:[0.05,0.6],DT:[0.03,0.2]};
+  ['STR','CENTER','FRIC','H','DT'].forEach(k=>{ if(q[k]!==undefined){ const v=parseFloat(q[k]);
+    if(isFinite(v)) P[k]=Math.max(RNG[k][0],Math.min(RNG[k][1],v)); } });
+  if(q.Q!==undefined){ RW=Math.max(160,Math.min(440,parseInt(q.Q)||280)); }
+  magnets=q.M.split('_').map(s=>{ const [x,y]=s.split(',').map(parseFloat); return {x,y}; }).filter(p=>isFinite(p.x)&&isFinite(p.y));
+  if(magnets.length<2) magnets=triangle(); return true; }
+
+// ---- presets ----
+const PRESETS=[
+  {name:'Trefoil',  P:{STR:0.60,CENTER:0.32,FRIC:0.20,H:0.22,DT:0.10}, m:poly(3,0.90,-90)},
+  {name:'Four-Fold',P:{STR:0.55,CENTER:0.30,FRIC:0.20,H:0.25,DT:0.10}, m:poly(4,0.95,45)},
+  {name:'Chaos Ring',P:{STR:0.82,CENTER:0.18,FRIC:0.13,H:0.17,DT:0.09}, m:poly(5,1.02,-90)},
+  {name:'Duet',     P:{STR:0.72,CENTER:0.42,FRIC:0.26,H:0.30,DT:0.11}, m:[{x:-0.85,y:0},{x:0.85,y:0}]},
+  {name:'Hexad',    P:{STR:0.50,CENTER:0.25,FRIC:0.16,H:0.20,DT:0.10}, m:poly(6,1.05,0)},
+  {name:'Asymm',    P:{STR:0.68,CENTER:0.28,FRIC:0.15,H:0.19,DT:0.10}, m:[{x:-0.9,y:-0.5},{x:0.95,y:-0.2},{x:0.1,y:0.98},{x:-0.3,y:0.2}]},
+];
+function applyPreset(pr){ Object.assign(P,pr.P); magnets=pr.m.map(o=>({x:o.x,y:o.y})); syncUI(); updateMagnetButtons(); startCompute(); }
+
+function buildThumbs(){ const box=document.getElementById('presets');
+  PRESETS.forEach(pr=>{ const b=document.createElement('button'); b.className='preset'; b.title=pr.name;
+    const cv=document.createElement('canvas'); cv.width=52; cv.height=52; const sp=document.createElement('span'); sp.textContent=pr.name;
+    b.appendChild(cv); b.appendChild(sp); b.onclick=()=>applyPreset(pr); box.appendChild(b);
+    // deferred thumbnail render so first paint isn't blocked
+    setTimeout(()=>renderThumb(pr,cv),40);
+  });
+}
+function renderThumb(pr,cv){ const T=cv.width, tctx=cv.getContext('2d'), im=tctx.createImageData(T,T), d=im.data;
+  const save=Object.assign({},P), sm=magnets, si=MAXIT; Object.assign(P,pr.P); magnets=pr.m; MAXIT=190;
+  const col=[0,0,0];
+  for(let j=0;j<T;j++) for(let i=0;i<T;i++){ const X=(i/(T-1)*2-1)*A, Y=(j/(T-1)*2-1)*A; simulate(X,Y,null);
+    baseColor(_si,_st,col,0); const p=(j*T+i)*4; d[p]=col[0];d[p+1]=col[1];d[p+2]=col[2];d[p+3]=255; }
+  tctx.putImageData(im,0,0); Object.assign(P,save); magnets=sm; MAXIT=si;
+}
+
+// ---- PNG export (supersampled recompute at scale, crisp output) ----
+document.getElementById('export').onclick=function(){ const btn=this; btn.textContent='Rendering…'; btn.disabled=true; document.body.style.cursor='wait';
+  setTimeout(()=>{ try{ doExport(parseInt(document.getElementById('scale').value)); }
+    finally{ btn.textContent='Export PNG'; btn.disabled=false; document.body.style.cursor=''; } },30); };
+function doExport(scale){ const RES=Math.min(RW*scale,960);
+  const ix=new Int16Array(RES*RES), it=new Float32Array(RES*RES);
+  for(let j=0;j<RES;j++) for(let i=0;i<RES;i++){ simulate((i/(RES-1)*2-1)*A,(j/(RES-1)*2-1)*A,null); const o=j*RES+i; ix[o]=_si; it[o]=_st; }
+  const cv=document.createElement('canvas'); cv.width=RES; cv.height=RES; const ec=cv.getContext('2d'), im=ec.createImageData(RES,RES), d=im.data, col=[0,0,0];
+  const gAt=(i,j,mi,ti,r,g,b,p)=>{ let e=0,di=0; const o=j*RES+i;
+    const ck=n=>{ if(ix[n]!==mi)e++; const dd=Math.abs(it[n]-ti); if(dd>di)di=dd; };
+    if(i+1<RES)ck(o+1); if(i>0)ck(o-1); if(j+1<RES)ck(o+RES); if(j>0)ck(o-RES);
+    const gl=Math.min(1,(e/4)*1.15+di*0.5)*0.92, gc=glowCol[mi];
+    d[p]=r+(gc[0]-r)*gl; d[p+1]=g+(gc[1]-g)*gl; d[p+2]=b+(gc[2]-b)*gl; d[p+3]=255; };
+  for(let j=0;j<RES;j++) for(let i=0;i<RES;i++){ const o=j*RES+i, mi=ix[o], ti=it[o]; baseColor(mi,ti,col,0); gAt(i,j,mi,ti,col[0],col[1],col[2],o*4); }
+  ec.putImageData(im,0,0);
+  if(document.getElementById('withpath').checked && trace){ const Pt=trace.pts, S=RES/SIZE; ec.lineWidth=1.6*S; ec.strokeStyle='rgba(255,255,255,.6)'; ec.beginPath();
+    for(let i=0;i<Pt.length/2;i++){ const X=cx(Pt[i*2])*S, Y=cy(Pt[i*2+1])*S; i?ec.lineTo(X,Y):ec.moveTo(X,Y); } ec.stroke(); }
+  const a=document.createElement('a'); a.download='poise-'+RES+'.png'; a.href=cv.toDataURL('image/png'); a.click();
+}
+
+// ---- boot ----
+buildThumbs();
+if(!readHash(location.hash)) Object.assign(P,PRESETS[0].P), magnets=PRESETS[0].m.map(o=>({x:o.x,y:o.y}));
+syncUI(); updateMagnetButtons(); updatePathBox(); startCompute(); requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

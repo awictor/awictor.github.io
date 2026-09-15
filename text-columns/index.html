@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Columns — align delimited text into neat columns</title>
+<meta name="description" content="Free offline text column aligner. Paste delimited text (spaces, commas, tabs, pipes) and get it padded into clean aligned columns — like column -t. Left or right align. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/text-columns/">
+<style>
+  :root{
+    --c:#312e81; --bg:#f8f8f9; --fg:#18181b; --muted:#52525b;
+    --card:#ffffff; --border:#e4e4e7; --code:#efeff1;
+  }
+  [data-theme="dark"]{
+    --bg:#09090b; --fg:#e7e7ea; --muted:#8b8b93; --card:#151518;
+    --border:#27272a; --code:#1c1c20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#4f46e5);display:grid;place-items:center;color:#fff;font-size:16px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  textarea{width:100%;min-height:130px;padding:12px 14px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:.9rem;line-height:1.5;resize:vertical;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .opts{margin-top:14px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  select,input[type=number],input[type=text]{padding:8px 10px;border:1px solid var(--border);border-radius:9px;background:var(--bg);color:var(--fg);font-size:.9rem}
+  input[type=number]{width:64px}input#custom{width:70px;font-family:ui-monospace,monospace}
+  label.chk{display:inline-flex;align-items:center;gap:7px;font-weight:400;font-size:.85rem;margin:0;cursor:pointer}
+  .top{display:flex;justify-content:space-between;align-items:center;margin:16px 0 6px}
+  .copy{background:none;border:1px solid var(--border);color:var(--fg);border-radius:8px;padding:5px 10px;cursor:pointer;font-size:.8rem}
+  pre{margin:0;padding:14px 16px;border:1px solid var(--border);border-radius:11px;background:var(--code);
+    font-family:ui-monospace,monospace;font-size:.9rem;line-height:1.5;overflow:auto;white-space:pre;min-height:80px}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:820px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('tc.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">▤</div>
+  <div>
+    <h1>Columns</h1>
+    <p class="sub">Align delimited text into neat columns</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <label for="in">Input</label>
+    <textarea id="in" spellcheck="false">name age city
+Alice 30 Seattle
+Bob 7 Austin
+Charlie 25 NYC</textarea>
+    <div class="opts">
+      <label style="margin:0">Delimiter
+        <select id="delim"><option value="ws">whitespace</option><option value=",">comma</option><option value="\t">tab</option><option value="|">pipe</option><option value="custom">custom</option></select>
+      </label>
+      <input type="text" id="custom" placeholder="char" style="display:none">
+      <label style="margin:0">Gap <input type="number" id="gap" min="1" max="8" value="2"></label>
+      <label class="chk"><input type="checkbox" id="right"> Right-align</label>
+    </div>
+    <div class="top"><label style="margin:0">Aligned</label><button class="copy" id="copy">Copy</button></div>
+    <pre id="out"></pre>
+    <p class="hint">Cells are split on the chosen delimiter, trimmed, and padded so every column lines up (like
+      <code style="font-family:ui-monospace">column -t</code>). The last column isn't padded when left-aligned, so
+      there are no trailing spaces. 100% local.</p>
+  </div>
+</main>
+<footer>
+  Columns is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/text-columns">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function splitRows(text, delim){
+  return String(text).split('\n').filter(function(l){ return l.trim() !== ''; }).map(function(l){
+    var cells = (delim === 'ws') ? l.trim().split(/\s+/) : l.split(delim);
+    return cells.map(function(c){ return c.trim(); });
+  });
+}
+function colWidths(rows){
+  var w = [];
+  rows.forEach(function(r){ r.forEach(function(c, i){ w[i] = Math.max(w[i] || 0, c.length); }); });
+  return w;
+}
+function align(text, opts){
+  opts = opts || {};
+  var delim = opts.delimiter || 'ws';
+  var gap = opts.gap === undefined ? 2 : opts.gap;
+  var right = !!opts.alignRight;
+  var rows = splitRows(text, delim);
+  if(rows.length === 0) return '';
+  var w = colWidths(rows);
+  var sep = ' '.repeat(gap);
+  return rows.map(function(r){
+    return r.map(function(c, i){
+      var pad = Math.max(0, (w[i] || 0) - c.length);
+      if(right) return ' '.repeat(pad) + c;
+      if(i === r.length - 1) return c;          // left-align: don't pad the final cell
+      return c + ' '.repeat(pad);
+    }).join(sep);
+  }).join('\n');
+}
+
+if(typeof module !== 'undefined') module.exports = { splitRows, colWidths, align };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var inEl = document.getElementById('in');
+  var delimEl = document.getElementById('delim');
+  var customEl = document.getElementById('custom');
+  var gapEl = document.getElementById('gap');
+  var rightEl = document.getElementById('right');
+  var outEl = document.getElementById('out');
+
+  function currentDelim(){
+    var d = delimEl.value;
+    if(d === 'custom') return customEl.value || ' ';
+    if(d === '\\t') return '\t';
+    return d;
+  }
+  function render(){
+    customEl.style.display = delimEl.value === 'custom' ? '' : 'none';
+    outEl.textContent = align(inEl.value, { delimiter: currentDelim(), gap: +gapEl.value || 1, alignRight: rightEl.checked });
+    try{ localStorage.setItem('tc.in', inEl.value); localStorage.setItem('tc.delim', delimEl.value); localStorage.setItem('tc.custom', customEl.value); localStorage.setItem('tc.gap', gapEl.value); localStorage.setItem('tc.right', rightEl.checked ? '1' : ''); }catch(e){}
+  }
+  [inEl, delimEl, customEl, gapEl, rightEl].forEach(function(x){ x.addEventListener('input', render); });
+  document.getElementById('copy').addEventListener('click', function(){
+    if(navigator.clipboard) navigator.clipboard.writeText(outEl.textContent);
+  });
+  try{
+    var g;
+    if((g = localStorage.getItem('tc.in')) !== null) inEl.value = g;
+    if((g = localStorage.getItem('tc.delim')) !== null) delimEl.value = g;
+    if((g = localStorage.getItem('tc.custom')) !== null) customEl.value = g;
+    if((g = localStorage.getItem('tc.gap')) !== null) gapEl.value = g;
+    if(localStorage.getItem('tc.right')) rightEl.checked = true;
+  }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('tc.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('tc.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

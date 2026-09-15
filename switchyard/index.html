@@ -1,0 +1,1433 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Switchyard — live regex playground &amp; railroad diagram</title>
+<style>
+:root{
+  --bg:#0f1420; --bg2:#161d2c; --bg3:#1e2738; --panel:#141b28; --line:#2a3448;
+  --fg:#e7ecf5; --fg2:#a4b0c4; --fg3:#6b7890; --accent:#5b9dff; --accent2:#7c5cff;
+  --ok:#3ddc84; --warn:#ffb020; --err:#ff5c72; --mark:#3a4a2a; --mark2:#243a4a;
+  --mono:'SF Mono',ui-monospace,'Cascadia Code','JetBrains Mono',Consolas,Menlo,monospace;
+  --sans:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  --shadow:0 8px 30px rgba(0,0,0,.35);
+}
+html[data-theme="light"]{
+  --bg:#f4f6fb; --bg2:#ffffff; --bg3:#eef1f7; --panel:#ffffff; --line:#dde3ee;
+  --fg:#161c28; --fg2:#4a5568; --fg3:#8a95a8; --accent:#2563eb; --accent2:#7c3aed;
+  --ok:#0f9d58; --warn:#b7791f; --err:#dc2626; --mark:#d9f0c9; --mark2:#cfe6f7;
+  --shadow:0 6px 22px rgba(20,30,60,.12);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px;line-height:1.5;display:flex;flex-direction:column;height:100vh;overflow:hidden}
+button{font-family:inherit;font-size:inherit;cursor:pointer}
+kbd{font-family:var(--mono);background:var(--bg3);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:11px}
+a{color:var(--accent)}
+
+/* Header */
+header{display:flex;align-items:center;gap:14px;padding:10px 16px;background:var(--bg2);border-bottom:1px solid var(--line);flex-shrink:0;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;letter-spacing:.2px}
+.brand .logo{width:26px;height:26px;flex-shrink:0}
+.brand small{font-weight:400;color:var(--fg3);font-size:11px;letter-spacing:0}
+.spacer{flex:1}
+.hbtn{background:var(--bg3);color:var(--fg);border:1px solid var(--line);border-radius:7px;padding:6px 11px;display:inline-flex;align-items:center;gap:6px;transition:.12s}
+.hbtn:hover{border-color:var(--accent);color:var(--accent)}
+.hbtn.small{padding:4px 8px;font-size:12px}
+select.hbtn{appearance:none;padding-right:26px;background-image:linear-gradient(45deg,transparent 50%,var(--fg2) 50%),linear-gradient(135deg,var(--fg2) 50%,transparent 50%);background-position:calc(100% - 14px) 55%,calc(100% - 9px) 55%;background-size:5px 5px,5px 5px;background-repeat:no-repeat}
+
+/* Pattern bar */
+.patbar{padding:12px 16px;background:var(--bg2);border-bottom:1px solid var(--line);flex-shrink:0}
+.patwrap{display:flex;align-items:stretch;gap:0;background:var(--bg);border:1px solid var(--line);border-radius:10px;overflow:hidden;transition:.12s}
+.patwrap.err{border-color:var(--err)}
+.patwrap:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px rgba(91,157,255,.28);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
+.delim{display:flex;align-items:center;padding:0 12px;color:var(--accent2);font-family:var(--mono);font-size:18px;font-weight:600;user-select:none;background:var(--bg3)}
+#pattern{flex:1;border:0;background:transparent;color:var(--fg);font-family:var(--mono);font-size:16px;padding:11px 8px;outline:none;min-width:0}
+.flagbox{display:flex;align-items:center;gap:2px;padding:0 8px;border-left:1px solid var(--line);background:var(--bg3)}
+.flag{width:26px;height:26px;border-radius:6px;border:1px solid transparent;background:transparent;color:var(--fg3);font-family:var(--mono);font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center}
+.flag:hover{color:var(--fg)}
+.flag.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.errline{margin-top:8px;color:var(--err);font-family:var(--mono);font-size:12.5px;display:none}
+.errline.show{display:block}
+.errline .caret{color:var(--warn);white-space:pre}
+
+/* Layout */
+main{flex:1;display:grid;grid-template-columns:minmax(340px,1fr) minmax(420px,1.25fr);gap:0;overflow:hidden;min-height:0}
+.col{display:flex;flex-direction:column;overflow:hidden;min-height:0}
+.col.left{border-right:1px solid var(--line)}
+.panel{background:var(--panel);border-bottom:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.panel h2{margin:0;padding:9px 14px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--fg2);font-weight:600;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line);background:var(--bg2);flex-shrink:0}
+.panel h2 .stat{margin-left:auto;color:var(--fg3);font-weight:500;text-transform:none;letter-spacing:0;font-family:var(--mono);font-size:11px}
+.panel .body{overflow:auto;padding:12px 14px}
+
+/* Sample editor */
+.editor-wrap{position:relative;flex:1;min-height:120px}
+.editor-wrap .backdrop,.editor-wrap textarea{position:absolute;inset:0;margin:0;border:0;padding:12px 14px;font-family:var(--mono);font-size:13.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word;overflow:auto}
+.editor-wrap .backdrop{color:transparent;pointer-events:none;z-index:1}
+.editor-wrap textarea{background:transparent;color:var(--fg);caret-color:var(--accent);resize:none;outline:none;z-index:2}
+html[data-theme="light"] .editor-wrap textarea{color:#1a2130}
+.backdrop mark{background:var(--mark);color:transparent;border-radius:3px;box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 30%,transparent)}
+.backdrop mark.alt{background:var(--mark2)}
+.backdrop mark.sel{box-shadow:0 0 0 2px var(--accent);background:var(--mark2);background:color-mix(in srgb,var(--accent) 34%,var(--mark))}
+.backdrop mark .g{border-radius:2px;box-shadow:inset 0 -2px 0 0 currentColor}
+
+/* stats row */
+.statsrow{display:flex;gap:8px;padding:8px 14px;border-bottom:1px solid var(--line);background:var(--bg2);flex-wrap:wrap;flex-shrink:0}
+.chip{background:var(--bg3);border:1px solid var(--line);border-radius:20px;padding:3px 11px;font-size:12px;color:var(--fg2)}
+.chip b{color:var(--fg);font-family:var(--mono)}
+.chip.ok b{color:var(--ok)} .chip.zero b{color:var(--fg3)}
+
+/* capture table */
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line)}
+th{color:var(--fg3);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+td.val{font-family:var(--mono);word-break:break-all}
+.swatch{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:middle}
+.empty-note{color:var(--fg3);font-style:italic;padding:8px 0}
+.matchnav{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.matchnav button{background:var(--bg3);border:1px solid var(--line);color:var(--fg);border-radius:6px;width:26px;height:24px}
+.matchnav button:disabled{opacity:.4;cursor:default}
+
+/* Diagram */
+#diagram{overflow:auto;background:
+  radial-gradient(circle at 1px 1px, var(--line) 1px, transparent 0);
+  background-size:22px 22px;flex:1;min-height:180px}
+#diagram svg{display:block}
+.rr-line{stroke:var(--fg2);stroke-width:1.6;fill:none}
+.rr-loop{stroke:var(--accent);stroke-width:1.6;fill:none}
+.rr-cap{fill:var(--accent)}
+.rr-box{fill:var(--bg3);stroke:var(--fg2);stroke-width:1.4}
+.rr-txt{fill:var(--fg);font-family:var(--mono);font-size:13px;dominant-baseline:middle;text-anchor:middle}
+.rr-term .rr-box{fill:var(--bg3)}
+.rr-class .rr-box{fill:var(--bg3);fill:color-mix(in srgb,var(--accent2) 20%,var(--bg3));stroke:var(--accent2)}
+.rr-anchor .rr-box{fill:var(--bg3);fill:color-mix(in srgb,var(--ok) 18%,var(--bg3));stroke:var(--ok);rx:13}
+.rr-any .rr-box{fill:var(--bg3);fill:color-mix(in srgb,var(--warn) 16%,var(--bg3));stroke:var(--warn)}
+.rr-backref .rr-box{fill:var(--bg3);fill:color-mix(in srgb,var(--err) 16%,var(--bg3));stroke:var(--err)}
+.rr-grouplabel{fill:var(--fg3);font-family:var(--mono);font-size:10.5px;text-anchor:start}
+.rr-groupbox{fill:none;stroke:var(--fg3);stroke-width:1.2;stroke-dasharray:4 3;rx:8}
+.rr-groupbox.look{stroke:var(--accent2);stroke-dasharray:2 3}
+.rr-qlabel{fill:var(--accent);font-family:var(--mono);font-size:10px;text-anchor:middle}
+.rr-node{cursor:pointer}
+.rr-node.hot .rr-box{stroke:var(--accent);stroke-width:2.5;filter:drop-shadow(0 0 6px color-mix(in srgb,var(--accent) 60%,transparent))}
+.rr-node.hot .rr-groupbox{stroke:var(--accent);stroke-width:2.2}
+.rr-node.risk .rr-box,.rr-node.risk .rr-groupbox{stroke:var(--err);stroke-width:2.2;stroke-dasharray:none}
+.rr-node.step .rr-box,.rr-node.step .rr-groupbox{stroke:var(--warn);stroke-width:3;filter:drop-shadow(0 0 8px var(--warn))}
+
+/* ReDoS banner */
+.redos{margin:0;padding:0;flex-shrink:0}
+.redos .item{display:flex;gap:8px;align-items:flex-start;padding:8px 14px;border-bottom:1px solid var(--line);border-left:4px solid var(--err);font-size:12.5px;background:var(--bg3);background:color-mix(in srgb,var(--err) 16%,var(--panel));cursor:pointer}
+.redos .item:hover{background:color-mix(in srgb,var(--err) 24%,var(--panel))}
+.redos .item .ic{color:var(--err);font-weight:700;font-size:14px}
+.redos .item.warn2{border-left-width:3px;border-left-color:var(--warn);background:var(--bg3);background:color-mix(in srgb,var(--warn) 9%,var(--panel))}
+.redos .item.warn2 .ic{color:var(--warn);font-size:13px}
+.redos code{font-family:var(--mono);background:var(--bg);padding:1px 4px;border-radius:3px}
+
+/* Tabs */
+.tabs{display:flex;gap:2px;padding:6px 10px 0;background:var(--bg2);border-bottom:1px solid var(--line);flex-shrink:0;overflow-x:auto}
+.tab{background:transparent;border:0;border-bottom:2px solid transparent;color:var(--fg2);padding:7px 13px;white-space:nowrap;border-radius:6px 6px 0 0}
+.tab:hover{color:var(--fg)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent);background:var(--panel)}
+.tabpane{display:none;overflow:auto;flex:1;padding:14px}
+.tabpane.active{display:block}
+
+/* Explanation */
+.exp-row{display:flex;gap:8px;padding:3px 6px;border-radius:6px;cursor:default;align-items:baseline}
+.exp-row:hover,.exp-row.hot{background:color-mix(in srgb,var(--accent) 14%,transparent)}
+.exp-tok{font-family:var(--mono);color:var(--accent);background:var(--bg3);padding:1px 6px;border-radius:4px;flex-shrink:0;white-space:pre}
+.exp-desc{color:var(--fg2)}
+.exp-row.container .exp-tok{color:var(--accent2);background:transparent;padding-left:0}
+
+/* Snippets */
+.snip{margin-bottom:16px}
+.snip-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.snip-head b{font-size:13px}
+.snip pre{margin:0;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:11px 13px;overflow:auto;font-family:var(--mono);font-size:12.5px;line-height:1.55}
+.copybtn{margin-left:auto;background:var(--bg3);border:1px solid var(--line);color:var(--fg2);border-radius:6px;padding:3px 10px;font-size:12px}
+.copybtn:hover{color:var(--accent);border-color:var(--accent)}
+.copybtn.done{color:var(--ok);border-color:var(--ok)}
+
+/* Replace */
+.replace-in{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--fg);font-family:var(--mono);font-size:13.5px;padding:9px 11px;outline:none}
+.replace-in:focus{border-color:var(--accent)}
+.replace-out{margin-top:10px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:11px 13px;font-family:var(--mono);font-size:13.5px;white-space:pre-wrap;word-break:break-word;min-height:60px}
+.replace-out ins{background:var(--mark);background:color-mix(in srgb,var(--ok) 28%,transparent);text-decoration:none;border-radius:3px;padding:0 1px}
+.hint{color:var(--fg3);font-size:12px;margin:4px 0 10px}
+
+/* Tests */
+.test-add{display:flex;gap:8px;margin-bottom:10px}
+.test-add input{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:7px;color:var(--fg);font-family:var(--mono);padding:7px 10px;outline:none}
+.test-add input:focus{border-color:var(--accent)}
+.test-add select{background:var(--bg3);border:1px solid var(--line);border-radius:7px;color:var(--fg);padding:0 8px}
+.test-add button{background:var(--accent);border:0;color:#fff;border-radius:7px;padding:0 14px;font-weight:600}
+.testrow td.res{font-weight:700;font-family:var(--mono)}
+.testrow .pass{color:var(--ok)} .testrow .fail{color:var(--err)}
+.testrow .del{background:none;border:0;color:var(--fg3);font-size:15px;padding:0 4px}
+.testrow .del:hover{color:var(--err)}
+.test-sum{margin-bottom:10px;font-family:var(--mono);font-size:13px}
+
+/* Debugger */
+.dbg-controls{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.dbg-controls button{background:var(--bg3);border:1px solid var(--line);color:var(--fg);border-radius:7px;padding:6px 12px;display:inline-flex;gap:5px;align-items:center}
+.dbg-controls button:hover{border-color:var(--accent);color:var(--accent)}
+.dbg-controls button.play{background:var(--accent);color:#fff;border-color:var(--accent)}
+.dbg-controls input[type=range]{accent-color:var(--accent)}
+.tape{display:flex;flex-wrap:wrap;gap:2px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;font-family:var(--mono);font-size:14px;margin-bottom:12px;min-height:40px}
+.tape .cell{min-width:15px;height:26px;display:flex;align-items:center;justify-content:center;border-radius:4px;padding:0 3px;position:relative}
+.tape .cell.consumed{background:color-mix(in srgb,var(--ok) 26%,transparent)}
+.tape .cell.cur{background:var(--warn);color:#101;box-shadow:0 0 0 2px var(--warn)}
+.tape .cell.ws{color:var(--fg3)}
+.dbg-status{font-family:var(--mono);font-size:12.5px;color:var(--fg2);margin-bottom:10px;min-height:18px}
+.dbg-status .accept{color:var(--ok);font-weight:700}
+.dbg-status .reject{color:var(--err);font-weight:700}
+.dbg-status .bt{color:var(--warn);font-weight:700}
+.dbg-log{background:var(--bg);border:1px solid var(--line);border-radius:8px;font-family:var(--mono);font-size:12px;max-height:220px;overflow:auto}
+.dbg-log .l{padding:3px 10px;border-bottom:1px solid var(--line);display:flex;gap:8px}
+.dbg-log .l.cur{background:color-mix(in srgb,var(--warn) 18%,transparent)}
+.dbg-log .l .op{width:64px;flex-shrink:0}
+.dbg-log .op.match{color:var(--ok)} .dbg-log .op.fail{color:var(--err)} .dbg-log .op.try{color:var(--fg3)}
+.dbg-log .op.enter,.dbg-log .op.exit{color:var(--accent2)} .dbg-log .op.accept{color:var(--ok);font-weight:700} .dbg-log .op.backtrack{color:var(--warn)}
+
+/* Drawer (cheatsheet) */
+.drawer-back{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:40;display:none}
+.drawer-back.open{display:block}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(440px,90vw);background:var(--bg2);border-left:1px solid var(--line);z-index:41;transform:translateX(100%);transition:transform .22s ease;display:flex;flex-direction:column;box-shadow:var(--shadow)}
+.drawer.open{transform:translateX(0)}
+.drawer header{background:var(--bg2)}
+.drawer .body{overflow:auto;padding:14px 18px}
+.cheat-sec{margin-bottom:18px}
+.cheat-sec h3{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--accent);margin:0 0 8px}
+.cheat-row{display:grid;grid-template-columns:90px 1fr;gap:10px;padding:4px 0;border-bottom:1px solid var(--line);font-size:12.5px;align-items:baseline}
+.cheat-row code{font-family:var(--mono);color:var(--fg);background:var(--bg3);padding:1px 6px;border-radius:4px;justify-self:start}
+.cheat-row span{color:var(--fg2)}
+
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--fg);color:var(--bg);padding:9px 18px;border-radius:8px;font-weight:600;font-size:13px;opacity:0;transition:.2s;z-index:60;pointer-events:none;box-shadow:var(--shadow)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:6px;border:2px solid var(--panel)}
+::-webkit-scrollbar-thumb:hover{background:var(--fg3)}
+
+@media(max-width:900px){
+  main{grid-template-columns:1fr;grid-template-rows:none;overflow:auto}
+  .col.left{border-right:0;border-bottom:1px solid var(--line)}
+  body{overflow:auto}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 32 32" fill="none">
+      <circle cx="6" cy="16" r="3.4" fill="var(--accent2)"/>
+      <circle cx="26" cy="16" r="3.4" fill="var(--accent)"/>
+      <path d="M9 16h4M19 16h4" stroke="var(--fg2)" stroke-width="2"/>
+      <path d="M13 16c2-6 4-6 6 0M13 16c2 6 4 6 6 0" stroke="var(--accent)" stroke-width="2" fill="none"/>
+    </svg>
+    <div>Switchyard <small>regex railroad workbench</small></div>
+  </div>
+  <div class="spacer"></div>
+  <select class="hbtn" id="presetSel" title="Load a preset pattern">
+    <option value="">Presets…</option>
+  </select>
+  <button class="hbtn" id="cheatBtn" title="Syntax cheatsheet (?)">Cheatsheet</button>
+  <button class="hbtn" id="shareBtn" title="Copy shareable link (Ctrl+S)">Share</button>
+  <button class="hbtn" id="themeBtn" title="Toggle light / dark">Theme</button>
+</header>
+
+<div class="patbar">
+  <div class="patwrap" id="patwrap">
+    <span class="delim">/</span>
+    <input id="pattern" spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="Regular expression pattern" placeholder="type a regular expression…">
+    <span class="delim">/</span>
+    <div class="flagbox" id="flagbox">
+      <button class="flag" data-flag="g" title="global — find all matches">g</button>
+      <button class="flag" data-flag="i" title="ignore case">i</button>
+      <button class="flag" data-flag="m" title="multiline — ^ and $ match line ends">m</button>
+      <button class="flag" data-flag="s" title="dotAll — . matches newlines">s</button>
+      <button class="flag" data-flag="u" title="unicode">u</button>
+      <button class="flag" data-flag="y" title="sticky">y</button>
+    </div>
+  </div>
+  <div class="errline" id="errline"></div>
+</div>
+
+<main>
+  <div class="col left">
+    <div class="statsrow" id="statsrow"></div>
+    <div class="panel" style="flex:1;min-height:0">
+      <h2>Sample text <span class="stat" id="sampleStat"></span></h2>
+      <div class="editor-wrap">
+        <div class="backdrop" id="backdrop" aria-hidden="true"></div>
+        <textarea id="sample" spellcheck="false" aria-label="Sample text to match against" placeholder="paste text to test your pattern against…"></textarea>
+      </div>
+    </div>
+    <div class="panel" style="max-height:40%">
+      <h2>Capture groups <span class="stat" id="capStat"></span></h2>
+      <div class="body" id="capBody"></div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="redos" id="redos"></div>
+    <div class="panel" style="flex:1;min-height:0">
+      <h2>Railroad diagram <span class="stat">hover to sync with explanation</span></h2>
+      <div id="diagram"></div>
+    </div>
+    <div class="panel" style="height:46%;min-height:220px">
+      <div class="tabs" id="tabs">
+        <button class="tab active" data-tab="explain">Explain</button>
+        <button class="tab" data-tab="debug">Debugger</button>
+        <button class="tab" data-tab="replace">Replace</button>
+        <button class="tab" data-tab="snippets">Snippets</button>
+        <button class="tab" data-tab="tests">Tests</button>
+      </div>
+      <div class="tabpane active" data-pane="explain" id="explainPane"></div>
+      <div class="tabpane" data-pane="debug" id="debugPane"></div>
+      <div class="tabpane" data-pane="replace" id="replacePane"></div>
+      <div class="tabpane" data-pane="snippets" id="snippetsPane"></div>
+      <div class="tabpane" data-pane="tests" id="testsPane"></div>
+    </div>
+  </div>
+</main>
+
+<div class="drawer-back" id="drawerBack"></div>
+<aside class="drawer" id="drawer">
+  <header><div class="brand"><div>Regex cheatsheet</div></div><div class="spacer"></div><button class="hbtn small" id="cheatClose">Close</button></header>
+  <div class="body" id="cheatBody"></div>
+</aside>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* ============================================================================
+   Switchyard — a single-file regex workbench.
+   Sections:
+     1. State + URL hash serialization
+     2. Hand-written regex parser -> AST
+     3. Explanation generator
+     4. SVG railroad diagram renderer
+     5. Native-RegExp match / highlight engine
+     6. ReDoS / catastrophic-backtracking analyzer
+     7. Replace preview
+     8. Snippet generator (JS / Python / Go)
+     9. Preset library + test-case bench
+    10. Step-through debugger (backtracking tracer)
+    11. Wiring, hover-sync, theme, sharing, cheatsheet
+   ============================================================================ */
+
+const $ = (s,el=document)=>el.querySelector(s);
+const $$ = (s,el=document)=>[...el.querySelectorAll(s)];
+const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const GROUP_COLORS = ['#e11d48','#0891b2','#7c3aed','#059669','#d97706','#2563eb','#db2777','#65a30d','#c026d3','#0d9488'];
+
+/* ---- 1. State ------------------------------------------------------------ */
+const state = {
+  pattern: '', flags: 'g', sample: '', replacement: '', tests: []
+};
+
+function encodeState(){
+  try{
+    const json = JSON.stringify({p:state.pattern,f:state.flags,s:state.sample,r:state.replacement,t:state.tests});
+    return btoa(unescape(encodeURIComponent(json)));
+  }catch(e){ return ''; }
+}
+function decodeState(hash){
+  try{
+    const json = decodeURIComponent(escape(atob(hash)));
+    const o = JSON.parse(json);
+    return {
+      pattern: typeof o.p==='string'?o.p:'',
+      flags: typeof o.f==='string'?o.f:'g',
+      sample: typeof o.s==='string'?o.s:'',
+      replacement: typeof o.r==='string'?o.r:'',
+      tests: Array.isArray(o.t)?o.t.filter(t=>t&&typeof t.text==='string'):[]
+    };
+  }catch(e){ return null; }
+}
+let hashTimer=null;
+function saveHash(){
+  clearTimeout(hashTimer);
+  hashTimer=setTimeout(()=>{
+    const h = encodeState();
+    history.replaceState(null,'','#'+h);
+  },250);
+}
+
+/* ============================================================================
+   2. REGEX PARSER  (recursive descent, produces AST with source spans)
+   ============================================================================ */
+function ParseError(msg,pos){ this.message=msg; this.pos=pos; }
+
+function parseRegex(src){
+  let i=0, groupCount=0; const names=[];
+  const peek = (o=0)=>src[i+o];
+  const eof = ()=>i>=src.length;
+  const err = (msg,pos)=>{ throw new ParseError(msg, pos==null?i:pos); };
+  const span = (n,start)=>{ n.start=start; n.end=i; n.raw=src.slice(start,i); return n; };
+
+  function parseAlternation(){
+    const start=i;
+    const options=[parseSequence()];
+    while(peek()==='|'){ i++; options.push(parseSequence()); }
+    if(options.length===1) return options[0];
+    return span({type:'alt',options},start);
+  }
+  function parseSequence(){
+    const start=i; const items=[];
+    while(!eof() && peek()!=='|' && peek()!==')') items.push(parseQuantified());
+    if(items.length===0) return span({type:'empty'},start);
+    if(items.length===1) return items[0];
+    return span({type:'seq',items},start);
+  }
+  function parseQuantified(){
+    let atom=parseAtom();
+    const c=peek();
+    let q=null;
+    if(c==='*') { q={min:0,max:Infinity,sym:'*'}; i++; }
+    else if(c==='+'){ q={min:1,max:Infinity,sym:'+'}; i++; }
+    else if(c==='?'){ q={min:0,max:1,sym:'?'}; i++; }
+    else if(c==='{'){ const b=tryBrace(); if(b) q=b; }
+    if(!q) return atom;
+    let greedy=true;
+    if(peek()==='?'){ greedy=false; i++; }
+    else if(peek()==='+'){ err('Nothing to repeat',i); } // possessive quantifiers (a++, a*+) are not valid in JS
+    const start=atom.start;
+    const n=span({type:'quant',min:q.min,max:q.max,sym:q.sym,greedy,child:atom},start);
+    // reject a second quantifier (matches native "Nothing to repeat")
+    if('*+?'.includes(peek())) err('Nothing to repeat',i);
+    if(peek()==='{'){ const save=i; if(tryBrace()){ i=save; err('Nothing to repeat',i); } }
+    return n;
+  }
+  function tryBrace(){
+    const save=i;
+    if(peek()!=='{') return null;
+    i++; let a='';
+    while(/[0-9]/.test(peek()||'')) a+=src[i++];
+    if(a===''){ i=save; return null; }
+    let b=null;
+    if(peek()===','){ i++; b=''; while(/[0-9]/.test(peek()||'')) b+=src[i++]; }
+    if(peek()!=='}'){ i=save; return null; }
+    i++;
+    const min=parseInt(a,10);
+    let max, sym;
+    if(b===null){ max=min; sym='{'+a+'}'; }
+    else if(b===''){ max=Infinity; sym='{'+a+',}'; }
+    else { max=parseInt(b,10); sym='{'+a+','+b+'}'; if(max<min) err('Numbers out of order in {} quantifier',save); }
+    return {min,max,sym};
+  }
+  function parseAtom(){
+    const start=i, c=peek();
+    if(c===undefined) err('Unexpected end of pattern');
+    if(c==='(') return parseGroup();
+    if(c==='[') return parseClass();
+    if(c==='.'){ i++; return span({type:'any'},start); }
+    if(c==='^'){ i++; return span({type:'anchor',kind:'bol'},start); }
+    if(c==='$'){ i++; return span({type:'anchor',kind:'eol'},start); }
+    if(c==='\\') return parseEscape(false);
+    if(c===')') err('Unmatched )',i);
+    if('*+?'.includes(c)) err('Nothing to repeat',i);
+    i++;
+    return span({type:'char',value:c},start);
+  }
+  function parseGroup(){
+    const start=i; i++;
+    let kind='capturing', name=null, number=null;
+    if(peek()==='?'){
+      i++; const d=peek();
+      if(d===':'){ i++; kind='noncapturing'; }
+      else if(d==='='){ i++; kind='lookahead'; }
+      else if(d==='!'){ i++; kind='neglookahead'; }
+      else if(d==='<'){
+        i++; const e=peek();
+        if(e==='='){ i++; kind='lookbehind'; }
+        else if(e==='!'){ i++; kind='neglookbehind'; }
+        else {
+          kind='named'; let nm='';
+          while(!eof() && peek()!=='>') nm+=src[i++];
+          if(peek()!=='>') err('Invalid named capture group',start);
+          if(nm==='') err('Empty group name',start);
+          i++; groupCount++; number=groupCount; name=nm; names.push(nm);
+        }
+      } else err('Invalid group — expected ?:, ?=, ?!, ?<= , ?<! or ?<name>',start);
+    } else { groupCount++; number=groupCount; }
+    const child = parseAlternation();
+    if(peek()!==')') err('Unterminated group — missing )',start);
+    i++;
+    return span({type:'group',kind,name,number,child},start);
+  }
+  function parseClass(){
+    const start=i; i++;
+    let negated=false;
+    if(peek()==='^'){ negated=true; i++; }
+    const items=[];
+    // JS dialect: a ']' immediately after '[' or '[^' closes the class.
+    // '[]' is a valid empty class (matches nothing); '[^]' matches any character.
+    while(!eof() && peek()!==']'){
+      const lo=parseClassAtom();
+      if(lo.type==='lit' && peek()==='-' && peek(1)!==']' && peek(1)!==undefined){
+        i++; const hi=parseClassAtom();
+        if(hi.type!=='lit') { items.push(lo); items.push({type:'lit',value:'-'}); items.push(hi); }
+        else { if(hi.value.charCodeAt(0)<lo.value.charCodeAt(0)) err('Range out of order in character class',start);
+               items.push({type:'range',from:lo.value,to:hi.value}); }
+      } else items.push(lo);
+    }
+    if(peek()!==']') err('Unterminated character class — missing ]',start);
+    i++;
+    return span({type:'class',negated,items},start);
+  }
+  function parseClassAtom(){
+    if(peek()==='\\'){
+      const e=parseEscape(true);
+      if(e.type==='char') return {type:'lit',value:e.value};
+      return e; // shorthand kept as-is
+    }
+    const v=src[i++]; return {type:'lit',value:v};
+  }
+  function parseEscape(inClass){
+    const start=i; i++;
+    if(eof()) err('Trailing backslash',start);
+    const c=src[i++];
+    const SH={d:1,D:1,w:1,W:1,s:1,S:1};
+    if(SH[c]) return span({type:'shorthand',code:c},start);
+    if(!inClass && (c==='b'||c==='B')) return span({type:'anchor',kind:c==='b'?'wb':'nwb'},start);
+    if(inClass && c==='b') return span({type:'char',value:'\b'},start);
+    const simple={n:'\n',r:'\r',t:'\t',f:'\f',v:'\v','0':'\0'};
+    if(c in simple && !(c==='0' && /[0-9]/.test(peek()||''))) return span({type:'char',value:simple[c]},start);
+    if(c==='x'){ let h=''; while(h.length<2 && /[0-9a-fA-F]/.test(peek()||'')) h+=src[i++];
+      if(h.length===2) return span({type:'char',value:String.fromCharCode(parseInt(h,16))},start);
+      return span({type:'char',value:'x'},start); }
+    if(c==='u'){
+      if(peek()==='{'){ i++; let h=''; while(/[0-9a-fA-F]/.test(peek()||'')) h+=src[i++];
+        if(peek()!=='}') err('Invalid unicode escape',start); i++;
+        return span({type:'char',value:String.fromCodePoint(parseInt(h,16))},start); }
+      let h=''; while(h.length<4 && /[0-9a-fA-F]/.test(peek()||'')) h+=src[i++];
+      if(h.length===4) return span({type:'char',value:String.fromCharCode(parseInt(h,16))},start);
+      return span({type:'char',value:'u'},start);
+    }
+    if(c==='c'){ const x=peek(); if(/[a-zA-Z]/.test(x||'')){ i++; return span({type:'char',value:String.fromCharCode(x.toUpperCase().charCodeAt(0)-64)},start); } return span({type:'char',value:'c'},start); }
+    if(!inClass && c==='k' && peek()==='<'){ i++; let nm=''; while(!eof()&&peek()!=='>') nm+=src[i++]; if(peek()!=='>') err('Invalid named backreference',start); i++; return span({type:'backref',name:nm},start); }
+    if(!inClass && /[1-9]/.test(c)){ let num=c; while(/[0-9]/.test(peek()||'')) num+=src[i++]; return span({type:'backref',num:parseInt(num,10)},start); }
+    // literal escaped metacharacter
+    return span({type:'char',value:c,escaped:true},start);
+  }
+
+  const ast = parseAlternation();
+  if(!eof()) err('Unexpected "'+peek()+'"',i);
+  return {ast, groupCount, names};
+}
+
+/* Assign stable ids to every node (used to sync diagram <-> explanation). */
+function assignIds(node,ctr={n:0}){
+  if(!node) return;
+  node.id='n'+(ctr.n++);
+  if(node.child) assignIds(node.child,ctr);
+  if(node.items && node.type!=='class') node.items.forEach(c=>assignIds(c,ctr));
+  if(node.options) node.options.forEach(c=>assignIds(c,ctr));
+  return node;
+}
+
+/* ============================================================================
+   3. EXPLANATION generator
+   ============================================================================ */
+function charLabel(v){
+  const map={'\n':'\\n (newline)','\r':'\\r (carriage return)','\t':'\\t (tab)','\f':'\\f','\v':'\\v','\0':'\\0 (null)','\b':'\\b (backspace)',' ':'a space'};
+  if(v in map) return map[v];
+  return '“'+v+'”';
+}
+const SH_DESC={d:'a digit (0–9)',D:'any non-digit',w:'a word char (A–Z a–z 0–9 _)',W:'any non-word char',s:'whitespace',S:'any non-whitespace'};
+const ANCHOR_DESC={bol:'start of string / line',eol:'end of string / line',wb:'a word boundary',nwb:'a non-word boundary'};
+const GROUP_DESC={capturing:'capturing group',noncapturing:'non-capturing group',named:'named capturing group',lookahead:'positive lookahead — followed by',neglookahead:'negative lookahead — NOT followed by',lookbehind:'positive lookbehind — preceded by',neglookbehind:'negative lookbehind — NOT preceded by'};
+
+function classToText(node){
+  let s='['+(node.negated?'^':'');
+  for(const it of node.items){
+    if(it.type==='lit') s+=dispChar(it.value);
+    else if(it.type==='range') s+=dispChar(it.from)+'-'+dispChar(it.to);
+    else if(it.type==='shorthand') s+='\\'+it.code;
+  }
+  return s+']';
+}
+function dispChar(v){
+  const map={'\n':'\\n','\r':'\\r','\t':'\\t','\f':'\\f','\v':'\\v','\0':'\\0','\b':'\\b'};
+  return map[v]!==undefined?map[v]:v;
+}
+function quantText(n){
+  let t;
+  if(n.sym==='*') t='zero or more times';
+  else if(n.sym==='+') t='one or more times';
+  else if(n.sym==='?') t='optional (zero or one)';
+  else if(n.max===n.min) t='exactly '+n.min+(n.min===1?' time':' times');
+  else if(n.max===Infinity) t='at least '+n.min+(n.min===1?' time':' times');
+  else t='between '+n.min+' and '+n.max+' times';
+  return t+(n.greedy?'':' (lazy — as few as possible)');
+}
+
+function buildExplanation(node,depth,out){
+  const row=(tok,desc,container,extra='')=>out.push({id:node.id,depth,tok,desc,container,extra});
+  switch(node.type){
+    case 'char': row(node.raw, (node.escaped?'a literal ':'the character ')+charLabel(node.value)); break;
+    case 'any': row('.', 'any character'+(state.flags.includes('s')?'':' except line breaks')); break;
+    case 'anchor': row(node.raw, ANCHOR_DESC[node.kind]); break;
+    case 'shorthand': row('\\'+node.code, SH_DESC[node.code]); break;
+    case 'class': row(classToText(node), node.negated?'any character NOT in the set':'any one character in the set'); break;
+    case 'backref': row(node.raw, node.name?('backreference to group “'+node.name+'”'):('backreference to group #'+node.num)); break;
+    case 'empty': row('(empty)','matches the empty string'); break;
+    case 'seq': node.items.forEach(c=>buildExplanation(c,depth,out)); break;
+    case 'alt':
+      row(' | ', node.options.length+' alternatives — match any one', true);
+      node.options.forEach((c,k)=>{ out.push({id:node.id,depth:depth+1,tok:'#'+(k+1),desc:'alternative',container:true,muted:true}); buildExplanation(c,depth+2,out); });
+      break;
+    case 'quant':
+      row(node.sym, 'the preceding element, repeated '+quantText(node), true);
+      buildExplanation(node.child,depth+1,out);
+      break;
+    case 'group': {
+      const num = node.kind==='capturing'?(' #'+node.number):node.kind==='named'?(' “'+node.name+'” (#'+node.number+')'):'';
+      row('( … )', GROUP_DESC[node.kind]+num, true);
+      buildExplanation(node.child,depth+1,out);
+      break;
+    }
+  }
+  return out;
+}
+
+function renderExplanation(node){
+  const rows=buildExplanation(node,0,[]);
+  const html=rows.map(r=>{
+    const cls='exp-row'+(r.container?' container':'');
+    const desc=r.muted?'<span class="exp-desc" style="opacity:.7">'+esc(r.desc)+'</span>':'<span class="exp-desc">'+esc(r.desc)+'</span>';
+    return `<div class="${cls}" data-nid="${r.id}" style="margin-left:${r.depth*16}px">`+
+           `<span class="exp-tok">${esc(r.tok)}</span>${desc}</div>`;
+  }).join('');
+  $('#explainPane').innerHTML = html || '<div class="empty-note">Nothing to explain yet.</div>';
+}
+
+/* ============================================================================
+   4. SVG RAILROAD renderer
+   ============================================================================ */
+let _measureCtx=null;
+function textWidth(t){
+  if(!_measureCtx){ const c=document.createElement('canvas'); _measureCtx=c.getContext('2d'); }
+  _measureCtx.font='13px ui-monospace, monospace';
+  return Math.ceil(_measureCtx.measureText(t).width);
+}
+function sline(x1,y1,x2,y2,cls='rr-line'){ return `<path class="${cls}" d="M${x1} ${y1}H${x2}"/>`; }
+function scurve(x1,y1,x2,y2,cls='rr-line'){ const dx=(x2-x1); return `<path class="${cls}" d="M${x1} ${y1}C${x1+dx*0.5} ${y1} ${x2-dx*0.5} ${y2} ${x2} ${y2}"/>`; }
+
+function terminal(text,cls,nid){
+  const w=Math.max(24,textWidth(text)+18), h=28, cy=h/2, rx=6;
+  return {w,h,cy,draw(x,y){
+    return `<g class="rr-node ${cls}" data-nid="${nid}">`+
+      `<rect class="rr-box" x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}"/>`+
+      `<text class="rr-txt" x="${x+w/2}" y="${y+cy+1}">${esc(text)}</text></g>`;
+  }};
+}
+
+function layout(node){
+  switch(node.type){
+    case 'char': return terminal(node.raw||node.value,'rr-term',node.id);
+    case 'any': return terminal('.','rr-any',node.id);
+    case 'shorthand': return terminal('\\'+node.code,'rr-term',node.id);
+    case 'class': return terminal(classToText(node),'rr-class',node.id);
+    case 'anchor': return terminal(node.raw,'rr-anchor',node.id);
+    case 'backref': return terminal(node.raw,'rr-backref',node.id);
+    case 'empty': {
+      const w=26,h=20,cy=10;
+      return {w,h,cy,draw(x,y){return `<g class="rr-node" data-nid="${node.id}">${sline(x,y+cy,x+w,y+cy)}<text class="rr-txt" x="${x+w/2}" y="${y+cy-6}" style="font-size:10px;fill:var(--fg3)">ε</text></g>`;}};
+    }
+    case 'seq': {
+      const parts=node.items.map(layout);
+      const gap=14;
+      const cy=Math.max(...parts.map(p=>p.cy));
+      const w=parts.reduce((s,p)=>s+p.w,0)+gap*(parts.length-1);
+      const h=Math.max(...parts.map(p=>cy-p.cy+p.h));
+      return {w,h,cy,draw(x,y){
+        let out='',cx=x,prevR=null;
+        parts.forEach(p=>{
+          const py=y+cy-p.cy;
+          if(prevR!==null) out+=sline(prevR,y+cy,cx,y+cy);
+          out+=p.draw(cx,py); prevR=cx+p.w; cx+=p.w+gap;
+        });
+        return out;
+      }};
+    }
+    case 'alt': {
+      const opts=node.options.map(layout);
+      const branch=26, gapV=12;
+      const innerW=Math.max(...opts.map(o=>o.w));
+      const h=opts.reduce((s,o)=>s+o.h,0)+gapV*(opts.length-1);
+      const w=innerW+branch*2;
+      const cy=h/2;
+      return {w,h,cy,draw(x,y){
+        let out='',oy=y;
+        opts.forEach(o=>{
+          const ocy=oy+o.cy, ox=x+branch+(innerW-o.w)/2;
+          out+=scurve(x,y+cy,x+branch,ocy);
+          if(ox>x+branch) out+=sline(x+branch,ocy,ox,ocy);
+          out+=o.draw(ox,oy);
+          if(ox+o.w<x+w-branch) out+=sline(ox+o.w,ocy,x+w-branch,ocy);
+          out+=scurve(x+w-branch,ocy,x+w,y+cy);
+          oy+=o.h+gapV;
+        });
+        return out;
+      }};
+    }
+    case 'quant': {
+      const c=layout(node.child);
+      const ext=14, vgap=15;
+      const hasBypass=node.min===0;
+      const hasLoop=node.max===Infinity||node.max>1;
+      const topPad=hasBypass?vgap:0;
+      const botPad=(hasLoop?vgap:0)+(node.sym[0]==='{'?12:0);
+      const w=c.w+ext*2;
+      const cy=topPad+c.cy;
+      const h=topPad+c.h+botPad;
+      const label=node.sym[0]==='{'?node.sym:(node.greedy?'':node.sym+'?');
+      return {w,h,cy,draw(x,y){
+        const childX=x+ext, childY=y+topPad, lineY=y+cy;
+        let out='';
+        out+=sline(x,lineY,childX,lineY);
+        out+=sline(childX+c.w,lineY,x+w,lineY);
+        out+=c.draw(childX,childY);
+        if(hasLoop){
+          const by=childY+c.h+6;
+          out+=`<path class="rr-loop" d="M${childX+c.w} ${lineY} q8 0 8 ${by-lineY} H${childX-0} q-8 0 -8 ${-(by-lineY)}"/>`;
+          out+=`<path class="rr-loop" d="M${childX+3} ${by-1} l4 -4 M${childX+3} ${by-1} l4 4"/>`;
+        }
+        if(hasBypass){
+          const ty=y+2;
+          out+=`<path class="rr-loop" d="M${x} ${lineY} q6 0 6 -${lineY-ty} H${x+w-6} q6 0 6 ${lineY-ty}"/>`;
+        }
+        if(label) out+=`<text class="rr-qlabel" x="${x+w/2}" y="${childY+c.h+(node.sym[0]==='{'?18:11)}">${esc(label)}</text>`;
+        return `<g class="rr-node" data-nid="${node.id}">${out}</g>`;
+      }};
+    }
+    case 'group': {
+      const c=layout(node.child);
+      const padX=13, padTop=node.kind==='capturing'||node.kind==='named'?19:16, padBot=8;
+      const w=c.w+padX*2, h=c.h+padTop+padBot, cy=padTop+c.cy;
+      const look=node.kind.includes('look');
+      let lbl;
+      if(node.kind==='capturing') lbl='group #'+node.number;
+      else if(node.kind==='named') lbl='‹'+node.name+'› #'+node.number;
+      else if(node.kind==='noncapturing') lbl='(?:) non-capturing';
+      else lbl={lookahead:'(?=) ahead',neglookahead:'(?!) not ahead',lookbehind:'(?<=) behind',neglookbehind:'(?<!) not behind'}[node.kind];
+      return {w,h,cy,draw(x,y){
+        let out=`<rect class="rr-groupbox${look?' look':''}" x="${x}" y="${y}" width="${w}" height="${h}"/>`;
+        out+=`<text class="rr-grouplabel" x="${x+7}" y="${y+13}">${esc(lbl)}</text>`;
+        out+=sline(x,y+cy,x+padX,y+cy);
+        out+=sline(x+padX+c.w,y+cy,x+w,y+cy);
+        out+=c.draw(x+padX,y+padTop);
+        return `<g class="rr-node" data-nid="${node.id}">${out}</g>`;
+      }};
+    }
+    default: return terminal('?','rr-term',node.id);
+  }
+}
+
+function renderDiagram(node){
+  const r=layout(node);
+  const startX=20, gap=22, pad=18;
+  const x0=startX+gap;
+  const totalW=x0+r.w+gap+startX;
+  const totalH=Math.max(r.h+pad*2, 60);
+  const midY=pad+r.cy;
+  let body='';
+  // start / end terminals
+  body+=`<circle class="rr-cap" cx="${startX}" cy="${midY}" r="6"/>`;
+  body+=sline(startX+6,midY,x0,midY);
+  body+=r.draw(x0,pad);
+  body+=sline(x0+r.w,midY,totalW-startX-6,midY);
+  body+=`<circle class="rr-cap" cx="${totalW-startX}" cy="${midY}" r="6" style="fill:var(--accent2)"/>`;
+  $('#diagram').innerHTML=`<svg width="${totalW}" height="${totalH}" viewBox="0 0 ${totalW} ${totalH}" xmlns="http://www.w3.org/2000/svg">${body}</svg>`;
+}
+
+/* ============================================================================
+   5. MATCH / HIGHLIGHT engine (native RegExp)
+   ============================================================================ */
+function buildRegex(flags, extra=''){
+  let f=flags.split('').filter((c,k,a)=>a.indexOf(c)===k).join('');
+  for(const c of extra) if(!f.includes(c)) f+=c;
+  return new RegExp(state.pattern, f);
+}
+let currentMatches=[]; let selectedMatch=0;
+
+function runMatches(){
+  const sample=state.sample;
+  $('#sampleStat').textContent=sample.length+' chars';
+  let re;
+  try{ re=buildRegex(state.flags,'gd'); }
+  catch(e){
+    // 'd' (hasIndices) is unsupported on older engines — fall back to 'g' before
+    // declaring the pattern invalid, so match highlighting still works everywhere.
+    try{ re=buildRegex(state.flags,'g'); }
+    catch(e2){ currentMatches=[]; renderHighlight(sample,[]); renderStats(null); renderCaptures(); return; }
+  }
+  const matches=[];
+  const t0=performance.now();
+  let m, guard=0, last=-1;
+  re.lastIndex=0;
+  try{
+    while((m=re.exec(sample))!==null){
+      matches.push(m);
+      if(m.index===re.lastIndex) re.lastIndex++; // zero-width guard
+      if(++guard>100000) break;
+      if(!state.flags.includes('g') && !state.flags.includes('y')) break;
+    }
+  }catch(e){/* ignore runtime */}
+  const t1=performance.now();
+  currentMatches=matches;
+  if(selectedMatch>=matches.length) selectedMatch=0;
+  renderHighlight(sample,matches);
+  renderStats({count:matches.length,time:(t1-t0)});
+  renderCaptures();
+  refreshReplace();
+}
+
+function renderStats(info){
+  const box=$('#statsrow');
+  if(!info){ box.innerHTML='<span class="chip zero"><b>—</b> invalid pattern</span>'; return; }
+  const groups = lastParse && lastParse.ok ? lastParse.groupCount : 0;
+  box.innerHTML =
+    `<span class="chip ${info.count?'ok':'zero'}"><b>${info.count}</b> match${info.count===1?'':'es'}</span>`+
+    `<span class="chip"><b>${groups}</b> group${groups===1?'':'s'}</span>`+
+    `<span class="chip"><b>${info.time.toFixed(2)}</b> ms</span>`+
+    `<span class="chip">flags <b>${state.flags||'—'}</b></span>`;
+}
+
+function renderHighlight(text,matches){
+  const bd=$('#backdrop');
+  if(!matches.length){ bd.innerHTML=esc(text)+'\n'; return; }
+  let html='', pos=0;
+  matches.forEach((m,mi)=>{
+    const s=m.index, e=m.index+m[0].length;
+    if(s>pos) html+=esc(text.slice(pos,s));
+    // per-char group coloring using match.indices when available
+    const idx=m.indices;
+    if(idx){
+      const colorAt=new Array(m[0].length).fill(-1);
+      for(let g=1;g<idx.length;g++){
+        if(!idx[g]) continue;
+        const [gs,ge]=idx[g];
+        for(let k=gs;k<ge;k++){ const off=k-s; if(off>=0&&off<colorAt.length) colorAt[off]=g; }
+      }
+      let inner='';
+      for(let k=0;k<m[0].length;k++){
+        const g=colorAt[k];
+        const ch=esc(m[0][k]);
+        if(g>=0) inner+=`<span class="g" style="color:${GROUP_COLORS[(g-1)%GROUP_COLORS.length]}">${ch}</span>`;
+        else inner+=ch;
+      }
+      html+=`<mark class="${(mi%2?'alt':'')+(mi===selectedMatch&&currentMatches.length>1?' sel':'')}">${inner}</mark>`;
+    } else {
+      html+=`<mark class="${(mi%2?'alt':'')+(mi===selectedMatch&&currentMatches.length>1?' sel':'')}">${esc(m[0])}</mark>`;
+    }
+    pos=e;
+  });
+  if(pos<text.length) html+=esc(text.slice(pos));
+  bd.innerHTML=html+'\n';
+}
+
+function renderCaptures(){
+  const body=$('#capBody'); const stat=$('#capStat');
+  if(!currentMatches.length){ body.innerHTML='<div class="empty-note">No matches — nothing to capture.</div>'; stat.textContent=''; return; }
+  const m=currentMatches[selectedMatch]||currentMatches[0];
+  stat.textContent=currentMatches.length+' match'+(currentMatches.length===1?'':'es');
+  let nav='';
+  if(currentMatches.length>1){
+    nav=`<div class="matchnav">`+
+      `<button id="capPrev" ${selectedMatch<=0?'disabled':''}>‹</button>`+
+      `<span>match <b>${selectedMatch+1}</b> / ${currentMatches.length} at index ${m.index}</span>`+
+      `<button id="capNext" ${selectedMatch>=currentMatches.length-1?'disabled':''}>›</button></div>`;
+  }
+  const named=m.groups||{};
+  let rows=`<tr><td><span class="swatch" style="background:var(--fg2)"></span>full match</td><td class="val">${esc(quoteEmpty(m[0]))}</td><td>${m.index}</td></tr>`;
+  for(let g=1;g<m.length;g++){
+    const color=GROUP_COLORS[(g-1)%GROUP_COLORS.length];
+    let name='';
+    for(const k in named) if(named[k]===m[g]){ name=' ‹'+k+'›'; break; }
+    const val = m[g]===undefined?'<i style="color:var(--fg3)">undefined</i>':esc(quoteEmpty(m[g]));
+    const at = m.indices&&m.indices[g]?m.indices[g][0]:'—';
+    rows+=`<tr><td><span class="swatch" style="background:${color}"></span>#${g}${esc(name)}</td><td class="val">${val}</td><td>${at}</td></tr>`;
+  }
+  body.innerHTML=nav+`<table><thead><tr><th>Group</th><th>Value</th><th>Index</th></tr></thead><tbody>${rows}</tbody></table>`;
+  const p=$('#capPrev'),n=$('#capNext');
+  if(p) p.onclick=()=>{selectedMatch--;afterMatchNav();};
+  if(n) n.onclick=()=>{selectedMatch++;afterMatchNav();};
+}
+function afterMatchNav(){
+  renderCaptures();
+  renderHighlight(state.sample,currentMatches);
+  const el=$('#backdrop mark.sel');
+  if(el){ el.scrollIntoView({block:'nearest'}); const bd=$('#backdrop'),ta=$('#sample'); ta.scrollTop=bd.scrollTop; ta.scrollLeft=bd.scrollLeft; }
+}
+function quoteEmpty(s){ return s===''?'(empty string)':s; }
+
+/* ============================================================================
+   6. ReDoS analyzer
+   ============================================================================ */
+const PROBE=' \t\nabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.@:/#?=&%+*!';
+function firstSet(node){
+  // returns {test(ch)->bool, empty:bool}
+  const anyTest=()=>({test:()=>true,empty:false});
+  switch(node.type){
+    case 'char': return {test:c=>c===node.value||(state.flags.includes('i')&&c.toLowerCase()===node.value.toLowerCase()),empty:false};
+    case 'any': return anyTest();
+    case 'shorthand': return {test:c=>shTest(node.code,c),empty:false};
+    case 'class': return {test:c=>classTest(node,c),empty:false};
+    case 'backref': return anyTest();
+    case 'anchor': return {test:()=>false,empty:true};
+    case 'empty': return {test:()=>false,empty:true};
+    case 'group': return firstSet(node.child);
+    case 'quant': { const f=firstSet(node.child); return {test:f.test,empty:node.min===0||f.empty}; }
+    case 'alt': { const fs=node.options.map(firstSet); return {test:c=>fs.some(f=>f.test(c)),empty:fs.some(f=>f.empty)}; }
+    case 'seq': {
+      let empty=true; const tests=[];
+      for(const it of node.items){ const f=firstSet(it); tests.push(f); if(!f.empty){ empty=false; break; } }
+      return {test:c=>tests.some(f=>f.test(c)),empty};
+    }
+    default: return {test:()=>false,empty:true};
+  }
+}
+function shTest(code,c){
+  const d=/[0-9]/.test(c), w=/[A-Za-z0-9_]/.test(c), s=/\s/.test(c);
+  return {d,D:!d,w,W:!w,s,S:!s}[code];
+}
+function classTest(node,c){
+  let r=false;
+  for(const it of node.items){
+    if(it.type==='lit'){ if(it.value===c||(state.flags.includes('i')&&it.value.toLowerCase()===c.toLowerCase())) {r=true;break;} }
+    else if(it.type==='range'){ const cc=c.charCodeAt(0); if(cc>=it.from.charCodeAt(0)&&cc<=it.to.charCodeAt(0)){r=true;break;}
+      if(state.flags.includes('i')){ const lo=c.toLowerCase(),up=c.toUpperCase();
+        if((lo.charCodeAt(0)>=it.from.charCodeAt(0)&&lo.charCodeAt(0)<=it.to.charCodeAt(0))||(up.charCodeAt(0)>=it.from.charCodeAt(0)&&up.charCodeAt(0)<=it.to.charCodeAt(0))){r=true;break;} } }
+    else if(it.type==='shorthand'){ if(shTest(it.code,c)){r=true;break;} }
+  }
+  return node.negated?!r:r;
+}
+function overlap(a,b){ for(const c of PROBE) if(a.test(c)&&b.test(c)) return true; return false; }
+
+function hasUnboundedInside(node){
+  if(!node) return false;
+  if(node.type==='quant' && node.max===Infinity) return true;
+  if(node.child) return hasUnboundedInside(node.child);
+  if(node.type==='seq') return node.items.some(hasUnboundedInside);
+  if(node.type==='alt') return node.options.some(hasUnboundedInside);
+  return false;
+}
+function analyzeReDoS(root){
+  const issues=[];
+  (function walk(node){
+    if(!node) return;
+    if(node.type==='quant' && node.max===Infinity){
+      // nested unbounded quantifier -> exponential class  e.g. (a+)+
+      const inner=unwrap(node.child);
+      if(hasUnboundedInside(inner) && !isSimpleAtom(inner)){
+        issues.push({sev:'high',node,msg:'Nested unbounded quantifiers — the engine can retry the same text exponentially many ways.',frag:node.raw});
+      } else if(inner.type==='alt'){
+        // overlapping alternation under a star  e.g. (a|a)* , (a|ab)*
+        const fs=inner.options.map(firstSet);
+        let ov=false;
+        for(let a=0;a<fs.length&&!ov;a++) for(let b=a+1;b<fs.length;b++) if(overlap(fs[a],fs[b])){ov=true;break;}
+        if(ov) issues.push({sev:'high',node,msg:'Repeated group with overlapping alternatives — branches can match the same input, causing catastrophic backtracking.',frag:node.raw});
+      }
+    }
+    if(node.type==='seq'){
+      for(let k=0;k<node.items.length-1;k++){
+        const a=node.items[k], b=node.items[k+1];
+        if(a.type==='quant'&&a.max===Infinity&&b.type==='quant'&&b.max===Infinity){
+          if(overlap(firstSet(a.child),firstSet(b.child)))
+            issues.push({sev:'warn',node:a,msg:'Adjacent unbounded quantifiers over overlapping characters (like <code>'+esc(a.raw)+esc(b.raw)+'</code>) split ambiguously and can backtrack heavily.',frag:a.raw});
+        }
+      }
+    }
+    if(node.child) walk(node.child);
+    if(node.items && node.type!=='class') node.items.forEach(walk);
+    if(node.options) node.options.forEach(walk);
+  })(root);
+  return issues;
+}
+function unwrap(n){ while(n && (n.type==='group'||(n.type==='seq'&&n.items.length===1))) n=n.child||n.items[0]; return n; }
+function isSimpleAtom(n){ return n && ['char','class','shorthand','any'].includes(n.type); }
+
+function renderReDoS(issues){
+  const box=$('#redos');
+  if(!issues.length){ box.innerHTML=''; return; }
+  box.innerHTML=issues.map((it,k)=>
+    `<div class="item ${it.sev==='high'?'':'warn2'}" data-nid="${it.node.id}">`+
+    `<span class="ic">${it.sev==='high'?'⛔':'⚠'}</span>`+
+    `<div><b>${it.sev==='high'?'Catastrophic backtracking risk':'Backtracking warning'}:</b> ${it.msg} `+
+    `<code>${esc(it.frag)}</code></div></div>`).join('');
+}
+
+/* ============================================================================
+   7. REPLACE preview
+   ============================================================================ */
+function buildReplacePane(){
+  $('#replacePane').innerHTML=
+    `<label style="font-size:12px;color:var(--fg2)">Replacement template</label>`+
+    `<input class="replace-in" id="replaceIn" spellcheck="false" placeholder="e.g.  [$1]  or  $&lt;name&gt;">`+
+    `<div class="hint">Use <b>$1 $2</b> for numbered groups, <b>$&lt;name&gt;</b> for named groups, <b>$&amp;</b> whole match, <b>$\`</b> before, <b>$'</b> after. Applies with your current flags.</div>`+
+    `<div class="replace-out" id="replaceOut"></div>`;
+  const inp=$('#replaceIn');
+  inp.value=state.replacement;
+  inp.addEventListener('input',()=>{ state.replacement=inp.value; saveHash(); refreshReplace(); });
+  refreshReplace();
+}
+function refreshReplace(){
+  const out=$('#replaceOut'); if(!out) return;
+  let re;
+  try{ re=buildRegex(state.flags); }catch(e){ out.innerHTML='<span style="color:var(--err)">Invalid pattern.</span>'; return; }
+  try{
+    // Wrap each substitution in sentinel chars, then swap them for <ins> after escaping.
+    // The native engine still expands $1/$<name>/$& inside the template, so the preview
+    // stays correct while lighting up exactly the regions the pattern replaced.
+    const S=String.fromCharCode(0), E=String.fromCharCode(1);
+    const marked=state.sample.replace(re, S+state.replacement+E);
+    const result=marked.split(S).join('').split(E).join('');
+    const html=esc(marked).split(S).join('<ins>').split(E).join('</ins>');
+    out.innerHTML = result==='' ? '<span style="color:var(--fg3)">(empty result)</span>' : html;
+  }catch(e){ out.innerHTML='<span style="color:var(--err)">'+esc(e.message)+'</span>'; }
+}
+
+/* ============================================================================
+   8. SNIPPET generator
+   ============================================================================ */
+function buildSnippets(){
+  const p=state.pattern, f=state.flags, sample=state.sample||'text';
+  const jsPat='/'+p.replace(/\//g,'\\/')+'/'+f;
+  const jsSample=JSON.stringify(sample);
+  const js = `const re = ${jsPat};\nconst text = ${jsSample};\n`+
+    (f.includes('g')
+      ? `for (const m of text.matchAll(re)) {\n  console.log(m[0], m.groups ?? {}, "@", m.index);\n}`
+      : `const m = re.exec(text);\nif (m) console.log(m[0], m.groups ?? {}, "@", m.index);`);
+
+  const pyFlags=[]; if(f.includes('i'))pyFlags.push('re.IGNORECASE'); if(f.includes('m'))pyFlags.push('re.MULTILINE'); if(f.includes('s'))pyFlags.push('re.DOTALL');
+  const pyFlagStr=pyFlags.length?', '+pyFlags.join(' | '):'';
+  const py = `import re\n\npattern = r"""${p.replace(/"""/g,'\\"\\"\\"')}"""\ntext = r"""${sample.replace(/"""/g,'\\"\\"\\"')}"""\n\n`+
+    `for m in re.finditer(pattern, text${pyFlagStr}):\n    print(m.group(0), m.groupdict(), "@", m.start())`;
+
+  const goFlags=(f.includes('i')?'i':'')+(f.includes('m')?'m':'')+(f.includes('s')?'s':'');
+  const goInline=goFlags?`(?${goFlags})`:'';
+  const goPatRaw=(goInline+p);
+  const goPat = goPatRaw.includes('`') ? '"'+goPatRaw.replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"' : '`'+goPatRaw+'`';
+  const goSample = sample.includes('`') ? '"'+sample.replace(/\\/g,'\\\\').replace(/"/g,'\\"').replace(/\n/g,'\\n')+'"' : '`'+sample+'`';
+  const usesUnsupported=/\(\?<?[=!]|\\[1-9]|\\k</.test(p);
+  const go = (usesUnsupported?`// NOTE: Go's regexp (RE2) does not support lookaround or backreferences.\n`:'')+
+    `package main\n\nimport (\n\t"fmt"\n\t"regexp"\n)\n\nfunc main() {\n\tre := regexp.MustCompile(${goPat})\n\ttext := ${goSample}\n\tfor _, m := range re.FindAllStringSubmatch(text, -1) {\n\t\tfmt.Printf("%q\\n", m)\n\t}\n}`;
+
+  const block=(id,label,code)=>`<div class="snip"><div class="snip-head"><b>${label}</b><button class="copybtn" data-copy="${id}">Copy</button></div><pre id="${id}">${esc(code)}</pre></div>`;
+  $('#snippetsPane').innerHTML=block('snipJs','JavaScript',js)+block('snipPy','Python',py)+block('snipGo','Go',go);
+  $$('#snippetsPane .copybtn').forEach(b=>b.onclick=()=>{
+    const code=$('#'+b.dataset.copy).textContent;
+    copy(code); b.textContent='Copied!'; b.classList.add('done');
+    setTimeout(()=>{b.textContent='Copy';b.classList.remove('done');},1400);
+  });
+}
+
+/* ============================================================================
+   9. PRESETS + TESTS
+   ============================================================================ */
+const PRESETS=[
+  {name:'Email address',pattern:'[\\w.+-]+@[\\w-]+\\.[\\w.-]+',flags:'g',
+   sample:'Contact us at hello@example.com or sales.team@sub.domain.co.uk. Not an email: foo@bar',
+   tests:[{text:'hello@example.com',expect:'match'},{text:'a.b+c@x-y.io',expect:'match'},{text:'no-at-sign.com',expect:'nomatch'}]},
+  {name:'URL',pattern:'https?:\\/\\/[^\\s/$.?#][^\\s]*',flags:'gi',
+   sample:'See https://example.com/path?q=1 and http://a.b/c. Bare www.no.com is skipped.',
+   tests:[{text:'https://example.com',expect:'match'},{text:'http://a.b/c?x=1',expect:'match'},{text:'ftp://nope',expect:'nomatch'}]},
+  {name:'IPv4 address',pattern:'\\b(?:(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\b',flags:'g',
+   sample:'Valid: 192.168.0.1 and 8.8.8.8. Invalid: 999.1.1.1 and 10.0.0',
+   tests:[{text:'192.168.0.1',expect:'match'},{text:'255.255.255.255',expect:'match'},{text:'256.1.1.1',expect:'nomatch'}]},
+  {name:'ISO date (YYYY-MM-DD)',pattern:'(?<year>\\d{4})-(?<month>\\d{2})-(?<day>\\d{2})',flags:'g',
+   sample:'Ship on 2026-09-09, due 2026-12-31. Bad: 26-9-9',
+   tests:[{text:'2026-09-09',expect:'match'},{text:'1999-01-01',expect:'match'},{text:'9-9-9',expect:'nomatch'}]},
+  {name:'Semver',pattern:'\\bv?(\\d+)\\.(\\d+)\\.(\\d+)(?:-([\\w.]+))?(?:\\+([\\w.]+))?\\b',flags:'g',
+   sample:'Releases 1.2.3, v2.0.0-beta.1 and 3.4.5+build.99. Not: 1.2',
+   tests:[{text:'1.2.3',expect:'match'},{text:'10.20.30-rc.1+meta',expect:'match'},{text:'1.2',expect:'nomatch'}]},
+  {name:'Hex color',pattern:'#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\\b',flags:'g',
+   sample:'Colors #fff, #FF6100 and #232F3E. Nope: #12 or #ggg',
+   tests:[{text:'#fff',expect:'match'},{text:'#FF6100',expect:'match'},{text:'#12',expect:'nomatch'}]},
+  {name:'⚠ ReDoS demo (a+)+$',pattern:'(a+)+$',flags:'',
+   sample:'aaaaaaaaaaaaaaaa!',
+   tests:[{text:'aaaa',expect:'nomatch'},{text:'aaa',expect:'nomatch'}]},
+  {name:'Phone (US)',pattern:'\\(?(\\d{3})\\)?[-.\\s]?(\\d{3})[-.\\s]?(\\d{4})',flags:'g',
+   sample:'Call (415) 555-2671 or 212.867.5309 or 8005551234.',
+   tests:[{text:'(415) 555-2671',expect:'match'},{text:'212.867.5309',expect:'match'},{text:'12-34',expect:'nomatch'}]}
+];
+
+function buildPresetMenu(){
+  const sel=$('#presetSel');
+  PRESETS.forEach((p,k)=>{ const o=document.createElement('option'); o.value=k; o.textContent=p.name; sel.appendChild(o); });
+  sel.addEventListener('change',()=>{
+    const p=PRESETS[sel.value]; sel.value='';
+    if(!p) return;
+    state.pattern=p.pattern; state.flags=p.flags; state.sample=p.sample;
+    state.replacement=''; state.tests=p.tests.map(t=>({...t}));
+    syncInputsFromState(); recompute(); saveHash();
+    toast('Loaded: '+p.name);
+  });
+}
+
+function buildTestsPane(){
+  const pane=$('#testsPane');
+  let re,ok=true;
+  try{ re=buildRegex(state.flags.replace('g','')); }catch(e){ ok=false; }
+  let pass=0;
+  const rows=state.tests.map((t,k)=>{
+    let res=null;
+    if(ok){ const r=new RegExp(state.pattern, state.flags.replace(/[gy]/g,'')); res=r.test(t.text); }
+    const good = ok && (res===(t.expect==='match'));
+    if(good) pass++;
+    return `<tr class="testrow" data-k="${k}">`+
+      `<td class="val">${esc(t.text)||'<i style=color:var(--fg3)>(empty)</i>'}</td>`+
+      `<td>should ${t.expect==='match'?'match':'not match'}</td>`+
+      `<td class="res">${!ok?'<span class=fail>—</span>':good?'<span class=pass>✓ pass</span>':'<span class=fail>✗ fail</span>'}</td>`+
+      `<td><button class="del" data-del="${k}" title="remove">×</button></td></tr>`;
+  }).join('');
+  const sum = state.tests.length
+    ? `<div class="test-sum">${!ok?'<span style="color:var(--err)">Pattern invalid</span>':`<b style="color:${pass===state.tests.length?'var(--ok)':'var(--warn)'}">${pass}/${state.tests.length} passing</b>`}</div>`
+    : '';
+  pane.innerHTML=
+    `<div class="hint">A tiny regex TDD bench. Add strings you expect to match (or not). Saved in the shareable link.</div>`+
+    `<div class="test-add"><input id="testText" placeholder="test string…" spellcheck="false">`+
+    `<select id="testExpect"><option value="match">should match</option><option value="nomatch">should not match</option></select>`+
+    `<button id="testAdd">Add</button></div>`+
+    sum+
+    (state.tests.length?`<table><thead><tr><th>String</th><th>Expectation</th><th>Result</th><th></th></tr></thead><tbody>${rows}</tbody></table>`:'<div class="empty-note">No test cases yet.</div>');
+  const add=()=>{
+    const tv=$('#testText'); const val=tv.value;
+    if(val==='') return;
+    state.tests.push({text:val,expect:$('#testExpect').value});
+    tv.value=''; buildTestsPane(); saveHash();
+  };
+  $('#testAdd').onclick=add;
+  $('#testText').addEventListener('keydown',e=>{ if(e.key==='Enter') add(); });
+  $$('#testsPane .del').forEach(b=>b.onclick=()=>{ state.tests.splice(+b.dataset.del,1); buildTestsPane(); saveHash(); });
+}
+
+/* ============================================================================
+   10. STEP-THROUGH DEBUGGER (backtracking tracer over the AST)
+   ============================================================================ */
+function buildTrace(root, input, flags){
+  const trace=[]; let steps=0; const MAX=8000;
+  const ic=flags.includes('i'), dotAll=flags.includes('s'), ml=flags.includes('m');
+  const caps={};
+  const rec=ev=>{ if(steps++<MAX) trace.push(ev); };
+  const eq=(a,b)=> a===b || (ic && a!==undefined && b!==undefined && a.toLowerCase()===b.toLowerCase());
+
+  function* m(node,pos){
+    if(steps>MAX) return;
+    switch(node.type){
+      case 'char':{ rec({op:'try',nid:node.id,pos}); if(eq(input[pos],node.value)){ rec({op:'match',nid:node.id,pos,len:1}); yield pos+1; } else rec({op:'fail',nid:node.id,pos}); return; }
+      case 'any':{ rec({op:'try',nid:node.id,pos}); const c=input[pos]; if(c!==undefined && (dotAll||c!=='\n')){ rec({op:'match',nid:node.id,pos,len:1}); yield pos+1; } else rec({op:'fail',nid:node.id,pos}); return; }
+      case 'shorthand':{ rec({op:'try',nid:node.id,pos}); const c=input[pos]; if(c!==undefined && shTest(node.code,c)){ rec({op:'match',nid:node.id,pos,len:1}); yield pos+1; } else rec({op:'fail',nid:node.id,pos}); return; }
+      case 'class':{ rec({op:'try',nid:node.id,pos}); const c=input[pos]; if(c!==undefined && classTest(node,c)){ rec({op:'match',nid:node.id,pos,len:1}); yield pos+1; } else rec({op:'fail',nid:node.id,pos}); return; }
+      case 'anchor':{ rec({op:'try',nid:node.id,pos}); let ok=false;
+        const isW=c=>c!==undefined&&/[A-Za-z0-9_]/.test(c);
+        if(node.kind==='bol') ok=pos===0||(ml&&input[pos-1]==='\n');
+        else if(node.kind==='eol') ok=pos===input.length||(ml&&input[pos]==='\n');
+        else if(node.kind==='wb') ok=isW(input[pos-1])!==isW(input[pos]);
+        else if(node.kind==='nwb') ok=isW(input[pos-1])===isW(input[pos]);
+        if(ok){ rec({op:'match',nid:node.id,pos,len:0}); yield pos; } else rec({op:'fail',nid:node.id,pos}); return; }
+      case 'backref':{ rec({op:'try',nid:node.id,pos}); const key=node.name||('#'+node.num); const s=caps[key];
+        if(s===undefined){ rec({op:'match',nid:node.id,pos,len:0}); yield pos; return; }
+        let ok=true; for(let k=0;k<s.length;k++) if(!eq(input[pos+k],s[k])){ ok=false; break; }
+        if(ok){ rec({op:'match',nid:node.id,pos,len:s.length}); yield pos+s.length; } else rec({op:'fail',nid:node.id,pos}); return; }
+      case 'empty': yield pos; return;
+      case 'seq':{ function* sf(idx,p){ if(idx>=node.items.length){ yield p; return; } for(const np of m(node.items[idx],p)){ yield* sf(idx+1,np); } } yield* sf(0,pos); return; }
+      case 'alt':{ for(let k=0;k<node.options.length;k++){ rec({op:'enter',nid:node.id,pos,info:'alt '+(k+1)}); yield* m(node.options[k],pos); } return; }
+      case 'quant':{ const {min,max,greedy,child}=node;
+        function* rep(count,p){
+          if(greedy){
+            if(count<max){ for(const np of m(child,p)){ if(np===p) break; yield* rep(count+1,np); } }
+            if(count>=min) yield p;
+          } else {
+            if(count>=min) yield p;
+            if(count<max){ for(const np of m(child,p)){ if(np===p) break; yield* rep(count+1,np); } }
+          }
+        }
+        yield* rep(0,pos); return; }
+      case 'group':{
+        if(node.kind==='lookahead'||node.kind==='neglookahead'){
+          rec({op:'enter',nid:node.id,pos,info:node.kind}); let ok=false; for(const _ of m(node.child,pos)){ ok=true; break; }
+          const pass=node.kind==='lookahead'?ok:!ok; rec({op:pass?'match':'fail',nid:node.id,pos,len:0}); if(pass) yield pos; return;
+        }
+        if(node.kind==='lookbehind'||node.kind==='neglookbehind'){
+          rec({op:'enter',nid:node.id,pos,info:node.kind}); let ok=false;
+          for(let j=pos;j>=0&&!ok;j--){ for(const e of m(node.child,j)){ if(e===pos){ ok=true; break; } } }
+          const pass=node.kind==='lookbehind'?ok:!ok; rec({op:pass?'match':'fail',nid:node.id,pos,len:0}); if(pass) yield pos; return;
+        }
+        rec({op:'enter',nid:node.id,pos});
+        for(const np of m(node.child,pos)){
+          if(node.kind==='capturing'||node.kind==='named'){ caps['#'+node.number]=input.slice(pos,np); if(node.name) caps[node.name]=input.slice(pos,np); }
+          rec({op:'exit',nid:node.id,pos:np}); yield np;
+        }
+        return;
+      }
+    }
+  }
+
+  // try each start position (like a real scan) until first accept
+  for(let start=0; start<=input.length; start++){
+    for(const end of m(root,start)){ rec({op:'accept',pos:end,start}); return {trace,matched:true,start,end}; }
+    if(steps>MAX) break;
+    if(flags.includes('y')) break; // sticky: only at 0
+    rec({op:'advance',pos:start+1});
+  }
+  return {trace,matched:false};
+}
+
+let dbg={trace:[],idx:0,timer:null,result:null};
+function buildDebugPane(){
+  $('#debugPane').innerHTML=
+    `<div class="hint">Watch the regex engine walk the sample text — greedy matching, and the <b>backtracking</b> it does when a path fails. Uses a faithful backtracking model (results shown elsewhere use the native engine).</div>`+
+    `<div class="dbg-controls">`+
+    `<button id="dbgReset" title="restart">⏮</button>`+
+    `<button id="dbgBack" title="step back">◀</button>`+
+    `<button id="dbgPlay" class="play" title="play / pause">▶ Play</button>`+
+    `<button id="dbgFwd" title="step forward">▶</button>`+
+    `<label style="color:var(--fg2);font-size:12px">speed <input id="dbgSpeed" type="range" min="1" max="60" value="18"></label>`+
+    `<span id="dbgProg" style="color:var(--fg3);font-family:var(--mono);font-size:12px"></span></div>`+
+    `<div class="tape" id="dbgTape"></div>`+
+    `<div class="dbg-status" id="dbgStatus"></div>`+
+    `<div class="dbg-log" id="dbgLog"></div>`;
+  $('#dbgReset').onclick=()=>{ stopPlay(); dbg.idx=0; renderDbg(); };
+  $('#dbgBack').onclick=()=>{ stopPlay(); dbg.idx=Math.max(0,dbg.idx-1); renderDbg(); };
+  $('#dbgFwd').onclick=()=>{ stopPlay(); dbg.idx=Math.min(dbg.trace.length,dbg.idx+1); renderDbg(); };
+  $('#dbgPlay').onclick=togglePlay;
+  computeTrace();
+}
+function computeTrace(){
+  stopPlay(); dbg.idx=0;
+  if(!lastParse||!lastParse.ok||!state.sample){ dbg.trace=[]; dbg.result=null; renderDbg(); return; }
+  if(state.sample.length>1500){ dbg.trace=[]; dbg.result={tooBig:true}; renderDbg(); return; }
+  try{ const r=buildTrace(lastParse.ast,state.sample,state.flags); dbg.trace=r.trace; dbg.result=r; }
+  catch(e){ dbg.trace=[]; dbg.result=null; }
+  renderDbg();
+}
+function togglePlay(){ if(dbg.timer) stopPlay(); else startPlay(); }
+function startPlay(){
+  if(!dbg.trace.length) return;
+  if(dbg.idx>=dbg.trace.length) dbg.idx=0;
+  $('#dbgPlay').textContent='⏸ Pause';
+  const speed=+$('#dbgSpeed').value;
+  dbg.timer=setInterval(()=>{ if(dbg.idx>=dbg.trace.length){ stopPlay(); return; } dbg.idx++; renderDbg(); },Math.max(16,1000/speed));
+}
+function stopPlay(){ if(dbg.timer){ clearInterval(dbg.timer); dbg.timer=null; } const b=$('#dbgPlay'); if(b) b.textContent='▶ Play'; }
+function renderDbg(){
+  const tape=$('#dbgTape'), status=$('#dbgStatus'), log=$('#dbgLog'), prog=$('#dbgProg');
+  if(!tape) return;
+  if(dbg.result&&dbg.result.tooBig){ tape.innerHTML=''; status.innerHTML='<span style="color:var(--fg3)">Sample too long to trace (over 1500 chars). Shorten it to use the debugger.</span>'; log.innerHTML=''; prog.textContent=''; clearStepHighlight(); return; }
+  if(!dbg.trace.length){ tape.innerHTML=''; status.innerHTML='<span style="color:var(--fg3)">Enter a valid pattern and some sample text to trace.</span>'; log.innerHTML=''; prog.textContent=''; clearStepHighlight(); return; }
+  const upto=dbg.trace.slice(0,dbg.idx);
+  const cur=dbg.trace[dbg.idx-1]||null;
+  const pos=cur?cur.pos:0;
+  // determine consumed extent (max matched end so far along current path)
+  const s=state.sample;
+  let cells='';
+  for(let k=0;k<=s.length;k++){
+    let ch=k<s.length?s[k]:'';
+    let disp=ch, wcls='';
+    if(ch===' '){disp='·';wcls=' ws';} else if(ch==='\n'){disp='⏎';wcls=' ws';} else if(ch==='\t'){disp='⇥';wcls=' ws';}
+    let cls='cell'+wcls;
+    if(cur && k<pos) cls+=' consumed';
+    if(k===pos) cls+=' cur';
+    cells+=`<span class="${cls}">${esc(disp)||'&nbsp;'}</span>`;
+  }
+  tape.innerHTML=cells;
+  // status
+  let st='';
+  if(cur){
+    if(cur.op==='accept') st=`<span class="accept">✓ MATCH accepted</span> — matched sample[${cur.start}..${cur.pos}] = “${esc(s.slice(cur.start,cur.pos))}”`;
+    else if(cur.op==='advance') st=`<span class="bt">↳ advance</span> — no match at this start, trying position ${cur.pos}`;
+    else if(cur.op==='fail') st=`<span class="reject">✗ fail</span> at position ${cur.pos} — will backtrack`;
+    else if(cur.op==='match') st=`<span style="color:var(--ok)">✓ consumed</span> ${cur.len} char(s) at position ${cur.pos}`;
+    else if(cur.op==='try') st=`trying token at position ${cur.pos}`;
+    else if(cur.op==='enter') st=`entering ${cur.info||'group'} at position ${cur.pos}`;
+    else if(cur.op==='exit') st=`captured up to position ${cur.pos}`;
+  } else st='Ready. Press Play or step forward.';
+  if(dbg.idx>=dbg.trace.length && dbg.result){ st += dbg.result.matched?'':' — <span class="reject">no match found</span>'; }
+  status.innerHTML=st;
+  prog.textContent=dbg.idx+' / '+dbg.trace.length+' steps';
+  // log (window around current)
+  const start=Math.max(0,dbg.idx-40), slice=dbg.trace.slice(start,dbg.idx+2);
+  log.innerHTML=slice.map((ev,k)=>{
+    const gi=start+k;
+    const iscur=gi===dbg.idx-1;
+    const label=ev.info?ev.op+' '+ev.info:ev.op;
+    const node=ev.nid?nodeById(ev.nid):null;
+    const tok=node?node.raw||node.type:(ev.op==='advance'?'@'+ev.pos:ev.op==='accept'?'@'+ev.pos:'');
+    return `<div class="l${iscur?' cur':''}"><span class="op ${ev.op}">${esc(label)}</span><span>pos ${ev.pos}</span><span style="color:var(--fg2)">${esc(tok||'')}</span></div>`;
+  }).join('');
+  const curEl=log.querySelector('.l.cur'); if(curEl) curEl.scrollIntoView({block:'nearest'});
+  // highlight current node on diagram
+  clearStepHighlight();
+  if(cur&&cur.nid){ const el=$(`#diagram [data-nid="${cur.nid}"]`); if(el) el.classList.add('step'); }
+}
+function clearStepHighlight(){ $$('#diagram .rr-node.step').forEach(e=>e.classList.remove('step')); }
+
+/* ============================================================================
+   11. WIRING
+   ============================================================================ */
+let lastParse={ok:false};
+function nodeById(id){ // small cache
+  if(!lastParse.ok) return null;
+  let found=null;
+  (function w(n){ if(!n||found) return; if(n.id===id){found=n;return;} if(n.child)w(n.child); if(n.items&&n.type!=='class')n.items.forEach(w); if(n.options)n.options.forEach(w); })(lastParse.ast);
+  return found;
+}
+
+function showError(msg,pos){
+  const el=$('#errline'); $('#patwrap').classList.add('err');
+  const caret=' '.repeat(Math.max(0,pos))+'^';
+  el.innerHTML=esc(msg)+(pos!=null?`<br><span class="caret">/${esc(state.pattern)}/\n <span class="caret">${caret}</span></span>`:'');
+  el.classList.add('show');
+}
+function clearError(){ $('#errline').classList.remove('show'); $('#patwrap').classList.remove('err'); }
+
+function recompute(){
+  // 1. native validity (source of truth for matching + error message)
+  let nativeOk=true, nativeErr=null;
+  try{ new RegExp(state.pattern, state.flags); }
+  catch(e){ nativeOk=false; nativeErr=e.message; }
+  // 2. our parser (for diagram / explanation / analysis)
+  let parsed=null, parseErr=null;
+  try{ parsed=parseRegex(state.pattern); assignIds(parsed.ast); }
+  catch(e){ parseErr=e; }
+
+  if(!nativeOk){
+    showError('SyntaxError: '+nativeErr, parseErr?parseErr.pos:null);
+  } else if(parseErr){
+    // native accepts but our parser choked on an exotic construct — degrade gracefully
+    clearError();
+  } else clearError();
+
+  if(parsed && nativeOk){
+    lastParse={ok:true,ast:parsed.ast,groupCount:parsed.groupCount,names:parsed.names};
+    renderDiagram(parsed.ast);
+    renderExplanation(parsed.ast);
+    renderReDoS(analyzeReDoS(parsed.ast));
+    wireHoverSync();
+  } else {
+    lastParse={ok:false};
+    $('#diagram').innerHTML='<div style="padding:24px;color:var(--fg3)">'+(nativeOk?'This pattern uses a construct the diagram engine can’t draw, but matching still works below.':'Fix the pattern to see its railroad diagram.')+'</div>';
+    $('#explainPane').innerHTML='<div class="empty-note">—</div>';
+    renderReDoS([]);
+  }
+  runMatches();
+  buildSnippets();
+  buildTestsPane();
+  refreshReplace();
+  computeTrace();
+}
+
+function wireHoverSync(){
+  const set=(nid,on)=>{
+    $$(`[data-nid="${nid}"]`).forEach(e=>{
+      if(e.classList.contains('rr-node')) e.classList.toggle('hot',on);
+      else if(e.classList.contains('exp-row')) e.classList.toggle('hot',on);
+      else if(e.classList.contains('item')) e.classList.toggle('hot',on);
+    });
+  };
+  const attach=(root)=>{
+    root.addEventListener('mouseover',e=>{ const t=e.target.closest('[data-nid]'); if(t) set(t.getAttribute('data-nid'),true); });
+    root.addEventListener('mouseout',e=>{ const t=e.target.closest('[data-nid]'); if(t) set(t.getAttribute('data-nid'),false); });
+  };
+  attach($('#diagram')); attach($('#explainPane'));
+  // ReDoS banner -> highlight node + scroll into view
+  $('#redos').addEventListener('click',e=>{ const t=e.target.closest('[data-nid]'); if(t){ const el=$(`#diagram [data-nid="${t.getAttribute('data-nid')}"]`); if(el){ el.classList.add('risk'); el.scrollIntoView({inline:'center',block:'center',behavior:'smooth'}); setTimeout(()=>el.classList.remove('risk'),2500); } } });
+  // persistent risk highlight
+  analyzeReDoS(lastParse.ast).forEach(it=>{ const el=$(`#diagram [data-nid="${it.node.id}"]`); if(el) el.classList.add('risk'); });
+}
+
+/* inputs */
+function syncInputsFromState(){
+  $('#pattern').value=state.pattern;
+  $('#sample').value=state.sample;
+  const ri=$('#replaceIn'); if(ri) ri.value=state.replacement;
+  $$('#flagbox .flag').forEach(b=>b.classList.toggle('on',state.flags.includes(b.dataset.flag)));
+  syncBackdropSize();
+}
+function syncBackdropSize(){ const ta=$('#sample'),bd=$('#backdrop'); bd.scrollTop=ta.scrollTop; bd.scrollLeft=ta.scrollLeft; }
+
+$('#pattern').addEventListener('input',e=>{ state.pattern=e.target.value; recompute(); saveHash(); });
+$('#sample').addEventListener('input',e=>{ state.sample=e.target.value; runMatches(); buildSnippets(); buildTestsPane(); refreshReplace(); computeTrace(); saveHash(); });
+$('#sample').addEventListener('scroll',syncBackdropSize);
+$$('#flagbox .flag').forEach(b=>b.addEventListener('click',()=>{
+  const f=b.dataset.flag;
+  state.flags = state.flags.includes(f) ? state.flags.replace(f,'') : state.flags+f;
+  b.classList.toggle('on');
+  recompute(); saveHash();
+}));
+
+/* tabs */
+$$('#tabs .tab').forEach(t=>t.addEventListener('click',()=>{
+  $$('#tabs .tab').forEach(x=>x.classList.remove('active'));
+  $$('.tabpane').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active'); $(`.tabpane[data-pane="${t.dataset.tab}"]`).classList.add('active');
+  if(t.dataset.tab==='debug') renderDbg();
+}));
+
+/* theme */
+$('#themeBtn').onclick=()=>{ const h=document.documentElement; h.dataset.theme=h.dataset.theme==='dark'?'light':'dark'; try{localStorage.setItem('sy-theme',h.dataset.theme);}catch(e){} updateThemeBtn(); };
+try{ const t=localStorage.getItem('sy-theme'); if(t) document.documentElement.dataset.theme=t; }catch(e){}
+function updateThemeBtn(){ const dark=document.documentElement.dataset.theme!=='light'; const b=$('#themeBtn'); if(b){ b.textContent=dark?'☾ Dark':'☀ Light'; b.title='Switch to '+(dark?'light':'dark')+' theme'; } }
+updateThemeBtn();
+
+/* share */
+$('#shareBtn').onclick=()=>{ const url=location.origin+location.pathname+'#'+encodeState(); copy(url); toast('Shareable link copied!'); };
+function copy(text){
+  if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(()=>fallbackCopy(text));
+  else fallbackCopy(text);
+}
+function fallbackCopy(text){ const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} ta.remove(); }
+let toastTimer=null;
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),1800); }
+
+/* cheatsheet */
+const CHEAT=[
+ ['Character classes',[['.','any char (except newline)'],['\\d \\D','digit / non-digit'],['\\w \\W','word / non-word char'],['\\s \\S','whitespace / non-ws'],['[abc]','a, b or c'],['[^abc]','not a, b or c'],['[a-z]','range a to z']]],
+ ['Anchors',[['^','start of string / line'],['$','end of string / line'],['\\b \\B','word / non-word boundary']]],
+ ['Quantifiers',[['*','0 or more'],['+','1 or more'],['?','0 or 1 (optional)'],['{n}','exactly n'],['{n,}','n or more'],['{n,m}','n to m'],['*? +? ??','lazy (as few as possible)']]],
+ ['Groups',[['(…)','capturing group'],['(?:…)','non-capturing'],['(?<name>…)','named group'],['\\1 \\2','backreference'],['\\k<name>','named backreference']]],
+ ['Lookaround',[['(?=…)','positive lookahead'],['(?!…)','negative lookahead'],['(?<=…)','positive lookbehind'],['(?<!…)','negative lookbehind']]],
+ ['Escapes',[['\\. \\* \\+','literal metacharacter'],['\\n \\t \\r','newline / tab / return'],['\\uFFFF','unicode code point'],['\\xFF','hex code point']]],
+ ['Flags',[['g','global — all matches'],['i','ignore case'],['m','^$ match line ends'],['s','. matches newline'],['u','unicode'],['y','sticky']]]
+];
+function buildCheat(){
+  $('#cheatBody').innerHTML=CHEAT.map(([t,rows])=>
+    `<div class="cheat-sec"><h3>${esc(t)}</h3>`+
+    rows.map(([c,d])=>`<div class="cheat-row"><code>${esc(c)}</code><span>${esc(d)}</span></div>`).join('')+
+    `</div>`).join('')+
+    `<div class="cheat-sec"><h3>Keyboard</h3>`+
+    `<div class="cheat-row"><code>?</code><span>open this cheatsheet</span></div>`+
+    `<div class="cheat-row"><code>Ctrl+S</code><span>copy shareable link</span></div>`+
+    `<div class="cheat-row"><code>Esc</code><span>close drawer</span></div></div>`;
+}
+function openDrawer(){ $('#drawer').classList.add('open'); $('#drawerBack').classList.add('open'); }
+function closeDrawer(){ $('#drawer').classList.remove('open'); $('#drawerBack').classList.remove('open'); }
+$('#cheatBtn').onclick=openDrawer; $('#cheatClose').onclick=closeDrawer; $('#drawerBack').onclick=closeDrawer;
+
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape') closeDrawer();
+  if(e.key==='?'&&!/input|textarea/i.test(document.activeElement.tagName)) { openDrawer(); e.preventDefault(); }
+  if((e.ctrlKey||e.metaKey)&&e.key==='s'){ e.preventDefault(); $('#shareBtn').click(); }
+});
+
+/* ---- boot ---- */
+function boot(){
+  buildPresetMenu(); buildCheat(); buildReplacePane(); buildDebugPane();
+  const fromHash = location.hash.length>1 ? decodeState(location.hash.slice(1)) : null;
+  if(fromHash && (fromHash.pattern||fromHash.sample)){
+    Object.assign(state,fromHash);
+  } else {
+    const p=PRESETS[0];
+    state.pattern=p.pattern; state.flags=p.flags; state.sample=p.sample; state.tests=p.tests.map(t=>({...t}));
+  }
+  syncInputsFromState();
+  recompute();
+}
+boot();
+</script>
+</body>
+</html>

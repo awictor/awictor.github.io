@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Opioid MME Calculator — morphine milligram equivalents</title>
+<meta name="description" content="Calculate total daily morphine milligram equivalents (MME) from opioid, dose, and frequency using CDC conversion factors, with tiered methadone and CDC risk thresholds. Offline.">
+<style>
+  :root{
+    --c:#9f1239;
+    --bg:#fbf4f6; --card:#ffffff; --fg:#211318; --muted:#786069;
+    --line:#efdfe5; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#170e11; --card:#22141a; --fg:#f5eaee; --muted:#b598a2;
+    --line:#3a2630; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .row{display:flex;gap:10px;align-items:end;margin-bottom:10px;flex-wrap:wrap}
+  .row .f{flex:1 1 120px}
+  label{display:block;font-size:.76rem;font-weight:600;color:var(--muted);margin-bottom:4px}
+  select,input[type=number]{width:100%;font:inherit;padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--fg)}
+  select:focus,input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .rm{background:none;border:1px solid var(--line);color:var(--muted);border-radius:8px;cursor:pointer;padding:9px 12px;font-weight:700}
+  .add{background:var(--bg);border:1px dashed var(--line);color:var(--fg);border-radius:9px;padding:9px 14px;cursor:pointer;font-weight:600;margin-top:4px}
+  .result{text-align:center;margin:18px 0 4px}
+  .result .n{font-size:3rem;font-weight:800;color:var(--c);font-variant-numeric:tabular-nums;line-height:1}
+  .result .k{color:var(--muted);font-size:.9rem;margin-top:4px}
+  .risk{display:inline-block;padding:6px 16px;border-radius:999px;font-weight:700;margin-top:12px}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">💊</div>
+  <div>
+    <h1>Opioid MME Calculator</h1>
+    <p>Total daily morphine milligram equivalents</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div id="rows"></div>
+    <button class="add" id="add">+ Add opioid</button>
+    <div class="result">
+      <div class="n" id="total">—</div>
+      <div class="k">total MME / day</div>
+      <div><span class="risk" id="risk">—</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>About</h2>
+    <p class="note">MME converts different opioids to a common morphine-equivalent scale to gauge overdose risk. Uses CDC oral conversion factors (methadone is dose-dependent). CDC guidance: reassess at <b>≥50 MME/day</b> and avoid or carefully justify <b>≥90 MME/day</b>. Factors are for <em>oral</em> forms; transdermal fentanyl and buccal products differ. Educational only — not a dosing tool or medical advice.</p>
+  </div>
+
+  <p class="foot">100% offline · not medical advice · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var FACTORS = {
+    morphine: 1, codeine: 0.15, hydrocodone: 1, hydromorphone: 4, oxycodone: 1.5,
+    oxymorphone: 3, tapentadol: 0.4, tramadol: 0.1
+  };
+  function toNum(x){ var n = Number(x); if(!isFinite(n)) throw new Error('inputs must be numbers'); return n; }
+  function methadoneFactor(dailyMg){
+    dailyMg = toNum(dailyMg);
+    if(dailyMg <= 20) return 4;
+    if(dailyMg <= 40) return 8;
+    if(dailyMg <= 60) return 10;
+    return 12;
+  }
+  function mmeDaily(drug, dosePerDoseMg, dosesPerDay){
+    var daily = toNum(dosePerDoseMg) * toNum(dosesPerDay);
+    if(drug === 'methadone') return daily * methadoneFactor(daily);
+    var f = FACTORS[drug];
+    if(f === undefined) throw new Error('unknown opioid: ' + drug);
+    return daily * f;
+  }
+  function totalMME(entries){
+    return entries.reduce(function(sum, e){ return sum + mmeDaily(e.drug, e.dose, e.perDay); }, 0);
+  }
+  function riskLevel(mme){
+    mme = toNum(mme);
+    if(mme < 50) return 'lower';
+    if(mme < 90) return 'increased';
+    return 'high';
+  }
+
+  if(typeof module !== 'undefined') module.exports = {
+    FACTORS:FACTORS, methadoneFactor:methadoneFactor, mmeDaily:mmeDaily, totalMME:totalMME, riskLevel:riskLevel
+  };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var host=document.getElementById('rows');
+    var DRUGS = ['morphine','codeine','hydrocodone','hydromorphone','oxycodone','oxymorphone','tapentadol','tramadol','methadone'];
+    function addRow(drug, dose, perDay){
+      var div=document.createElement('div'); div.className='row';
+      div.innerHTML = '<div class="f"><label>Opioid</label><select>' +
+        DRUGS.map(function(d){ return '<option'+(d===drug?' selected':'')+'>'+d+'</option>'; }).join('') + '</select></div>' +
+        '<div class="f"><label>Dose (mg)</label><input type="number" step="any" value="'+(dose||30)+'"></div>' +
+        '<div class="f"><label>× per day</label><input type="number" step="any" value="'+(perDay||2)+'"></div>' +
+        '<button class="rm" title="Remove">×</button>';
+      div.querySelector('.rm').addEventListener('click', function(){ div.remove(); render(); });
+      div.querySelectorAll('select,input').forEach(function(el){ el.addEventListener('input', render); });
+      host.appendChild(div);
+    }
+    function entries(){
+      return Array.from(host.querySelectorAll('.row')).map(function(r){
+        var el=r.querySelectorAll('select,input');
+        return { drug: el[0].value, dose: Number(el[1].value), perDay: Number(el[2].value) };
+      });
+    }
+    var colors={ lower:'#16a34a', increased:'#ea580c', high:'#dc2626' };
+    var labels={ lower:'Lower risk (<50)', increased:'Increased — reassess (50–89)', high:'High — avoid/justify (≥90)' };
+    function render(){
+      try{
+        var t = totalMME(entries());
+        document.getElementById('total').textContent = t.toFixed(1);
+        var lvl = riskLevel(t), r = document.getElementById('risk');
+        r.textContent = labels[lvl]; r.style.background = colors[lvl]; r.style.color = '#fff';
+      }catch(e){ document.getElementById('total').textContent='—'; }
+    }
+    document.getElementById('add').addEventListener('click', function(){ addRow('morphine',30,2); render(); });
+    addRow('oxycodone', 15, 4); render();
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('mme-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('mme-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Burgage — procedural town-plan generator</title>
+<style>
+  :root{ --bg:#2a2620; --panel:#161310; --ink:#e9dfca; --accent:#c07a2b; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family:Georgia,'Times New Roman',serif; }
+  header{ display:flex; flex-wrap:wrap; align-items:center; gap:10px;
+    padding:8px 14px; background:var(--panel); border-bottom:1px solid #000;
+    box-shadow:0 2px 8px rgba(0,0,0,.5); }
+  h1{ font-size:19px; margin:0 12px 0 0; letter-spacing:2px; color:var(--accent);
+    font-variant:small-caps; }
+  header .sub{ font-size:11px; opacity:.55; margin-right:auto; font-style:italic; }
+  label{ font-size:12px; opacity:.8; }
+  input,select,button{ font-family:inherit; font-size:13px; background:#241f19;
+    color:var(--ink); border:1px solid #4a4034; border-radius:4px; padding:5px 9px; }
+  input#seed{ width:150px; }
+  button{ cursor:pointer; transition:background .15s,border-color .15s; }
+  button:hover{ background:#3a3125; border-color:var(--accent); }
+  button:focus-visible,input:focus-visible,select:focus-visible{
+    outline:2px solid var(--accent); outline-offset:2px; }
+  button.go{ background:var(--accent); color:#1a1206; border-color:var(--accent);
+    font-weight:bold; }
+  button.go:hover{ background:#d98c3d; }
+  button.flash{ background:var(--accent); color:#1a1206; border-color:var(--accent); }
+  main{ display:flex; justify-content:center; align-items:flex-start;
+    padding:16px; height:calc(100% - 52px); overflow:auto; }
+  #wrap{ position:relative; }
+  canvas{ background:#ece0c8; border-radius:3px; max-width:100%; height:auto;
+    box-shadow:0 8px 30px rgba(0,0,0,.6); }
+  #skip{ position:absolute; right:10px; bottom:10px; display:none;
+    background:rgba(22,19,16,.85); border:1px solid var(--accent); color:var(--ink);
+    padding:7px 12px; }
+  #skip:hover{ background:rgba(48,40,30,.92); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Burgage</h1>
+  <span class="sub">a survey of imaginary towns</span>
+  <label>Seed <input id="seed" type="text" spellcheck="false"
+    title="This seed is saved to the URL — copy the address (or use Copy link) to share this exact town."></label>
+  <button id="reseed" class="go" title="Generate a new random town">Reseed &#10227;</button>
+  <button id="copy" title="Copy this town's shareable permalink to the clipboard">Copy link</button>
+  <label>Era
+    <select id="era" title="Restyle the palette, linework and label fonts">
+      <option value="medieval">Medieval ink</option>
+      <option value="regency">Regency engraving</option>
+      <option value="blueprint">Modern blueprint</option>
+    </select>
+  </label>
+  <button id="replay" title="Replay the animated reveal">Grow &#9654;</button>
+  <button id="png" title="Download the map as a PNG image">Export PNG</button>
+  <button id="svg" title="Download the map as a crisp vector SVG">Export SVG</button>
+</header>
+<main><div id="wrap">
+  <canvas id="c" width="1040" height="780" role="img"
+    aria-label="A procedurally generated town plan"></canvas>
+  <button id="skip" title="Skip the growth animation">Skip animation &#9199;</button>
+</div></main>
+<script>
+"use strict";
+const W=1040,H=780,cv=document.getElementById("c"),ctx=cv.getContext("2d");
+function setupCanvas(){
+  const DPR=Math.min(2,window.devicePixelRatio||1);
+  cv.width=W*DPR; cv.height=H*DPR; cv.style.width=W+"px"; cv.style.height=H+"px";
+  ctx.setTransform(1,0,0,1,0,0); ctx.scale(DPR,DPR);
+}
+setupCanvas();
+
+// ---- seeded PRNG (mulberry32) ----
+function strHash(s){let h=1779033703^s.length;for(let i=0;i<s.length;i++){
+  h=Math.imul(h^s.charCodeAt(i),3432918353);h=h<<13|h>>>19;}return h>>>0;}
+let rndState=0;
+function mul32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+let rnd=Math.random;
+const rr=(a,b)=>a+(b-a)*rnd(), ri=(a,b)=>Math.floor(a+(b-a+1)*rnd()),
+      pick=a=>a[Math.floor(rnd()*a.length)], chance=p=>rnd()<p;
+
+// ---- value noise ----
+let LAT;
+function initNoise(){LAT=[];for(let i=0;i<64;i++)LAT.push(rnd());}
+function noise(x,y){const G=8,xi=Math.floor(x),yi=Math.floor(y),fx=x-xi,fy=y-yi;
+  const v=(a,b)=>LAT[((a%G+G)%G)*G+((b%G+G)%G)];
+  const s=t=>t*t*(3-2*t), u=s(fx),w=s(fy);
+  return v(xi,yi)*(1-u)*(1-w)+v(xi+1,yi)*u*(1-w)+v(xi,yi+1)*(1-u)*w+v(xi+1,yi+1)*u*w;}
+
+// ---- geometry ----
+const rot=(p,a)=>({x:p.x*Math.cos(a)-p.y*Math.sin(a),y:p.x*Math.sin(a)+p.y*Math.cos(a)});
+const lerp=(a,b,t)=>a+(b-a)*t;
+const lp=(A,B,t)=>({x:lerp(A.x,B.x,t),y:lerp(A.y,B.y,t)});
+const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+function bilerp(c,u,v){return lp(lp(c[0],c[1],u),lp(c[3],c[2],u),v);}
+function segInt(p,p2,q,q2){const d1x=p2.x-p.x,d1y=p2.y-p.y,d2x=q2.x-q.x,d2y=q2.y-q.y;
+  const den=d1x*d2y-d1y*d2x; if(Math.abs(den)<1e-9)return null;
+  const t=((q.x-p.x)*d2y-(q.y-p.y)*d2x)/den, s=((q.x-p.x)*d1y-(q.y-p.y)*d1x)/den;
+  if(t>=0&&t<=1&&s>=0&&s<=1)return{x:p.x+t*d1x,y:p.y+t*d1y};return null;}
+function distSeg(pt,a,b){const dx=b.x-a.x,dy=b.y-a.y,l2=dx*dx+dy*dy;
+  let t=l2?((pt.x-a.x)*dx+(pt.y-a.y)*dy)/l2:0; t=Math.max(0,Math.min(1,t));
+  return Math.hypot(pt.x-(a.x+t*dx),pt.y-(a.y+t*dy));}
+function riverDist(pt){let m=1e9;for(let i=0;i<river.length-1;i++)m=Math.min(m,distSeg(pt,river[i],river[i+1]));return m;}
+
+// ---- place-name generator ----
+const PRE=["Ash","Eld","Grey","Stan","Wic","Bram","Hart","Old","Nor","Wend","Cald","Marl","Thorn","Ock","Fen"];
+const ROOT=["wick","market","fen","bury","ford","stow","borough","minster","combe","dean","holt","mere","worth","ley","don"];
+const SUF=["","-on-Stour","-under-Wold","-le-Marsh"," Regis"," St Mary"," Magna"];
+const RIVERS=["Stour","Ouse","Nene","Exe","Derwent","Avon","Wye","Tamar","Cam","Debden"];
+function genName(){let n=chance(.5)?pick(PRE)+pick(ROOT):cap(pick(ROOT))+pick(ROOT);
+  n=cap(n); if(chance(.35))n+=pick(SUF); return n;}
+const cap=s=>s.charAt(0).toUpperCase()+s.slice(1);
+
+// ---- palettes ----
+const ERAS={
+ medieval:{paper:"#ece0c8",paper2:"#e0d0ad",ink:"#3a2f22",faint:"#7a6a4e",
+   water:"#c3d0c9",waterhatch:"#8fa79d",bldg:"#d8b98a",bldg2:"#cdae7d",shadow:"rgba(60,45,25,.18)",
+   accent:"#8a4a24",wall:"#4a3826",green:"#b9c19a",font:"Georgia,serif",lw:1},
+ regency:{paper:"#efe9da",paper2:"#e6dcc4",ink:"#2b2b2b",faint:"#7d786c",
+   water:"#d3dbdd",waterhatch:"#9aa7ab",bldg:"#e4dcc8",bldg2:"#d8cfb6",shadow:"rgba(40,40,40,.14)",
+   accent:"#5a4632",wall:"#3a3a34",green:"#cfd2ba",font:"Georgia,serif",lw:.85},
+ blueprint:{paper:"#123a5c",paper2:"#0e3050",ink:"#dbe7f2",faint:"#7fa6c8",
+   water:"#1b4c72",waterhatch:"#4d84ad",bldg:"#1a4468",bldg2:"#20507a",shadow:"rgba(0,0,0,.22)",
+   accent:"#8fd0ff",wall:"#bcd8ef",green:"#164a70",font:"'Trebuchet MS','DejaVu Sans','Segoe UI',sans-serif",lw:1}}
+let S=ERAS.medieval, era="medieval";
+
+// ---- global model ----
+let prims=[], river=[], town={}, maxOrder=0, reveal=1e9, anim=null;
+const P0={x:W/2,y:H/2};
+function pushP(ph,pts,o){o=o||{};const c=pts.reduce((a,p)=>({x:a.x+p.x,y:a.y+p.y}),{x:0,y:0});
+  prims.push({ph,t:"path",pts,cx:c.x/pts.length,cy:c.y/pts.length,
+    closed:!!o.closed,fill:o.fill,stroke:o.stroke,sw:o.sw||S.lw,dash:o.dash});}
+function pushC(ph,x,y,r,o){o=o||{};prims.push({ph,t:"circle",x,y,r,cx:x,cy:y,
+    fill:o.fill,stroke:o.stroke,sw:o.sw||S.lw});}
+function pushT(ph,x,y,str,o){o=o||{};prims.push({ph,t:"text",x,y,cx:x,cy:y,str,
+    size:o.size||12,fill:o.fill||S.ink,anchor:o.anchor||"center",rot:o.rot||0,
+    italic:o.italic,spaced:o.spaced,weight:o.weight});}
+
+// ================= GENERATION =================
+function build(seed){
+  rndState=strHash(seed); rnd=mul32(rndState); initNoise();
+  prims=[]; river=[];
+  const C={x:rr(W*0.44,W*0.56),y:rr(H*0.44,H*0.56)};
+  const theta=rr(-0.35,0.35);
+  const R=rr(230,265);                 // wall radius
+  const isPort=chance(0.45);
+  town={name:genName(),riverName:pick(RIVERS),C,R,seed,isPort,gates:[]};
+
+  // ---- river: wandering polyline across canvas ----
+  const rAng=rr(-0.5,0.5)+(chance(.5)?0:Math.PI), horiz=chance(.6);
+  const start=horiz?{x:-20,y:rr(H*0.2,H*0.8)}:{x:rr(W*0.2,W*0.8),y:-20};
+  const end=horiz?{x:W+20,y:rr(H*0.2,H*0.8)}:{x:rr(W*0.2,W*0.8),y:H+20};
+  for(let i=0;i<=40;i++){const t=i/40;let p=lp(start,end,t);
+    const nx=noise(t*5+3,1.5)-0.5, ny=noise(t*5+11,7.3)-0.5;
+    p.x+=nx*150*Math.sin(t*Math.PI); p.y+=ny*150*Math.sin(t*Math.PI);
+    river.push(p);}
+  const rw=13;
+  drawRiver(rw);
+
+  // ---- port coastline: sea fills one edge, river empties into it ----
+  if(isPort){ town.sea=makeCoast(); }
+
+  // ---- gates & primary radials ----
+  const nGates=ri(4,6), baseA=rr(0,Math.PI);
+  const placeGates=off=>{const out=[];for(let i=0;i<nGates;i++){
+    const a=baseA+off+i/nGates*Math.PI*2+rr(-0.2,0.2);
+    const g={x:C.x+Math.cos(a)*R,y:C.y+Math.sin(a)*R,a};
+    if(riverDist(g)<rw+6)continue;
+    out.push(g);}return out;};
+  town.gates=placeGates(0);
+  // if the river filtered out too many candidates, rotate the ring and retry
+  for(let tries=0;town.gates.length<2&&tries<5;tries++)
+    town.gates=placeGates((tries+1)*0.31);
+  // organic core lanes + tidy outer grid via warped quad-grid
+  const grid=makeGrid(C,theta,R);
+  // primary radials on top (drawn phase 2), high street = first gate
+  town.gates.forEach((g,i)=>{
+    const ext={x:C.x+Math.cos(g.a)*(R+rr(40,90)),y:C.y+Math.sin(g.a)*(R+rr(40,90))};
+    const road=[C,g,ext], hi=(i===0);
+    // bridges where radial crosses river
+    for(let s=0;s<road.length-1;s++)for(let k=0;k<river.length-1;k++){
+      const X=segInt(road[s],road[s+1],river[k],river[k+1]);
+      if(X)addBridge(X,{x:road[s+1].x-road[s].x,y:road[s+1].y-road[s].y});}
+    pushP(2,road,{stroke:S.ink,sw:hi?3.4:2.4});
+  });
+  drawGridStreets(grid,C,R,rw);
+  drawBlocks(grid,C,R,rw);
+
+  // market square (open plaza near centre)
+  const sq=R*0.10;
+  pushP(3,[{x:C.x-sq,y:C.y-sq},{x:C.x+sq,y:C.y-sq},{x:C.x+sq,y:C.y+sq},{x:C.x-sq,y:C.y+sq}],
+    {fill:S.paper2,stroke:S.ink,sw:1.4});
+
+  // ---- wall, towers, gates ----
+  drawWall(C,R,rw);
+
+  // ---- commons / orchards stipple outside wall ----
+  drawCommons(C,R);
+
+  // ---- labels ----
+  addLabels(C,R);
+
+  // ---- cartographic furniture ----
+  compass(); scaleBar(); cartouche(); legend();
+
+  // order prims: by phase then distance from centre (grows outward)
+  prims.forEach(p=>{p.d=Math.hypot(p.cx-C.x,p.cy-C.y);});
+  prims.sort((a,b)=>a.ph-b.ph||a.d-b.d);
+  prims.forEach((p,i)=>p.order=i);
+  maxOrder=prims.length;
+}
+
+function drawRiver(rw){
+  // ribbon fill
+  const L=[],Rr=[];
+  for(let i=0;i<river.length;i++){
+    const a=river[Math.max(0,i-1)],b=river[Math.min(river.length-1,i+1)];
+    let nx=-(b.y-a.y),ny=(b.x-a.x); const m=Math.hypot(nx,ny)||1; nx/=m;ny/=m;
+    L.push({x:river[i].x+nx*rw,y:river[i].y+ny*rw});
+    Rr.push({x:river[i].x-nx*rw,y:river[i].y-ny*rw});
+  }
+  pushP(1,L.concat(Rr.reverse()),{fill:S.water,stroke:S.waterhatch,sw:1});
+  // bank hatching (short ticks)
+  for(let i=2;i<river.length-2;i+=1){
+    const a=river[i-1],b=river[i+1];let nx=-(b.y-a.y),ny=(b.x-a.x);
+    const m=Math.hypot(nx,ny)||1;nx/=m;ny/=m;
+    pushP(1,[{x:river[i].x+nx*rw,y:river[i].y+ny*rw},{x:river[i].x+nx*(rw+4),y:river[i].y+ny*(rw+4)}],{stroke:S.waterhatch,sw:.7});
+    pushP(1,[{x:river[i].x-nx*rw,y:river[i].y-ny*rw},{x:river[i].x-nx*(rw+4),y:river[i].y-ny*(rw+4)}],{stroke:S.waterhatch,sw:.7});
+  }
+}
+function makeCoast(){
+  // pick an edge far from town core, hatch sea, add quays
+  const edge=town.C.y<H/2?"S":"N"; // sea on opposite side from centre bias
+  const y=edge==="S"?H-1:0, sign=edge==="S"?1:-1;
+  const cy=edge==="S"?H*0.86:H*0.14;
+  const pts=[];for(let i=0;i<=20;i++){const x=i/20*W;
+    pts.push({x,y:cy+ (noise(i*0.4+20,3)-0.5)*26*Math.abs(sign)});}
+  const poly=pts.concat([{x:W,y},{x:0,y}]);
+  pushP(1,poly,{fill:S.water,stroke:S.waterhatch,sw:1});
+  for(let i=0;i<pts.length-1;i++)
+    pushP(1,[pts[i],pts[i+1]],{stroke:S.waterhatch,sw:.9});
+  // sea hatch lines parallel to coast
+  for(let k=1;k<=4;k++)pushP(1,pts.map(p=>({x:p.x,y:p.y+sign*k*7})),{stroke:S.waterhatch,sw:.5});
+  return {cy,sign};
+}
+function addBridge(X,dir){
+  const m=Math.hypot(dir.x,dir.y)||1; let nx=-dir.y/m,ny=dir.x/m;
+  const bw=10,bl=18, dx=dir.x/m,dy=dir.y/m;
+  pushP(2,[{x:X.x-dx*bl+nx*bw,y:X.y-dy*bl+ny*bw},{x:X.x+dx*bl+nx*bw,y:X.y+dy*bl+ny*bw},
+    {x:X.x+dx*bl-nx*bw,y:X.y+dy*bl-ny*bw},{x:X.x-dx*bl-nx*bw,y:X.y-dy*bl-ny*bw}],
+    {fill:S.paper,stroke:S.ink,sw:1.6,closed:true});
+}
+function makeGrid(C,theta,R){
+  const N=15, ext=R*1.35, step=2*ext/N, g=[];
+  for(let i=0;i<=N;i++){g[i]=[];for(let j=0;j<=N;j++){
+    let base=rot({x:(i-N/2)*step,y:(j-N/2)*step},theta);
+    let p={x:C.x+base.x,y:C.y+base.y};
+    const d=Math.hypot(base.x,base.y);
+    const organic=Math.max(0,1-d/R)*0.9+0.15;   // more warp near core
+    p.x+=(noise(i*0.5,j*0.5)-0.5)*step*organic;
+    p.y+=(noise(i*0.5+30,j*0.5+30)-0.5)*step*organic;
+    g[i][j]=p;
+  }}
+  return {g,N};
+}
+function drawGridStreets({g,N},C,R,rw){
+  const ok=p=>Math.hypot(p.x-C.x,p.y-C.y)<R*1.28;
+  const crossesRiver=(a,b)=>{for(let k=0;k<river.length-1;k++)if(segInt(a,b,river[k],river[k+1]))return true;return false;};
+  for(let i=0;i<=N;i++)for(let j=0;j<N;j++){const a=g[i][j],b=g[i][j+1];
+    if(ok(a)&&ok(b)&&!crossesRiver(a,b))pushP(3,[a,b],{stroke:S.faint,sw:1.1});}
+  for(let j=0;j<=N;j++)for(let i=0;i<N;i++){const a=g[i][j],b=g[i+1][j];
+    if(ok(a)&&ok(b)&&!crossesRiver(a,b))pushP(3,[a,b],{stroke:S.faint,sw:1.1});}
+}
+function wardOf(pt,C,R,rw){
+  const dx=pt.x-C.x,dy=pt.y-C.y,r=Math.hypot(dx,dy),a=Math.atan2(dy,dx);
+  if(r<R*0.13)return{n:"Market",w:26,depth:0.5,dens:.9};
+  if(r>R)return{n:"The Common",w:30,depth:0.42,dens:.35};
+  if(riverDist(pt)<rw+34&&town.isPort)return{n:"The Docks",w:22,depth:0.6,dens:.8};
+  const sec=(Math.floor((a+Math.PI)/(Math.PI*2)*4)+town.__sec)%4;
+  return [{n:"Cathedral Close",w:26,depth:0.5,dens:.6},
+          {n:"Weavers' Row",w:16,depth:0.62,dens:.85},
+          {n:"Artisans' Quarter",w:14,depth:0.6,dens:.88},
+          {n:"The Shambles",w:15,depth:0.58,dens:.8}][sec];
+}
+function drawBlocks({g,N},C,R,rw){
+  town.__sec=ri(0,3); town.wardPts={};
+  let church=false,guild=false;
+  const inside=p=>Math.hypot(p.x-C.x,p.y-C.y)<R*1.02;
+  for(let i=0;i<N;i++)for(let j=0;j<N;j++){
+    const c=[g[i][j],g[i+1][j],g[i+1][j+1],g[i][j+1]];
+    const ctr={x:(c[0].x+c[1].x+c[2].x+c[3].x)/4,y:(c[0].y+c[1].y+c[2].y+c[3].y)/4};
+    if(!inside(ctr))continue;
+    if(riverDist(ctr)<rw+8)continue;
+    if(Math.hypot(ctr.x-C.x,ctr.y-C.y)<R*0.11)continue; // market square gap
+    const wd=wardOf(ctr,C,R,rw);
+    (town.wardPts[wd.n]=town.wardPts[wd.n]||[]).push(ctr);
+    if(!chance(wd.dens)){ // open yard/garden — stipple
+      stipple(c); continue; }
+    // landmark override
+    if(!church&&wd.n==="Cathedral Close"&&chance(.5)){church=true;drawChurch(c);continue;}
+    if(!guild&&wd.n==="Market"&&chance(.6)){guild=true;drawGuild(c);continue;}
+    subdivide(c,wd);
+  }
+}
+function subdivide(c,wd){
+  const frontLen=(dist(c[0],c[1])+dist(c[3],c[2]))/2;
+  const k=Math.max(1,Math.round(frontLen/wd.w));
+  const flip=chance(.5); // frontage on v=0 or v=1
+  for(let s=0;s<k;s++){
+    const u0=s/k,u1=(s+1)/k,g=0.10/k*frontLen/wd.w*0.15+0.12/k;
+    const a=Math.min(u0+g*.4,u1),b=Math.max(u1-g*.4,u0);
+    const dep=wd.depth*rr(.82,1.05);
+    const v0=flip?1:0, v1=flip?1-dep:dep;
+    const bld=[bilerp(c,a,v0),bilerp(c,b,v0),bilerp(c,b,v1),bilerp(c,a,v1)];
+    // rear yard outline (faint)
+    pushP(5,[bilerp(c,u0,v0),bilerp(c,u1,v0),bilerp(c,u1,flip?0:1),bilerp(c,u0,flip?0:1)],
+      {stroke:S.faint,sw:.5,closed:true});
+    building(bld);
+  }
+}
+function building(bld){
+  // drop shadow (phase 4.9 so it always draws behind the facade regardless of distance sort)
+  pushP(4.9,bld.map(p=>({x:p.x+2.2,y:p.y+2.4})),{fill:S.shadow,closed:true});
+  pushP(5,bld,{fill:chance(.5)?S.bldg:S.bldg2,stroke:S.ink,sw:.9,closed:true});
+}
+function stipple(c){
+  const n=ri(5,11);
+  for(let i=0;i<n;i++){const u=rr(.12,.88),v=rr(.12,.88),p=bilerp(c,u,v);
+    pushC(6,p.x,p.y,rr(.6,1.2),{fill:S.green,stroke:S.faint,sw:.4});}
+}
+function drawChurch(c){
+  const nave=[bilerp(c,.15,.2),bilerp(c,.85,.2),bilerp(c,.85,.62),bilerp(c,.15,.62)];
+  pushP(4.9,nave.map(p=>({x:p.x+2.4,y:p.y+2.6})),{fill:S.shadow,closed:true});
+  pushP(5,nave,{fill:S.accent,stroke:S.ink,sw:1.3,closed:true});
+  // transept
+  pushP(5,[bilerp(c,.35,.05),bilerp(c,.65,.05),bilerp(c,.65,.8),bilerp(c,.35,.8)],
+    {fill:S.accent,stroke:S.ink,sw:1.1,closed:true});
+  const t=bilerp(c,.5,.12); pushC(5,t.x,t.y,3,{fill:S.paper,stroke:S.ink,sw:1});
+}
+function drawGuild(c){
+  const b=[bilerp(c,.12,.15),bilerp(c,.88,.15),bilerp(c,.88,.7),bilerp(c,.12,.7)];
+  pushP(4.9,b.map(p=>({x:p.x+2.4,y:p.y+2.6})),{fill:S.shadow,closed:true});
+  pushP(5,b,{fill:S.accent,stroke:S.ink,sw:1.3,closed:true});
+}
+function drawWall(C,R,rw){
+  const NV=20,verts=[];
+  for(let i=0;i<NV;i++){const a=i/NV*Math.PI*2;
+    const rr2=R*(1+(noise(Math.cos(a)*2+40,Math.sin(a)*2+40)-0.5)*0.06);
+    verts.push({x:C.x+Math.cos(a)*rr2,y:C.y+Math.sin(a)*rr2,a});}
+  // break wall where port sea is close: skip verts near sea edge
+  const seg=[];let cur=[];
+  verts.forEach(v=>{
+    const nearSea=town.isPort&&Math.abs(v.y-town.sea.cy)<40;
+    const nearRiver=riverDist(v)<rw+6;
+    if(nearSea){if(cur.length){seg.push(cur);cur=[];}}else cur.push(v);
+  });
+  if(cur.length)seg.push(cur);
+  (seg.length?seg:[verts]).forEach(sg=>{ if(sg.length>1)pushP(4,sg,{stroke:S.wall,sw:3});});
+  // towers
+  verts.forEach(v=>{ if(!(town.isPort&&Math.abs(v.y-town.sea.cy)<40))
+    pushC(4,v.x,v.y,3.4,{fill:S.paper,stroke:S.wall,sw:1.4});});
+  // gates
+  town.gates.forEach((g,i)=>{
+    pushC(4,g.x,g.y,5,{fill:S.paper,stroke:S.wall,sw:1.8});
+    g.name=(["N","E","S","W"][((Math.round((g.a+Math.PI/2)/(Math.PI/2))%4)+4)%4])+" Gate";
+  });
+}
+function drawCommons(C,R){
+  // faint field/orchard rows outside wall (drop-hatch texture)
+  for(let a=0;a<Math.PI*2;a+=0.18){
+    const r0=R*1.05+rr(0,10), r1=r0+rr(30,70);
+    const p0={x:C.x+Math.cos(a)*r0,y:C.y+Math.sin(a)*r0};
+    const p1={x:C.x+Math.cos(a)*r1,y:C.y+Math.sin(a)*r1};
+    if(p1.x<12||p1.x>W-12||p1.y<64||p1.y>H-40)continue;
+    if(town.isPort&&Math.abs(p1.y-town.sea.cy)<30)continue;
+    if(riverDist(p1)<16)continue;
+    pushP(3,[p0,p1],{stroke:S.green,sw:1.4});
+  }
+}
+function addLabels(C,R){
+  pushT(3,C.x,C.y+4,"MARKET",{size:11,spaced:true,fill:S.accent,weight:"bold"});
+  for(const n in town.wardPts){const a=town.wardPts[n];
+    const c=a.reduce((s,p)=>({x:s.x+p.x,y:s.y+p.y}),{x:0,y:0});
+    pushT(6,c.x/a.length,c.y/a.length,n.toUpperCase(),{size:10,spaced:true,italic:true,fill:S.faint});}
+  town.gates.forEach(g=>pushT(6,g.x+Math.cos(g.a)*16,g.y+Math.sin(g.a)*16,g.name,{size:9,fill:S.wall}));
+  // river name along river
+  const mid=Math.floor(river.length/2),a=river[mid-2],b=river[mid+2];
+  pushT(6,river[mid].x,river[mid].y-2,"R. "+town.riverName,{size:11,italic:true,
+    fill:S.waterhatch,rot:Math.atan2(b.y-a.y,b.x-a.x)});
+}
+function compass(){
+  const x=W-64,y=110,r=30;
+  pushC(6,x,y,r,{stroke:S.ink,sw:1.4});
+  pushC(6,x,y,r*0.7,{stroke:S.faint,sw:.7});
+  pushP(6,[{x,y:y-r-6},{x:x-6,y},{x,y:y+r*0.55},{x:x+6,y}],{fill:S.ink,stroke:S.ink,sw:.8,closed:true});
+  pushP(6,[{x,y:y-r-6},{x:x+6,y},{x,y:y+r*0.55}],{fill:S.paper,stroke:S.ink,sw:.8,closed:true});
+  pushT(6,x,y-r-11,"N",{size:12,weight:"bold",fill:S.accent});
+}
+function scaleBar(){
+  const x=40,y=H-34,seg=42;
+  for(let i=0;i<4;i++)pushP(6,[{x:x+i*seg,y},{x:x+(i+1)*seg,y},{x:x+(i+1)*seg,y:y+7},{x:x+i*seg,y:y+7}],
+    {fill:i%2?S.paper:S.ink,stroke:S.ink,sw:1,closed:true});
+  pushT(6,x,y-6,"0",{size:9,anchor:"start",fill:S.ink});
+  pushT(6,x+seg*4,y-6,"¼ mile",{size:9,anchor:"start",fill:S.ink});
+}
+function cartouche(){
+  const w=290,h=52,x=W/2-w/2,y=16;
+  pushP(6,[{x,y},{x:x+w,y},{x:x+w,y:y+h},{x,y:y+h}],{fill:S.paper2,stroke:S.ink,sw:2,closed:true});
+  pushP(6,[{x:x+5,y:y+5},{x:x+w-5,y:y+5},{x:x+w-5,y:y+h-5},{x:x+5,y:y+h-5}],{stroke:S.faint,sw:.8,closed:true});
+  pushT(6,W/2,y+25,town.name,{size:23,weight:"bold",fill:S.accent});
+  pushT(6,W/2,y+43,"A Plan of the Towne · seed "+town.seed,{size:10,italic:true,fill:S.faint});
+}
+function legend(){
+  const x=40,y=H-176,w=150,items=[["bldg","Burgage dwelling"],["church","Church / Guildhall"],
+    ["wall","Wall & towers"],["water","River / quays"],["green","Common & orchard"]];
+  pushP(6,[{x,y},{x:x+w,y},{x:x+w,y:y+items.length*18+22},{x,y:y+items.length*18+22}],
+    {fill:S.paper2,stroke:S.ink,sw:1.2,closed:true});
+  pushT(6,x+8,y+15,"LEGEND",{size:10,anchor:"start",weight:"bold",spaced:true,fill:S.accent});
+  items.forEach((it,i)=>{const yy=y+30+i*18;
+    if(it[0]==="water")pushP(6,[{x:x+8,y:yy-5},{x:x+22,y:yy-5},{x:x+22,y:yy+3},{x:x+8,y:yy+3}],{fill:S.water,stroke:S.waterhatch,sw:.8,closed:true});
+    else if(it[0]==="wall")pushC(6,x+15,yy-1,4,{fill:S.paper,stroke:S.wall,sw:1.4});
+    else if(it[0]==="green")pushC(6,x+15,yy-1,2,{fill:S.green,stroke:S.faint,sw:.4});
+    else pushP(6,[{x:x+8,y:yy-6},{x:x+22,y:yy-6},{x:x+22,y:yy+2},{x:x+8,y:yy+2}],
+      {fill:it[0]==="church"?S.accent:S.bldg,stroke:S.ink,sw:.8,closed:true});
+    pushT(6,x+30,yy,it[1],{size:9.5,anchor:"start",fill:S.ink});});
+}
+
+// ================= RENDER (canvas) =================
+function paper(){
+  const gd=ctx.createLinearGradient(0,0,W,H);
+  gd.addColorStop(0,S.paper);gd.addColorStop(1,S.paper2);
+  ctx.fillStyle=gd;ctx.fillRect(0,0,W,H);
+  // stains
+  ["rgba(120,90,40,.05)","rgba(90,60,20,.06)","rgba(40,60,40,.04)"].forEach((col,i)=>{
+    const g=mul32(strHash(town.seed)+i*97);const cx=g()*W,cy=g()*H,r=90+g()*120;
+    const rg=ctx.createRadialGradient(cx,cy,0,cx,cy,r);
+    rg.addColorStop(0,col);rg.addColorStop(1,"rgba(0,0,0,0)");
+    ctx.fillStyle=rg;ctx.fillRect(0,0,W,H);});
+  // fold lines
+  ctx.strokeStyle=era==="blueprint"?"rgba(255,255,255,.04)":"rgba(60,40,20,.07)";
+  ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(W/3,0);ctx.lineTo(W/3,H);
+  ctx.moveTo(0,H*0.6);ctx.lineTo(W,H*0.6);ctx.stroke();
+}
+function vignette(){
+  const rg=ctx.createRadialGradient(W/2,H/2,H*0.35,W/2,H/2,H*0.85);
+  rg.addColorStop(0,"rgba(0,0,0,0)");
+  rg.addColorStop(1,era==="blueprint"?"rgba(0,0,0,.35)":"rgba(60,40,15,.28)");
+  ctx.fillStyle=rg;ctx.fillRect(0,0,W,H);
+}
+function drawPrim(ctx,p){
+  ctx.lineJoin="round";ctx.lineCap="round";
+  if(p.t==="path"){ctx.beginPath();p.pts.forEach((q,i)=>i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y));
+    if(p.closed)ctx.closePath();
+    if(p.fill){ctx.fillStyle=p.fill;ctx.fill();}
+    if(p.stroke){ctx.strokeStyle=p.stroke;ctx.lineWidth=p.sw;
+      if(p.dash)ctx.setLineDash(p.dash);ctx.stroke();ctx.setLineDash([]);}}
+  else if(p.t==="circle"){ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,7);
+    if(p.fill){ctx.fillStyle=p.fill;ctx.fill();}
+    if(p.stroke){ctx.strokeStyle=p.stroke;ctx.lineWidth=p.sw;ctx.stroke();}}
+  else if(p.t==="text"){ctx.save();ctx.translate(p.x,p.y);if(p.rot)ctx.rotate(p.rot);
+    ctx.fillStyle=p.fill;ctx.textAlign=p.anchor;ctx.textBaseline="middle";
+    let str=p.str;ctx.font=(p.italic?"italic ":"")+(p.weight||"normal")+" "+p.size+"px "+S.font;
+    if(p.spaced)str=str.split("").join("  ");
+    ctx.fillText(str,0,0);ctx.restore();}
+}
+function render(){
+  paper();
+  for(const p of prims){ if(p.order<reveal)drawPrim(ctx,p); }
+  vignette();
+}
+
+// ================= ANIMATION =================
+function grow(){
+  cancelAnimationFrame(anim); reveal=0;
+  document.getElementById("skip").style.display="block";
+  const dur=3400,t0=performance.now();
+  (function step(now){
+    const t=Math.min(1,(now-t0)/dur);
+    reveal=Math.pow(t,0.85)*maxOrder;
+    render();
+    if(t<1)anim=requestAnimationFrame(step);
+    else{reveal=1e9;render();document.getElementById("skip").style.display="none";}
+  })(t0);
+}
+function skip(){cancelAnimationFrame(anim);reveal=1e9;render();
+  document.getElementById("skip").style.display="none";}
+
+// ================= SVG EXPORT =================
+function esc(s){return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
+// SVG 1.1 requires <color> + separate *-opacity rather than rgba() in presentation attrs.
+function splitRGBA(c){
+  if(typeof c!=="string")return{color:c||"none",op:null};
+  const m=c.match(/^rgba?\(([^)]+)\)/i);
+  if(!m)return{color:c,op:null};
+  const parts=m[1].split(",").map(s=>s.trim());
+  const hex="#"+parts.slice(0,3).map(v=>Math.max(0,Math.min(255,Math.round(+v))).toString(16).padStart(2,"0")).join("");
+  return{color:hex,op:parts.length>3?parts[3]:"1"};
+}
+function fillAttr(c){if(!c)return 'fill="none"';const s=splitRGBA(c);return `fill="${s.color}"`+(s.op!=null?` fill-opacity="${s.op}"`:"");}
+function strokeAttr(c,sw){if(!c)return "";const s=splitRGBA(c);return ` stroke="${s.color}"`+(s.op!=null?` stroke-opacity="${s.op}"`:"")+` stroke-width="${sw}"`;}
+function toSVG(){
+  const vig=splitRGBA(era==="blueprint"?"rgba(0,0,0,.35)":"rgba(60,40,15,.28)");
+  let o=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
+  o+=`<defs><radialGradient id="vg" cx="50%" cy="50%" r="65%"><stop offset="55%" stop-color="#000000" stop-opacity="0"/><stop offset="100%" stop-color="${vig.color}" stop-opacity="${vig.op}"/></radialGradient></defs>`;
+  o+=`<rect width="${W}" height="${H}" fill="${S.paper}"/>`;
+  for(const p of prims){
+    if(p.t==="path"){const d=p.pts.map((q,i)=>(i?"L":"M")+q.x.toFixed(1)+" "+q.y.toFixed(1)).join(" ")+(p.closed?"Z":"");
+      o+=`<path d="${d}" ${fillAttr(p.fill)}${strokeAttr(p.stroke,p.sw)} stroke-linejoin="round" stroke-linecap="round"/>`;}
+    else if(p.t==="circle")o+=`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${p.r}" ${fillAttr(p.fill)}${strokeAttr(p.stroke,p.sw)}/>`;
+    else if(p.t==="text"){const an={center:"middle",start:"start",end:"end"}[p.anchor];
+      const str=p.spaced?p.str.split("").join("  "):p.str;
+      const tf=splitRGBA(p.fill);
+      o+=`<text x="${p.x.toFixed(1)}" y="${p.y.toFixed(1)}" xml:space="preserve" font-family="${S.font}" font-size="${p.size}" fill="${tf.color}"${tf.op!=null?` fill-opacity="${tf.op}"`:""} text-anchor="${an}" dominant-baseline="middle" ${p.italic?'font-style="italic"':""} ${p.weight?`font-weight="${p.weight}"`:""} ${p.rot?`transform="rotate(${(p.rot*180/Math.PI).toFixed(1)} ${p.x.toFixed(1)} ${p.y.toFixed(1)})"`:""}>${esc(str)}</text>`;}
+  }
+  o+=`<rect width="${W}" height="${H}" fill="url(#vg)"/></svg>`;
+  return o;
+}
+function dl(name,url){const a=document.createElement("a");a.href=url;a.download=name;a.click();
+  if(url.startsWith("blob:"))setTimeout(()=>URL.revokeObjectURL(url),0);}
+// finalize any in-flight growth animation so exports never capture a half-drawn town
+function ensureComplete(){if(reveal<maxOrder)skip();}
+function flash(btn,txt){const t=btn.textContent;btn.textContent=txt;btn.classList.add("flash");
+  setTimeout(()=>{btn.textContent=t;btn.classList.remove("flash");},1100);}
+// tolerate malformed percent-encoding in the URL hash (e.g. #%, #%zz)
+function readHash(){try{return decodeURIComponent(location.hash.slice(1));}catch(_){return"";}}
+
+// ================= CONTROL =================
+function regen(seed,animate){
+  S=ERAS[era];
+  build(seed);
+  document.getElementById("seed").value=seed;
+  cv.setAttribute("aria-label",town.name+", a procedurally generated town plan, seed "+town.seed);
+  document.title="Burgage — "+town.name;
+  location.hash=encodeURIComponent(seed);
+  if(animate)grow(); else{reveal=1e9;render();}
+}
+const rs=()=>Math.random().toString(36).slice(2,8);
+document.getElementById("reseed").onclick=()=>regen(rs(),true);
+document.getElementById("replay").onclick=()=>grow();
+document.getElementById("skip").onclick=skip;
+document.getElementById("seed").onchange=e=>regen(e.target.value.trim()||rs(),true);
+document.getElementById("era").onchange=e=>{era=e.target.value;regen(town.seed,false);};
+document.getElementById("copy").onclick=e=>{
+  const done=()=>flash(e.currentTarget,"Copied!");
+  if(navigator.clipboard&&navigator.clipboard.writeText)
+    navigator.clipboard.writeText(location.href).then(done,done); else done();};
+document.getElementById("png").onclick=e=>{ensureComplete();
+  dl(town.name.replace(/\W+/g,"_")+".png",cv.toDataURL("image/png"));flash(e.currentTarget,"Saved PNG");};
+document.getElementById("svg").onclick=e=>{ensureComplete();
+  dl(town.name.replace(/\W+/g,"_")+".svg",URL.createObjectURL(new Blob([toSVG()],{type:"image/svg+xml"})));
+  flash(e.currentTarget,"Saved SVG");};
+window.addEventListener("hashchange",()=>{const h=readHash();
+  if(h&&h!==town.seed)regen(h,false);});
+// keep the backing store crisp when the window moves between displays of different DPR
+let rzT;window.addEventListener("resize",()=>{clearTimeout(rzT);
+  rzT=setTimeout(()=>{setupCanvas();render();},150);});
+
+// init
+const initSeed=readHash()||rs();
+regen(initSeed,true);
+</script>
+</body>
+</html>

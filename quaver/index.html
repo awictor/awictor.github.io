@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Quaver — Chladni sand plate</title>
+<style>
+  :root{ --ink:#e9e6df; --dim:#8b8778; }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{ height:100%; background:#08080b; overflow:hidden; -webkit-user-select:none; user-select:none; }
+  body{ font:13px/1.4 ui-monospace,"SF Mono",Menlo,Consolas,monospace; color:var(--ink); }
+  #stage{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center; }
+  canvas{ display:block; touch-action:none; cursor:crosshair; }
+  canvas.grabbing{ cursor:grabbing; }
+  .hud{ position:fixed; pointer-events:none; }
+  #title{ top:16px; left:18px; }
+  #title b{ font-size:15px; letter-spacing:.34em; font-weight:600; }
+  #title span{ display:block; color:var(--dim); font-size:10px; letter-spacing:.14em; margin-top:3px; }
+  #readout{ top:16px; right:18px; text-align:right; }
+  #readout b{ font-size:26px; font-weight:600; font-variant-numeric:tabular-nums; }
+  #readout span{ display:block; color:var(--dim); font-size:10px; letter-spacing:.12em; }
+  #dock{ position:fixed; left:50%; bottom:16px; transform:translateX(-50%);
+    display:flex; align-items:center; justify-content:center; gap:14px; pointer-events:auto;
+    flex-wrap:wrap; max-width:calc(100vw - 24px); }
+  #presets{ display:flex; gap:7px; }
+  .thumb{ width:38px; height:38px; border:1px solid #262630; border-radius:6px; cursor:pointer;
+    background:#0e0e13; transition:border-color .15s, transform .12s; }
+  .thumb:hover{ border-color:#565644; transform:translateY(-2px); }
+  .thumb.on{ border-color:var(--ink); }
+  #btns{ display:flex; gap:6px; }
+  .btn{ pointer-events:auto; cursor:pointer; border:1px solid #262630; background:#0e0e13; color:var(--ink);
+    border-radius:6px; padding:8px 11px; font:inherit; letter-spacing:.06em; transition:border-color .15s,color .15s; }
+  .btn:hover{ border-color:#565644; }
+  .btn.on{ border-color:var(--ink); color:#fff; }
+  .btn.rec.on{ border-color:#e5484d; color:#ff6b6f; }
+  #help{ bottom:16px; left:18px; color:var(--dim); font-size:10px; letter-spacing:.08em; line-height:1.7; }
+  #help kbd{ color:var(--ink); background:#15151b; border:1px solid #262630; border-radius:3px; padding:0 4px; }
+  #helpm{ display:none; top:52px; left:0; right:0; text-align:center; color:var(--dim);
+    font-size:11px; letter-spacing:.12em; }
+  #toast{ left:50%; top:50%; transform:translate(-50%,-50%); background:rgba(20,20,26,.92);
+    border:1px solid #262630; border-radius:6px; padding:8px 14px; color:var(--ink);
+    font-size:11px; letter-spacing:.06em; opacity:0; transition:opacity .3s; }
+  #toast.show{ opacity:1; }
+  @media (max-width:720px){ #help,#title span{ display:none; } #helpm{ display:block; } }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c"></canvas></div>
+<div class="hud" id="title"><b>QUAVER</b><span>chladni cymatics · sand flees to silence</span></div>
+<div class="hud" id="readout"><b id="mn">5,4</b><span id="hz">— Hz</span></div>
+<div id="dock">
+  <div id="presets"></div>
+  <div id="btns">
+    <button class="btn" id="bSweep" title="Auto-cycle modes (S)">sweep</button>
+    <button class="btn" id="bAudio" title="Hear the plate sing (A)">audio</button>
+    <button class="btn" id="bNode" title="Toggle nodal answer-key (N)">nodes</button>
+    <button class="btn" id="bPal" title="Cycle palettes (C)">palette</button>
+    <button class="btn" id="bShake" title="Re-scatter sand (Space)">shake</button>
+    <button class="btn rec" id="bRec" title="Record WebM (R)">rec</button>
+    <button class="btn" id="bShot" title="Save PNG (P)">png</button>
+  </div>
+</div>
+<div class="hud" id="helpm">drag the plate to tune</div>
+<div class="hud" id="toast"></div>
+<div class="hud" id="help">
+  <kbd>←→</kbd> m &nbsp; <kbd>↑↓</kbd> n &nbsp; <kbd>drag</kbd> tune &nbsp; <kbd>space</kbd> shake<br>
+  <kbd>S</kbd> sweep &nbsp; <kbd>A</kbd> audio &nbsp; <kbd>N</kbd> nodes &nbsp; <kbd>C</kbd> palette
+</div>
+<script>
+"use strict";
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+
+// ---- palettes: plate background + sand + node underlay ---------------------
+const PALETTES = [
+  { id:'noir',  plate:'#0c0c11', sand:[244,241,233], node:'rgba(120,116,150,.5)' },
+  { id:'ember', plate:'#16090a', sand:[255,150, 84], node:'rgba(150, 70, 40,.5)' },
+  { id:'ocean', plate:'#061019', sand:[130,222,255], node:'rgba( 60,120,150,.5)' },
+];
+// famous (m,n) Chladni modes for the preset strip
+const PRESETS = [[1,2],[2,3],[3,4],[4,5],[5,6],[1,4],[3,7],[6,7]];
+
+// ---- state (URL-serialized) ------------------------------------------------
+const S = { m:5, n:4, count:4000, seed:7, pal:0 };
+function readHash(){
+  const p = new URLSearchParams(location.hash.slice(1));
+  const gi=(k,d,lo,hi)=>{ const v=parseInt(p.get(k)); return Number.isFinite(v)?Math.max(lo,Math.min(hi,v)):d; };
+  S.m=gi('m',S.m,1,12); S.n=gi('n',S.n,1,12);
+  S.count=gi('c',S.count,500,6000); S.seed=gi('s',S.seed,0,99999);
+  S.pal=gi('p',S.pal,0,PALETTES.length-1);
+}
+let hashTimer=0;
+function writeHash(){
+  clearTimeout(hashTimer);
+  hashTimer=setTimeout(()=>{
+    const h=`m=${S.m}&n=${S.n}&c=${S.count}&s=${S.seed}&p=${S.pal}`;
+    history.replaceState(null,'','#'+h);
+  },250);
+}
+
+// ---- seeded RNG (mulberry32) ----------------------------------------------
+function rng(seed){ let a=seed>>>0; return ()=>{ a|=0; a=a+0x6D2B79F5|0;
+  let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+// ---- Chladni field u(x,y) and its gradient, x,y in [0,1] -------------------
+const PI=Math.PI;
+function field(x,y,m,n){
+  const a=PI*x, b=PI*y;
+  return Math.cos(n*a)*Math.cos(m*b) - Math.cos(m*a)*Math.cos(n*b);
+}
+function gradX(x,y,m,n){
+  const a=PI*x, b=PI*y;
+  return PI*(-n*Math.sin(n*a)*Math.cos(m*b) + m*Math.sin(m*a)*Math.cos(n*b));
+}
+function gradY(x,y,m,n){
+  const a=PI*x, b=PI*y;
+  return PI*(-m*Math.cos(n*a)*Math.sin(m*b) + n*Math.cos(m*a)*Math.sin(n*b));
+}
+
+// ---- grains ----------------------------------------------------------------
+let gx,gy;              // positions in [0,1]
+function seedGrains(){
+  const r=rng(S.seed*2654435761 ^ 0x9e37);
+  gx=new Float32Array(S.count); gy=new Float32Array(S.count);
+  for(let i=0;i<S.count;i++){ gx[i]=r(); gy[i]=r(); }
+}
+
+// live-interpolated mode so figures morph instead of teleport
+let cm=S.m, cn=S.n;
+
+// ---- layout / DPR ----------------------------------------------------------
+let plate=0, ox=0, oy=0, dpr=1;
+function resize(){
+  dpr=Math.min(window.devicePixelRatio||1,2);
+  const w=innerWidth, h=innerHeight;
+  cv.width=w*dpr; cv.height=h*dpr; cv.style.width=w+'px'; cv.style.height=h+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  plate=Math.min(w,h)-Math.min(160,w*0.14);
+  plate=Math.max(240,plate);
+  ox=(w-plate)/2; oy=(h-plate)/2;
+}
+addEventListener('resize',resize);
+
+// ---- nodal underlay via marching squares (recomputed on mode change) -------
+const GS=90;                        // contour grid resolution
+let nodeSegs=[];                    // [x0,y0,x1,y1] in [0,1]
+let lastNM=-1,lastNN=-1;
+function buildNodes(m,n){
+  const step=1/GS, segs=[];
+  const f=new Float32Array((GS+1)*(GS+1));
+  for(let j=0;j<=GS;j++) for(let i=0;i<=GS;i++) f[j*(GS+1)+i]=field(i*step,j*step,m,n);
+  const at=(i,j)=>f[j*(GS+1)+i];
+  const ip=(va,vb,pa,pb)=>pa+(pb-pa)*(va/(va-vb));   // zero-crossing interpolation
+  for(let j=0;j<GS;j++) for(let i=0;i<GS;i++){
+    const x0=i*step,y0=j*step,x1=x0+step,y1=y0+step;
+    const a=at(i,j),b=at(i+1,j),c=at(i+1,j+1),d=at(i,j+1);
+    let idx=(a>0?8:0)|(b>0?4:0)|(c>0?2:0)|(d>0?1:0);
+    if(idx===0||idx===15) continue;
+    const T=[x0+ip(a,b,0,step),y0], R=[x1,y0+ip(b,c,0,step)],
+          B=[x0+ip(d,c,0,step),y1], L=[x0,y0+ip(a,d,0,step)];
+    const push=(p,q)=>segs.push(p[0],p[1],q[0],q[1]);
+    switch(idx){
+      case 1: case 14: push(L,B); break;
+      case 2: case 13: push(B,R); break;
+      case 3: case 12: push(L,R); break;
+      case 4: case 11: push(T,R); break;
+      case 6: case 9:  push(T,B); break;
+      case 7: case 8:  push(T,L); break;
+      case 5:  push(T,L); push(B,R); break;
+      case 10: push(T,R); push(L,B); break;
+    }
+  }
+  nodeSegs=segs; lastNM=m; lastNN=n;
+}
+
+// ---- audio (gesture-gated sine at the mode's pitch) ------------------------
+let actx=null, osc=null, gain=null, audioOn=false;
+function modeHz(m,n){ return Math.round(140 + 34*(m*m+n*n)); } // pleasant audible mapping
+function toggleAudio(force){
+  audioOn = force!==undefined ? force : !audioOn;
+  document.getElementById('bAudio').classList.toggle('on',audioOn);
+  if(audioOn){
+    if(!actx){ actx=new (window.AudioContext||window.webkitAudioContext)();
+      osc=actx.createOscillator(); gain=actx.createGain();
+      osc.type='sine'; gain.gain.value=0; osc.connect(gain); gain.connect(actx.destination); osc.start(); }
+    if(actx.state==='suspended') actx.resume();
+    gain.gain.cancelScheduledValues(actx.currentTime);
+    gain.gain.setTargetAtTime(0.06, actx.currentTime, 0.05);   // click-free ramp
+  } else if(gain){ gain.gain.setTargetAtTime(0, actx.currentTime, 0.05); }
+}
+function updateAudio(){
+  if(audioOn&&osc) osc.frequency.setTargetAtTime(modeHz(cm,cn), actx.currentTime, 0.08);
+}
+
+// ---- recording -------------------------------------------------------------
+let rec=null, chunks=[], recTimer=0, recStart=0;
+function toggleRec(){
+  const b=document.getElementById('bRec');
+  if(rec){ rec.stop(); return; }
+  // Safari & others: no MediaRecorder/WebM -> fall back to a PNG snapshot
+  if(!cv.captureStream||!window.MediaRecorder){ snapshot(); return; }
+  chunks=[];
+  const mime=['video/webm;codecs=vp9','video/webm'].find(t=>MediaRecorder.isTypeSupported(t));
+  if(!mime){ snapshot(); return; }
+  try{ rec=new MediaRecorder(cv.captureStream(30),{mimeType:mime,videoBitsPerSecond:6e6}); }
+  catch(err){ rec=null; snapshot(); return; }
+  rec.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data); };
+  rec.onstop=()=>{ const u=URL.createObjectURL(new Blob(chunks,{type:'video/webm'}));
+    const name=`quaver-${S.m}-${S.n}.webm`; dl(u,name); URL.revokeObjectURL(u); rec=null;
+    clearInterval(recTimer); b.textContent='rec'; b.classList.remove('on'); toast('saved '+name); };
+  rec.start(); b.classList.add('on');
+  recStart=performance.now();
+  const tick=()=>{ const s=Math.floor((performance.now()-recStart)/1000);
+    b.textContent=`rec ${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; };
+  tick(); recTimer=setInterval(tick,500);
+}
+function snapshot(){ const name=`quaver-${S.m}-${S.n}.png`; dl(cv.toDataURL('image/png'),name); toast('saved '+name); }
+let toastTimer=0;
+function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),1600); }
+function dl(href,name){ const a=document.createElement('a'); a.href=href; a.download=name; a.click(); }
+
+// ---- input -----------------------------------------------------------------
+let sweeping=false, sweepT=0;
+function bump(dm,dn){ S.m=clamp(S.m+dm); S.n=clamp(S.n+dn); onMode(); }
+const clamp=v=>Math.max(1,Math.min(12,v));
+function onMode(){ if(S.m===S.n) S.n=clamp(S.n+1); seedGrains(); writeHash(); refreshPresetSel(); readoutMN(); }
+function readoutMN(){ document.getElementById('mn').textContent=`${S.m},${S.n}`; }
+
+addEventListener('keydown',e=>{
+  if(e.ctrlKey||e.metaKey||e.altKey) return;   // leave browser/OS shortcuts alone
+  const k=e.key;
+  if(k==='ArrowRight'){ bump(1,0); } else if(k==='ArrowLeft'){ bump(-1,0); }
+  else if(k==='ArrowUp'){ bump(0,1); } else if(k==='ArrowDown'){ bump(0,-1); }
+  else if(k===' '){ S.seed=(S.seed+1)%99999; seedGrains(); writeHash(); }
+  else if(k==='s'||k==='S'){ toggleSweep(); }
+  else if(k==='a'||k==='A'){ toggleAudio(); }
+  else if(k==='n'||k==='N'){ toggleNodes(); }
+  else if(k==='c'||k==='C'){ S.pal=(S.pal+1)%PALETTES.length; applyPalette(); writeHash(); }
+  else if(k==='p'||k==='P'){ snapshot(); }
+  else if(k==='r'||k==='R'){ toggleRec(); }
+  else return;
+  e.preventDefault();
+},{passive:false});
+
+// drag on the plate to tune (x→m, y→n)
+let dragging=false;
+function pt(e){ const t=e.touches?e.touches[0]:e; return [t.clientX,t.clientY]; }
+function tune(e){
+  const [px,py]=pt(e);
+  const nx=(px-ox)/plate, ny=(py-oy)/plate;
+  if(nx<-.1||nx>1.1||ny<-.1||ny>1.1) return;
+  S.m=clamp(Math.round(1+nx*11)); S.n=clamp(Math.round(1+(1-ny)*11)); onMode();
+}
+cv.addEventListener('pointerdown',e=>{ dragging=true; cv.classList.add('grabbing'); sweeping&&toggleSweep(); tune(e); });
+addEventListener('pointermove',e=>{ if(dragging) tune(e); });
+addEventListener('pointerup',()=>{ dragging=false; cv.classList.remove('grabbing'); });
+
+// buttons — blur after each click so a later Space/Enter shortcut can't re-fire it
+const $=id=>document.getElementById(id);
+function wire(id,fn){ const el=$(id); el.onclick=()=>{ fn(); el.blur(); }; }
+wire('bShake',()=>{ S.seed=(S.seed+1)%99999; seedGrains(); writeHash(); });
+wire('bSweep',toggleSweep);
+wire('bAudio',()=>toggleAudio());
+wire('bNode',toggleNodes);
+wire('bPal',()=>{ S.pal=(S.pal+1)%PALETTES.length; applyPalette(); writeHash(); });
+wire('bRec',toggleRec);
+wire('bShot',snapshot);
+function toggleSweep(){ sweeping=!sweeping; $('bSweep').classList.toggle('on',sweeping); }
+let showNodes=true;
+function toggleNodes(){ showNodes=!showNodes; $('bNode').classList.toggle('on',showNodes); }
+
+// preset strip (each thumbnail draws its own nodal figure)
+function buildPresets(){
+  const wrap=$('presets');
+  PRESETS.forEach(([m,n],i)=>{
+    const cn2=document.createElement('canvas'); cn2.width=cn2.height=38; cn2.className='thumb';
+    cn2.dataset.i=i; cn2.title=`mode ${m},${n}`;
+    const c2=cn2.getContext('2d');
+    c2.fillStyle='#0e0e13'; c2.fillRect(0,0,38,38);
+    c2.fillStyle='rgba(233,230,223,.85)';
+    for(let y=1;y<37;y++) for(let x=1;x<37;x++){
+      if(Math.abs(field(x/38,y/38,m,n))<0.06) c2.fillRect(x,y,1,1);
+    }
+    cn2.onclick=()=>{ sweeping&&toggleSweep(); S.m=m; S.n=n; onMode(); };
+    wrap.appendChild(cn2);
+  });
+}
+function refreshPresetSel(){
+  document.querySelectorAll('.thumb').forEach((t,i)=>{
+    const [m,n]=PRESETS[i]; t.classList.toggle('on', m===S.m && n===S.n);
+  });
+}
+function applyPalette(){ document.body.style.background=PALETTES[S.pal].plate; }
+
+// ---- main loop -------------------------------------------------------------
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(0.05,(now-last)/1000); last=now;
+
+  // sweep: slowly wander the mode target
+  if(sweeping){ sweepT+=dt;
+    const tm=clamp(Math.round(3.5+2.5*Math.sin(sweepT*0.22)));
+    const tn=clamp(Math.round(4.5+2.5*Math.cos(sweepT*0.17)));
+    if((tm!==S.m||tn!==S.n)&&tm!==tn){ S.m=tm; S.n=tn; writeHash(); refreshPresetSel(); readoutMN(); }
+  }
+  // interpolate live mode so grains flow between figures
+  cm+=(S.m-cm)*Math.min(1,dt*3.2); cn+=(S.n-cn)*Math.min(1,dt*3.2);
+
+  const P=PALETTES[S.pal], [sr,sg,sb]=P.sand;
+  ctx.fillStyle=P.plate; ctx.fillRect(0,0,innerWidth,innerHeight);
+
+  // nodal underlay (answer key)
+  if(showNodes){
+    const rm=Math.round(cm), rn=Math.round(cn);
+    if(rm!==lastNM||rn!==lastNN) buildNodes(rm,rn);
+    ctx.strokeStyle=P.node; ctx.lineWidth=1; ctx.beginPath();
+    for(let i=0;i<nodeSegs.length;i+=4){
+      ctx.moveTo(ox+nodeSegs[i]*plate, oy+nodeSegs[i+1]*plate);
+      ctx.lineTo(ox+nodeSegs[i+2]*plate, oy+nodeSegs[i+3]*plate);
+    }
+    ctx.stroke();
+  }
+
+  // physics + render
+  const N=gx.length, jitter=0.018, stepK=0.09;
+  for(let i=0;i<N;i++){
+    let x=gx[i], y=gy[i];
+    const u=field(x,y,cm,cn);
+    const gxv=gradX(x,y,cm,cn), gyv=gradY(x,y,cm,cn);
+    const gm=gxv*gxv+gyv*gyv+1e-4;
+    const amp=Math.abs(u);                       // local vibration amplitude
+    // descend u^2 toward nodal lines (step capped so thin low-gradient annuli
+    // near antinodes can't fling a grain off the plate)
+    const s=stepK*u/gm, maxStep=0.05;
+    let dx=-s*gxv, dy=-s*gyv;
+    dx=dx<-maxStep?-maxStep:dx>maxStep?maxStep:dx;
+    dy=dy<-maxStep?-maxStep:dy>maxStep?maxStep:dy;
+    x+=dx; y+=dy;
+    // jitter scales with amplitude: antinodes shake, nodes settle
+    const j=jitter*amp;
+    x+=(Math.random()-0.5)*j; y+=(Math.random()-0.5)*j;
+    // keep on plate: reflect, then hard-clamp so no grain can ever escape [0,1]
+    if(x<0)x=-x; else if(x>1)x=2-x;
+    if(y<0)y=-y; else if(y>1)y=2-y;
+    x=x<0?0:x>1?1:x; y=y<0?0:y>1?1:y;
+    gx[i]=x; gy[i]=y;
+
+    // color/opacity by settledness: settled(low amp)=opaque sand, shaken=faint
+    const settle=1-Math.min(1,amp*1.4);
+    const alpha=0.28+0.72*settle*settle;
+    ctx.fillStyle=`rgba(${sr},${sg},${sb},${alpha.toFixed(3)})`;
+    const px=ox+x*plate, py=oy+y*plate, sz=settle>0.55?1.6:1.1;
+    ctx.fillRect(px,py,sz,sz);
+  }
+
+  // subtle plate border
+  ctx.strokeStyle='rgba(255,255,255,.05)'; ctx.lineWidth=1;
+  ctx.strokeRect(ox-.5,oy-.5,plate+1,plate+1);
+
+  updateAudio();
+  requestAnimationFrame(frame);
+}
+
+// ---- boot ------------------------------------------------------------------
+readHash(); resize(); seedGrains(); buildPresets();
+applyPalette(); refreshPresetSel(); readoutMN();
+$('bNode').classList.add('on');
+setInterval(()=>{ document.getElementById('hz').textContent=modeHz(cm,cn)+' Hz'; },120);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

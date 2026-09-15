@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FireCalc — Financial Independence / Retire Early Calculator</title>
+<meta name="description" content="Find your FIRE number from the safe-withdrawal rate, estimate years to financial independence, and see your savings rate. 100% offline, nothing leaves your browser.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('firecalc-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#10b981;
+    --bg:#f2f8f5; --card:#ffffff; --fg:#12201a; --muted:#5a6b63; --line:#dceae3; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#0a1310; --card:#111d18; --fg:#e9f5ef; --muted:#8aa398; --line:#1e2c25; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:680px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#047857);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:680px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .field{margin-bottom:14px}
+  .field:last-child{margin-bottom:0}
+  input{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem}
+  .big{font-size:2.6rem;font-weight:800;color:var(--c);letter-spacing:-1px}
+  .lbl{color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.04em}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
+  .stat{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px;text-align:center}
+  .stat .v{font-size:1.5rem;font-weight:800}
+  .stat .k{color:var(--muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
+  .bar{height:10px;border-radius:6px;background:var(--line);overflow:hidden;margin-top:16px}
+  .bar > div{height:100%;background:var(--c);border-radius:6px;transition:width .2s}
+  .prog{color:var(--muted);font-size:.85rem;text-align:center;margin-top:8px}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:680px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.8rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🔥</div>
+    <div><h1>FireCalc</h1><div class="sub">Financial independence planner</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid2">
+      <div class="field"><label for="expenses">Annual spending in retirement</label><input type="number" id="expenses" value="40000" min="0" step="1000"></div>
+      <div class="field"><label for="income">Annual take-home income</label><input type="number" id="income" value="80000" min="0" step="1000"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label for="current">Current invested savings</label><input type="number" id="current" value="100000" min="0" step="1000"></div>
+      <div class="field"><label for="contrib">Annual savings (contribution)</label><input type="number" id="contrib" value="30000" min="0" step="1000"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label for="ret">Expected real return %</label><input type="number" id="ret" value="5" step="0.5"></div>
+      <div class="field"><label for="swr">Safe withdrawal rate %</label><input type="number" id="swr" value="4" step="0.1"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="lbl">Your FIRE number</div>
+    <div class="big" id="fireNum">—</div>
+    <div class="stats">
+      <div class="stat"><div class="v" id="years">—</div><div class="k">Years to FI</div></div>
+      <div class="stat"><div class="v" id="rate">—</div><div class="k">Savings rate</div></div>
+    </div>
+    <div class="bar"><div id="prog" style="width:0"></div></div>
+    <div class="prog" id="progTxt"></div>
+    <div class="err" id="err"></div>
+  </div>
+</main>
+<footer>
+  The FIRE number is annual spending ÷ withdrawal rate (the "4% rule"). Years-to-FI assumes a constant real return and contribution. Estimates only — <strong>not financial advice</strong>. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/fire-calc">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  // Nest-egg needed to fund annual spending at a given withdrawal rate.
+  function fireNumber(annualExpenses, withdrawalRatePct){
+    const e = Number(annualExpenses), w = Number(withdrawalRatePct);
+    if(!Number.isFinite(e) || !Number.isFinite(w)) throw new Error('enter numbers');
+    if(e < 0) throw new Error('spending must be ≥ 0');
+    if(w <= 0) throw new Error('withdrawal rate must be > 0');
+    return e / (w / 100);
+  }
+
+  // Fraction of income saved.
+  function savingsRate(income, expenses){
+    const i = Number(income), e = Number(expenses);
+    if(!Number.isFinite(i) || !Number.isFinite(e)) throw new Error('enter numbers');
+    if(i <= 0) throw new Error('income must be > 0');
+    return (i - e) / i;
+  }
+
+  // Years until invested savings + contributions reach the target,
+  // compounding annually at a constant real return (contributions at year end).
+  function yearsToFI(current, contribution, returnPct, target){
+    const p = Number(current), c = Number(contribution), t = Number(target);
+    if(![p, c, returnPct, t].every(Number.isFinite)) throw new Error('enter numbers');
+    if(t <= 0) throw new Error('target must be > 0');
+    if(p >= t) return 0;
+    const r = Number(returnPct) / 100;
+    if(r === 0){
+      if(c <= 0) return Infinity;
+      return (t - p) / c;
+    }
+    const k = c / r;                     // annuity constant
+    const x = (t + k) / (p + k);         // (1+r)^n
+    if(!(x > 0)) return Infinity;
+    const n = Math.log(x) / Math.log(1 + r);
+    return Number.isFinite(n) && n > 0 ? n : (n <= 0 ? 0 : Infinity);
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('fireNum')){
+    const $ = id => document.getElementById(id);
+    const money = n => '$' + Math.round(n).toLocaleString('en-US');
+
+    function render(){
+      try{
+        const expenses = $('expenses').value, income = $('income').value;
+        const current = $('current').value, contrib = $('contrib').value;
+        const ret = $('ret').value, swr = $('swr').value;
+
+        const target = fireNumber(expenses, swr);
+        $('fireNum').textContent = money(target);
+
+        const yrs = yearsToFI(current, contrib, ret, target);
+        $('years').textContent = yrs === Infinity ? '∞' : (yrs === 0 ? 'Reached!' : yrs.toFixed(1));
+
+        let sr;
+        try{ sr = savingsRate(income, expenses); $('rate').textContent = (sr * 100).toFixed(0) + '%'; }
+        catch(_){ $('rate').textContent = '—'; }
+
+        const pct = Math.max(0, Math.min(100, (Number(current) / target) * 100));
+        $('prog').style.width = pct + '%';
+        $('progTxt').textContent = `You're ${pct.toFixed(1)}% of the way to financial independence.`;
+        $('err').textContent = '';
+      }catch(e){
+        $('fireNum').textContent = '—'; $('years').textContent = '—'; $('rate').textContent = '—';
+        $('prog').style.width = '0'; $('progTxt').textContent = '';
+        $('err').textContent = e.message;
+      }
+    }
+    [...document.querySelectorAll('input')].forEach(el => el.addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('firecalc-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { fireNumber, savingsRate, yearsToFI };
+</script>
+</body>
+</html>

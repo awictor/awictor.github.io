@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAC Rate 💨 — Scuba Air Consumption &amp; Gas Planning</title>
+<meta name="description" content="Work out your surface air consumption (SAC), breathing rate in cubic feet per minute, and how long a tank lasts at depth. Offline, private, single file.">
+<style>
+:root{
+  --c:#0891b2;
+  --bg:#f6f8fa; --card:#fff; --fg:#1a1f24; --muted:#5a6470; --line:#e2e6ea;
+}
+[data-theme="dark"]{
+  --bg:#0b1016; --card:#141b23; --fg:#e6edf3; --muted:#8b98a6; --line:#232d38;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.55;transition:background .2s,color .2s}
+.wrap{max-width:640px;margin:0 auto;padding:24px 18px 60px}
+header{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.logo{font-size:2.2rem;line-height:1}
+h1{font-size:1.5rem;margin:0}
+.tag{color:var(--muted);margin:2px 0 22px;font-size:.98rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:18px}
+label{display:block;font-weight:600;margin:14px 0 6px;font-size:.92rem}
+input{width:100%;padding:11px 12px;font-size:1rem;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--fg)}
+input:focus{outline:2px solid var(--c);border-color:var(--c)}
+.out{margin-top:20px;padding:18px;border-radius:12px;background:linear-gradient(135deg,var(--c)20,transparent);border:1px solid var(--c)}
+.big{font-size:2rem;font-weight:700;color:#0e7490}
+[data-theme="dark"] .big{color:#67e8f9}
+.sub{color:var(--muted);font-size:.9rem;margin-top:4px}
+table{width:100%;border-collapse:collapse;margin-top:8px;font-size:.95rem}
+th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:600}
+td:last-child{text-align:right;font-weight:700}
+.explain{font-size:.9rem;color:var(--muted)}
+.explain h2{font-size:1rem;color:var(--fg);margin:0 0 8px}
+.explain li{margin:4px 0}
+footer{text-align:center;color:var(--muted);font-size:.85rem;margin-top:30px}
+footer a{color:var(--c);text-decoration:none}
+.theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:7px 11px;cursor:pointer;font-size:1.1rem}
+.note{background:var(--bg);border:1px dashed var(--c);border-radius:9px;padding:10px 12px;font-size:.86rem;color:var(--muted);margin-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <span class="logo">💨</span>
+  <h1>SAC Rate</h1>
+  <button class="theme" id="themeBtn" title="Toggle theme">🌙</button>
+</header>
+<p class="tag">Surface air consumption, breathing volume, and gas duration at depth.</p>
+
+<div class="card">
+  <label for="psi">Gas used (psi)</label>
+  <input type="number" id="psi" value="600" min="1" step="10">
+
+  <label for="time">Time at depth (minutes)</label>
+  <input type="number" id="time" value="10" min="0.1" step="1">
+
+  <label for="depth">Average depth (feet)</label>
+  <input type="number" id="depth" value="33" min="0" step="1">
+
+  <label for="tank">Tank size (cu ft) / service pressure (psi)</label>
+  <input type="number" id="tankv" value="80" min="1" step="1" placeholder="cu ft">
+  <input type="number" id="tankp" value="3000" min="100" step="50" placeholder="psi" style="margin-top:8px">
+
+  <div class="out">
+    <div class="big" id="sacOut">—</div>
+    <div class="sub">Surface air consumption (psi/min)</div>
+    <table>
+      <tr><th>Detail</th><th>Value</th></tr>
+      <tr><td>Breathing rate (RMV)</td><td id="rmvOut">—</td></tr>
+      <tr><td>Atmospheres at depth</td><td id="ataOut">—</td></tr>
+      <tr><td>Full tank duration here</td><td id="durOut">—</td></tr>
+    </table>
+    <div class="note" id="note"></div>
+  </div>
+</div>
+
+<div class="card explain">
+  <h2>How it works</h2>
+  <ul>
+    <li>Every 33 ft of seawater adds one atmosphere, so at depth you breathe gas faster in proportion to the pressure.</li>
+    <li><strong>SAC</strong> normalizes your consumption back to the surface: SAC = psi used &divide; (minutes &times; ATA). It&#39;s a personal constant you can plan any dive with.</li>
+    <li>Multiply by your tank factor (cu ft &divide; service psi) to get <strong>RMV</strong> — your true breathing volume in cubic feet per minute.</li>
+    <li>Duration at a new depth = tank psi &divide; (SAC &times; ATA). Deeper means shorter, fast.</li>
+    <li>Measure SAC on a relaxed, flat dive; stress and work raise it. Always plan gas with a reserve.</li>
+  </ul>
+</div>
+
+<footer>Part of the <a href="https://awictor.github.io/toolkit/" target="_blank" rel="noopener">Toolkit</a> · offline &amp; private · no data leaves your device</footer>
+</div>
+
+<script>
+function ata(depthFt){
+  if(!(depthFt >= 0)) throw new Error("depth must be zero or more");
+  return depthFt / 33 + 1;
+}
+function sacRate(psiUsed, timeMin, depthFt){
+  if(!(psiUsed >= 0)) throw new Error("gas used must be zero or more");
+  if(!(timeMin > 0)) throw new Error("time must be positive");
+  return psiUsed / (timeMin * ata(depthFt));
+}
+function rmv(sacPsiPerMin, tankCuft, servicePsi){
+  if(!(servicePsi > 0)) throw new Error("service pressure must be positive");
+  return sacPsiPerMin * tankCuft / servicePsi;
+}
+function durationAtDepth(psiAvailable, sacPsiPerMin, depthFt){
+  if(!(sacPsiPerMin > 0)) throw new Error("SAC must be positive");
+  return psiAvailable / (sacPsiPerMin * ata(depthFt));
+}
+
+function render(){
+  var psi = parseFloat(document.getElementById("psi").value);
+  var time = parseFloat(document.getElementById("time").value);
+  var depth = parseFloat(document.getElementById("depth").value);
+  var tankv = parseFloat(document.getElementById("tankv").value);
+  var tankp = parseFloat(document.getElementById("tankp").value);
+  var sO = document.getElementById("sacOut"), rO = document.getElementById("rmvOut"),
+      aO = document.getElementById("ataOut"), dO = document.getElementById("durOut"),
+      note = document.getElementById("note");
+  try{
+    var sac = sacRate(psi, time, depth);
+    sO.textContent = (Math.round(sac * 100) / 100) + " psi/min";
+    rO.textContent = (Math.round(rmv(sac, tankv, tankp) * 1000) / 1000) + " cu ft/min";
+    aO.textContent = (Math.round(ata(depth) * 100) / 100) + " ATA";
+    dO.textContent = Math.round(durationAtDepth(tankp, sac, depth)) + " min";
+    note.textContent = "Measure SAC when relaxed; always plan gas with a reserve.";
+  }catch(e){
+    sO.textContent = "—"; rO.textContent = "—"; aO.textContent = "—"; dO.textContent = "—";
+    note.textContent = "Enter gas used, a positive time, and depth.";
+  }
+}
+
+(function(){
+  if(typeof document === "undefined") return;
+  var th = localStorage.getItem("sacTheme") || "dark";
+  document.documentElement.setAttribute("data-theme", th);
+  var btn = document.getElementById("themeBtn");
+  btn.textContent = th === "dark" ? "☀️" : "🌙";
+  btn.addEventListener("click", function(){
+    var cur = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", cur);
+    localStorage.setItem("sacTheme", cur);
+    btn.textContent = cur === "dark" ? "☀️" : "🌙";
+  });
+  ["psi", "time", "depth", "tankv", "tankp"].forEach(function(id){
+    document.getElementById(id).addEventListener("input", render);
+  });
+  render();
+})();
+
+if(typeof module !== 'undefined') module.exports = { ata, sacRate, rmv, durationAtDepth };
+</script>
+</body>
+</html>

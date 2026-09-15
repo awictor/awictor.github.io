@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Freshet — watch rivers carve their watersheds</title>
+<style>
+  :root{
+    --bg:#0b1016; --panel:#131b24; --line:#243343; --ink:#e7eef5;
+    --dim:#8fa3b6; --accent:#37d0ff; --lock:#ff9b3d; --divide:#ff4b6e;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(1200px 700px at 70% -10%, #16222f 0%, var(--bg) 60%);
+    color:var(--ink);
+    font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    display:flex;flex-direction:column;align-items:center;
+    padding:18px 16px 28px;min-height:100%;
+  }
+  h1{font-size:20px;margin:0;letter-spacing:.3px;font-weight:650}
+  h1 .drop{color:var(--accent)}
+  .sub{color:var(--dim);font-size:12.5px;margin:2px 0 14px;text-align:center;max-width:820px}
+  .wrap{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;justify-content:center}
+  .stage{position:relative;border:1px solid var(--line);border-radius:10px;overflow:hidden;
+    box-shadow:0 18px 50px -20px #000;background:#04070b}
+  canvas#map{display:block;cursor:crosshair;max-width:100%;height:auto}
+  .hint{position:absolute;left:10px;bottom:8px;font-size:11px;color:#b9cbdc;
+    background:#04070bcc;padding:4px 8px;border-radius:6px;pointer-events:none;
+    border:1px solid #ffffff14;letter-spacing:.2px}
+  .bar{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;margin:12px 0 0;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;max-width:820px}
+  .bar label{color:var(--dim);font-size:12px;display:flex;align-items:center;gap:7px}
+  input[type=text]{width:120px;background:#0a121b;border:1px solid var(--line);color:var(--ink);
+    border-radius:6px;padding:5px 8px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+  input[type=range]{accent-color:var(--accent);width:130px}
+  button{background:#1b2836;border:1px solid #2c4258;color:var(--ink);border-radius:7px;
+    padding:6px 11px;font-size:12.5px;cursor:pointer;transition:.15s}
+  button:hover{background:#23384c;border-color:#3a556f}
+  button:active{transform:scale(.96)}
+  button[aria-busy=true]{opacity:.6;pointer-events:none}
+  button.on{background:var(--accent);color:#04121a;border-color:var(--accent);font-weight:650}
+  .aside{width:100%;max-width:300px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .aside h2{font-size:12px;text-transform:uppercase;letter-spacing:1.2px;color:var(--dim);margin:0 0 10px}
+  .stat{display:flex;justify-content:space-between;align-items:baseline;padding:5px 0;border-bottom:1px dashed #22303e}
+  .stat:last-of-type{border-bottom:none}
+  .stat .k{color:var(--dim);font-size:12px}
+  .stat .v{font-family:ui-monospace,Menlo,monospace;font-size:14px;font-weight:600}
+  .ord{display:inline-block;min-width:20px;text-align:center;border-radius:5px;padding:1px 6px;font-size:12px;color:#04121a;font-weight:700}
+  canvas#profile{width:100%;height:96px;margin-top:10px;background:#0a121b;border:1px solid var(--line);border-radius:7px}
+  .pcap{color:var(--dim);font-size:10.5px;margin-top:4px;text-align:center}
+  .cmp{margin-top:10px;font-size:12px;color:var(--dim);line-height:1.6}
+  .sw{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:middle;margin-right:5px}
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);
+    background:var(--accent);color:#04121a;font-weight:650;padding:9px 16px;border-radius:8px;
+    opacity:0;transition:.25s;pointer-events:none}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+  <h1>Fresh<span class="drop">et</span></h1>
+  <div class="sub">A seeded world carves its own rivers. Hover the terrain to flood the <b>entire upstream watershed</b> that drains through your cursor. <b>Click to lock</b> one basin, then hover another to reveal the drainage divide between them.</div>
+
+  <div class="wrap">
+    <div>
+      <div class="stage">
+        <canvas id="map" width="800" height="560"></canvas>
+        <div class="hint" id="hint">hover to reveal a watershed · click to lock/compare</div>
+      </div>
+      <div class="bar">
+        <label>seed <input type="text" id="seed" spellcheck="false"></label>
+        <label>sea level <input type="range" id="sea" min="0" max="70" value="30"><span class="v" id="seaval" style="min-width:54px;text-align:right">—</span></label>
+        <button id="regen">↻ regenerate</button>
+        <button id="strahler" aria-pressed="false">Strahler order</button>
+        <button id="flow" class="on" aria-pressed="true">flow ✦</button>
+        <button id="copy">copy link</button>
+      </div>
+    </div>
+
+    <div class="aside">
+      <h2>Watershed under cursor</h2>
+      <div class="stat"><span class="k">Basin area</span><span class="v" id="area">—</span></div>
+      <div class="stat"><span class="k">River length below</span><span class="v" id="len">—</span></div>
+      <div class="stat"><span class="k">Elevation</span><span class="v" id="elev">—</span></div>
+      <div class="stat"><span class="k">Strahler order</span><span class="v" id="sord">—</span></div>
+      <canvas id="profile" width="272" height="96"></canvas>
+      <div class="pcap">downstream profile · cursor → sea</div>
+      <div class="cmp" id="cmp"></div>
+    </div>
+  </div>
+  <div class="toast" id="toast">link copied</div>
+
+<script>
+"use strict";
+// ---------- grid config ----------
+const W = 200, H = 140, N = W*H, SC = 4;            // grid + display scale
+const CELL_KM = 0.09;                                // one cell edge, km
+const CELL_AREA = CELL_KM*CELL_KM;                   // km^2 per cell
+const SQ2 = Math.SQRT2;
+const canvas = document.getElementById('map'), ctx = canvas.getContext('2d');
+const prof = document.getElementById('profile'), pctx = prof.getContext('2d');
+// crisp rendering on HiDPI / OS display-scaling: backing store scaled by DPR,
+// all drawing done in logical (CSS) coordinates. CSS keeps aspect on small screens.
+const DPR = Math.min(3, window.devicePixelRatio || 1);
+const VIEW_W = W*SC, VIEW_H = H*SC;   // logical draw size (px)
+const PROF_W = 272, PROF_H = 96;      // logical profile size (px)
+canvas.style.width = VIEW_W+'px';     // CSS max-width:100% + height:auto scale this down responsively
+canvas.width = VIEW_W*DPR; canvas.height = VIEW_H*DPR; ctx.scale(DPR,DPR);
+prof.width = PROF_W*DPR; prof.height = PROF_H*DPR; pctx.scale(DPR,DPR);
+const terrain = document.createElement('canvas'); terrain.width=W; terrain.height=H;
+const tctx = terrain.getContext('2d'); const timg = tctx.createImageData(W,H);
+const overlay = document.createElement('canvas'); overlay.width=W; overlay.height=H;
+const octx = overlay.getContext('2d'); const oimg = octx.createImageData(W,H);
+
+// ---------- deterministic PRNG + value-noise fBm ----------
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function hashSeed(str){let h=2166136261>>>0;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
+function makeNoise(seed){
+  const smooth=t=>t*t*(3-2*t);
+  const lat=(x,y)=>{let h=Math.imul(x,374761393)+Math.imul(y,668265263)+Math.imul(seed|0,1013904223);
+    h=Math.imul(h^h>>>13,1274126177);return((h^h>>>16)>>>0)/4294967295;};
+  const v=(x,y)=>{const x0=Math.floor(x),y0=Math.floor(y),fx=smooth(x-x0),fy=smooth(y-y0);
+    const a=lat(x0,y0),b=lat(x0+1,y0),c=lat(x0,y0+1),d=lat(x0+1,y0+1);
+    return (a*(1-fx)+b*fx)*(1-fy)+(c*(1-fx)+d*fx)*fy;};
+  return (x,y)=>{let amp=1,f=1,s=0,n=0;for(let o=0;o<5;o++){s+=amp*v(x*f,y*f);n+=amp;amp*=0.5;f*=2;}return s/n;};
+}
+
+// ---------- state ----------
+let Ht = new Float32Array(N);      // terrain (for color/shade)
+let Hf = new Float32Array(N);      // depression-filled (for hydrology)
+let rec = new Int32Array(N);       // D8 receiver, -1 = outlet
+let acc = new Float32Array(N);     // flow accumulation (cell count)
+let ordr = new Uint16Array(N);     // Strahler order
+let donHead = new Int32Array(N);   // CSR donor lists
+let donNext = new Int32Array(N);
+let sortDesc = new Int32Array(N);  // cells by Hf descending
+let shade = new Float32Array(N);   // hillshade factor
+let seaLevel = 0.30, showStrahler=false, showFlow=true;
+let seedStr = "cascade";
+let hoverIdx = -1, lockIdx = -1;
+const visit = new Int32Array(N); let visStamp = 0;
+
+const nbx=[1,-1,0,0,1,1,-1,-1], nby=[0,0,1,-1,1,-1,1,-1];
+const ndist=[1,1,1,1,SQ2,SQ2,SQ2,SQ2];
+
+// ---------- pipeline ----------
+function build(seed){
+  const noise = makeNoise(hashSeed(seed));
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    let e = noise(x/W*3.2+0.5, y/H*3.2+0.5);
+    e = Math.pow(e,1.35);                              // sharpen ridges/valleys
+    const edge = Math.min(x,W-1-x,y,H-1-y)/22;         // gently lower the borders (drain off-map)
+    e -= 0.14*Math.max(0,1-edge);
+    Ht[y*W+x]=e;
+  }
+  // erosion nudge: carve valleys toward their lowest neighbour
+  const tmp=new Float32Array(N);
+  for(let pass=0;pass<2;pass++){
+    for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;let mn=Ht[i];
+      for(let k=0;k<8;k++){const nx=x+nbx[k],ny=y+nby[k];if(nx<0||ny<0||nx>=W||ny>=H)continue;
+        const h=Ht[ny*W+nx];if(h<mn)mn=h;}
+      tmp[i]=Ht[i]-0.09*(Ht[i]-mn);}
+    Ht.set(tmp);
+  }
+  fillSinks(); flowDir(); accumulate(); strahler(); hillshade();
+}
+
+// Priority-flood depression filling (Barnes 2014) with epsilon drainage slope
+function fillSinks(){
+  const EPS=1e-5, done=new Uint8Array(N);
+  const heapE=new Float64Array(N), heapI=new Int32Array(N); let hn=0;
+  const up=i=>{while(i>0){const p=i-1>>1;if(heapE[p]<=heapE[i])break;
+    [heapE[p],heapE[i]]=[heapE[i],heapE[p]];[heapI[p],heapI[i]]=[heapI[i],heapI[p]];i=p;}};
+  const down=()=>{let i=0;for(;;){let l=2*i+1,r=l+1,s=i;
+    if(l<hn&&heapE[l]<heapE[s])s=l;if(r<hn&&heapE[r]<heapE[s])s=r;if(s===i)break;
+    [heapE[s],heapE[i]]=[heapE[i],heapE[s]];[heapI[s],heapI[i]]=[heapI[i],heapI[s]];i=s;}};
+  const push=(e,i)=>{heapE[hn]=e;heapI[hn]=i;hn++;up(hn-1);};
+  const pop=()=>{const e=heapE[0],i=heapI[0];hn--;heapE[0]=heapE[hn];heapI[0]=heapI[hn];down();return[e,i];};
+  for(let x=0;x<W;x++){for(const y of [0,H-1]){const i=y*W+x;Hf[i]=Ht[i];done[i]=1;push(Ht[i],i);}}
+  for(let y=0;y<H;y++){for(const x of [0,W-1]){const i=y*W+x;if(done[i])continue;Hf[i]=Ht[i];done[i]=1;push(Ht[i],i);}}
+  while(hn){const [e,i]=pop();const x=i%W,y=(i/W)|0;
+    for(let k=0;k<8;k++){const nx=x+nbx[k],ny=y+nby[k];if(nx<0||ny<0||nx>=W||ny>=H)continue;
+      const j=ny*W+nx;if(done[j])continue;done[j]=1;
+      Hf[j]=Math.max(Ht[j],e+EPS);push(Hf[j],j);}}
+}
+function flowDir(){
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;
+    if(x===0||y===0||x===W-1||y===H-1){rec[i]=-1;continue;}
+    let best=-1,bestS=0;
+    for(let k=0;k<8;k++){const j=(y+nby[k])*W+(x+nbx[k]);
+      const s=(Hf[i]-Hf[j])/ndist[k];if(s>bestS){bestS=s;best=j;}}
+    rec[i]=best;}
+}
+function accumulate(){
+  for(let i=0;i<N;i++)sortDesc[i]=i;
+  sortDesc.sort((a,b)=>Hf[b]-Hf[a]);
+  acc.fill(1);
+  for(let s=0;s<N;s++){const i=sortDesc[s],r=rec[i];if(r>=0)acc[r]+=acc[i];}
+  // build donor CSR: process ascending so downstream is set; iterate any order
+  donHead.fill(-1);
+  for(let i=0;i<N;i++){const r=rec[i];if(r>=0){donNext[i]=donHead[r];donHead[r]=i;}else donNext[i]=-1;}
+}
+function strahler(){
+  ordr.fill(0);
+  // headwaters first (highest elevation) so all donors are resolved before a cell
+  for(let s=0;s<N;s++){const i=sortDesc[s];
+    let mx=0,cnt=0;
+    for(let d=donHead[i];d>=0;d=donNext[d]){const o=ordr[d];
+      if(o>mx){mx=o;cnt=1;}else if(o===mx)cnt++;}
+    ordr[i]=mx===0?1:(cnt>=2?mx+1:mx);}
+}
+function hillshade(){
+  const az=Math.PI*0.75, alt=Math.PI/4, Z=2.4;                 // NW light
+  const lx=Math.cos(alt)*Math.cos(az), ly=Math.cos(alt)*Math.sin(az), lz=Math.sin(alt);
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;
+    const xm=Math.max(0,x-1),xp=Math.min(W-1,x+1),ym=Math.max(0,y-1),yp=Math.min(H-1,y+1);
+    const dzdx=(Ht[y*W+xp]-Ht[y*W+xm])*Z, dzdy=(Ht[yp*W+x]-Ht[ym*W+x])*Z;
+    const nl=Math.hypot(dzdx,dzdy,1);
+    let s=(-dzdx*lx-dzdy*ly+lz)/nl;
+    shade[i]=0.55+0.85*Math.max(0,s);}
+}
+
+// ---------- colour ----------
+const ORDER_COLS=[[0,0,0],[92,196,255],[70,150,255],[86,120,255],[150,96,240],[220,80,180],[255,70,110],[255,60,60],[255,60,60]];
+function ramp(stops,t){t=Math.max(0,Math.min(1,t));
+  for(let k=1;k<stops.length;k++){const a=stops[k-1],b=stops[k];
+    if(t<=b[0]||k===stops.length-1){const f=(t-a[0])/(b[0]-a[0]||1);
+      return[a[1]+(b[1]-a[1])*f,a[2]+(b[2]-a[2])*f,a[3]+(b[3]-a[3])*f];}}
+}
+const LAND=[[0,60,110,60],[0.12,96,140,72],[0.35,150,168,98],[0.6,150,120,80],[0.82,120,96,78],[1,238,240,244]];
+function renderTerrain(){
+  const d=timg.data;
+  let maxA=1; for(let i=0;i<N;i++)if(acc[i]>maxA)maxA=acc[i];
+  const lmax=Math.log(maxA);
+  for(let i=0;i<N;i++){
+    let r,g,b; const h=Ht[i];
+    if(h<seaLevel){                                   // water: shallow → deep
+      const t=(seaLevel-h)/Math.max(0.001,seaLevel);
+      r=44-24*t; g=110-70*t; b=150-70*t;
+    }else{
+      const a=(h-seaLevel)/Math.max(0.001,1-seaLevel);
+      const c=ramp(LAND,a); const sh=shade[i];
+      r=c[0]*sh; g=c[1]*sh; b=c[2]*sh;
+    }
+    // streams: cells above a drainage threshold, weighted by log(acc)
+    if(showFlow && h>=seaLevel && acc[i]>18){
+      const w=Math.min(1,(Math.log(acc[i])-Math.log(18))/(lmax-Math.log(18)+.001));
+      let cr,cg,cb;
+      if(showStrahler){const o=Math.min(8,ordr[i]);const oc=ORDER_COLS[o];cr=oc[0];cg=oc[1];cb=oc[2];}
+      else{cr=70;cg=150+80*w;cb=255;}
+      const m=0.35+0.6*w;
+      r=r*(1-m)+cr*m; g=g*(1-m)+cg*m; b=b*(1-m)+cb*m;
+    }
+    const p=i*4; d[p]=r; d[p+1]=g; d[p+2]=b; d[p+3]=255;
+  }
+  tctx.putImageData(timg,0,0);
+}
+
+// ---------- upstream watershed ----------
+function upstream(start,tag){          // marks visit[]=tag for every cell draining through start
+  visStamp++;                          // (independent generation so we can compare two basins)
+  let count=0; const stack=[start]; visit[start]=visStamp; if(tag) tagArr[start]=tag;
+  while(stack.length){const i=stack.pop(); count++;
+    for(let d=donHead[i];d>=0;d=donNext[d]){if(visit[d]!==visStamp){visit[d]=visStamp;
+      if(tag) tagArr[d]=tag; stack.push(d);}}}
+  return count;
+}
+const tagArr = new Uint8Array(N);      // 1 = locked basin, 2 = hover basin
+function downstreamPath(start){        // follow receivers to the sea / map edge
+  const path=[start]; let i=start, guard=0;
+  while(rec[i]>=0 && Ht[i]>=seaLevel && guard++<N){i=rec[i];path.push(i);}
+  return path;
+}
+function reaches(from,target){         // does the flow path from `from` pass through `target`?
+  let i=from, g=0; while(i>=0 && g++<N){ if(i===target) return true; i=rec[i]; } return false;
+}
+
+// ---------- overlay (basins + divide) ----------
+function buildOverlay(){
+  const d=oimg.data; d.fill(0);
+  if(hoverIdx<0 && lockIdx<0){octx.putImageData(oimg,0,0);return;}
+  tagArr.fill(0);
+  let aCount=0,bCount=0;
+  if(lockIdx>=0) aCount=upstream(lockIdx,1);       // paints locked basin into tagArr as 1
+  if(hoverIdx>=0) bCount=upstream(hoverIdx,2);      // paints hover basin as 2 (overwrites overlap)
+  // paint
+  for(let i=0;i<N;i++){const t=tagArr[i];if(!t)continue;const p=i*4;
+    if(t===1){d[p]=255;d[p+1]=155;d[p+2]=61;d[p+3]=95;}     // locked = orange
+    else{d[p]=55;d[p+1]=208;d[p+2]=255;d[p+3]=100;}          // hover  = cyan
+  }
+  // divide: cells in one basin bordering the other → contested ridgeline.
+  // If one basin is contained in the other (shared trunk), it isn't a real divide → suppress.
+  let divideLen=0, nested=false;
+  if(lockIdx>=0 && hoverIdx>=0){
+    nested = reaches(hoverIdx,lockIdx) || reaches(lockIdx,hoverIdx);
+    if(!nested){
+      for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;const t=tagArr[i];if(!t)continue;
+        let ortho=false, diag=false;
+        for(let k=0;k<8;k++){const nx=x+nbx[k],ny=y+nby[k];if(nx<0||ny<0||nx>=W||ny>=H)continue;
+          const nt=tagArr[ny*W+nx];if(nt&&nt!==t){ k<4 ? ortho=true : diag=true; }}
+        if(ortho||diag){const p=i*4;d[p]=255;d[p+1]=75;d[p+2]=110;d[p+3]=210;
+          // count length on one side only (t===2) so a shared border isn't double-counted;
+          // weight a purely-diagonal contact by √2
+          if(t===2) divideLen += ortho ? 1 : SQ2;}}
+    }
+  }
+  octx.putImageData(oimg,0,0);
+  return {aCount,bCount,divideLen,nested};
+}
+
+// ---------- animated flow particles ----------
+const PN=340; const parts=new Int32Array(PN); const plife=new Int32Array(PN);
+let sources=[];
+function initParticles(){
+  sources=[];
+  for(let i=0;i<N;i++)if(acc[i]>18 && acc[i]<120 && Ht[i]>=seaLevel)sources.push(i);
+  if(!sources.length)for(let i=0;i<N;i++)if(acc[i]>18)sources.push(i);
+  for(let p=0;p<PN;p++){parts[p]=sources.length?sources[(Math.random()*sources.length)|0]:0;plife[p]=(Math.random()*80)|0;}
+}
+let frame=0;
+function stepParticles(){
+  frame++;
+  if(!showFlow) return;
+  for(let p=0;p<PN;p++){
+    let i=parts[p];
+    if(frame%2===0){                                    // ~half speed for legible cadence
+      if(rec[i]<0 || Ht[i]<seaLevel || plife[p]>260){
+        parts[p]=sources.length?sources[(Math.random()*sources.length)|0]:0;plife[p]=0;continue;}
+      parts[p]=rec[i]; plife[p]++;
+    }
+  }
+}
+function drawParticles(){
+  if(!showFlow) return;
+  for(let p=0;p<PN;p++){const i=parts[p];if(acc[i]<=18||Ht[i]<seaLevel)continue;
+    const x=(i%W)*SC, y=((i/W)|0)*SC;
+    const pulse=0.55+0.45*Math.sin((frame*0.13)+p);
+    ctx.globalAlpha=0.35+0.5*pulse;
+    ctx.fillStyle= showStrahler ? '#fff' : '#dffaff';
+    const r=1.5+Math.min(2.4,Math.log(acc[i])*0.4);
+    ctx.beginPath();ctx.arc(x+SC/2,y+SC/2,r,0,7);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+}
+
+// ---------- profile chart ----------
+function drawProfile(path){
+  const w=PROF_W,h=PROF_H; pctx.clearRect(0,0,w,h);
+  pctx.fillStyle='#0a121b';pctx.fillRect(0,0,w,h);
+  if(!path||path.length<2)return;
+  const pad=6;
+  let hi=-1,lo=2; for(const i of path){if(Ht[i]>hi)hi=Ht[i];if(Ht[i]<lo)lo=Ht[i];}
+  const seaY = h-pad-(seaLevel-lo)/Math.max(0.001,hi-lo)*(h-2*pad);
+  if(seaLevel>=lo&&seaLevel<=hi){pctx.fillStyle='#123048';pctx.fillRect(0,seaY,w,h-seaY);
+    pctx.strokeStyle='#2a5f86';pctx.beginPath();pctx.moveTo(0,seaY);pctx.lineTo(w,seaY);pctx.stroke();}
+  pctx.beginPath();
+  for(let k=0;k<path.length;k++){const x=pad+(w-2*pad)*k/(path.length-1);
+    const y=h-pad-(Ht[path[k]]-lo)/Math.max(0.001,hi-lo)*(h-2*pad);
+    k?pctx.lineTo(x,y):pctx.moveTo(x,y);}
+  pctx.lineTo(w-pad,h-pad);pctx.lineTo(pad,h-pad);pctx.closePath();
+  const grd=pctx.createLinearGradient(0,pad,0,h-pad);
+  grd.addColorStop(0,'#5a7d55');grd.addColorStop(1,'#3a2f22');pctx.fillStyle=grd;pctx.fill();
+  pctx.beginPath();
+  for(let k=0;k<path.length;k++){const x=pad+(w-2*pad)*k/(path.length-1);
+    const y=h-pad-(Ht[path[k]]-lo)/Math.max(0.001,hi-lo)*(h-2*pad);
+    k?pctx.lineTo(x,y):pctx.moveTo(x,y);}
+  pctx.strokeStyle='#37d0ff';pctx.lineWidth=1.6;pctx.stroke();
+  pctx.fillStyle='#dffaff';pctx.beginPath();
+  pctx.arc(pad,h-pad-(Ht[path[0]]-lo)/Math.max(0.001,hi-lo)*(h-2*pad),3,0,7);pctx.fill();
+}
+
+// ---------- readout ----------
+const $=id=>document.getElementById(id);
+function orderBadge(o){const c=ORDER_COLS[Math.min(8,o)];return `<span class="ord" style="background:rgb(${c[0]},${c[1]},${c[2]})">${o}</span>`;}
+function updateInfo(){
+  if(hoverIdx<0){$('area').textContent='—';$('len').textContent='—';$('elev').textContent='—';$('sord').innerHTML='—';drawProfile(null);return;}
+  const up=upstream(hoverIdx,0);
+  const path=downstreamPath(hoverIdx);
+  let riverKm=0;for(let k=1;k<path.length;k++){const a=path[k-1],b=path[k];
+    riverKm+=((a%W)!==(b%W)&&((a/W|0)!==(b/W|0)))?CELL_KM*SQ2:CELL_KM;}
+  $('area').textContent=(up*CELL_AREA).toFixed(2)+' km²';
+  $('len').textContent=riverKm.toFixed(2)+' km';
+  const relief=((Ht[hoverIdx]-seaLevel)*3800)|0;
+  $('elev').textContent=(relief>=0?'+':'')+relief+' m';
+  $('sord').innerHTML=(acc[hoverIdx]>18&&Ht[hoverIdx]>=seaLevel)?orderBadge(ordr[hoverIdx]):'<span style="color:#8fa3b6">— (hillslope)</span>';
+  drawProfile(path);
+}
+function updateCompare(info){
+  const el=$('cmp');
+  if(lockIdx<0){el.innerHTML='<span style="color:#8fa3b6">Click a river to lock a basin, then hover another to compare.</span>';return;}
+  const aArea=(upstream(lockIdx,0)*CELL_AREA).toFixed(2);
+  let html=`<div><span class="sw" style="background:var(--lock)"></span><b>Locked basin:</b> ${aArea} km²</div>`;
+  if(hoverIdx>=0 && info){
+    const bArea=(info.bCount*CELL_AREA).toFixed(2);
+    html+=`<div><span class="sw" style="background:var(--accent)"></span><b>Hover basin:</b> ${bArea} km²</div>`;
+    if(info.nested)html+=`<div style="margin-top:2px;color:#8fa3b6">↳ Nested sub-basin — both points share one trunk, so there is no divide between them.</div>`;
+    else if(info.divideLen>0)html+=`<div><span class="sw" style="background:var(--divide)"></span><b>Divide:</b> ${(info.divideLen*CELL_KM).toFixed(2)} km of contested ridge</div>`;
+  }
+  html+=`<div style="margin-top:6px;color:#8fa3b6">Click terrain again to clear lock.</div>`;
+  el.innerHTML=html;
+}
+
+// ---------- render loop ----------
+let overlayInfo=null;
+function refresh(){ renderTerrain(); overlayInfo=buildOverlay(); updateInfo(); updateCompare(overlayInfo); }
+function loop(){
+  ctx.imageSmoothingEnabled=true;
+  ctx.drawImage(terrain,0,0,VIEW_W,VIEW_H);
+  ctx.drawImage(overlay,0,0,VIEW_W,VIEW_H);
+  stepParticles(); drawParticles();
+  requestAnimationFrame(loop);
+}
+
+// ---------- interaction ----------
+function cellFromEvent(e){const r=canvas.getBoundingClientRect();
+  // map CSS-space pointer straight to a grid cell (robust to DPR and any CSS downscale)
+  const x=Math.max(0,Math.min(W-1,((e.clientX-r.left)/r.width*W)|0));
+  const y=Math.max(0,Math.min(H-1,((e.clientY-r.top)/r.height*H)|0));return y*W+x;}
+canvas.addEventListener('mousemove',e=>{const i=cellFromEvent(e);if(i!==hoverIdx){hoverIdx=i;overlayInfo=buildOverlay();updateInfo();updateCompare(overlayInfo);}});
+canvas.addEventListener('mouseleave',()=>{hoverIdx=-1;overlayInfo=buildOverlay();updateInfo();updateCompare(overlayInfo);});
+canvas.addEventListener('click',e=>{const i=cellFromEvent(e);lockIdx=(lockIdx===i)?-1:i;overlayInfo=buildOverlay();updateCompare(overlayInfo);});
+canvas.addEventListener('touchstart',e=>{e.preventDefault();const t=e.touches[0];const i=cellFromEvent(t);
+  lockIdx=(lockIdx===i)?-1:i; hoverIdx=i; overlayInfo=buildOverlay();updateInfo();updateCompare(overlayInfo);},{passive:false});
+canvas.addEventListener('touchmove',e=>{e.preventDefault();const t=e.touches[0];const i=cellFromEvent(t);if(i!==hoverIdx){hoverIdx=i;overlayInfo=buildOverlay();updateInfo();updateCompare(overlayInfo);}},{passive:false});
+canvas.addEventListener('touchend',()=>{hoverIdx=-1;overlayInfo=buildOverlay();updateInfo();updateCompare(overlayInfo);});
+
+function updateSeaVal(){$('seaval').textContent=(seaLevel*3800|0)+' m';}
+$('sea').addEventListener('input',e=>{seaLevel=e.target.value/100;updateSeaVal();refresh();});
+function withBusy(btn,fn){btn.setAttribute('aria-busy','true');
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{fn();btn.removeAttribute('aria-busy');}));}
+$('regen').addEventListener('click',e=>{const b=e.currentTarget;withBusy(b,()=>{
+  seedStr=Math.random().toString(36).slice(2,9);$('seed').value=seedStr;location.hash=encodeURIComponent(seedStr);regen();});});
+$('seed').addEventListener('change',e=>{seedStr=e.target.value.trim()||'cascade';location.hash=encodeURIComponent(seedStr);regen();});
+$('strahler').addEventListener('click',e=>{showStrahler=!showStrahler;e.currentTarget.classList.toggle('on',showStrahler);e.currentTarget.setAttribute('aria-pressed',showStrahler);refresh();});
+$('flow').addEventListener('click',e=>{showFlow=!showFlow;e.currentTarget.classList.toggle('on',showFlow);e.currentTarget.setAttribute('aria-pressed',showFlow);refresh();});
+$('copy').addEventListener('click',()=>{
+  const url=location.href.split('#')[0]+'#'+encodeURIComponent(seedStr);
+  const ok=()=>{const t=$('toast');t.textContent='link copied';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1300);};
+  const fail=()=>window.prompt('Copy this link:',url);
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(url).then(ok,fail);
+  else fail();});
+
+function regen(){ build(seedStr); initParticles(); lockIdx=-1; refresh(); }
+
+// ---------- boot ----------
+try{ seedStr=(location.hash?decodeURIComponent(location.hash.slice(1)):'')||'cascade'; }
+catch(_){ seedStr=(location.hash&&location.hash.slice(1))||'cascade'; }
+$('seed').value=seedStr; $('sea').value=Math.round(seaLevel*100); updateSeaVal();
+regen(); loop();
+</script>
+</body>
+</html>

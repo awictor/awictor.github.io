@@ -1,0 +1,1853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#05060a">
+<title>Driftfield — a self-composing ambient music engine</title>
+<meta name="description" content="A single-file generative ambient music engine. Every seed grows an endless, evolving piece that never repeats — and you watch it flow.">
+<style>
+  :root{
+    --bg:#05060a;
+    --panel:rgba(12,14,22,0.72);
+    --panel-solid:#0b0d15;
+    --stroke:rgba(255,255,255,0.10);
+    --stroke-strong:rgba(255,255,255,0.22);
+    --ink:#eef1f8;
+    --ink-dim:#9aa3b8;
+    --ink-faint:#828ba3;
+    --accent:#7fd4ff;
+    --accent-2:#c79bff;
+    --accent-3:#ffd39b;
+    --shadow:0 20px 60px rgba(0,0,0,0.55);
+    --radius:16px;
+    font-synthesis:none;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+    touch-action:manipulation;
+  }
+  #stage{position:fixed;inset:0;}
+  canvas#field{position:fixed;inset:0;width:100%;height:100%;display:block;background:var(--bg);}
+
+  /* ---- top bar ---- */
+  .topbar{
+    position:fixed;top:0;left:0;right:0;
+    display:flex;align-items:center;gap:14px;
+    padding:14px 18px;
+    z-index:20;
+    pointer-events:none;
+    transition:opacity .5s ease, transform .5s ease;
+  }
+  .topbar > *{pointer-events:auto;}
+  .brand{
+    display:flex;align-items:baseline;gap:10px;
+    font-weight:700;letter-spacing:.5px;
+    text-shadow:0 2px 18px rgba(0,0,0,.6);
+    user-select:none;
+  }
+  .brand .logo{font-size:19px;color:var(--accent);background:linear-gradient(92deg,var(--accent),var(--accent-2) 55%,var(--accent-3));}
+  @supports ((-webkit-background-clip:text) or (background-clip:text)){
+    .brand .logo{-webkit-background-clip:text;background-clip:text;color:transparent;}
+  }
+  .brand .seedlabel{font-size:12px;color:var(--ink-dim);font-weight:500;letter-spacing:.2px;}
+  .brand .seedlabel b{color:var(--ink);font-weight:600;}
+  .spacer{flex:1;}
+  .pill{
+    display:inline-flex;align-items:center;gap:7px;
+    height:34px;padding:0 13px;
+    border-radius:999px;
+    background:var(--panel);
+    border:1px solid var(--stroke);
+    color:var(--ink);
+    font-size:12.5px;font-weight:600;
+    cursor:pointer;
+    backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    transition:border-color .18s, background .18s, transform .1s, color .18s;
+    white-space:nowrap;
+  }
+  .pill:hover{border-color:var(--stroke-strong);background:rgba(20,24,36,.82);}
+  .pill:active{transform:scale(.96);}
+  .pill.active{background:linear-gradient(135deg,rgba(127,212,255,.22),rgba(199,155,255,.22));border-color:rgba(127,212,255,.55);color:var(--ink);}
+  .pill svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;}
+  .pill.icononly{padding:0;width:34px;justify-content:center;}
+  .pill.rec.active{color:#ff8f8f;border-color:rgba(255,120,120,.5);}
+  .pill.rec.active .dot{background:#ff6b6b;animation:pulse 1s infinite;}
+  .dot{width:8px;height:8px;border-radius:50%;background:currentColor;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.25;}}
+
+  /* ---- transport (bottom center) ---- */
+  .transport{
+    position:fixed;left:50%;bottom:26px;transform:translateX(-50%);
+    display:flex;align-items:center;gap:10px;
+    padding:10px 12px;
+    background:var(--panel);
+    border:1px solid var(--stroke);
+    border-radius:999px;
+    box-shadow:var(--shadow);
+    backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+    z-index:20;
+    transition:opacity .5s ease, transform .5s ease;
+  }
+  .playbtn{
+    width:56px;height:56px;border-radius:50%;
+    border:none;cursor:pointer;
+    background:linear-gradient(135deg,var(--accent),var(--accent-2));
+    color:#05060a;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 8px 30px rgba(127,212,255,.35);
+    transition:transform .12s, box-shadow .2s;
+  }
+  .playbtn:hover{box-shadow:0 8px 40px rgba(199,155,255,.5);}
+  .playbtn:active{transform:scale(.93);}
+  .playbtn svg{width:24px;height:24px;fill:#05060a;}
+  .tctl{display:flex;flex-direction:column;gap:2px;min-width:104px;}
+  .tctl label{font-size:10px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.9px;font-weight:700;}
+  .tctl .row{display:flex;align-items:center;gap:8px;}
+  .tctl input[type=range]{width:96px;}
+  .tctl .val{font-size:11px;color:var(--ink-dim);font-variant-numeric:tabular-nums;min-width:30px;}
+
+  input[type=range]{-webkit-appearance:none;appearance:none;height:4px;background:rgba(255,255,255,.16);border-radius:999px;outline:none;cursor:pointer;}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;border-radius:50%;background:var(--ink);box-shadow:0 0 0 3px rgba(127,212,255,.25);transition:box-shadow .15s;}
+  input[type=range]::-webkit-slider-thumb:hover{box-shadow:0 0 0 5px rgba(127,212,255,.3);}
+  input[type=range]::-moz-range-thumb{width:14px;height:14px;border:none;border-radius:50%;background:var(--ink);}
+  input[type=range]::-moz-range-track{height:4px;background:rgba(255,255,255,.16);border-radius:999px;}
+
+  /* keyboard focus ring — visible on the near-black background */
+  .pill:focus-visible,.chip:focus-visible,.btn:focus-visible,.playbtn:focus-visible,
+  .startbtn:focus-visible,.card:focus-visible,.panel .close:focus-visible,
+  input:focus-visible,.seedbox input[type=text]:focus-visible{
+    outline:2px solid var(--accent);outline-offset:2px;
+  }
+
+  /* ---- side panel ---- */
+  .panel{
+    position:fixed;top:0;right:0;bottom:0;
+    width:340px;max-width:88vw;
+    background:var(--panel-solid);
+    border-left:1px solid var(--stroke);
+    box-shadow:-20px 0 60px rgba(0,0,0,.5);
+    z-index:30;
+    transform:translateX(102%);
+    transition:transform .34s cubic-bezier(.4,0,.2,1);
+    display:flex;flex-direction:column;
+    overflow:hidden;
+  }
+  .panel.open{transform:translateX(0);}
+  .scrim{
+    position:fixed;inset:0;z-index:29;
+    background:rgba(3,4,8,.5);
+    opacity:0;pointer-events:none;
+    transition:opacity .3s ease;
+  }
+  .scrim.show{opacity:1;pointer-events:auto;}
+  .panel header{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:16px 18px;border-bottom:1px solid var(--stroke);flex:none;
+  }
+  .panel header h2{margin:0;font-size:14px;font-weight:700;letter-spacing:.4px;}
+  .panel .body{padding:8px 18px 26px;overflow-y:auto;flex:1;}
+  .panel .close{background:none;border:none;color:var(--ink-dim);cursor:pointer;font-size:22px;line-height:1;padding:2px 6px;}
+  .panel .close:hover{color:var(--ink);}
+  .grp{margin-top:18px;}
+  .grp > .lbl{font-size:10.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:9px;display:flex;justify-content:space-between;}
+  .grp > .lbl .rv{color:var(--ink-dim);font-weight:600;letter-spacing:.3px;text-transform:none;}
+  .chips{display:flex;flex-wrap:wrap;gap:7px;}
+  .chip{
+    padding:7px 12px;border-radius:9px;
+    border:1px solid var(--stroke);
+    background:rgba(255,255,255,.03);
+    color:var(--ink-dim);font-size:12px;font-weight:600;cursor:pointer;
+    transition:all .15s;
+  }
+  .chip:hover{border-color:var(--stroke-strong);color:var(--ink);}
+  .chip.on{background:linear-gradient(135deg,rgba(127,212,255,.22),rgba(199,155,255,.22));border-color:rgba(127,212,255,.55);color:var(--ink);}
+  .sliderrow{display:flex;flex-direction:column;gap:6px;margin-bottom:14px;}
+  .sliderrow .top{display:flex;justify-content:space-between;font-size:12px;}
+  .sliderrow .top .name{color:var(--ink);font-weight:600;}
+  .sliderrow .top .v{color:var(--ink-dim);font-variant-numeric:tabular-nums;}
+  .sliderrow input[type=range]{width:100%;}
+  .seedbox{display:flex;gap:8px;}
+  .seedbox input[type=text]{
+    flex:1;background:rgba(255,255,255,.05);border:1px solid var(--stroke);
+    color:var(--ink);border-radius:9px;padding:9px 11px;font-size:13px;font-weight:600;
+    outline:none;transition:border-color .15s;
+  }
+  .seedbox input[type=text]:focus{border-color:var(--accent);}
+  .seedbox input[type=text].invalid{border-color:#ff8f8f;animation:shake .32s;}
+  @keyframes shake{10%,90%{transform:translateX(-2px);}30%,70%{transform:translateX(3px);}50%{transform:translateX(-4px);}}
+  .btnrow{display:flex;gap:8px;margin-top:10px;}
+  .btn{
+    flex:1;padding:9px;border-radius:9px;border:1px solid var(--stroke);
+    background:rgba(255,255,255,.04);color:var(--ink);font-size:12px;font-weight:700;cursor:pointer;
+    transition:all .15s;text-align:center;
+  }
+  .btn:hover{border-color:var(--stroke-strong);background:rgba(255,255,255,.08);}
+  .btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#05060a;border:none;}
+  .btn:active{transform:scale(.97);}
+
+  /* ---- start overlay / gallery ---- */
+  .overlay{
+    position:fixed;inset:0;z-index:60;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    padding:24px;
+    background:radial-gradient(1200px 700px at 50% 20%, rgba(20,26,44,.55), rgba(3,4,8,.86) 70%);
+    backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);
+    transition:opacity .6s ease;
+    text-align:center;
+  }
+  .overlay.hide{opacity:0;pointer-events:none;}
+  .hero{max-width:720px;}
+  .hero .kicker{font-size:12px;letter-spacing:3px;text-transform:uppercase;color:var(--accent);font-weight:700;margin-bottom:14px;}
+  .hero h1{
+    margin:0 0 14px;font-size:clamp(38px,8vw,72px);line-height:.98;font-weight:800;letter-spacing:-1.5px;
+    color:var(--ink);
+    background:linear-gradient(100deg,#fff,var(--accent) 40%,var(--accent-2) 70%,var(--accent-3));
+  }
+  @supports ((-webkit-background-clip:text) or (background-clip:text)){
+    .hero h1{-webkit-background-clip:text;background-clip:text;color:transparent;}
+  }
+  .hero p{margin:0 auto 30px;max-width:540px;font-size:15.5px;line-height:1.6;color:var(--ink-dim);}
+  .startbtn{
+    display:inline-flex;align-items:center;gap:12px;
+    padding:16px 30px;border:none;border-radius:999px;cursor:pointer;
+    background:linear-gradient(135deg,var(--accent),var(--accent-2));
+    color:#05060a;font-size:16px;font-weight:800;letter-spacing:.3px;
+    box-shadow:0 12px 44px rgba(127,212,255,.4);
+    transition:transform .12s, box-shadow .2s;
+  }
+  .startbtn:hover{box-shadow:0 12px 60px rgba(199,155,255,.55);transform:translateY(-1px);}
+  .startbtn:active{transform:scale(.97);}
+  .startbtn svg{width:20px;height:20px;fill:#05060a;}
+  .galtitle{margin:44px 0 14px;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--ink-faint);font-weight:700;}
+  .gallery{
+    display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
+    gap:12px;width:min(720px,92vw);
+  }
+  .card{
+    position:relative;overflow:hidden;
+    border:1px solid var(--stroke);border-radius:14px;
+    cursor:pointer;padding:0;background:#0a0c14;
+    aspect-ratio:16/10;
+    transition:transform .16s, border-color .16s, box-shadow .2s;
+  }
+  .card:hover{transform:translateY(-3px);border-color:var(--stroke-strong);box-shadow:var(--shadow);}
+  .card canvas{position:absolute;inset:0;width:100%;height:100%;}
+  .card .meta{
+    position:absolute;left:0;right:0;bottom:0;
+    padding:9px 11px;text-align:left;
+    background:linear-gradient(0deg,rgba(3,4,8,.9),rgba(3,4,8,0));
+  }
+  .card .meta .nm{font-size:13px;font-weight:800;letter-spacing:.2px;}
+  .card .meta .sub{font-size:10.5px;color:var(--ink-dim);margin-top:1px;}
+  .footnote{margin-top:30px;font-size:11px;color:var(--ink-faint);}
+  .footnote kbd{background:rgba(255,255,255,.08);border:1px solid var(--stroke);border-radius:5px;padding:1px 6px;font-family:inherit;font-size:10px;}
+
+  /* ---- toast ---- */
+  .toast{
+    position:fixed;left:50%;bottom:110px;transform:translateX(-50%) translateY(12px);
+    background:var(--panel-solid);border:1px solid var(--stroke-strong);
+    color:var(--ink);padding:11px 18px;border-radius:999px;font-size:13px;font-weight:600;
+    box-shadow:var(--shadow);z-index:80;opacity:0;pointer-events:none;
+    transition:opacity .25s, transform .25s;
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+  .idle .topbar{opacity:0;transform:translateY(-14px);pointer-events:none;}
+  .idle .transport{opacity:0;transform:translateX(-50%) translateY(18px);pointer-events:none;}
+  .idle{cursor:none;}
+
+  @media (max-width:640px){
+    .tctl{min-width:78px;}
+    .tctl input[type=range]{width:70px;}
+    .brand .seedlabel{display:none;}
+    .transport{gap:7px;padding:8px 9px;}
+    .hidesmall{display:none;}
+    .topbar{gap:8px;padding:10px 12px;flex-wrap:wrap;}
+    .pill.rec #recLabel{display:none;}
+    .pill.rec{padding:0;width:34px;justify-content:center;}
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="field"></canvas>
+
+  <div class="topbar" id="topbar">
+    <div class="brand">
+      <span class="logo">Driftfield</span>
+      <span class="seedlabel">seed <b id="seedName">—</b></span>
+    </div>
+    <div class="spacer"></div>
+    <button class="pill hidesmall" id="btnEvolve" title="Gently mutate the current piece">
+      <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3"/><path d="M18 3v3.7h-3.7M6 21v-3.7h3.7"/></svg>
+      Evolve
+    </button>
+    <button class="pill hidesmall" id="btnRandom" title="Jump to a fresh random seed">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="16" cy="16" r="1.3" fill="currentColor" stroke="none"/><circle cx="16" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="8" cy="16" r="1.3" fill="currentColor" stroke="none"/></svg>
+      Random
+    </button>
+    <button class="pill rec" id="btnRec" title="Record an audio clip (WebM/OGG)" aria-label="Record an audio clip">
+      <span class="dot"></span><span id="recLabel">Rec</span>
+    </button>
+    <button class="pill icononly" id="btnPng" title="Save a PNG snapshot of the field" aria-label="Save PNG snapshot">
+      <svg viewBox="0 0 24 24"><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><path d="M8 11l4 4 4-4"/><path d="M12 4v11"/></svg>
+    </button>
+    <button class="pill icononly" id="btnShare" title="Copy shareable permalink" aria-label="Copy permalink">
+      <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.3 10.7l7.4-4.4M8.3 13.3l7.4 4.4"/></svg>
+    </button>
+    <button class="pill icononly" id="btnFull" title="Fullscreen ambient mode" aria-label="Fullscreen ambient mode">
+      <svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+    </button>
+    <button class="pill icononly" id="btnPanel" title="Composition controls" aria-label="Composition controls" aria-expanded="false">
+      <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="1.6" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="8" cy="18" r="1.6" fill="currentColor" stroke="none"/></svg>
+    </button>
+  </div>
+
+  <div class="transport" id="transport">
+    <button class="playbtn" id="playBtn" title="Play / Pause (Space)" aria-label="Play or pause">
+      <svg id="playIcon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+    </button>
+    <div class="tctl">
+      <label>Volume</label>
+      <div class="row"><input type="range" id="volSlide" min="0" max="100" value="72"><span class="val" id="volVal">72</span></div>
+    </div>
+    <div class="tctl hidesmall">
+      <label>Density</label>
+      <div class="row"><input type="range" id="densSlide" min="0" max="100" value="50"><span class="val" id="densVal">50</span></div>
+    </div>
+  </div>
+
+  <!-- scrim behind the composition panel -->
+  <div class="scrim" id="scrim"></div>
+
+  <!-- side panel -->
+  <aside class="panel" id="panel">
+    <header>
+      <h2>Composition</h2>
+      <button class="close" id="panelClose">&times;</button>
+    </header>
+    <div class="body">
+      <div class="grp">
+        <div class="lbl">Seed</div>
+        <div class="seedbox">
+          <input type="text" id="seedInput" spellcheck="false" placeholder="type a word…">
+          <button class="btn primary" id="seedGo" style="flex:none;padding:9px 14px;">Grow</button>
+        </div>
+        <div class="btnrow">
+          <button class="btn" id="pRandom">Random</button>
+          <button class="btn" id="pEvolve">Evolve</button>
+        </div>
+      </div>
+
+      <div class="grp">
+        <div class="lbl">Mood <span class="rv" id="moodName">Nocturne</span></div>
+        <div class="chips" id="moodChips"></div>
+      </div>
+
+      <div class="grp">
+        <div class="lbl">Key</div>
+        <div class="chips" id="keyChips"></div>
+      </div>
+
+      <div class="grp">
+        <div class="lbl">Scale / mode <span class="rv" id="scaleName">Aeolian</span></div>
+        <div class="chips" id="scaleChips"></div>
+      </div>
+
+      <div class="grp">
+        <div class="lbl">Motion</div>
+        <div class="sliderrow">
+          <div class="top"><span class="name">Density</span><span class="v" id="densV2">50%</span></div>
+          <input type="range" id="densSlide2" min="0" max="100" value="50">
+        </div>
+        <div class="sliderrow">
+          <div class="top"><span class="name">Tempo / pulse</span><span class="v" id="tempoV">64 bpm</span></div>
+          <input type="range" id="tempoSlide" min="40" max="120" value="64">
+        </div>
+        <div class="sliderrow">
+          <div class="top"><span class="name">Tension</span><span class="v" id="tensV">40%</span></div>
+          <input type="range" id="tensSlide" min="0" max="100" value="40">
+        </div>
+        <div class="sliderrow">
+          <div class="top"><span class="name">Brightness</span><span class="v" id="briteV">50%</span></div>
+          <input type="range" id="briteSlide" min="0" max="100" value="50">
+        </div>
+        <div class="sliderrow">
+          <div class="top"><span class="name">Reverb / space</span><span class="v" id="revV">55%</span></div>
+          <input type="range" id="revSlide" min="0" max="100" value="55">
+        </div>
+      </div>
+
+      <div class="grp">
+        <div class="lbl">Visuals</div>
+        <div class="chips" id="visChips"></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- start overlay -->
+  <div class="overlay" id="overlay">
+    <div class="hero">
+      <div class="kicker">Generative &nbsp;•&nbsp; Zero-dependency &nbsp;•&nbsp; Never loops</div>
+      <h1>Driftfield</h1>
+      <p>Type a word and it grows an endless, evolving ambient piece — layered drones, warm pads, a probabilistic arp, glassy bells and a granular texture bed. The music <em>is</em> a flow field: every note you hear releases a particle of light you can watch drift.</p>
+      <button class="startbtn" id="startBtn">
+        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        Begin listening
+      </button>
+      <div class="galtitle">or drop into a curated piece</div>
+    </div>
+    <div class="gallery" id="gallery"></div>
+    <div class="footnote">Everything is in the URL — share the link, a friend hears the exact same piece. <span class="hidesmall"><kbd>Space</kbd> play · <kbd>F</kbd> fullscreen · <kbd>R</kbd> random · <kbd>E</kbd> evolve</span></div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+"use strict";
+/* ============================================================================
+   Driftfield — a self-composing ambient music engine.
+   Single file, zero dependencies, raw WebAudio + Canvas 2D.
+   All randomness derives from a seeded PRNG so pieces are fully reproducible.
+   ============================================================================ */
+
+/* ---------------------------------------------------------------------------
+   1. Deterministic PRNG (mulberry32) + string hashing
+   --------------------------------------------------------------------------- */
+function xmur3(str){
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i++){
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  return function(){
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    h ^= h >>> 16;
+    return h >>> 0;
+  };
+}
+function mulberry32(a){
+  return function(){
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+// A small deterministic RNG object built from a string seed.
+function makeRNG(seedStr){
+  const seedFn = xmur3(String(seedStr));
+  const rng = mulberry32(seedFn());
+  return {
+    next: rng,
+    range: (lo, hi) => lo + rng() * (hi - lo),
+    int: (lo, hi) => Math.floor(lo + rng() * (hi - lo + 1)),
+    pick: (arr) => arr[Math.floor(rng() * arr.length)],
+    chance: (p) => rng() < p,
+    // weighted pick: weights array parallel to items
+    weighted: (items, weights) => {
+      let total = 0; for (let i = 0; i < weights.length; i++) total += weights[i];
+      let r = rng() * total;
+      for (let i = 0; i < items.length; i++){ r -= weights[i]; if (r <= 0) return items[i]; }
+      return items[items.length - 1];
+    }
+  };
+}
+
+/* ---------------------------------------------------------------------------
+   2. Music theory tables
+   --------------------------------------------------------------------------- */
+const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+const KEYS = NOTE_NAMES.slice();
+
+const SCALES = {
+  aeolian:   { name:"Aeolian",   steps:[0,2,3,5,7,8,10] },
+  dorian:    { name:"Dorian",    steps:[0,2,3,5,7,9,10] },
+  lydian:    { name:"Lydian",    steps:[0,2,4,6,7,9,11] },
+  phrygian:  { name:"Phrygian",  steps:[0,1,3,5,7,8,10] },
+  majpenta:  { name:"Maj Penta", steps:[0,2,4,7,9] },
+  minpenta:  { name:"Min Penta", steps:[0,3,5,7,10] },
+  hirajoshi: { name:"Hirajoshi", steps:[0,2,3,7,8] }
+};
+const SCALE_KEYS = Object.keys(SCALES);
+
+// MIDI -> frequency
+function mtof(m){ return 440 * Math.pow(2, (m - 69) / 12); }
+
+/* ---------------------------------------------------------------------------
+   3. Mood presets — remap synthesis + generative character.
+   --------------------------------------------------------------------------- */
+const MOODS = {
+  nocturne: {
+    name:"Nocturne",
+    scale:"aeolian", tempo:60, density:0.46, tension:0.42, brightness:0.42, reverb:0.62,
+    padWave:"sawtooth", bellRatio:2.0, register:0, hue:[205,265],
+    subGain:0.9, padGain:1.0, bellGain:0.8, arpGain:0.7, textureGain:0.8,
+    bg:[6,8,16]
+  },
+  meadow: {
+    name:"Meadow",
+    scale:"lydian", tempo:74, density:0.6, tension:0.28, brightness:0.68, reverb:0.5,
+    padWave:"triangle", bellRatio:3.0, register:2, hue:[70,160],
+    subGain:0.7, padGain:0.95, bellGain:1.0, arpGain:0.9, textureGain:0.6,
+    bg:[8,14,12]
+  },
+  glacier: {
+    name:"Glacier",
+    scale:"dorian", tempo:52, density:0.34, tension:0.34, brightness:0.6, reverb:0.78,
+    padWave:"sawtooth", bellRatio:4.0, register:1, hue:[175,215],
+    subGain:0.85, padGain:1.0, bellGain:0.95, arpGain:0.6, textureGain:0.85,
+    bg:[6,12,18]
+  },
+  rainfall: {
+    name:"Rainfall",
+    scale:"minpenta", tempo:84, density:0.7, tension:0.3, brightness:0.5, reverb:0.6,
+    padWave:"triangle", bellRatio:2.5, register:1, hue:[190,240],
+    subGain:0.75, padGain:0.85, bellGain:0.9, arpGain:1.0, textureGain:0.95,
+    bg:[7,9,15]
+  },
+  deep: {
+    name:"Deep",
+    scale:"phrygian", tempo:48, density:0.3, tension:0.5, brightness:0.3, reverb:0.72,
+    padWave:"sawtooth", bellRatio:1.5, register:-1, hue:[250,300],
+    subGain:1.0, padGain:1.0, bellGain:0.65, arpGain:0.5, textureGain:0.9,
+    bg:[9,7,14]
+  }
+};
+const MOOD_KEYS = Object.keys(MOODS);
+
+/* ---------------------------------------------------------------------------
+   4. Application state / URL hash (de)serialization
+   --------------------------------------------------------------------------- */
+const state = {
+  seed:"driftfield",
+  key:9,           // A
+  scale:"aeolian",
+  mood:"nocturne",
+  density:0.5,
+  tempo:64,
+  tension:0.4,
+  brightness:0.5,
+  reverb:0.55,
+  volume:0.72,
+  visual:"flow"    // flow | ripple | nebula
+};
+
+function serialize(){
+  const p = new URLSearchParams();
+  p.set("s", state.seed);
+  p.set("k", state.key);
+  p.set("sc", state.scale);
+  p.set("m", state.mood);
+  p.set("d", Math.round(state.density * 100));
+  p.set("t", Math.round(state.tempo));
+  p.set("te", Math.round(state.tension * 100));
+  p.set("b", Math.round(state.brightness * 100));
+  p.set("r", Math.round(state.reverb * 100));
+  p.set("v", Math.round(state.volume * 100));
+  p.set("vz", state.visual);
+  return p.toString();
+}
+function deserialize(hash){
+  try {
+    const p = new URLSearchParams(hash.replace(/^#/, ""));
+    if (p.has("s")) state.seed = p.get("s");
+    if (p.has("k")) state.key = clampInt(+p.get("k"), 0, 11, state.key);
+    if (p.has("sc") && SCALES[p.get("sc")]) state.scale = p.get("sc");
+    if (p.has("m") && MOODS[p.get("m")]) state.mood = p.get("m");
+    if (p.has("d")) state.density = clampF(+p.get("d") / 100, 0, 1, state.density);
+    if (p.has("t")) state.tempo = clampF(+p.get("t"), 40, 120, state.tempo);
+    if (p.has("te")) state.tension = clampF(+p.get("te") / 100, 0, 1, state.tension);
+    if (p.has("b")) state.brightness = clampF(+p.get("b") / 100, 0, 1, state.brightness);
+    if (p.has("r")) state.reverb = clampF(+p.get("r") / 100, 0, 1, state.reverb);
+    if (p.has("v")) state.volume = clampF(+p.get("v") / 100, 0, 1, state.volume);
+    if (p.has("vz")) state.visual = ["flow","ripple","nebula"].includes(p.get("vz")) ? p.get("vz") : state.visual;
+    return true;
+  } catch(e){ return false; }
+}
+function clampF(v, lo, hi, dflt){ return (isFinite(v) ? Math.max(lo, Math.min(hi, v)) : dflt); }
+function clampInt(v, lo, hi, dflt){ return (isFinite(v) ? Math.max(lo, Math.min(hi, Math.round(v))) : dflt); }
+
+let suppressHash = false;
+function writeHash(){
+  if (suppressHash) return;
+  const h = "#" + serialize();
+  history.replaceState(null, "", h);
+}
+
+/* Apply a mood preset to state (used when user taps a mood chip). */
+function applyMood(moodKey, alsoScale){
+  const m = MOODS[moodKey];
+  if (!m) return;
+  state.mood = moodKey;
+  if (alsoScale){
+    state.scale = m.scale;
+    state.tempo = m.tempo;
+    state.density = m.density;
+    state.tension = m.tension;
+    state.brightness = m.brightness;
+    state.reverb = m.reverb;
+  }
+}
+
+/* ===========================================================================
+   5. AUDIO ENGINE
+   =========================================================================== */
+const Audio = {
+  ctx:null,
+  master:null, limiter:null, comp:null,
+  reverb:null, reverbSend:null, reverbWet:null,
+  delay:null, delayFb:null, delaySend:null, delayWet:null,
+  analyser:null, analyData:null,
+  voiceBus:null, padBus:null, padDuck:null,
+  started:false,
+  ready:false,
+  destStream:null
+};
+
+// Delay time locked to tempo (dotted-eighth echo), clamped to the delay's max.
+function delaySyncTime(){ return Math.min(1.9, stepDuration() * 3); }
+
+function buildAudioGraph(){
+  if (Audio.ctx) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AC({ latencyHint:"playback" });
+  Audio.ctx = ctx;
+
+  // --- master chain: mixBus -> compressor -> soft limiter -> analyser -> dest
+  const master = ctx.createGain();      master.gain.value = state.volume;
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -20; comp.knee.value = 28; comp.ratio.value = 3.2;
+  comp.attack.value = 0.02; comp.release.value = 0.35;
+  const limiter = ctx.createDynamicsCompressor();
+  limiter.threshold.value = -3.0; limiter.knee.value = 0; limiter.ratio.value = 20;
+  limiter.attack.value = 0.002; limiter.release.value = 0.12;
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 1024; analyser.smoothingTimeConstant = 0.82;
+
+  // voice bus feeds master; pad bus goes through a "duck" gain (sidechain-ish)
+  const mixBus = ctx.createGain(); mixBus.gain.value = 1.0;
+  const voiceBus = ctx.createGain(); voiceBus.gain.value = 1.0;   // arp/bells/bass/sub
+  const padBus = ctx.createGain(); padBus.gain.value = 1.0;       // pads + texture
+  const padDuck = ctx.createGain(); padDuck.gain.value = 1.0;     // sidechain target
+
+  padBus.connect(padDuck);
+  padDuck.connect(mixBus);
+  voiceBus.connect(mixBus);
+
+  // --- reverb (procedural convolution, no external IR) ---
+  const reverb = ctx.createConvolver();
+  reverb.buffer = makeImpulse(ctx, 3.4, 3.0);
+  const reverbSend = ctx.createGain(); reverbSend.gain.value = 1.0;
+  const reverbWet = ctx.createGain(); reverbWet.gain.value = state.reverb;
+  // high shelf to tame reverb brightness
+  const revTone = ctx.createBiquadFilter(); revTone.type = "highshelf";
+  revTone.frequency.value = 3200; revTone.gain.value = -6;
+
+  // --- tempo-synced stereo feedback delay ---
+  const delaySend = ctx.createGain(); delaySend.gain.value = 0.4;
+  const delay = ctx.createDelay(2.0);
+  delay.delayTime.value = delaySyncTime();
+  const delayFb = ctx.createGain(); delayFb.gain.value = 0.36;
+  const delayTone = ctx.createBiquadFilter(); delayTone.type = "lowpass";
+  delayTone.frequency.value = 2600;
+  const delayWet = ctx.createGain(); delayWet.gain.value = 0.5;
+
+  mixBus.connect(reverbSend); reverbSend.connect(reverb); reverb.connect(revTone);
+  revTone.connect(reverbWet); reverbWet.connect(master);
+
+  mixBus.connect(delaySend); delaySend.connect(delay);
+  delay.connect(delayTone); delayTone.connect(delayFb); delayFb.connect(delay); // feedback loop
+  delayTone.connect(delayWet); delayWet.connect(master);
+
+  // dry path
+  mixBus.connect(master);
+
+  master.connect(comp); comp.connect(limiter); limiter.connect(analyser);
+  analyser.connect(ctx.destination);
+
+  // capture stream for MediaRecorder
+  let destStream = null;
+  if (ctx.createMediaStreamDestination){
+    const streamDest = ctx.createMediaStreamDestination();
+    limiter.connect(streamDest);
+    destStream = streamDest.stream;
+  }
+
+  Object.assign(Audio, {
+    master, comp, limiter, analyser,
+    analyData: new Uint8Array(analyser.frequencyBinCount),
+    reverb, reverbSend, reverbWet, delay, delayFb, delaySend, delayWet, delayTone,
+    mixBus, voiceBus, padBus, padDuck, destStream, ready:true
+  });
+}
+
+// Procedural impulse response: stereo exponentially-decaying filtered noise.
+function makeImpulse(ctx, seconds, decay){
+  const rate = ctx.sampleRate;
+  const len = Math.floor(rate * seconds);
+  const buf = ctx.createBuffer(2, len, rate);
+  // deterministic noise from a fixed seed so reverb tail is stable
+  const rng = mulberry32(0x9E3779B9);
+  for (let ch = 0; ch < 2; ch++){
+    const data = buf.getChannelData(ch);
+    let lp = 0;
+    for (let i = 0; i < len; i++){
+      const t = i / len;
+      const env = Math.pow(1 - t, decay);
+      // small early-reflection cluster in the first ~60ms for body
+      let n = (rng() * 2 - 1);
+      lp += (n - lp) * 0.35;            // gentle lowpass on the noise
+      let s = lp * env;
+      if (i < rate * 0.02) s *= 0.4;    // soften the very front
+      data[i] = s * 0.7;
+    }
+  }
+  return buf;
+}
+
+/* ---------------------------------------------------------------------------
+   5b. Synth voices — all created per-note and cleaned up automatically.
+   Each voice reports its note-on to the visualizer via onNote().
+   --------------------------------------------------------------------------- */
+const VOICE_COLOR = {
+  sub:     [265, 55, 42],
+  pad:     [210, 60, 58],
+  bass:    [285, 55, 50],
+  arp:     [50, 85, 68],
+  bell:    [190, 85, 72],
+  texture: [160, 45, 55]
+};
+
+let activeVoiceCount = 0;
+const MAX_VOICES = 48;
+
+function trackVoice(node){
+  activeVoiceCount++;
+  node.onended = () => { activeVoiceCount = Math.max(0, activeVoiceCount - 1); };
+}
+
+// Warm detuned-saw pad through slow lowpass; long envelope.
+function playPad(freq, t, dur, gain){
+  const ctx = Audio.ctx;
+  if (activeVoiceCount > MAX_VOICES) return;
+  const wave = MOODS[state.mood].padWave;
+  const vca = ctx.createGain();
+  const filt = ctx.createBiquadFilter();
+  filt.type = "lowpass";
+  const baseCut = 400 + state.brightness * 2200 + curArc.bright * 900;
+  filt.frequency.setValueAtTime(baseCut * 0.6, t);
+  filt.frequency.linearRampToValueAtTime(baseCut, t + dur * 0.5);
+  filt.frequency.linearRampToValueAtTime(baseCut * 0.7, t + dur);
+  filt.Q.value = 0.7;
+
+  const detunes = [-7, -3, 4, 8];
+  for (let i = 0; i < detunes.length; i++){
+    const o = ctx.createOscillator();
+    o.type = wave;
+    o.frequency.value = freq;
+    o.detune.value = detunes[i];
+    o.connect(filt);
+    o.start(t);
+    o.stop(t + dur + 0.1);
+    trackVoice(o);
+  }
+  const peak = gain * 0.16;
+  vca.gain.setValueAtTime(0, t);
+  vca.gain.linearRampToValueAtTime(peak, t + dur * 0.35);
+  vca.gain.linearRampToValueAtTime(peak * 0.8, t + dur * 0.7);
+  vca.gain.linearRampToValueAtTime(0.0001, t + dur);
+  filt.connect(vca);
+
+  // Haas widening: tiny delay on one channel
+  const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+  if (pan){ pan.pan.value = (curArc.pan); vca.connect(pan); pan.connect(Audio.padBus); }
+  else vca.connect(Audio.padBus);
+}
+
+// Sub drone: sine + slight sub-oscillator.
+function playSub(freq, t, dur, gain){
+  const ctx = Audio.ctx;
+  const vca = ctx.createGain();
+  const o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = freq;
+  const o2 = ctx.createOscillator(); o2.type = "sine"; o2.frequency.value = freq * 0.5;
+  const og2 = ctx.createGain(); og2.gain.value = 0.5;
+  o.connect(vca); o2.connect(og2); og2.connect(vca);
+  const peak = gain * 0.22;
+  vca.gain.setValueAtTime(0, t);
+  vca.gain.linearRampToValueAtTime(peak, t + dur * 0.3);
+  vca.gain.linearRampToValueAtTime(0.0001, t + dur);
+  vca.connect(Audio.padBus);
+  o.start(t); o2.start(t); o.stop(t + dur + 0.1); o2.stop(t + dur + 0.1);
+  trackVoice(o);
+}
+
+// Sine/triangle bass.
+function playBass(freq, t, dur, gain){
+  const ctx = Audio.ctx;
+  if (activeVoiceCount > MAX_VOICES) return;
+  const vca = ctx.createGain();
+  const o = ctx.createOscillator(); o.type = "triangle"; o.frequency.value = freq;
+  const filt = ctx.createBiquadFilter(); filt.type = "lowpass"; filt.frequency.value = 600;
+  o.connect(filt); filt.connect(vca);
+  const peak = gain * 0.3;
+  vca.gain.setValueAtTime(0, t);
+  vca.gain.linearRampToValueAtTime(peak, t + 0.05);
+  vca.gain.exponentialRampToValueAtTime(peak * 0.4, t + dur * 0.6);
+  vca.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  vca.connect(Audio.voiceBus);
+  o.start(t); o.stop(t + dur + 0.05);
+  trackVoice(o);
+  duck(t, 0.25);
+}
+
+// Plucked probabilistic arp (triangle + short decay).
+function playArp(freq, t, dur, gain, pan){
+  const ctx = Audio.ctx;
+  if (activeVoiceCount > MAX_VOICES) return;
+  const vca = ctx.createGain();
+  const o = ctx.createOscillator(); o.type = "triangle"; o.frequency.value = freq;
+  const o2 = ctx.createOscillator(); o2.type = "sine"; o2.frequency.value = freq * 2;
+  const og2 = ctx.createGain(); og2.gain.value = 0.25;
+  const filt = ctx.createBiquadFilter(); filt.type = "lowpass";
+  filt.frequency.setValueAtTime(2200 + state.brightness * 3000, t);
+  filt.frequency.exponentialRampToValueAtTime(700, t + dur);
+  o.connect(filt); o2.connect(og2); og2.connect(filt); filt.connect(vca);
+  const peak = gain * 0.14;
+  vca.gain.setValueAtTime(0, t);
+  vca.gain.linearRampToValueAtTime(peak, t + 0.008);
+  vca.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  const p = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+  if (p){ p.pan.value = pan; vca.connect(p); p.connect(Audio.voiceBus); }
+  else vca.connect(Audio.voiceBus);
+  o.start(t); o2.start(t); o.stop(t + dur + 0.02); o2.stop(t + dur + 0.02);
+  trackVoice(o);
+  duck(t, 0.14);
+}
+
+// FM-ish glassy bell.
+function playBell(freq, t, dur, gain, pan){
+  const ctx = Audio.ctx;
+  if (activeVoiceCount > MAX_VOICES) return;
+  const carrier = ctx.createOscillator(); carrier.type = "sine"; carrier.frequency.value = freq;
+  const modIdx = MOODS[state.mood].bellRatio;
+  const mod = ctx.createOscillator(); mod.type = "sine";
+  mod.frequency.value = freq * modIdx;
+  const modGain = ctx.createGain();
+  modGain.gain.setValueAtTime(freq * (1.4 + state.brightness * 2), t);
+  modGain.gain.exponentialRampToValueAtTime(freq * 0.15, t + dur);
+  mod.connect(modGain); modGain.connect(carrier.frequency);
+  const vca = ctx.createGain();
+  const peak = gain * 0.12;
+  vca.gain.setValueAtTime(0, t);
+  vca.gain.linearRampToValueAtTime(peak, t + 0.01);
+  vca.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  carrier.connect(vca);
+  const p = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+  if (p){ p.pan.value = pan; vca.connect(p); p.connect(Audio.voiceBus); }
+  else vca.connect(Audio.voiceBus);
+  carrier.start(t); mod.start(t);
+  carrier.stop(t + dur + 0.05); mod.stop(t + dur + 0.05);
+  trackVoice(carrier);
+  duck(t, 0.18);
+}
+
+// Granular noise-texture pad: filtered noise grains.
+let sharedNoiseBuf = null;
+function getNoiseBuf(){
+  if (sharedNoiseBuf) return sharedNoiseBuf;
+  const ctx = Audio.ctx;
+  const len = ctx.sampleRate * 2;
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  const rng = mulberry32(0x1234567);
+  for (let i = 0; i < len; i++) d[i] = rng() * 2 - 1;
+  sharedNoiseBuf = buf;
+  return buf;
+}
+function playTexture(freq, t, dur, gain, pan){
+  const ctx = Audio.ctx;
+  if (activeVoiceCount > MAX_VOICES) return;
+  const src = ctx.createBufferSource();
+  src.buffer = getNoiseBuf();
+  src.loop = true;
+  src.playbackRate.value = 0.5 + state.brightness * 0.6;
+  const bp = ctx.createBiquadFilter(); bp.type = "bandpass";
+  bp.frequency.value = freq * 2; bp.Q.value = 5 + state.brightness * 8;
+  const vca = ctx.createGain();
+  const peak = gain * 0.06;
+  vca.gain.setValueAtTime(0, t);
+  vca.gain.linearRampToValueAtTime(peak, t + dur * 0.4);
+  vca.gain.linearRampToValueAtTime(0.0001, t + dur);
+  src.connect(bp); bp.connect(vca);
+  const p = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+  if (p){ p.pan.value = pan; vca.connect(p); p.connect(Audio.padBus); }
+  else vca.connect(Audio.padBus);
+  src.start(t); src.stop(t + dur + 0.1);
+  trackVoice(src);
+}
+
+// Sidechain-style pad ducking under transients (bell/arp/bass hits).
+function duck(t, amount){
+  const g = Audio.padDuck.gain;
+  const now = Audio.ctx.currentTime;
+  const at = Math.max(t, now);
+  g.cancelScheduledValues(at);
+  g.setValueAtTime(Math.max(0.35, 1 - amount), at);
+  g.linearRampToValueAtTime(1.0, at + 0.35);
+}
+
+/* ===========================================================================
+   6. COMPOSITION ENGINE — Markov chord walker + Euclidean rhythms + LFOs
+   =========================================================================== */
+const Comp = {
+  rng:null,
+  scaleSteps:[],
+  scaleLen:0,
+  root:57,             // MIDI root note
+  chordIdx:0,
+  euclid:{},           // rhythm patterns per voice
+  step:0,              // global 16th-step counter
+  bar:0,
+  lastArpDegree:0,
+  lastBellDegree:4,
+  lastChordVoicing:[]
+};
+
+// Euclidean rhythm generator (Bjorklund).
+function euclid(pulses, steps){
+  if (pulses <= 0) return new Array(steps).fill(0);
+  if (pulses >= steps) return new Array(steps).fill(1);
+  const pattern = [];
+  let bucket = 0;
+  for (let i = 0; i < steps; i++){
+    bucket += pulses;
+    if (bucket >= steps){ bucket -= steps; pattern.push(1); }
+    else pattern.push(0);
+  }
+  return pattern;
+}
+
+// Diatonic triad/7th chord degrees available for the Markov walk.
+// Each entry: root scale-degree offset (0-based within scale).
+const CHORD_DEGREES = [0, 1, 2, 3, 4, 5, 6];
+
+// Markov transition weights between chord degrees, biased for pleasant motion.
+// Rows = current degree, cols = next degree. Tension parameter interpolates
+// between "restful" (I/IV/vi heavy) and "restless" (more ii/V/vii motion).
+function chordTransitionWeights(from, tension){
+  // base gravitational pull toward tonic & subdominant/dominant relations
+  const restful  = [
+    [2,1,2,3,3,2,1],  // from I
+    [2,1,1,1,3,2,1],  // ii
+    [3,1,1,2,1,3,1],  // iii
+    [3,2,1,1,3,2,1],  // IV
+    [4,1,1,2,1,2,1],  // V
+    [3,2,1,3,2,1,1],  // vi
+    [4,1,1,1,2,1,1]   // vii
+  ];
+  const restless = [
+    [1,2,2,2,3,2,2],
+    [1,1,1,1,4,2,2],
+    [2,2,1,2,2,3,1],
+    [2,3,1,1,3,1,2],
+    [3,1,2,2,1,3,2],
+    [2,3,1,2,3,1,2],
+    [3,1,1,1,3,1,1]
+  ];
+  const r = restful[from], s = restless[from];
+  const out = new Array(7);
+  for (let i = 0; i < 7; i++) out[i] = r[i] * (1 - tension) + s[i] * tension;
+  return out;
+}
+
+// Build a chord voicing (MIDI notes) from a scale degree, with 7th options.
+function buildChord(degree, add7){
+  const steps = Comp.scaleSteps;
+  const n = steps.length;
+  const notes = [];
+  const idxs = add7 ? [0, 2, 4, 6] : [0, 2, 4];
+  for (const off of idxs){
+    const di = degree + off;
+    const oct = Math.floor(di / n);
+    const st = steps[((di % n) + n) % n];
+    notes.push(Comp.root + oct * 12 + st);
+  }
+  return notes;
+}
+
+// Voice-leading smoothing: given previous voicing, choose octave placement of
+// the new chord to minimize total motion.
+function voiceLead(prev, chord){
+  if (!prev || !prev.length) return chord.slice();
+  const out = [];
+  for (let i = 0; i < chord.length; i++){
+    let note = chord[i];
+    const target = prev[Math.min(i, prev.length - 1)];
+    // shift by octaves toward target
+    while (note - target > 6) note -= 12;
+    while (target - note > 6) note += 12;
+    out.push(note);
+  }
+  return out;
+}
+
+function initComposition(){
+  Comp.rng = makeRNG(state.seed + "|" + state.scale + "|" + state.key);
+  Comp.scaleSteps = SCALES[state.scale].steps;
+  Comp.scaleLen = Comp.scaleSteps.length;
+  const reg = MOODS[state.mood].register;
+  Comp.root = 45 + state.key + reg * 12; // around A2..A3 depending on register
+  Comp.chordIdx = Comp.rng.int(0, 6);
+  Comp.step = 0;
+  Comp.bar = 0;
+  Comp.lastChordVoicing = [];
+  Comp.lastArpDegree = Comp.rng.int(0, Comp.scaleLen - 1);
+  Comp.lastBellDegree = Comp.rng.int(2, Comp.scaleLen);
+
+  // Euclidean patterns seeded per voice; density influences pulse counts.
+  const d = state.density;
+  Comp.euclid = {
+    arp:     euclid(Comp.rng.int(4, 7) + Math.round(d * 4), 16),
+    bell:    euclid(Comp.rng.int(2, 4) + Math.round(d * 2), 16),
+    texture: euclid(Comp.rng.int(1, 3), 16),
+    bass:    euclid(Comp.rng.int(1, 2), 8)
+  };
+  // rotate patterns deterministically so pieces feel distinct
+  Comp.euclid.arp = rotate(Comp.euclid.arp, Comp.rng.int(0, 15));
+  Comp.euclid.bell = rotate(Comp.euclid.bell, Comp.rng.int(0, 15));
+}
+function rotate(a, n){ n = ((n % a.length) + a.length) % a.length; return a.slice(n).concat(a.slice(0, n)); }
+
+// Advance the chord walker one step (called at bar boundaries).
+function walkChord(){
+  const w = chordTransitionWeights(Comp.chordIdx, effectiveTension());
+  const next = Comp.rng.weighted(CHORD_DEGREES, w);
+  Comp.chordIdx = next;
+  const add7 = Comp.rng.chance(0.35 + effectiveTension() * 0.4);
+  const raw = buildChord(next, add7);
+  const led = voiceLead(Comp.lastChordVoicing, raw);
+  Comp.lastChordVoicing = led;
+  return led;
+}
+
+/* ---------------------------------------------------------------------------
+   6b. LFOs + "day arc" macro — long-form evolution
+   --------------------------------------------------------------------------- */
+const curArc = { bright:0, dens:0, pan:0, tension:0, revMod:0, energy:0.5 };
+let arcStartTime = 0;
+const DAY_ARC_SECONDS = 480; // ~8 minute intro/build/resolve shape
+
+function updateArc(now){
+  const t = now - arcStartTime;
+  // day arc: 0 -> intro (sparse), peak build near middle, resolve back
+  const cyc = (t % DAY_ARC_SECONDS) / DAY_ARC_SECONDS;    // 0..1
+  const arc = 0.5 - 0.5 * Math.cos(cyc * Math.PI * 2);     // smooth 0..1..0
+  curArc.energy = 0.35 + arc * 0.55;
+
+  // several very slow free-running LFOs (different periods -> non-repeating feel)
+  curArc.bright = 0.5 + 0.5 * Math.sin(t * 0.017) * Math.sin(t * 0.0041 + 1.3);
+  curArc.dens   = 0.5 + 0.5 * Math.sin(t * 0.011 + 0.7);
+  curArc.pan    = Math.sin(t * 0.033) * 0.55;
+  curArc.tension= 0.5 + 0.5 * Math.sin(t * 0.008 + 2.1);
+  curArc.revMod = 0.5 + 0.5 * Math.sin(t * 0.006 + 0.4);
+
+  // modulate reverb wet + delay feedback gently over time
+  if (Audio.ready){
+    const targetRev = state.reverb * (0.8 + curArc.revMod * 0.35);
+    Audio.reverbWet.gain.setTargetAtTime(Math.min(1, targetRev), Audio.ctx.currentTime, 1.5);
+    Audio.delayFb.gain.setTargetAtTime(0.28 + curArc.energy * 0.14, Audio.ctx.currentTime, 2.0);
+  }
+}
+function effectiveTension(){ return Math.max(0, Math.min(1, state.tension * 0.65 + curArc.tension * 0.35)); }
+function effectiveDensity(){ return Math.max(0.05, Math.min(1, state.density * (0.55 + curArc.energy * 0.6) * (0.7 + curArc.dens * 0.5))); }
+
+/* ---------------------------------------------------------------------------
+   6c. Lookahead scheduler — glitch-free timing, all decisions from PRNG.
+   --------------------------------------------------------------------------- */
+const Sched = {
+  running:false,
+  nextStepTime:0,
+  // Seconds of audio scheduled ahead. Kept large so a background tab (where
+  // setInterval is throttled to ~1s) still has notes buffered and does not glitch.
+  lookahead:0.9,
+  interval:25,         // ms between scheduler ticks
+  timer:null,
+  currentChord:[]
+};
+
+function stepDuration(){
+  // 16th-note duration from tempo (bpm). One "beat" = quarter note.
+  const spb = 60 / state.tempo;
+  return spb / 4;
+}
+
+function scheduler(){
+  const ctx = Audio.ctx;
+  updateArc(ctx.currentTime);
+  while (Sched.nextStepTime < ctx.currentTime + Sched.lookahead){
+    scheduleStep(Sched.step, Sched.nextStepTime);
+    Sched.nextStepTime += stepDuration();
+    Sched.step = (Sched.step + 1);
+  }
+}
+
+function scheduleStep(globalStep, t){
+  const s16 = globalStep % 16;
+  const s8 = globalStep % 8;
+  const R = Comp.rng;
+  const dens = effectiveDensity();
+
+  // --- bar boundary: advance chord, retrigger pad + sub ---
+  if (s16 === 0){
+    Comp.bar++;
+    Sched.currentChord = walkChord();
+    const chord = Sched.currentChord;
+    const barDur = stepDuration() * 16;
+    const mg = MOODS[state.mood];
+
+    // sub drone on chord root (an octave down)
+    const rootMidi = chord[0] - 12;
+    playSub(mtof(rootMidi), t, barDur * (R.range(1.4, 2.0)), mg.subGain * curArc.energy);
+    emitNote("sub", mtof(rootMidi), 0.9);
+
+    // warm pad: play 2-3 chord tones with slight time offsets
+    const nTones = 2 + (dens > 0.5 ? 1 : 0);
+    for (let i = 0; i < Math.min(nTones, chord.length); i++){
+      const f = mtof(chord[i] + 12);
+      const off = R.range(0, 0.08);
+      playPad(f, t + off, barDur * R.range(1.1, 1.6), mg.padGain);
+      emitNoteAt("pad", f, 0.7, off);
+    }
+
+    // texture grains — sparse, on some bars
+    if (R.chance(0.4 + dens * 0.3)){
+      const tf = mtof(chord[R.int(0, chord.length - 1)] + 24);
+      playTexture(tf, t, barDur * R.range(1.2, 2.0), mg.textureGain * (0.6 + curArc.energy * 0.6), curArc.pan);
+      emitNote("texture", tf, 0.5);
+    }
+  }
+
+  const chord = Sched.currentChord.length ? Sched.currentChord : (Sched.currentChord = walkChord());
+  const mg = MOODS[state.mood];
+
+  // --- bass on the 8-step euclid pattern ---
+  if (Comp.euclid.bass[s8] && R.chance(0.6 + dens * 0.3)){
+    const bassMidi = chord[0] - 12 + (R.chance(0.3) ? 7 : 0);
+    playBass(mtof(bassMidi), t, stepDuration() * R.range(3, 6), mg.subGain);
+    emitNote("bass", mtof(bassMidi), 0.8);
+  }
+
+  // --- probabilistic arp ---
+  if (Comp.euclid.arp[s16]){
+    const playProb = (0.45 + dens * 0.5) * (0.6 + curArc.energy * 0.5);
+    if (R.chance(playProb)){
+      // walk a scale degree near the last, favor chord tones
+      const chordDegrees = chord.map(m => nearestScaleDegree(m));
+      let deg;
+      if (R.chance(0.55)) deg = R.pick(chordDegrees);
+      else deg = Comp.lastArpDegree + R.pick([-2,-1,1,2]);
+      Comp.lastArpDegree = deg;
+      const midi = degreeToMidi(deg, 1) + 12;
+      // humanize timing + panning
+      const jitter = R.range(-0.012, 0.012);
+      const pan = clampPan(curArc.pan + R.range(-0.35, 0.35));
+      const dur = stepDuration() * R.range(1.4, 3.2);
+      playArp(mtof(midi), t + jitter, dur, mg.arpGain * (0.7 + curArc.energy * 0.5), pan);
+      emitNoteAt("arp", mtof(midi), 0.75, jitter);
+    }
+  }
+
+  // --- glassy bells (sparser, higher register) ---
+  if (Comp.euclid.bell[s16]){
+    const playProb = (0.3 + dens * 0.35) * (0.5 + curArc.energy * 0.6);
+    if (R.chance(playProb)){
+      const chordDegrees = chord.map(m => nearestScaleDegree(m));
+      let deg = R.chance(0.6) ? R.pick(chordDegrees) : Comp.lastBellDegree + R.pick([-1,1,2,3]);
+      Comp.lastBellDegree = deg;
+      const midi = degreeToMidi(deg, 2) + 12;
+      const pan = clampPan(-curArc.pan + R.range(-0.4, 0.4));
+      const dur = stepDuration() * R.range(6, 12);
+      playBell(mtof(midi), t, dur, mg.bellGain * (0.65 + curArc.energy * 0.5), pan);
+      emitNote("bell", mtof(midi), 0.85);
+    }
+  }
+}
+
+function clampPan(p){ return Math.max(-0.9, Math.min(0.9, p)); }
+function nearestScaleDegree(midi){
+  const rel = ((midi - Comp.root) % 12 + 12) % 12;
+  const steps = Comp.scaleSteps;
+  let best = 0, bd = 99;
+  for (let i = 0; i < steps.length; i++){ const d = Math.abs(steps[i] - rel); if (d < bd){ bd = d; best = i; } }
+  const octave = Math.floor((midi - Comp.root) / 12);
+  return best + octave * steps.length;
+}
+function degreeToMidi(deg, extraOct){
+  const steps = Comp.scaleSteps, n = steps.length;
+  const oct = Math.floor(deg / n) + (extraOct || 0);
+  const st = steps[((deg % n) + n) % n];
+  return Comp.root + oct * 12 + st;
+}
+
+function startScheduler(){
+  if (Sched.running) return;
+  Sched.running = true;
+  Sched.nextStepTime = Audio.ctx.currentTime + 0.08;
+  Sched.timer = setInterval(scheduler, Sched.interval);
+}
+function stopScheduler(){
+  Sched.running = false;
+  if (Sched.timer){ clearInterval(Sched.timer); Sched.timer = null; }
+}
+
+/* ===========================================================================
+   7. VISUALIZER — seeded flow field + note particles + analyser bloom
+   =========================================================================== */
+const Vis = {
+  canvas:null, ctx:null,
+  w:0, h:0, dpr:1,
+  field:null, fieldCols:0, fieldRows:0, fieldRes:38,
+  particles:[],
+  maxParticles:800,
+  emitQueue:[],
+  running:false,
+  lastFrame:0,
+  hidden:false
+};
+
+// Value-noise flow field derived from the same seed as the music.
+function makeFieldNoise(seed){
+  const rng = makeRNG(seed + "|field");
+  const size = 64;
+  const grid = new Float32Array(size * size);
+  for (let i = 0; i < grid.length; i++) grid[i] = rng.next();
+  return { grid, size };
+}
+let fieldNoise = null;
+function noise2(nx, ny){
+  const g = fieldNoise; const s = g.size;
+  const x = ((nx % s) + s) % s, y = ((ny % s) + s) % s;
+  const x0 = Math.floor(x), y0 = Math.floor(y);
+  const x1 = (x0 + 1) % s, y1 = (y0 + 1) % s;
+  const fx = x - x0, fy = y - y0;
+  const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+  const v00 = g.grid[y0 * s + x0], v10 = g.grid[y0 * s + x1];
+  const v01 = g.grid[y1 * s + x0], v11 = g.grid[y1 * s + x1];
+  const a = v00 + (v10 - v00) * sx;
+  const b = v01 + (v11 - v01) * sx;
+  return a + (b - a) * sy;
+}
+
+function fieldAngle(px, py, time){
+  // sample layered noise -> angle; slowly drifts with time
+  const scale = 0.0016;
+  const n = noise2(px * scale * fieldNoise.size + time * 0.06,
+                   py * scale * fieldNoise.size + time * 0.05);
+  const n2 = noise2(px * scale * fieldNoise.size * 2.3 + 40,
+                    py * scale * fieldNoise.size * 2.3 - time * 0.03);
+  return (n * 2 + n2) * Math.PI * 2;
+}
+
+function setupCanvas(){
+  const c = Vis.canvas;
+  Vis.dpr = Math.min(window.devicePixelRatio || 1, 2);
+  // CPU adaptivity: lower internal resolution on hi-dpr / small perf
+  const w = window.innerWidth, h = window.innerHeight;
+  Vis.w = w; Vis.h = h;
+  c.width = Math.floor(w * Vis.dpr);
+  c.height = Math.floor(h * Vis.dpr);
+  Vis.ctx = c.getContext("2d", { alpha:false });
+  Vis.ctx.setTransform(Vis.dpr, 0, 0, Vis.dpr, 0, 0);
+  // particle budget scales with area & dpr
+  const area = w * h;
+  Vis.maxParticles = Math.max(240, Math.min(1100, Math.floor(area / 1400 / Vis.dpr)));
+}
+
+function bgColor(){
+  const m = MOODS[state.mood].bg;
+  return `rgb(${m[0]},${m[1]},${m[2]})`;
+}
+
+// Emit particles for a note-on event. Called by the synth voices.
+function emitNote(voice, freq, strength){ emitNoteAt(voice, freq, strength, 0); }
+function emitNoteAt(voice, freq, strength, delay){
+  Vis.emitQueue.push({ voice, freq, strength, at: (Audio.ctx ? Audio.ctx.currentTime + delay : 0) });
+}
+
+function spawnParticles(voice, freq, strength){
+  const [h, sBase, lBase] = VOICE_COLOR[voice] || [200, 60, 60];
+  // pitch -> position bias + count
+  const pitchNorm = Math.max(0, Math.min(1, (Math.log2(freq) - 5) / 5)); // ~C1..C6
+  const count = Math.round((voice === "pad" || voice === "texture" ? 3 : 6) * (0.4 + strength) *
+                (Vis.maxParticles > 500 ? 1 : 0.6));
+  const cx = Vis.w * (0.15 + Vis.rng.next() * 0.7);
+  const cy = Vis.h * (0.9 - pitchNorm * 0.8);
+  for (let i = 0; i < count; i++){
+    if (Vis.particles.length >= Vis.maxParticles) Vis.particles.shift();
+    const ang = Vis.rng.next() * Math.PI * 2;
+    const spd = Vis.rng.next() * 1.2;
+    Vis.particles.push({
+      x: cx + Math.cos(ang) * 12 * Vis.rng.next(),
+      y: cy + Math.sin(ang) * 12 * Vis.rng.next(),
+      vx: Math.cos(ang) * spd,
+      vy: Math.sin(ang) * spd,
+      life: 1,
+      decay: 0.0016 + Vis.rng.next() * 0.004,
+      size: (voice === "pad" ? 2.6 : voice === "sub" ? 3.4 : 1.6) + strength * 1.6,
+      h: h + (Vis.rng.next() * 30 - 15),
+      s: sBase, l: lBase + pitchNorm * 12,
+      voice
+    });
+  }
+}
+
+function renderFrame(ts){
+  if (!Vis.running) return;
+  requestAnimationFrame(renderFrame);
+
+  // frame pacing / hidden-tab throttle
+  const dt = ts - Vis.lastFrame;
+  if (Vis.hidden){ Vis.lastFrame = ts; return; }
+  if (dt < 12) return;
+  Vis.lastFrame = ts;
+
+  const ctx = Vis.ctx, w = Vis.w, h = Vis.h;
+  const time = (Audio.ctx ? Audio.ctx.currentTime : ts / 1000);
+
+  // analyser bloom energy
+  let energy = 0;
+  if (Audio.ready && Audio.analyser){
+    Audio.analyser.getByteFrequencyData(Audio.analyData);
+    let sum = 0;
+    for (let i = 0; i < Audio.analyData.length; i += 4) sum += Audio.analyData[i];
+    energy = sum / (Audio.analyData.length / 4) / 255;
+  }
+
+  // fade previous frame (creates trails). Darker fade => longer trails.
+  // Visual mode changes trail length: nebula lingers, ripple is crisper.
+  const bg = MOODS[state.mood].bg;
+  const fadeBase = state.visual === "nebula" ? 0.05 : (state.visual === "ripple" ? 0.20 : 0.12);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = `rgba(${bg[0]},${bg[1]},${bg[2]},${fadeBase + (1 - state.reverb) * 0.05})`;
+  ctx.fillRect(0, 0, w, h);
+
+  // process emit queue (spawn when audio time reaches the note-on)
+  const nowAudio = Audio.ctx ? Audio.ctx.currentTime : 0;
+  // Per-frame spawn cap so a backlog can never block a single frame.
+  let spawned = 0;
+  for (let i = Vis.emitQueue.length - 1; i >= 0 && spawned < 32; i--){
+    if (nowAudio >= Vis.emitQueue[i].at - 0.02){
+      const e = Vis.emitQueue[i];
+      spawnParticles(e.voice, e.freq, e.strength);
+      Vis.emitQueue.splice(i, 1);
+      spawned++;
+    }
+  }
+
+  // draw + advect particles through the flow field
+  ctx.globalCompositeOperation = "lighter";
+  const drift = 0.9 + energy * 0.8;
+  const P = Vis.particles;
+  for (let i = P.length - 1; i >= 0; i--){
+    const p = P[i];
+    const ang = fieldAngle(p.x, p.y, time);
+    // ripple mode follows the field more loosely (more radial), nebula clings to it
+    const follow = state.visual === "ripple" ? 0.09 : (state.visual === "nebula" ? 0.18 : 0.14);
+    p.vx += Math.cos(ang) * follow * drift;
+    p.vy += Math.sin(ang) * follow * drift;
+    // gentle upward buoyancy so the field breathes upward
+    p.vy -= state.visual === "ripple" ? 0.005 : 0.02;
+    const damp = state.visual === "nebula" ? 0.96 : 0.94;
+    p.vx *= damp; p.vy *= damp;
+    p.x += p.vx; p.y += p.vy;
+    p.life -= p.decay;
+    if (p.life <= 0 || p.x < -20 || p.x > w + 20 || p.y < -20 || p.y > h + 20){
+      P.splice(i, 1); continue;
+    }
+    const a = p.life * p.life;
+    const glow = 1 + energy * 1.4;
+    const size = p.size * glow;
+    ctx.beginPath();
+    ctx.fillStyle = `hsla(${p.h},${p.s}%,${p.l}%,${a * 0.55})`;
+    ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+    ctx.fill();
+    // bright core
+    ctx.beginPath();
+    ctx.fillStyle = `hsla(${p.h},${Math.min(100,p.s+20)}%,${Math.min(90,p.l+25)}%,${a * 0.9})`;
+    ctx.arc(p.x, p.y, size * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalCompositeOperation = "source-over";
+
+  // faint central bloom pulsing with energy (visual anchor)
+  if (energy > 0.02){
+    const g = ctx.createRadialGradient(w/2, h*0.55, 0, w/2, h*0.55, Math.max(w,h)*0.5);
+    const hh = (MOODS[state.mood].hue[0] + MOODS[state.mood].hue[1]) / 2;
+    g.addColorStop(0, `hsla(${hh},70%,60%,${energy * 0.05})`);
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+    ctx.globalCompositeOperation = "source-over";
+  }
+}
+
+function startVisualizer(){
+  if (Vis.running) return;
+  Vis.rng = makeRNG(state.seed + "|vis");
+  fieldNoise = makeFieldNoise(state.seed);
+  Vis.running = true;
+  Vis.lastFrame = performance.now();
+  requestAnimationFrame(renderFrame);
+}
+
+/* ===========================================================================
+   8. Thumbnail renderer for the gallery cards (static seeded flow snapshot)
+   =========================================================================== */
+function renderThumb(canvas, preset){
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  const mood = MOODS[preset.mood] || MOODS.nocturne;
+  ctx.fillStyle = `rgb(${mood.bg[0]},${mood.bg[1]},${mood.bg[2]})`;
+  ctx.fillRect(0, 0, W, H);
+  const fn = makeFieldNoise(preset.seed);
+  const rng = makeRNG(preset.seed + "|thumb");
+  function ang(x, y){
+    const s = fn.size, sc = 0.02;
+    const nx = ((x * sc) % s + s) % s, ny = ((y * sc) % s + s) % s;
+    const x0 = Math.floor(nx), y0 = Math.floor(ny);
+    const v = fn.grid[(y0 % s) * s + (x0 % s)];
+    return v * Math.PI * 4;
+  }
+  ctx.globalCompositeOperation = "lighter";
+  const hueLo = mood.hue[0], hueHi = mood.hue[1];
+  for (let s = 0; s < 90; s++){
+    let x = rng.next() * W, y = rng.next() * H;
+    const hue = hueLo + rng.next() * (hueHi - hueLo);
+    ctx.strokeStyle = `hsla(${hue},80%,65%,0.5)`;
+    ctx.lineWidth = 0.8 + rng.next();
+    ctx.beginPath(); ctx.moveTo(x, y);
+    for (let k = 0; k < 26; k++){
+      const a = ang(x, y);
+      x += Math.cos(a) * 3.2; y += Math.sin(a) * 3.2 - 0.3;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  ctx.globalCompositeOperation = "source-over";
+  const grad = ctx.createLinearGradient(0, H*0.5, 0, H);
+  grad.addColorStop(0, "rgba(0,0,0,0)");
+  grad.addColorStop(1, `rgba(${mood.bg[0]},${mood.bg[1]},${mood.bg[2]},0.9)`);
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+}
+
+/* ===========================================================================
+   9. Curated seed gallery
+   =========================================================================== */
+const GALLERY = [
+  { name:"Midnight Tide",  seed:"midnight-tide",  mood:"nocturne", scale:"aeolian",  key:9,  density:0.42, tempo:58, tension:0.4,  brightness:0.4,  reverb:0.66 },
+  { name:"Glass Meadow",   seed:"glass-meadow",   mood:"meadow",   scale:"lydian",   key:2,  density:0.6,  tempo:74, tension:0.26, brightness:0.7,  reverb:0.5  },
+  { name:"Blue Glacier",   seed:"blue-glacier",   mood:"glacier",  scale:"dorian",   key:7,  density:0.34, tempo:52, tension:0.32, brightness:0.6,  reverb:0.78 },
+  { name:"Petrichor",      seed:"petrichor",      mood:"rainfall", scale:"minpenta", key:4,  density:0.72, tempo:84, tension:0.3,  brightness:0.52, reverb:0.6  },
+  { name:"Abyssal",        seed:"abyssal",        mood:"deep",     scale:"phrygian", key:0,  density:0.3,  tempo:48, tension:0.52, brightness:0.3,  reverb:0.72 },
+  { name:"Hanami",         seed:"hanami",         mood:"meadow",   scale:"hirajoshi",key:11, density:0.5,  tempo:66, tension:0.34, brightness:0.62, reverb:0.58 }
+];
+
+/* ===========================================================================
+   10. UI WIRING
+   =========================================================================== */
+const $ = (id) => document.getElementById(id);
+const overlay = $("overlay");
+let isPlaying = false;
+let started = false;
+
+function toast(msg){
+  const el = $("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove("show"), 1900);
+}
+
+// Open/close the composition panel, keeping scrim, toggle button and ARIA in sync.
+function setPanel(open){
+  $("panel").classList.toggle("open", open);
+  $("scrim").classList.toggle("show", open);
+  $("btnPanel").classList.toggle("active", open);
+  $("btnPanel").setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function refreshUIFromState(){
+  $("seedName").textContent = state.seed;
+  $("seedInput").value = state.seed;
+  $("moodName").textContent = MOODS[state.mood].name;
+  $("scaleName").textContent = SCALES[state.scale].name;
+  $("volSlide").value = Math.round(state.volume * 100);
+  $("volVal").textContent = Math.round(state.volume * 100);
+  $("densSlide").value = Math.round(state.density * 100);
+  $("densVal").textContent = Math.round(state.density * 100);
+  $("densSlide2").value = Math.round(state.density * 100);
+  $("densV2").textContent = Math.round(state.density * 100) + "%";
+  $("tempoSlide").value = Math.round(state.tempo);
+  $("tempoV").textContent = Math.round(state.tempo) + " bpm";
+  $("tensSlide").value = Math.round(state.tension * 100);
+  $("tensV").textContent = Math.round(state.tension * 100) + "%";
+  $("briteSlide").value = Math.round(state.brightness * 100);
+  $("briteV").textContent = Math.round(state.brightness * 100) + "%";
+  $("revSlide").value = Math.round(state.reverb * 100);
+  $("revV").textContent = Math.round(state.reverb * 100) + "%";
+  // chip states
+  document.querySelectorAll("#moodChips .chip").forEach(c => c.classList.toggle("on", c.dataset.v === state.mood));
+  document.querySelectorAll("#keyChips .chip").forEach(c => c.classList.toggle("on", +c.dataset.v === state.key));
+  document.querySelectorAll("#scaleChips .chip").forEach(c => c.classList.toggle("on", c.dataset.v === state.scale));
+  document.querySelectorAll("#visChips .chip").forEach(c => c.classList.toggle("on", c.dataset.v === state.visual));
+  document.body.style.background = bgColor();
+  document.querySelector('meta[name=theme-color]').setAttribute("content", bgColor());
+}
+
+// Rebuild the composition + visualizer field for a new seed/scale/key/mood.
+function regenerate(resetArc){
+  initComposition();
+  fieldNoise = makeFieldNoise(state.seed);
+  if (Vis.running) Vis.rng = makeRNG(state.seed + "|vis");
+  if (resetArc && Audio.ctx){ arcStartTime = Audio.ctx.currentTime; }
+  if (Audio.ready) Audio.delay.delayTime.setTargetAtTime(delaySyncTime(), Audio.ctx.currentTime, 0.08);
+  Sched.currentChord = [];
+  refreshUIFromState();
+  writeHash();
+}
+
+function applyVolume(){ if (Audio.ready) Audio.master.gain.setTargetAtTime(state.volume, Audio.ctx.currentTime, 0.05); }
+
+function setPlaying(play){
+  if (!Audio.ready) return;
+  if (play){
+    if (Audio.ctx.state === "suspended") Audio.ctx.resume();
+    startScheduler();
+    isPlaying = true;
+    $("playIcon").innerHTML = '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>';
+  } else {
+    stopScheduler();
+    isPlaying = false;
+    $("playIcon").innerHTML = '<path d="M8 5v14l11-7z"/>';
+  }
+}
+
+// First-gesture boot: build the audio graph, start everything.
+function boot(startPlay){
+  if (!started){
+    buildAudioGraph();
+    initComposition();
+    arcStartTime = Audio.ctx.currentTime;
+    startVisualizer();
+    applyVolume();
+    started = true;
+  }
+  if (Audio.ctx.state === "suspended") Audio.ctx.resume();
+  overlay.classList.add("hide");
+  if (startPlay !== false) setPlaying(true);
+  refreshUIFromState();
+  writeHash();
+  setTimeout(resetIdleTimer, 100);
+}
+
+function loadPreset(preset){
+  state.seed = preset.seed;
+  state.mood = preset.mood;
+  state.scale = preset.scale;
+  state.key = preset.key;
+  state.density = preset.density;
+  state.tempo = preset.tempo;
+  state.tension = preset.tension;
+  state.brightness = preset.brightness;
+  state.reverb = preset.reverb;
+  boot(true);
+  regenerate(true);
+}
+
+/* ---- build chip UIs ---- */
+function buildChips(){
+  const moodC = $("moodChips");
+  MOOD_KEYS.forEach(k => {
+    const b = document.createElement("button");
+    b.className = "chip"; b.dataset.v = k; b.textContent = MOODS[k].name;
+    b.onclick = () => { applyMood(k, true); regenerate(true); };
+    moodC.appendChild(b);
+  });
+  const keyC = $("keyChips");
+  KEYS.forEach((k, i) => {
+    const b = document.createElement("button");
+    b.className = "chip"; b.dataset.v = i; b.textContent = k;
+    b.onclick = () => { state.key = i; regenerate(false); };
+    keyC.appendChild(b);
+  });
+  const scaleC = $("scaleChips");
+  SCALE_KEYS.forEach(k => {
+    const b = document.createElement("button");
+    b.className = "chip"; b.dataset.v = k; b.textContent = SCALES[k].name;
+    b.onclick = () => { state.scale = k; regenerate(false); };
+    scaleC.appendChild(b);
+  });
+  const visC = $("visChips");
+  [["flow","Flow"],["ripple","Ripple"],["nebula","Nebula"]].forEach(([v, label]) => {
+    const b = document.createElement("button");
+    b.className = "chip"; b.dataset.v = v; b.textContent = label;
+    b.onclick = () => { state.visual = v; refreshUIFromState(); writeHash();
+      Vis.particles.length = 0; }; // clear for a fresh look
+    visC.appendChild(b);
+  });
+}
+
+function buildGallery(){
+  const gal = $("gallery");
+  GALLERY.forEach(preset => {
+    const card = document.createElement("button");
+    card.className = "card";
+    const cv = document.createElement("canvas");
+    cv.width = 320; cv.height = 200;
+    card.appendChild(cv);
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.innerHTML = `<div class="nm">${preset.name}</div><div class="sub">${MOODS[preset.mood].name} · ${SCALES[preset.scale].name} · ${KEYS[preset.key]}</div>`;
+    card.appendChild(meta);
+    card.onclick = () => loadPreset(preset);
+    gal.appendChild(card);
+    renderThumb(cv, preset);
+  });
+}
+
+/* ---- slider wiring ---- */
+function wireSliders(){
+  const link = (id, apply) => {
+    const el = $(id);
+    el.addEventListener("input", () => { apply(+el.value); });
+  };
+  link("volSlide", v => { state.volume = v/100; $("volVal").textContent = v; applyVolume(); writeHash(); });
+  const setDens = v => { state.density = v/100; $("densVal").textContent = v; $("densV2").textContent = v+"%"; $("densSlide").value=v; $("densSlide2").value=v; initComposition(); writeHash(); };
+  link("densSlide", setDens);
+  link("densSlide2", setDens);
+  link("tempoSlide", v => { state.tempo = v; $("tempoV").textContent = v+" bpm";
+    if (Audio.ready) Audio.delay.delayTime.setTargetAtTime(delaySyncTime(), Audio.ctx.currentTime, 0.08); writeHash(); });
+  link("tensSlide", v => { state.tension = v/100; $("tensV").textContent = v+"%"; writeHash(); });
+  link("briteSlide", v => { state.brightness = v/100; $("briteV").textContent = v+"%"; writeHash(); });
+  link("revSlide", v => { state.reverb = v/100; $("revV").textContent = v+"%";
+    if (Audio.ready) Audio.reverbWet.gain.setTargetAtTime(state.reverb, Audio.ctx.currentTime, 0.1); writeHash(); });
+}
+
+/* ---- seed actions ---- */
+const SEED_WORDS = ["aurora","cinder","hollow","meridian","fathom","lantern","willow","cobalt","vellum","ember","tundra","zephyr","cascade","obsidian","marigold","quartz","nimbus","driftwood","solstice","umbra","halcyon","glimmer","petal","monsoon","reverie","cavern","estuary","lull"];
+function randomSeed(){
+  const r = makeRNG(String(Date.now()) + Math.random());
+  return r.pick(SEED_WORDS) + "-" + r.pick(SEED_WORDS) + "-" + r.int(10, 999);
+}
+function doRandom(){
+  state.seed = randomSeed();
+  if (!started) boot(true);
+  regenerate(true);
+  toast("New seed: " + state.seed);
+}
+function doEvolve(){
+  // gently mutate: append/replace a suffix so the PRNG shifts but character stays
+  const r = makeRNG(state.seed + "|evolve" + (evolveCounter++));
+  const base = state.seed.replace(/~[a-z0-9]+$/i, "");
+  state.seed = base + "~" + r.int(0, 9999).toString(36);
+  // nudge a parameter slightly
+  state.tension = Math.max(0, Math.min(1, state.tension + r.range(-0.08, 0.08)));
+  if (!started) boot(true);
+  regenerate(false);
+  toast("Evolved → " + state.seed);
+}
+let evolveCounter = 0;
+function doSeedGo(){
+  const el = $("seedInput");
+  const v = el.value.trim();
+  if (!v){
+    toast("Type a word to grow a piece");
+    el.classList.remove("invalid"); void el.offsetWidth; el.classList.add("invalid");
+    el.focus();
+    return;
+  }
+  el.classList.remove("invalid");
+  state.seed = v;
+  if (!started) boot(true);
+  regenerate(true);
+  toast("Grown: " + v);
+}
+
+function doShare(){
+  const url = location.origin + location.pathname + "#" + serialize();
+  const share = { title:"Driftfield — " + state.seed, text:"Listen to this generative ambient piece:", url };
+  if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)){
+    navigator.share(share).catch(()=>{});
+  } else if (navigator.clipboard){
+    navigator.clipboard.writeText(url).then(() => toast("Permalink copied to clipboard")).catch(() => fallbackCopy(url));
+  } else fallbackCopy(url);
+}
+function fallbackCopy(text){
+  const ta = document.createElement("textarea");
+  ta.value = text; document.body.appendChild(ta); ta.select();
+  try { document.execCommand("copy"); toast("Permalink copied"); } catch(e){ toast("Copy failed — link is in the URL bar"); }
+  document.body.removeChild(ta);
+}
+
+/* ---- PNG export ---- */
+function doPng(){
+  if (!Vis.canvas){ toast("Start the piece first"); return; }
+  try {
+    const link = document.createElement("a");
+    link.download = "driftfield-" + state.seed.replace(/[^a-z0-9-]/gi,"_") + ".png";
+    link.href = Vis.canvas.toDataURL("image/png");
+    link.click();
+    toast("Saved PNG snapshot");
+  } catch(e){ toast("PNG export unavailable"); }
+}
+
+/* ---- audio recording via MediaRecorder ---- */
+const Rec = { recorder:null, chunks:[], recording:false };
+function toggleRec(){
+  if (!Audio.ready || !Audio.destStream){
+    if (!started){ boot(true); }
+    if (!Audio.destStream){ toast("Recording not supported here"); return; }
+  }
+  if (Rec.recording){ stopRec(); return; }
+  let mime = "";
+  const cands = ["audio/webm;codecs=opus","audio/webm","audio/ogg;codecs=opus","audio/ogg"];
+  for (const m of cands){ if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)){ mime = m; break; } }
+  if (!window.MediaRecorder){ toast("MediaRecorder not supported"); return; }
+  try {
+    Rec.recorder = mime ? new MediaRecorder(Audio.destStream, { mimeType:mime }) : new MediaRecorder(Audio.destStream);
+  } catch(e){ toast("Recording failed to start"); return; }
+  Rec.chunks = [];
+  Rec.recorder.ondataavailable = (e) => { if (e.data && e.data.size) Rec.chunks.push(e.data); };
+  Rec.recorder.onstop = () => {
+    const type = Rec.recorder.mimeType || "audio/webm";
+    const blob = new Blob(Rec.chunks, { type });
+    const ext = type.includes("ogg") ? "ogg" : "webm";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "driftfield-" + state.seed.replace(/[^a-z0-9-]/gi,"_") + "." + ext;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    toast("Saved audio clip");
+  };
+  Rec.recorder.start();
+  Rec.recording = true;
+  $("btnRec").classList.add("active");
+  $("recLabel").textContent = "Stop";
+  if (!isPlaying) setPlaying(true);
+}
+function stopRec(){
+  if (Rec.recorder && Rec.recording){ try { Rec.recorder.stop(); } catch(e){} }
+  Rec.recording = false;
+  $("btnRec").classList.remove("active");
+  $("recLabel").textContent = "Rec";
+}
+
+/* ---- fullscreen / ambient mode ---- */
+function toggleFull(){
+  const el = document.documentElement;
+  if (!document.fullscreenElement){
+    const p = (el.requestFullscreen || el.webkitRequestFullscreen || function(){}).call(el);
+    if (p && p.catch) p.catch(()=>{});
+    if (!started) boot(true);
+  } else {
+    const p = (document.exitFullscreen || document.webkitExitFullscreen || function(){}).call(document);
+    if (p && p.catch) p.catch(()=>{});
+  }
+}
+
+/* ---- idle auto-hide controls (ambient/screensaver mode) ---- */
+let idleTimer = null;
+function resetIdleTimer(){
+  document.body.classList.remove("idle");
+  clearTimeout(idleTimer);
+  if (isPlaying){
+    idleTimer = setTimeout(() => { if (isPlaying && !$("panel").classList.contains("open")) document.body.classList.add("idle"); }, 3600);
+  }
+}
+
+/* ===========================================================================
+   11. Init
+   =========================================================================== */
+function init(){
+  Vis.canvas = $("field");
+  setupCanvas();
+  // parse hash / apply defaults
+  if (location.hash && location.hash.length > 2) deserialize(location.hash);
+  buildChips();
+  buildGallery();
+  wireSliders();
+  refreshUIFromState();
+
+  // start affordances
+  $("startBtn").onclick = () => boot(true);
+  $("playBtn").onclick = () => { if (!started) boot(true); else setPlaying(!isPlaying); };
+
+  // top bar
+  $("btnEvolve").onclick = doEvolve;
+  $("btnRandom").onclick = doRandom;
+  $("btnRec").onclick = toggleRec;
+  $("btnPng").onclick = doPng;
+  $("btnShare").onclick = doShare;
+  $("btnFull").onclick = toggleFull;
+  $("btnPanel").onclick = () => setPanel(!$("panel").classList.contains("open"));
+  $("panelClose").onclick = () => setPanel(false);
+  $("scrim").onclick = () => setPanel(false);
+
+  // panel seed actions
+  $("seedGo").onclick = doSeedGo;
+  $("seedInput").addEventListener("keydown", e => { if (e.key === "Enter") doSeedGo(); });
+  $("pRandom").onclick = doRandom;
+  $("pEvolve").onclick = doEvolve;
+
+  // keyboard shortcuts
+  window.addEventListener("keydown", e => {
+    if (e.target.tagName === "INPUT") return;
+    if (e.code === "Space"){ e.preventDefault(); if (!started) boot(true); else setPlaying(!isPlaying); }
+    else if (e.key === "f" || e.key === "F") toggleFull();
+    else if (e.key === "r" || e.key === "R") doRandom();
+    else if (e.key === "e" || e.key === "E") doEvolve();
+    else if (e.key === "Escape") setPanel(false);
+  });
+
+  // resize
+  let rsz;
+  window.addEventListener("resize", () => { clearTimeout(rsz); rsz = setTimeout(setupCanvas, 150); });
+
+  // hidden-tab throttle for CPU
+  document.addEventListener("visibilitychange", () => {
+    Vis.hidden = document.hidden;
+    // Audio keeps running, but the visualizer is paused while hidden. Drop any
+    // queued note-ons so they can't pile up and burst-spawn on return.
+    if (document.hidden){ Vis.emitQueue.length = 0; }
+  });
+
+  // idle controls
+  ["mousemove","touchstart","keydown","click"].forEach(ev =>
+    window.addEventListener(ev, resetIdleTimer, { passive:true }));
+
+  // tap the field (in ambient mode) toggles controls / play
+  Vis.canvas.addEventListener("click", () => {
+    if (document.body.classList.contains("idle")) { resetIdleTimer(); return; }
+    if (!started) boot(true);
+  });
+
+  // if a shareable hash was provided, surface a hint to press play
+  if (location.hash && location.hash.length > 2){
+    $("startBtn").innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> Play this piece';
+  }
+}
+
+document.addEventListener("DOMContentLoaded", init);
+</script>
+</body>
+</html>

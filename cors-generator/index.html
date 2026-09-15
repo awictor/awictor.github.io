@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CORS Header Generator — Access-Control-* response headers</title>
+<meta name="description" content="Generate CORS response headers (Access-Control-Allow-Origin, Methods, Headers, Credentials, Max-Age) from a simple config, with a warning for the credentials + wildcard conflict. Offline.">
+<style>
+  :root{
+    --c:#0369a1;
+    --bg:#e9f3fb; --card:#ffffff; --fg:#06192a; --muted:#3d566b;
+    --line:#cae0f1; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#04121d; --card:#0a1d2e; --fg:#dcecfa; --muted:#87a6c2;
+    --line:#123146; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:840px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto;font-weight:700}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:840px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.76rem;font-weight:600;color:var(--muted);margin:12px 0 5px}
+  input{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.98rem;font-weight:500;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--fg)}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .methods{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+  .methods label{display:flex;align-items:center;gap:5px;margin:0;font-family:ui-monospace,monospace;font-size:.85rem;color:var(--fg);cursor:pointer}
+  .row{display:flex;align-items:center;gap:8px;margin-top:12px}
+  .row input[type=checkbox]{width:auto}
+  pre{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:16px;overflow-x:auto;font-family:ui-monospace,monospace;font-size:.95rem;white-space:pre-wrap;word-break:break-word;min-height:3em}
+  .warn{background:#fef2f2;border:1px solid #fca5a5;color:#b91c1c;border-radius:10px;padding:12px;font-size:.86rem;margin-top:12px}
+  [data-theme="dark"] .warn{background:#2a0f10;border-color:#7f1d1d;color:#fca5a5}
+  .btn{background:var(--c);color:#fff;border:0;border-radius:10px;padding:9px 14px;font-weight:700;cursor:pointer;font-size:.88rem;margin-top:12px}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .note code{background:var(--bg);padding:1px 5px;border-radius:5px}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🌐</div>
+  <div>
+    <h1>CORS Header Generator</h1>
+    <p>Access-Control-* response headers</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <label>Allowed origins (one per line, or * for any)</label>
+    <input id="origins" value="*">
+    <label>Methods</label>
+    <div class="methods" id="methodBoxes"></div>
+    <label>Allowed request headers (comma-separated)</label>
+    <input id="headers" value="Content-Type, Authorization">
+    <label>Expose headers (comma-separated, optional)</label>
+    <input id="expose" value="">
+    <label>Max-Age (seconds, optional)</label>
+    <input id="maxage" value="86400">
+    <div class="row"><input type="checkbox" id="creds"><label for="creds" style="margin:0">Allow credentials (cookies / auth)</label></div>
+    <div class="warn" id="warn" style="display:none"></div>
+  </div>
+
+  <div class="card">
+    <h2>Response headers</h2>
+    <pre id="out">—</pre>
+    <button class="btn" id="copy">Copy headers</button>
+  </div>
+
+  <div class="card">
+    <h2>About CORS</h2>
+    <p class="note"><b>CORS</b> (Cross-Origin Resource Sharing) headers tell a browser which other origins may read a response. <code>Access-Control-Allow-Origin</code> names the allowed origin (or <code>*</code> for any); <code>Allow-Methods</code> and <code>Allow-Headers</code> list what a preflight request may use; <code>Max-Age</code> caches the preflight. One key rule: if you set <code>Allow-Credentials: true</code> you <b>cannot</b> use <code>*</code> for the origin — you must echo back the specific requesting origin. This tool flags that conflict. Everything is generated locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function resolveOrigin(origins){
+    if(!origins || !origins.length) return '*';
+    if(origins.indexOf('*') >= 0) return '*';
+    if(origins.length === 1) return origins[0];
+    return origins.join(', ');
+  }
+  function corsHeaders(c){
+    var o = [];
+    o.push('Access-Control-Allow-Origin: ' + resolveOrigin(c.origins));
+    if(c.methods && c.methods.length) o.push('Access-Control-Allow-Methods: ' + c.methods.join(', '));
+    if(c.headers && c.headers.length) o.push('Access-Control-Allow-Headers: ' + c.headers.join(', '));
+    if(c.exposeHeaders && c.exposeHeaders.length) o.push('Access-Control-Expose-Headers: ' + c.exposeHeaders.join(', '));
+    if(c.credentials) o.push('Access-Control-Allow-Credentials: true');
+    if(c.maxAge !== undefined && c.maxAge !== null && c.maxAge !== '') o.push('Access-Control-Max-Age: ' + c.maxAge);
+    return o;
+  }
+  function credentialWildcardConflict(c){ return !!c.credentials && resolveOrigin(c.origins) === '*'; }
+
+  if(typeof module !== 'undefined') module.exports = { resolveOrigin:resolveOrigin, corsHeaders:corsHeaders, credentialWildcardConflict:credentialWildcardConflict };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var $ = function(id){ return document.getElementById(id); };
+    var METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'];
+    var box = $('methodBoxes');
+    METHODS.forEach(function(m){
+      var checked = (m === 'GET' || m === 'POST' || m === 'OPTIONS') ? 'checked' : '';
+      var l = document.createElement('label');
+      l.innerHTML = '<input type="checkbox" value="' + m + '" ' + checked + '>' + m;
+      box.appendChild(l);
+    });
+    function list(str, sep){ return String(str || '').split(sep || ',').map(function(s){ return s.trim(); }).filter(Boolean); }
+    function selectedMethods(){ return Array.prototype.filter.call(box.querySelectorAll('input'), function(i){ return i.checked; }).map(function(i){ return i.value; }); }
+    function render(){
+      var c = {
+        origins: list($('origins').value, '\n').length ? list($('origins').value, '\n') : list($('origins').value, ','),
+        methods: selectedMethods(),
+        headers: list($('headers').value),
+        exposeHeaders: list($('expose').value),
+        credentials: $('creds').checked,
+        maxAge: $('maxage').value.trim()
+      };
+      $('out').textContent = corsHeaders(c).join('\n') || '—';
+      if(credentialWildcardConflict(c)){
+        $('warn').style.display = 'block';
+        $('warn').textContent = '⚠ Conflict: Allow-Credentials cannot be used with Allow-Origin: *. Echo the specific requesting origin instead.';
+      } else { $('warn').style.display = 'none'; }
+    }
+    ['origins','headers','expose','maxage'].forEach(function(id){ $(id).addEventListener('input', render); });
+    $('creds').addEventListener('change', render);
+    box.addEventListener('change', render);
+    $('copy').addEventListener('click', function(){
+      if(navigator.clipboard) navigator.clipboard.writeText($('out').textContent);
+      $('copy').textContent = 'Copied!'; setTimeout(function(){ $('copy').textContent = 'Copy headers'; }, 1200);
+    });
+    render();
+
+    var root = document.documentElement, tb = $('theme');
+    function setTheme(t){ root.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? '☀️' : '🌙'; try{ localStorage.setItem('cors-theme', t); }catch(e){} }
+    var saved; try{ saved = localStorage.getItem('cors-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); });
+  }
+</script>
+</body>
+</html>

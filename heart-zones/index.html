@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HeartZones — training heart rate zone calculator</title>
+<meta name="description" content="Free offline heart rate zone calculator. Enter your age (and optional resting heart rate) to get your five training zones in bpm, using max-HR or the Karvonen heart-rate-reserve method. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/heart-zones/">
+<style>
+  :root{
+    --c:#be123c; --bg:#fbf7f8; --fg:#231317; --muted:#7c5b62;
+    --card:#ffffff; --border:#eedde1; --code:#fbedf0;
+    --z1:#0284c7; --z2:#0d9488; --z3:#65a30d; --z4:#ea580c; --z5:#be123c;
+  }
+  [data-theme="dark"]{
+    --bg:#190f12; --fg:#f2e5e8; --muted:#b5949b; --card:#251519;
+    --border:#3a2329; --code:#2d191e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:28px 20px 8px;
+    display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#fb7185);
+    display:grid;place-items:center;color:#fff;font-size:20px}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);
+    color:var(--fg);border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:720px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);
+    border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .fld{flex:1;min-width:130px}
+  input,select{width:100%;padding:11px 13px;border:1px solid var(--border);
+    border-radius:11px;background:var(--bg);color:var(--fg);font-size:1rem}
+  input:focus,select:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .err{color:#dc2626;font-size:.86rem;margin:12px 0 0;min-height:1.1em}
+  .max{margin-top:18px;font-size:.95rem;color:var(--muted)}
+  .max b{color:var(--fg);font-size:1.15rem;font-family:ui-monospace,monospace}
+  .zones{margin-top:14px;display:flex;flex-direction:column;gap:8px}
+  .zn{display:flex;align-items:center;gap:12px;padding:12px 15px;border-radius:12px;
+    background:var(--code)}
+  .dot{width:12px;height:12px;border-radius:50%;flex:none}
+  .zn .nm{font-weight:700}
+  .zn .pc{color:var(--muted);font-size:.82rem}
+  .zn .bpm{margin-left:auto;font-family:ui-monospace,monospace;font-weight:700;font-size:1.1rem}
+  .zn .bpm small{color:var(--muted);font-weight:400;font-size:.7rem}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('hz.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">❤</div>
+  <div>
+    <h1>HeartZones</h1>
+    <p class="sub">Training heart rate zone calculator</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <div class="row">
+      <div class="fld">
+        <label for="age">Age</label>
+        <input id="age" value="30" inputmode="numeric" spellcheck="false" placeholder="30">
+      </div>
+      <div class="fld">
+        <label for="rest">Resting HR (optional)</label>
+        <input id="rest" value="" inputmode="numeric" spellcheck="false" placeholder="e.g. 60">
+      </div>
+      <div class="fld">
+        <label for="formula">Max-HR formula</label>
+        <select id="formula">
+          <option value="haskell">220 − age (Fox)</option>
+          <option value="tanaka">208 − 0.7·age (Tanaka)</option>
+          <option value="gulati">206 − 0.88·age (Gulati)</option>
+        </select>
+      </div>
+    </div>
+    <p class="err" id="err"></p>
+    <div class="max" id="max"></div>
+    <div class="zones" id="zones"></div>
+    <p class="hint">With a resting heart rate, zones use the Karvonen (heart-rate-reserve)
+      method, which is more personalized. Without it, zones are a percentage of max HR.
+      Estimates only — not medical advice. Runs entirely in your browser.</p>
+  </div>
+</main>
+<footer>
+  HeartZones is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/heart-zones">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function maxHeartRate(age, formula){
+  age = Number(age);
+  if(!Number.isFinite(age) || age <= 0 || age > 130) return null;
+  formula = formula || 'haskell';
+  if(formula === 'tanaka') return Math.round(208 - 0.7 * age);
+  if(formula === 'gulati') return Math.round(206 - 0.88 * age);
+  return 220 - age;
+}
+function karvonen(maxHR, restHR, intensity){
+  if(!Number.isFinite(maxHR) || !Number.isFinite(restHR) || !Number.isFinite(intensity)) return null;
+  return Math.round((maxHR - restHR) * intensity + restHR);
+}
+var ZONE_DEFS = [
+  { zone:1, name:'Recovery',  low:0.5, high:0.6 },
+  { zone:2, name:'Endurance', low:0.6, high:0.7 },
+  { zone:3, name:'Aerobic',   low:0.7, high:0.8 },
+  { zone:4, name:'Threshold', low:0.8, high:0.9 },
+  { zone:5, name:'Maximum',   low:0.9, high:1.0 }
+];
+function zones(maxHR, restHR){
+  if(!Number.isFinite(maxHR) || maxHR <= 0) return null;
+  var useKarvonen = Number.isFinite(restHR) && restHR > 0 && restHR < maxHR;
+  return ZONE_DEFS.map(function(z){
+    var low  = useKarvonen ? karvonen(maxHR, restHR, z.low)  : Math.round(maxHR * z.low);
+    var high = useKarvonen ? karvonen(maxHR, restHR, z.high) : Math.round(maxHR * z.high);
+    return { zone:z.zone, name:z.name, low:low, high:high,
+             pctLow:Math.round(z.low * 100), pctHigh:Math.round(z.high * 100),
+             method: useKarvonen ? 'karvonen' : 'pctmax' };
+  });
+}
+
+if(typeof module !== 'undefined') module.exports = {
+  maxHeartRate, karvonen, zones, ZONE_DEFS
+};
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var ageEl = document.getElementById('age');
+  var restEl = document.getElementById('rest');
+  var formulaEl = document.getElementById('formula');
+  var errEl = document.getElementById('err');
+  var maxEl = document.getElementById('max');
+  var zonesEl = document.getElementById('zones');
+  var COLORS = ['var(--z1)','var(--z2)','var(--z3)','var(--z4)','var(--z5)'];
+
+  function render(){
+    var mhr = maxHeartRate(ageEl.value, formulaEl.value);
+    if(mhr === null){
+      errEl.textContent = 'Enter a valid age (1–130).';
+      maxEl.textContent = ''; zonesEl.innerHTML = '';
+      return;
+    }
+    errEl.textContent = '';
+    var rest = restEl.value.trim() === '' ? NaN : Number(restEl.value);
+    var zs = zones(mhr, rest);
+    var karv = zs[0].method === 'karvonen';
+    maxEl.innerHTML = 'Estimated max heart rate: <b>' + mhr + ' bpm</b>' +
+      (karv ? ' · using Karvonen (resting ' + Math.round(rest) + ')' : ' · % of max');
+    zonesEl.innerHTML = zs.map(function(z, i){
+      return '<div class="zn">' +
+        '<span class="dot" style="background:'+COLORS[i]+'"></span>' +
+        '<div><div class="nm">Zone '+z.zone+' · '+z.name+'</div>' +
+        '<div class="pc">'+z.pctLow+'–'+z.pctHigh+'%</div></div>' +
+        '<div class="bpm">'+z.low+'–'+z.high+' <small>bpm</small></div></div>';
+    }).join('');
+    try{
+      localStorage.setItem('hz.age', ageEl.value);
+      localStorage.setItem('hz.rest', restEl.value);
+      localStorage.setItem('hz.formula', formulaEl.value);
+    }catch(e){}
+  }
+  [ageEl, restEl].forEach(function(el){ el.addEventListener('input', render); });
+  formulaEl.addEventListener('change', render);
+  try{
+    var a = localStorage.getItem('hz.age'); if(a !== null) ageEl.value = a;
+    var r = localStorage.getItem('hz.rest'); if(r !== null) restEl.value = r;
+    var f = localStorage.getItem('hz.formula'); if(f) formulaEl.value = f;
+  }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('hz.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('hz.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

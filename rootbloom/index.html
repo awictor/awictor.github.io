@@ -1,0 +1,1301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Rootbloom — live Newton-fractal explorer</title>
+<style>
+  :root{
+    --bg:#07080c; --panel:rgba(16,18,28,0.82); --panel-solid:#12141f;
+    --edge:rgba(255,255,255,0.10); --edge2:rgba(255,255,255,0.18);
+    --txt:#eef1f8; --dim:#9aa2b8; --accent:#ff6bd0; --accent2:#7fd7ff;
+    --good:#7CFFB2;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--txt);
+    font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;touch-action:none;}
+  canvas{display:block;position:absolute;inset:0;width:100%;height:100%}
+  #gl{z-index:1}
+  #overlay{z-index:2;pointer-events:none}
+  a{color:var(--accent2);text-decoration:none}
+
+  /* ---- Control panel ---- */
+  #panel{position:absolute;z-index:5;top:12px;left:12px;width:288px;max-height:calc(100vh - 24px);
+    overflow-y:auto;background:var(--panel);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    border:1px solid var(--edge);border-radius:14px;padding:12px 13px 14px;
+    box-shadow:0 18px 50px rgba(0,0,0,.55);transition:transform .28s cubic-bezier(.4,0,.2,1),opacity .28s;}
+  #panel.hidden{transform:translateX(-115%);opacity:0;pointer-events:none}
+  #panel::-webkit-scrollbar{width:8px}
+  #panel::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:8px}
+  .brand{display:flex;align-items:center;gap:9px;margin-bottom:4px}
+  .brand .dot{width:22px;height:22px;border-radius:50%;
+    background:conic-gradient(from 0deg,#ff6bd0,#ffd36b,#7CFFB2,#7fd7ff,#b784ff,#ff6bd0);
+    box-shadow:0 0 12px rgba(255,107,208,.6);flex:0 0 auto}
+  .brand h1{font-size:16px;margin:0;letter-spacing:.3px;font-weight:700}
+  .tagline{color:var(--dim);font-size:11px;margin:0 0 10px}
+  .grp{border-top:1px solid var(--edge);padding-top:9px;margin-top:9px}
+  .grp:first-of-type{border-top:0;margin-top:0;padding-top:0}
+  .row{display:flex;align-items:center;gap:8px;margin:6px 0}
+  .row label{flex:0 0 84px;color:var(--dim);font-size:11px}
+  .row .val{margin-left:auto;color:var(--txt);font-variant-numeric:tabular-nums;font-size:11px;min-width:44px;text-align:right}
+  input[type=range]{-webkit-appearance:none;appearance:none;height:4px;border-radius:4px;flex:1;
+    background:linear-gradient(90deg,var(--accent),var(--accent2));outline:none;cursor:pointer}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+    background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.6);cursor:pointer}
+  input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radius:50%;background:#fff;cursor:pointer}
+  select{flex:1;background:var(--panel-solid);color:var(--txt);border:1px solid var(--edge2);
+    border-radius:8px;padding:5px 7px;font-size:12px;outline:none;cursor:pointer}
+  .btns{display:flex;flex-wrap:wrap;gap:6px}
+  button{background:var(--panel-solid);color:var(--txt);border:1px solid var(--edge2);border-radius:8px;
+    padding:6px 9px;font-size:12px;cursor:pointer;transition:background .15s,border-color .15s,transform .05s}
+  button:hover{background:#1c2030;border-color:var(--accent)}
+  button:active{transform:translateY(1px)}
+  button:disabled{opacity:.55;cursor:progress;background:var(--panel-solid);border-color:var(--edge2)}
+  button.on{background:var(--accent);color:#12141f;border-color:var(--accent);font-weight:600}
+  button.wide{flex:1}
+  .chk{display:flex;align-items:center;gap:7px;cursor:pointer;user-select:none;font-size:12px;color:var(--dim)}
+  .chk input{accent-color:var(--accent);width:15px;height:15px;cursor:pointer}
+  .hint{color:var(--dim);font-size:10.5px;margin-top:7px;line-height:1.5}
+  .kf-count{color:var(--accent2);font-variant-numeric:tabular-nums}
+
+  /* ---- Readout / FPS ---- */
+  #hud{position:absolute;z-index:4;top:12px;right:12px;background:var(--panel);
+    backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid var(--edge);
+    border-radius:10px;padding:7px 11px;font-variant-numeric:tabular-nums;font-size:11px;color:var(--dim);
+    text-align:right;line-height:1.7;pointer-events:none}
+  #hud b{color:var(--txt);font-weight:600}
+
+  /* ---- Panel toggle tab ---- */
+  #tab{position:absolute;z-index:6;top:12px;left:12px;display:none;width:34px;height:34px;border-radius:10px;
+    align-items:center;justify-content:center;font-size:18px}
+  #panel.hidden ~ #tab{display:flex}
+
+  /* ---- Gallery ---- */
+  #gallery{position:absolute;z-index:4;bottom:0;left:0;right:0;padding:10px 12px 12px;
+    display:flex;gap:10px;overflow-x:auto;background:linear-gradient(0deg,rgba(4,5,9,.85),rgba(4,5,9,0));
+    transition:transform .3s ease,opacity .3s}
+  #gallery.hidden{transform:translateY(120%);opacity:0;pointer-events:none}
+  .thumb{flex:0 0 auto;width:132px;cursor:pointer;border-radius:10px;overflow:hidden;
+    border:1px solid var(--edge2);background:#0c0e16;transition:transform .16s,border-color .16s,box-shadow .16s}
+  .thumb:hover{transform:translateY(-4px);border-color:var(--accent);box-shadow:0 10px 26px rgba(255,107,208,.28)}
+  .thumb canvas{position:static;width:132px;height:84px;display:block}
+  .thumb .cap{padding:5px 8px;font-size:10.5px;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .thumb .cap small{color:var(--dim)}
+  #galTab{position:absolute;z-index:6;bottom:12px;right:12px;display:none}
+  #gallery.hidden ~ #galTab{display:block}
+
+  /* ---- Help overlay ---- */
+  #help{position:absolute;z-index:20;inset:0;display:none;align-items:center;justify-content:center;
+    background:rgba(4,5,9,.72);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+  #help.show{display:flex}
+  #help .card{max-width:600px;width:calc(100% - 40px);max-height:calc(100% - 60px);overflow-y:auto;
+    background:var(--panel-solid);border:1px solid var(--edge2);border-radius:16px;padding:22px 26px;
+    box-shadow:0 30px 80px rgba(0,0,0,.6)}
+  #help h2{margin:0 0 4px;font-size:20px}
+  #help h3{margin:18px 0 6px;font-size:13px;color:var(--accent);text-transform:uppercase;letter-spacing:.6px}
+  #help p{color:var(--dim);margin:4px 0}
+  #help table{width:100%;border-collapse:collapse;margin-top:4px}
+  #help td{padding:4px 8px;border-top:1px solid var(--edge);vertical-align:top}
+  #help td:first-child{color:var(--accent2);white-space:nowrap;font-variant-numeric:tabular-nums;width:150px}
+  kbd{background:#222636;border:1px solid var(--edge2);border-bottom-width:2px;border-radius:5px;
+    padding:1px 6px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:#fff}
+  #help .x{position:sticky;top:0;float:right;font-size:22px;line-height:1;cursor:pointer;color:var(--dim);
+    background:none;border:0;padding:0}
+  #help .x:hover{color:#fff}
+
+  /* ---- Fallback ---- */
+  #fallback{position:absolute;z-index:50;inset:0;display:none;align-items:center;justify-content:center;
+    padding:30px;background:radial-gradient(circle at 50% 40%,#1a0f22,#07080c)}
+  #fallback.show{display:flex}
+  #fallback .card{max-width:520px;text-align:center;background:var(--panel-solid);
+    border:1px solid var(--edge2);border-radius:16px;padding:34px}
+  #fallback h2{margin:0 0 10px;font-size:22px;color:var(--accent)}
+  #fallback p{color:var(--dim)}
+  .toast{position:absolute;z-index:30;bottom:78px;left:50%;transform:translateX(-50%) translateY(20px);
+    background:var(--panel-solid);border:1px solid var(--accent);border-radius:10px;padding:9px 16px;
+    color:#fff;font-size:12px;opacity:0;transition:opacity .25s,transform .25s;pointer-events:none;
+    box-shadow:0 10px 30px rgba(0,0,0,.5)}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<canvas id="overlay"></canvas>
+
+<div id="panel">
+  <div class="brand"><div class="dot"></div><h1>Rootbloom</h1></div>
+  <p class="tagline">Drag the roots and watch the basins bloom.</p>
+
+  <div class="grp">
+    <div class="row"><label>Method</label>
+      <select id="method">
+        <option value="newton">Newton</option>
+        <option value="relaxed">Relaxed Newton</option>
+        <option value="halley">Halley</option>
+        <option value="nova">Nova</option>
+      </select></div>
+    <div class="row" id="rowRoots"><label>Roots</label>
+      <span class="val"><b id="rootCount">3</b> / 12</span></div>
+  </div>
+
+  <div class="grp" id="grpA">
+    <div class="row"><label>|a| coeff</label>
+      <input type="range" id="aMag" min="0.05" max="2" step="0.005" value="1">
+      <span class="val" id="aMagV">1.00</span></div>
+    <div class="row"><label>a angle</label>
+      <input type="range" id="aAng" min="-3.14159" max="3.14159" step="0.005" value="0">
+      <span class="val" id="aAngV">0°</span></div>
+    <label class="chk"><input type="checkbox" id="orbitA"> orbit <i>a</i> around unit circle</label>
+  </div>
+
+  <div class="grp" id="grpC" style="display:none">
+    <div class="row"><label>c.re</label>
+      <input type="range" id="cRe" min="-1" max="1" step="0.005" value="0">
+      <span class="val" id="cReV">0.00</span></div>
+    <div class="row"><label>c.im</label>
+      <input type="range" id="cIm" min="-1" max="1" step="0.005" value="0">
+      <span class="val" id="cImV">0.00</span></div>
+  </div>
+
+  <div class="grp">
+    <div class="row"><label>Iterations</label>
+      <input type="range" id="maxIter" min="20" max="300" step="1" value="90">
+      <span class="val" id="maxIterV">90</span></div>
+    <div class="row"><label>Palette</label>
+      <select id="palette">
+        <option value="0">Bloom</option><option value="1">Neon</option>
+        <option value="2">Spectral</option><option value="3">Ember</option>
+        <option value="4">Ice</option><option value="5">Candy</option>
+        <option value="6">Mono</option><option value="7">Prism bands</option>
+      </select></div>
+    <label class="chk"><input type="checkbox" id="contours" checked> iteration contour bands</label>
+    <label class="chk" style="margin-top:6px"><input type="checkbox" id="shimmer"> shimmer (rotate colors)</label>
+  </div>
+
+  <div class="grp">
+    <div class="btns">
+      <button id="btnReset" class="wide">Reset cubic</button>
+      <button id="btnRandom" class="wide">Randomize</button>
+    </div>
+    <div class="btns" style="margin-top:6px">
+      <button id="btnOrbit" class="wide">Orbit trace: off</button>
+    </div>
+    <div class="btns" style="margin-top:6px">
+      <button id="btnPng" class="wide">Save PNG</button>
+      <select id="hiresScale" style="flex:0 0 62px"><option value="2">2×</option><option value="4">4×</option><option value="6">6×</option></select>
+      <button id="btnHires" class="wide">Hi-res</button>
+    </div>
+    <div class="btns" style="margin-top:6px">
+      <button id="btnCopy" class="wide">Copy link</button>
+    </div>
+  </div>
+
+  <div class="grp">
+    <div class="row"><label>Tour</label>
+      <span class="val"><span class="kf-count" id="kfCount">0</span> keys</span></div>
+    <div class="btns">
+      <button id="btnKf" class="wide">Add keyframe</button>
+      <button id="btnPlay" class="wide">Play</button>
+      <button id="btnClearKf">Clear</button>
+    </div>
+    <div class="row" style="margin-top:6px"><label>Tour speed</label>
+      <input type="range" id="tourSpeed" min="1.2" max="8" step="0.1" value="4">
+      <span class="val" id="tourSpeedV">4.0s</span></div>
+  </div>
+
+  <p class="hint"><b>Click</b> empty space to add a root · <b>drag</b> a root to reshape ·
+    <b>Alt/right-click</b> a root to remove · <b>drag bg</b> to pan · <b>wheel</b> to zoom.
+    Press <kbd>?</kbd> for full help.</p>
+</div>
+<button id="tab" title="Show controls">☰</button>
+
+<div id="hud">
+  <div><b id="fps">–</b> fps</div>
+  <div>zoom <b id="zoom">1.0×</b></div>
+  <div>iter budget <b id="iterHud">90</b></div>
+</div>
+
+<div id="gallery"></div>
+<button id="galTab" title="Show gallery">✦ Gallery</button>
+
+<div id="help">
+  <div class="card">
+    <button class="x" id="helpX">×</button>
+    <h2>Rootbloom</h2>
+    <p>A live explorer for <b>Newton-method fractals</b>: the basin-of-attraction maps you get by
+    iterating <i>z ← z − a·p(z)/p′(z)</i> toward the roots of a complex polynomial. The polynomial is
+    defined by its roots — so you can literally grab a root and drag it, and the fractal reflows in real time.</p>
+
+    <h3>Mouse &amp; touch</h3>
+    <table>
+      <tr><td>Drag a root handle</td><td>Reshape the polynomial live.</td></tr>
+      <tr><td>Click empty space</td><td>Spawn a new root (raise the degree).</td></tr>
+      <tr><td>Alt-click / right-click a root</td><td>Remove that root (min 2).</td></tr>
+      <tr><td>Drag the background</td><td>Pan across the plane.</td></tr>
+      <tr><td>Mouse wheel</td><td>Zoom toward the cursor.</td></tr>
+      <tr><td>Two-finger pinch</td><td>Zoom on touch devices (anchored on the midpoint).</td></tr>
+      <tr><td>Long-press a root</td><td>Remove that root on touch (the alt/right-click equivalent).</td></tr>
+      <tr><td>Click (orbit trace on)</td><td>Animate the Newton iteration path to its root.</td></tr>
+    </table>
+
+    <h3>Keyboard</h3>
+    <table>
+      <tr><td><kbd>?</kbd> / <kbd>H</kbd></td><td>Toggle this help.</td></tr>
+      <tr><td><kbd>C</kbd></td><td>Hide / show the control panel.</td></tr>
+      <tr><td><kbd>G</kbd></td><td>Toggle the preset gallery.</td></tr>
+      <tr><td><kbd>O</kbd></td><td>Toggle orbit-trace mode.</td></tr>
+      <tr><td><kbd>R</kbd></td><td>Reset to the cubic z³−1.</td></tr>
+      <tr><td><kbd>Space</kbd></td><td>Play / stop the keyframe tour.</td></tr>
+      <tr><td><kbd>S</kbd></td><td>Save a screen-resolution PNG.</td></tr>
+      <tr><td><kbd>+</kbd> / <kbd>−</kbd> · <kbd>]</kbd> / <kbd>[</kbd></td><td>Zoom in / out on the center.</td></tr>
+    </table>
+
+    <h3>Methods</h3>
+    <p><b>Newton</b> — classic z − p/p′. <b>Relaxed Newton</b> — complex coefficient <i>a</i>; spin it around
+    the unit circle to make basins spiral. <b>Halley</b> — third-order, distinct petal geometry.
+    <b>Nova</b> — adds a constant <i>c</i> each step for off-set blooms.</p>
+
+    <h3>Shareable state</h3>
+    <p>Everything — roots, view, method, coefficients, palette, iteration budget — is packed into the
+    URL after <code>#</code>. Hit <b>Copy link</b> in the panel to grab a shareable URL for the current
+    bloom, or use the gallery presets below.</p>
+
+    <h3>Requirements</h3>
+    <p>Any WebGL-capable browser with float-precision fragment shaders. Runs fully offline; no network calls,
+    no build step. Deep zoom is limited by 32-bit GPU float precision (roughly 10⁵×).</p>
+  </div>
+</div>
+
+<div id="fallback">
+  <div class="card">
+    <h2>WebGL unavailable</h2>
+    <p id="fbMsg">Rootbloom needs a WebGL context with float-precision fragment shaders to render Newton
+    fractals on the GPU. Your browser or device didn't provide one.</p>
+    <p style="margin-top:14px">Try a recent version of Chrome, Firefox, Edge, or Safari, enable hardware
+    acceleration, and make sure WebGL isn't blocked.</p>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+(function(){
+/* ============================================================================
+   Rootbloom — single-file WebGL Newton-fractal explorer
+   ========================================================================== */
+
+/* ---------- Complex helpers (JS side, for orbit trace + tour) ------------- */
+const Cx = {
+  add:(a,b)=>[a[0]+b[0],a[1]+b[1]],
+  sub:(a,b)=>[a[0]-b[0],a[1]-b[1]],
+  mul:(a,b)=>[a[0]*b[0]-a[1]*b[1], a[0]*b[1]+a[1]*b[0]],
+  inv:(a)=>{const d=a[0]*a[0]+a[1]*a[1]||1e-30;return [a[0]/d,-a[1]/d];},
+  div:(a,b)=>{const d=b[0]*b[0]+b[1]*b[1]||1e-30;return [(a[0]*b[0]+a[1]*b[1])/d,(a[1]*b[0]-a[0]*b[1])/d];},
+  abs:(a)=>Math.hypot(a[0],a[1])
+};
+const clamp=(x,lo,hi)=> x<lo ? lo : (x>hi ? hi : x);
+
+/* ---------- Global state -------------------------------------------------- */
+const MAX_ROOTS = 12;
+const state = {
+  roots: cubeRoots(3),        // array of [re,im]
+  method: 'newton',
+  aMag: 1.0, aAng: 0.0,
+  cRe: 0.0, cIm: 0.0,
+  maxIter: 90,
+  palette: 0,
+  contours: true,
+  shimmer: false,
+  orbitA: false,
+  center: [0,0],
+  viewW: 3.0                  // complex-plane width across canvas, screen-size independent
+};
+
+function cubeRoots(n){
+  const r=[];
+  for(let k=0;k<n;k++){const t=2*Math.PI*k/n; r.push([Math.cos(t),Math.sin(t)]);}
+  return r;
+}
+
+/* ---------- Canvas / GL bootstrap ---------------------------------------- */
+const glCanvas = document.getElementById('gl');
+const ovCanvas = document.getElementById('overlay');
+const octx = ovCanvas.getContext('2d');
+let dpr = Math.min(window.devicePixelRatio||1, 2);
+let CW=0, CH=0;               // css pixels
+let FW=0, FH=0;               // device pixels (framebuffer)
+
+let gl=null;
+try {
+  const opts = {antialias:false, preserveDrawingBuffer:true, alpha:false, depth:false,
+                premultipliedAlpha:false, powerPreference:'high-performance'};
+  gl = glCanvas.getContext('webgl', opts) || glCanvas.getContext('experimental-webgl', opts);
+} catch(e){ gl=null; }
+
+if(!gl){ showFallback("Could not create a WebGL context."); return; }
+
+/* ---------- Shaders ------------------------------------------------------- */
+const VERT = `
+attribute vec2 aPos;
+void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }
+`;
+
+const FRAG = `
+precision highp float;
+#define MAX_ROOTS ${MAX_ROOTS}
+#define MAX_ITER 300
+
+uniform vec2  uRoots[MAX_ROOTS];
+uniform int   uRootCount;
+uniform vec2  uCenter;
+uniform float uScale;        // complex units per device pixel
+uniform vec2  uFullRes;      // full image resolution in device pixels
+uniform vec2  uFragOffset;   // tile offset (device px)
+uniform vec2  uSubOffset;    // sub-pixel supersample jitter
+uniform int   uMaxIter;
+uniform int   uMethod;       // 0 newton/relaxed, 1 halley, 2 nova
+uniform vec2  uA;            // relaxation coefficient
+uniform vec2  uC;            // nova constant
+uniform int   uPalette;
+uniform float uShift;        // palette rotation
+uniform float uContour;      // contour strength
+uniform float uBoundary;     // boundary darkening
+
+vec2 cmul(vec2 a, vec2 b){ return vec2(a.x*b.x-a.y*b.y, a.x*b.y+a.y*b.x); }
+vec2 cinv(vec2 a){ float d=a.x*a.x+a.y*a.y; d=max(d,1e-30); return vec2(a.x,-a.y)/d; }
+vec2 cdiv(vec2 a, vec2 b){ return cmul(a, cinv(b)); }
+
+vec3 hsv2rgb(vec3 c){
+  vec4 K=vec4(1.0,2.0/3.0,1.0/3.0,3.0);
+  vec3 p=abs(fract(c.xxx+K.xyz)*6.0-K.www);
+  return c.z*mix(K.xxx, clamp(p-K.xxx,0.0,1.0), c.y);
+}
+
+// smooth warm/cool colormaps for iteration count t in [0,1]
+vec3 ember(float t){
+  return clamp(vec3(1.35*t+0.08, 1.1*t*t, 0.55*t*t*t*t), 0.0, 1.0);
+}
+vec3 ice(float t){
+  return clamp(vec3(0.25*t*t, 0.55*t+0.15, 0.75+0.25*t), 0.0, 1.0);
+}
+
+void main(){
+  vec2 frag = gl_FragCoord.xy + uFragOffset + uSubOffset;
+  vec2 z;
+  z.x = uCenter.x + (frag.x - 0.5*uFullRes.x)*uScale;
+  z.y = uCenter.y + (frag.y - 0.5*uFullRes.y)*uScale;
+
+  const float tol = 1e-6;
+  float dlast = 1e30;
+  bool  conv = false;
+  int   ri = 0;
+  float sm = float(uMaxIter);
+
+  for(int i=0; i<MAX_ITER; i++){
+    if(i>=uMaxIter) break;
+
+    // nearest root to current z
+    float best = 1e30; int bi = 0;
+    for(int k=0;k<MAX_ROOTS;k++){
+      if(k>=uRootCount) break;
+      float d = length(z - uRoots[k]);
+      if(d < best){ best = d; bi = k; }
+    }
+    if(best < tol){
+      conv = true; ri = bi;
+      float lp1 = log(max(dlast,1e-30)), lp2 = log(max(best,1e-30)), lt = log(tol);
+      float frac = clamp((lt - lp2)/max(lp1 - lp2, 1e-6), 0.0, 1.0);
+      sm = float(i) - frac;
+      break;
+    }
+    dlast = best;
+
+    // p'/p = S1 = sum 1/(z-r), p''/p = S1^2 - S2 with S2 = sum 1/(z-r)^2
+    vec2 S1 = vec2(0.0), S2 = vec2(0.0);
+    for(int k=0;k<MAX_ROOTS;k++){
+      if(k>=uRootCount) break;
+      vec2 inv = cinv(z - uRoots[k]);
+      S1 += inv;
+      S2 += cmul(inv, inv);
+    }
+
+    vec2 step;
+    if(uMethod==1){
+      // Halley: 2*S1 / (S1^2 + S2)
+      vec2 denom = cmul(S1,S1) + S2;
+      step = cmul(uA, cmul(vec2(2.0,0.0), cdiv(S1, denom)));
+    } else {
+      // Newton / relaxed / nova base: a / S1
+      step = cmul(uA, cinv(S1));
+    }
+    z = z - step;
+    if(uMethod==2){ z += uC; }
+  }
+
+  vec3 col;
+  if(!conv){
+    // boundary / non-converging: dark palette-tinted frontier
+    float g = 0.04;
+    if(uPalette==3) col = vec3(0.06,0.02,0.0);
+    else if(uPalette==4) col = vec3(0.0,0.02,0.05);
+    else col = vec3(g,g,g*1.15);
+  } else {
+    float t = clamp(sm/float(uMaxIter), 0.0, 1.0);
+    float hb = fract(float(ri)/max(float(uRootCount),1.0) + uShift);
+    // brightness falls off toward the boundary (many iterations)
+    float v = 1.0 - uBoundary*pow(t, 0.45);
+    // contour bands from continuous iteration count
+    float band = 0.5 + 0.5*cos(sm*0.85);
+    v *= mix(1.0, 0.55 + 0.45*band, uContour);
+
+    if(uPalette==0){                       // Bloom
+      col = hsv2rgb(vec3(hb, 0.72, v));
+    } else if(uPalette==1){                // Neon
+      col = hsv2rgb(vec3(hb, 0.95, clamp(v*1.15,0.0,1.0)));
+      col = pow(col, vec3(0.85));
+    } else if(uPalette==2){                // Spectral (hue drifts with iteration)
+      col = hsv2rgb(vec3(fract(hb + sm*0.012), 0.85, v));
+    } else if(uPalette==3){                // Ember
+      col = ember(1.0 - 0.85*t) * v * (0.7 + 0.3*hb + 0.0);
+      col = mix(col, ember(fract(hb+0.15)), 0.25) * v;
+    } else if(uPalette==4){                // Ice
+      col = ice(1.0 - 0.8*t) * v;
+      col = mix(col, hsv2rgb(vec3(0.55+0.12*hb,0.5,v)), 0.35);
+    } else if(uPalette==5){                // Candy (pastel)
+      col = hsv2rgb(vec3(hb, 0.45, clamp(v+0.15,0.0,1.0)));
+    } else if(uPalette==6){                // Mono with faint root tint
+      float m = v;
+      col = mix(vec3(m), hsv2rgb(vec3(hb,0.25,m)), 0.25);
+    } else {                               // Prism bands
+      col = hsv2rgb(vec3(hb, 0.9, 1.0)) * (0.35 + 0.65*band);
+    }
+  }
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+function compile(type, src){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)){
+    const log = gl.getShaderInfoLog(s);
+    showFallback("Shader failed to compile: " + log);
+    throw new Error(log);
+  }
+  return s;
+}
+
+let prog, uni={}, quadBuf;
+function initGL(){
+  // verify float precision in fragment shaders; fall back to mediump if highp is absent
+  let fragSrc = FRAG;
+  const hp = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
+  if(!hp || hp.precision === 0){
+    fragSrc = fragSrc.replace('precision highp float;', 'precision mediump float;');
+    setTimeout(()=>toast('High precision unavailable — using mediump (deep zoom limited)'), 500);
+  }
+  const vs = compile(gl.VERTEX_SHADER, VERT);
+  const fs = compile(gl.FRAGMENT_SHADER, fragSrc);
+  prog = gl.createProgram();
+  gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
+  if(!gl.getProgramParameter(prog, gl.LINK_STATUS)){
+    showFallback("Shader program failed to link: " + gl.getProgramInfoLog(prog));
+    throw new Error("link");
+  }
+  gl.useProgram(prog);
+
+  // full-screen triangle
+  quadBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, 'aPos');
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+
+  ['uRoots','uRootCount','uCenter','uScale','uFullRes','uFragOffset','uSubOffset',
+   'uMaxIter','uMethod','uA','uC','uPalette','uShift','uContour','uBoundary']
+    .forEach(n=> uni[n]=gl.getUniformLocation(prog, n));
+}
+
+/* ---------- Rendering ----------------------------------------------------- */
+let shift = 0;                     // palette rotation accumulator
+let unitsPerPixel = 1;             // device-pixel scale, recomputed on resize/zoom
+
+function methodMode(){
+  return state.method==='halley' ? 1 : (state.method==='nova' ? 2 : 0);
+}
+function aVec(){
+  if(state.method==='newton') return [1,0];   // classic Newton is always a = 1
+  return [state.aMag*Math.cos(state.aAng), state.aMag*Math.sin(state.aAng)];
+}
+
+// Render the fractal into the currently-bound framebuffer with given geometry.
+function renderScene(fullResX, fullResY, fragOffX, fragOffY, subX, subY){
+  gl.useProgram(prog);
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  const rc = state.roots.length;
+  const flat = new Float32Array(MAX_ROOTS*2);
+  for(let i=0;i<rc;i++){ flat[i*2]=state.roots[i][0]; flat[i*2+1]=state.roots[i][1]; }
+  gl.uniform2fv(uni.uRoots, flat);
+  gl.uniform1i(uni.uRootCount, rc);
+  gl.uniform2f(uni.uCenter, state.center[0], state.center[1]);
+  gl.uniform1f(uni.uScale, unitsPerPixel);
+  gl.uniform2f(uni.uFullRes, fullResX, fullResY);
+  gl.uniform2f(uni.uFragOffset, fragOffX, fragOffY);
+  gl.uniform2f(uni.uSubOffset, subX, subY);
+  gl.uniform1i(uni.uMaxIter, state.maxIter);
+  gl.uniform1i(uni.uMethod, methodMode());
+  const a = aVec();
+  gl.uniform2f(uni.uA, a[0], a[1]);
+  gl.uniform2f(uni.uC, state.cRe, state.cIm);
+  gl.uniform1i(uni.uPalette, state.palette|0);
+  gl.uniform1f(uni.uShift, shift);
+  gl.uniform1f(uni.uContour, state.contours ? 0.55 : 0.0);
+  gl.uniform1f(uni.uBoundary, 0.9);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+// Draw to the visible canvas.
+function drawMain(){
+  unitsPerPixel = state.viewW / FW;
+  gl.viewport(0,0,FW,FH);
+  renderScene(FW, FH, 0, 0, 0, 0);
+}
+
+/* ---------- Coordinate mapping (CSS pixels <-> complex) ------------------- */
+function screenToWorld(cx, cy){
+  // css pixel -> complex; gl y is bottom-up
+  const dx = cx*dpr, dy = (CH - cy)*dpr;
+  return [ state.center[0] + (dx - 0.5*FW)*unitsPerPixel,
+           state.center[1] + (dy - 0.5*FH)*unitsPerPixel ];
+}
+function worldToScreen(w){
+  const dx = (w[0]-state.center[0])/unitsPerPixel + 0.5*FW;
+  const dy = (w[1]-state.center[1])/unitsPerPixel + 0.5*FH;
+  return [ dx/dpr, CH - dy/dpr ];
+}
+
+/* ---------- Overlay: root handles + orbit trace --------------------------- */
+function basinColor(i){
+  const h = ((i/Math.max(state.roots.length,1) + shift) % 1 + 1)%1;
+  const [r,g,b] = hsv2rgbJS(h, 0.72, 1.0);
+  return `rgb(${r|0},${g|0},${b|0})`;
+}
+function hsv2rgbJS(h,s,v){
+  const i=Math.floor(h*6), f=h*6-i, p=v*(1-s), q=v*(1-f*s), t=v*(1-(1-f)*s);
+  let r,g,b;
+  switch(i%6){case 0:r=v;g=t;b=p;break;case 1:r=q;g=v;b=p;break;case 2:r=p;g=v;b=t;break;
+    case 3:r=p;g=q;b=v;break;case 4:r=t;g=p;b=v;break;default:r=v;g=p;b=q;}
+  return [r*255,g*255,b*255];
+}
+
+let hoverRoot = -1, dragRoot = -1;
+function drawOverlay(){
+  octx.clearRect(0,0,CW,CH);
+
+  // orbit trace path
+  if(orbit.active && orbit.pts.length>1){
+    drawOrbit();
+  }
+
+  // root handles
+  for(let i=0;i<state.roots.length;i++){
+    const p = worldToScreen(state.roots[i]);
+    const col = basinColor(i);
+    const active = (i===dragRoot || i===hoverRoot);
+    const R = active ? 9 : 7;
+    // basin-colored halo
+    octx.beginPath(); octx.arc(p[0],p[1], R+7, 0, 7);
+    const grad = octx.createRadialGradient(p[0],p[1],R,p[0],p[1],R+8);
+    grad.addColorStop(0, col); grad.addColorStop(1,'rgba(0,0,0,0)');
+    octx.globalAlpha = active?0.55:0.35; octx.fillStyle = grad; octx.fill(); octx.globalAlpha=1;
+    // ring
+    octx.beginPath(); octx.arc(p[0],p[1], R, 0, 7);
+    octx.fillStyle = col; octx.fill();
+    octx.lineWidth = 2; octx.strokeStyle = active ? '#fff':'rgba(255,255,255,0.85)'; octx.stroke();
+    // index
+    octx.fillStyle = 'rgba(0,0,0,0.85)'; octx.font = '600 10px system-ui,sans-serif';
+    octx.textAlign='center'; octx.textBaseline='middle';
+    octx.fillText(String(i+1), p[0], p[1]+0.5);
+  }
+}
+
+/* ---------- Orbit trace --------------------------------------------------- */
+const orbit = { active:false, mode:false, pts:[], t:0, converged:-1 };
+
+function computeOrbit(w){
+  const pts=[w.slice()];
+  let z=w.slice();
+  const a=aVec(), mode=methodMode(), tol=1e-6;
+  let conv=-1;
+  for(let i=0;i<state.maxIter;i++){
+    // nearest root check
+    let best=1e30,bi=0;
+    for(let k=0;k<state.roots.length;k++){const d=Cx.abs(Cx.sub(z,state.roots[k])); if(d<best){best=d;bi=k;}}
+    if(best<tol){conv=bi;break;}
+    let S1=[0,0],S2=[0,0];
+    for(let k=0;k<state.roots.length;k++){
+      const inv=Cx.inv(Cx.sub(z,state.roots[k]));
+      S1=Cx.add(S1,inv); S2=Cx.add(S2,Cx.mul(inv,inv));
+    }
+    let step;
+    if(mode===1){ const den=Cx.add(Cx.mul(S1,S1),S2); step=Cx.mul(a,Cx.mul([2,0],Cx.div(S1,den))); }
+    else { step=Cx.mul(a,Cx.inv(S1)); }
+    z=Cx.sub(z,step);
+    if(mode===2) z=Cx.add(z,[state.cRe,state.cIm]);
+    pts.push(z.slice());
+    if(!isFinite(z[0])||!isFinite(z[1])) break;
+  }
+  orbit.pts=pts; orbit.t=0; orbit.converged=conv; orbit.active=true;
+}
+
+function drawOrbit(){
+  const pts = orbit.pts;
+  const shown = Math.min(pts.length-1, orbit.t);
+  const full = Math.floor(shown);
+  octx.lineJoin='round';
+  for(let i=0;i<full;i++){
+    const a=worldToScreen(pts[i]), b=worldToScreen(pts[i+1]);
+    const f=i/(pts.length-1);
+    octx.beginPath(); octx.moveTo(a[0],a[1]); octx.lineTo(b[0],b[1]);
+    octx.lineWidth=2.4; octx.strokeStyle=`rgba(255,255,255,${0.25+0.6*(1-f)})`; octx.stroke();
+    octx.beginPath(); octx.arc(a[0],a[1],2.6,0,7); octx.fillStyle='#7fd7ff'; octx.fill();
+  }
+  // partial segment + moving marker
+  if(full < pts.length-1){
+    const fr = shown - full;
+    const a=worldToScreen(pts[full]), b=worldToScreen(pts[full+1]);
+    const mx=a[0]+(b[0]-a[0])*fr, my=a[1]+(b[1]-a[1])*fr;
+    octx.beginPath(); octx.moveTo(a[0],a[1]); octx.lineTo(mx,my);
+    octx.lineWidth=2.4; octx.strokeStyle='rgba(255,255,255,0.9)'; octx.stroke();
+    octx.beginPath(); octx.arc(mx,my,5,0,7);
+    octx.fillStyle='#fff'; octx.fill();
+    octx.beginPath(); octx.arc(mx,my,9,0,7);
+    octx.strokeStyle='rgba(255,255,255,0.5)'; octx.lineWidth=1.5; octx.stroke();
+  } else {
+    // landed on a root
+    const p=worldToScreen(pts[pts.length-1]);
+    octx.beginPath(); octx.arc(p[0],p[1],7,0,7);
+    octx.fillStyle='#fff'; octx.fill();
+  }
+  // seed marker
+  const s=worldToScreen(pts[0]);
+  octx.beginPath(); octx.arc(s[0],s[1],4,0,7);
+  octx.fillStyle='#ff6bd0'; octx.fill(); octx.strokeStyle='#fff'; octx.lineWidth=1.5; octx.stroke();
+}
+
+/* ---------- Interaction --------------------------------------------------- */
+let panning=false, panStart=null, panCenter=null, moved=0;
+const pointers=new Map();          // active pointers: id -> {x,y}
+let pinch=null;                    // {dist} when two pointers are down
+let lpTimer=null, lpStart=null, lpRoot=-1;  // long-press (touch) root removal
+
+function pickRoot(cx,cy){
+  for(let i=state.roots.length-1;i>=0;i--){
+    const p=worldToScreen(state.roots[i]);
+    if(Math.hypot(p[0]-cx,p[1]-cy) <= 12) return i;
+  }
+  return -1;
+}
+
+// Zoom toward a css-pixel anchor by `factor` (>1 zooms in), reused by wheel + pinch + keys.
+function zoomAt(cx, cy, factor){
+  const before=screenToWorld(cx,cy);
+  state.viewW = clamp(state.viewW/factor, 3e-5, 40);
+  unitsPerPixel = state.viewW/FW;
+  const after=screenToWorld(cx,cy);
+  state.center=[ state.center[0]+before[0]-after[0], state.center[1]+before[1]-after[1] ];
+  dirty=true; scheduleHash(); updateHud();
+}
+
+function startLongPress(root, cx, cy){
+  clearLongPress();
+  lpRoot=root; lpStart=[cx,cy];
+  lpTimer=setTimeout(()=>{
+    lpTimer=null;
+    if(dragRoot===lpRoot && lpRoot>=0){ const r=lpRoot; dragRoot=-1; lpRoot=-1; removeRoot(r); }
+  }, 500);
+}
+function clearLongPress(){ if(lpTimer){ clearTimeout(lpTimer); lpTimer=null; } lpRoot=-1; }
+
+glCanvas.addEventListener('contextmenu', e=>e.preventDefault());
+
+glCanvas.addEventListener('pointerdown', e=>{
+  glCanvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  if(pointers.size===2){
+    // enter pinch-zoom: cancel any pan/drag/long-press in progress
+    panning=false; dragRoot=-1; clearLongPress();
+    const p=[...pointers.values()];
+    pinch={ dist:Math.hypot(p[0].x-p[1].x, p[0].y-p[1].y) };
+    return;
+  }
+  if(pointers.size>2) return;
+  const cx=e.clientX, cy=e.clientY;
+  const hit=pickRoot(cx,cy);
+  moved=0;
+  if(hit>=0 && (e.button===2 || e.altKey)){
+    removeRoot(hit); return;
+  }
+  if(hit>=0){
+    dragRoot=hit; dirty=true;
+    if(e.pointerType!=='mouse') startLongPress(hit, cx, cy);  // touch: long-press = remove
+    return;
+  }
+  if(orbit.mode && e.button===0 && !e.altKey){
+    computeOrbit(screenToWorld(cx,cy)); return;
+  }
+  panning=true; panStart=[cx,cy]; panCenter=state.center.slice();
+});
+
+glCanvas.addEventListener('pointermove', e=>{
+  if(pointers.has(e.pointerId)) pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  if(pinch && pointers.size>=2){
+    const p=[...pointers.values()];
+    const dist=Math.hypot(p[0].x-p[1].x, p[0].y-p[1].y);
+    const mx=(p[0].x+p[1].x)/2, my=(p[0].y+p[1].y)/2;
+    if(pinch.dist>0 && dist>0) zoomAt(mx, my, dist/pinch.dist);
+    pinch.dist=dist;
+    return;
+  }
+  const cx=e.clientX, cy=e.clientY;
+  if(dragRoot>=0){
+    if(lpRoot>=0 && Math.hypot(cx-lpStart[0], cy-lpStart[1])>6) clearLongPress();
+    state.roots[dragRoot]=screenToWorld(cx,cy);
+    dirty=true; scheduleHash(); return;
+  }
+  if(panning){
+    const ddx=(cx-panStart[0])*dpr, ddy=(cy-panStart[1])*dpr;
+    moved=Math.max(moved, Math.hypot(cx-panStart[0], cy-panStart[1]));
+    state.center=[ panCenter[0]-ddx*unitsPerPixel, panCenter[1]+ddy*unitsPerPixel ];
+    dirty=true; scheduleHash(); return;
+  }
+  const h=pickRoot(cx,cy);
+  if(h!==hoverRoot){ hoverRoot=h; glCanvas.style.cursor = h>=0?'grab':(orbit.mode?'crosshair':'move'); }
+});
+
+function endPointer(e){
+  pointers.delete(e.pointerId);
+  clearLongPress();
+  if(pinch){
+    if(pointers.size<2) pinch=null;
+    return;  // don't treat a pinch release as a click/add-root
+  }
+  const cx=e.clientX, cy=e.clientY;
+  if(dragRoot>=0){ dragRoot=-1; scheduleHash(); return; }
+  if(panning){
+    panning=false;
+    if(moved<4 && !orbit.mode && e.button===0 && !e.altKey){
+      // treat as click on empty space -> add root
+      addRoot(screenToWorld(cx,cy));
+    }
+    scheduleHash();
+  }
+}
+glCanvas.addEventListener('pointerup', endPointer);
+glCanvas.addEventListener('pointercancel', e=>{
+  pointers.delete(e.pointerId);
+  if(pointers.size<2) pinch=null;
+  panning=false; dragRoot=-1; clearLongPress();
+});
+
+glCanvas.addEventListener('wheel', e=>{
+  e.preventDefault();
+  zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY*0.0016));
+},{passive:false});
+
+function addRoot(w){
+  if(state.roots.length>=MAX_ROOTS){ toast("Max "+MAX_ROOTS+" roots"); return; }
+  state.roots.push(w); dirty=true; syncUI(); scheduleHash();
+}
+function removeRoot(i){
+  if(state.roots.length<=2){ toast("Need at least 2 roots"); return; }
+  state.roots.splice(i,1); hoverRoot=-1; dirty=true; syncUI(); scheduleHash();
+}
+
+/* ---------- UI wiring ----------------------------------------------------- */
+const $=id=>document.getElementById(id);
+function fmtDeg(r){ return Math.round(r*180/Math.PI)+'°'; }
+
+function bindSlider(id, vId, fmt, apply){
+  const el=$(id), v=$(vId);
+  el.addEventListener('input', ()=>{ apply(parseFloat(el.value)); v.textContent=fmt(parseFloat(el.value)); dirty=true; scheduleHash(); });
+}
+bindSlider('aMag','aMagV', x=>x.toFixed(2), x=>state.aMag=x);
+bindSlider('aAng','aAngV', fmtDeg, x=>state.aAng=x);
+bindSlider('cRe','cReV', x=>x.toFixed(2), x=>state.cRe=x);
+bindSlider('cIm','cImV', x=>x.toFixed(2), x=>state.cIm=x);
+bindSlider('maxIter','maxIterV', x=>String(x|0), x=>{state.maxIter=x|0; updateHud();});
+bindSlider('tourSpeed','tourSpeedV', x=>x.toFixed(1)+'s', x=>tour.segDur=x);
+
+$('method').addEventListener('change', ()=>{ state.method=$('method').value; syncUI(); dirty=true; scheduleHash(); });
+$('palette').addEventListener('change', ()=>{ state.palette=parseInt($('palette').value,10); dirty=true; scheduleHash(); });
+$('contours').addEventListener('change', ()=>{ state.contours=$('contours').checked; dirty=true; scheduleHash(); });
+$('shimmer').addEventListener('change', ()=>{ state.shimmer=$('shimmer').checked; dirty=true; scheduleHash(); });
+$('orbitA').addEventListener('change', ()=>{ state.orbitA=$('orbitA').checked; scheduleHash(); });
+
+$('btnReset').addEventListener('click', resetCubic);
+$('btnRandom').addEventListener('click', randomize);
+$('btnOrbit').addEventListener('click', toggleOrbitMode);
+$('btnPng').addEventListener('click', ()=>savePNG());
+$('btnCopy').addEventListener('click', ()=>{
+  writeHash();
+  const url=location.href;
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).then(()=>toast('Link copied'), ()=>toast('Copy failed — use the address bar'));
+  } else {
+    toast('Copy failed — use the address bar');
+  }
+});
+$('btnHires').addEventListener('click', ()=>exportHiRes(parseInt($('hiresScale').value,10)));
+$('btnKf').addEventListener('click', addKeyframe);
+$('btnPlay').addEventListener('click', toggleTour);
+$('btnClearKf').addEventListener('click', ()=>{ tour.keys=[]; $('kfCount').textContent='0'; if(tour.playing) toggleTour(); });
+
+$('tab').addEventListener('click', ()=>{ $('panel').classList.remove('hidden'); });
+$('galTab').addEventListener('click', ()=>{ $('gallery').classList.remove('hidden'); });
+$('helpX').addEventListener('click', ()=>$('help').classList.remove('show'));
+$('help').addEventListener('click', e=>{ if(e.target.id==='help') $('help').classList.remove('show'); });
+
+function syncUI(){
+  $('method').value=state.method;
+  $('rootCount').textContent=state.roots.length;
+  $('palette').value=String(state.palette);
+  $('contours').checked=state.contours;
+  $('shimmer').checked=state.shimmer;
+  $('orbitA').checked=state.orbitA;
+  $('aMag').value=state.aMag; $('aMagV').textContent=state.aMag.toFixed(2);
+  $('aAng').value=state.aAng; $('aAngV').textContent=fmtDeg(state.aAng);
+  $('cRe').value=state.cRe; $('cReV').textContent=state.cRe.toFixed(2);
+  $('cIm').value=state.cIm; $('cImV').textContent=state.cIm.toFixed(2);
+  $('maxIter').value=state.maxIter; $('maxIterV').textContent=String(state.maxIter);
+  $('grpA').style.display = (state.method==='newton') ? 'none' : '';
+  $('grpC').style.display = (state.method==='nova') ? '' : 'none';
+  $('iterHud').textContent=state.maxIter;
+  updateHud();
+}
+
+function resetCubic(){
+  Object.assign(state,{ roots:cubeRoots(3), method:'newton', aMag:1, aAng:0, cRe:0, cIm:0,
+    center:[0,0], viewW:3.0 });
+  orbit.active=false; dirty=true; syncUI(); scheduleHash();
+}
+// Sample a small grid with the JS iteration; returns the fraction of seeds that converge.
+function sampleConvergence(){
+  const a=aVec(), mode=methodMode(), tol=1e-6, N=7, span=state.viewW*0.5;
+  let conv=0, total=0;
+  for(let gy=0; gy<N; gy++) for(let gx=0; gx<N; gx++){
+    total++;
+    let z=[ state.center[0]+(gx/(N-1)-0.5)*2*span, state.center[1]+(gy/(N-1)-0.5)*2*span ];
+    for(let i=0;i<state.maxIter;i++){
+      let best=1e30;
+      for(let k=0;k<state.roots.length;k++){ const d=Cx.abs(Cx.sub(z,state.roots[k])); if(d<best) best=d; }
+      if(best<tol){ conv++; break; }
+      let S1=[0,0],S2=[0,0];
+      for(let k=0;k<state.roots.length;k++){ const inv=Cx.inv(Cx.sub(z,state.roots[k])); S1=Cx.add(S1,inv); S2=Cx.add(S2,Cx.mul(inv,inv)); }
+      let step;
+      if(mode===1){ const den=Cx.add(Cx.mul(S1,S1),S2); step=Cx.mul(a,Cx.mul([2,0],Cx.div(S1,den))); }
+      else step=Cx.mul(a,Cx.inv(S1));
+      z=Cx.sub(z,step);
+      if(mode===2) z=Cx.add(z,[state.cRe,state.cIm]);
+      if(!isFinite(z[0])||!isFinite(z[1])) break;
+    }
+  }
+  return conv/total;
+}
+function randomize(){
+  const methods=['newton','relaxed','halley','nova'];
+  for(let attempt=0; attempt<6; attempt++){
+    const n=3+Math.floor(Math.random()*5);
+    const roots=[];
+    for(let i=0;i<n;i++){
+      const t=2*Math.PI*i/n + (Math.random()-0.5)*0.6;
+      const r=0.7+Math.random()*0.7;
+      roots.push([r*Math.cos(t), r*Math.sin(t)]);
+    }
+    state.roots=roots;
+    state.method=methods[Math.floor(Math.random()*methods.length)];
+    state.aMag = state.method==='newton'?1:(0.6+Math.random()*0.9);
+    state.aAng = state.method==='newton'?0:(Math.random()-0.5)*2;
+    state.cRe = state.method==='nova'?(Math.random()-0.5)*0.3:0;   // ±0.15 keeps blooms rich
+    state.cIm = state.method==='nova'?(Math.random()-0.5)*0.3:0;
+    state.palette=Math.floor(Math.random()*8);
+    state.center=[0,0]; state.viewW=3.0;
+    // re-roll if most of the frame diverges (near-black); last resort: fall back to plain Newton
+    if(sampleConvergence()>=0.4) break;
+    if(attempt===5){ state.method='newton'; state.aMag=1; state.aAng=0; state.cRe=0; state.cIm=0; }
+  }
+  orbit.active=false; dirty=true; syncUI(); scheduleHash();
+}
+function toggleOrbitMode(){
+  orbit.mode=!orbit.mode;
+  $('btnOrbit').classList.toggle('on', orbit.mode);
+  $('btnOrbit').textContent='Orbit trace: '+(orbit.mode?'on':'off');
+  glCanvas.style.cursor = orbit.mode?'crosshair':'move';
+  if(!orbit.mode) orbit.active=false;
+}
+
+/* ---------- Keyboard ------------------------------------------------------ */
+window.addEventListener('keydown', e=>{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT') return;
+  const k=e.key.toLowerCase();
+  if(k==='?'||k==='h'){ $('help').classList.toggle('show'); }
+  else if(k==='c'){ $('panel').classList.toggle('hidden'); }
+  else if(k==='g'){ $('gallery').classList.toggle('hidden'); }
+  else if(k==='o'){ toggleOrbitMode(); }
+  else if(k==='r'){ resetCubic(); }
+  else if(k==='s'){ savePNG(); }
+  else if(k==='+'||k==='='||k===']'){ zoomAt(CW/2, CH/2, 1.25); }
+  else if(k==='-'||k==='_'||k==='['){ zoomAt(CW/2, CH/2, 1/1.25); }
+  else if(e.code==='Space'){ e.preventDefault(); toggleTour(); }
+  else if(k==='escape'){ $('help').classList.remove('show'); }
+});
+
+/* ---------- Keyframe tour ------------------------------------------------- */
+const tour = { keys:[], playing:false, t:0, segDur:4.0 };
+function snapshot(){
+  return { roots: state.roots.map(r=>r.slice()), method:state.method, aMag:state.aMag, aAng:state.aAng,
+           cRe:state.cRe, cIm:state.cIm, palette:state.palette, contours:state.contours,
+           maxIter:state.maxIter, center:state.center.slice(), viewW:state.viewW };
+}
+function addKeyframe(){
+  tour.keys.push(snapshot());
+  $('kfCount').textContent=String(tour.keys.length);
+  toast("Keyframe "+tour.keys.length+" saved");
+}
+function toggleTour(){
+  if(tour.keys.length<2){ toast("Add 2+ keyframes first"); return; }
+  tour.playing=!tour.playing; tour.t=0;
+  $('btnPlay').classList.toggle('on', tour.playing);
+  $('btnPlay').textContent=tour.playing?'Stop':'Play';
+  if(tour.playing) orbit.active=false;
+}
+function lerp(a,b,t){ return a+(b-a)*t; }
+function shortAng(a,b,t){ let d=((b-a+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI; return a+d*t; }
+function ease(t){ return t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; }
+function applyTour(dt){
+  const n=tour.keys.length;
+  tour.t += dt/tour.segDur;
+  const seg=Math.floor(tour.t)%n;
+  const A=tour.keys[seg], B=tour.keys[(seg+1)%n];
+  const lt=ease(tour.t-Math.floor(tour.t));
+  const m=Math.min(A.roots.length, B.roots.length);
+  const roots=[];
+  for(let i=0;i<m;i++) roots.push([ lerp(A.roots[i][0],B.roots[i][0],lt), lerp(A.roots[i][1],B.roots[i][1],lt) ]);
+  state.roots=roots;
+  state.method=A.method;
+  state.aMag=lerp(A.aMag,B.aMag,lt);
+  state.aAng=shortAng(A.aAng,B.aAng,lt);
+  state.cRe=lerp(A.cRe,B.cRe,lt); state.cIm=lerp(A.cIm,B.cIm,lt);
+  state.palette=A.palette; state.contours=A.contours;
+  state.center=[ lerp(A.center[0],B.center[0],lt), lerp(A.center[1],B.center[1],lt) ];
+  state.viewW=Math.exp(lerp(Math.log(A.viewW),Math.log(B.viewW),lt));  // log-interp zoom
+  dirty=true;
+}
+
+/* ---------- PNG export ---------------------------------------------------- */
+function stamp(){
+  const d=new Date(), p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+function download(blob, name){
+  const url=URL.createObjectURL(blob), a=document.createElement('a');
+  a.href=url; a.download=name; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); }, 1500);
+}
+function savePNG(){
+  if(dirty) drawMain(), dirty=false;   // ensure current frame present in buffer
+  glCanvas.toBlob(b=>{ if(b){ download(b, `rootbloom-${stamp()}.png`); toast("Saved PNG"); } }, 'image/png');
+}
+
+const nextFrame=()=>new Promise(r=>requestAnimationFrame(()=>r()));
+async function exportHiRes(scale){
+  if(hiresBusy) return;
+  const btn=$('btnHires');
+  btn.disabled=true; btn.textContent='Rendering…'; hiresBusy=true;
+  try{
+    await nextFrame();          // let the button state + first toast paint
+    await doHiRes(scale);
+  }catch(err){
+    toast('Hi-res export failed');
+  }finally{
+    hiresBusy=false; btn.disabled=false; btn.textContent='Hi-res';
+    resize(); dirty=true;       // restore the live canvas at screen resolution
+  }
+}
+async function doHiRes(scale){
+  const outW = Math.round(FW*scale), outH = Math.round(FH*scale);
+  const ss = 3;                                   // supersample passes per axis
+  unitsPerPixel = state.viewW / outW;             // scale for the big image
+  const maxTex = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE)||2048, 1024);
+  const tile = Math.min(maxTex, 1024);
+  const out = document.createElement('canvas'); out.width=outW; out.height=outH;
+  const octxOut = out.getContext('2d');
+
+  const acc = new Float32Array(tile*tile*4);
+  const px = new Uint8Array(tile*tile*4);
+
+  glCanvas.width = tile; glCanvas.height = tile;
+
+  const totalTiles = Math.ceil(outW/tile)*Math.ceil(outH/tile);
+  let doneTiles = 0;
+
+  for(let ty=0; ty<outH; ty+=tile){
+    for(let tx=0; tx<outW; tx+=tile){
+      const tw=Math.min(tile,outW-tx), th=Math.min(tile,outH-ty);
+      acc.fill(0);
+      for(let sy=0; sy<ss; sy++){
+        for(let sx=0; sx<ss; sx++){
+          gl.viewport(0,0,tile,tile);
+          const jx=(sx+0.5)/ss-0.5, jy=(sy+0.5)/ss-0.5;
+          // fragOffset maps this tile's pixel(0,0) to global pixel(tx,ty); gl y is bottom-up
+          renderScene(outW, outH, tx, (outH - (ty+th)), jx, jy);
+          gl.readPixels(0,0,tile,tile,gl.RGBA,gl.UNSIGNED_BYTE,px);
+          // accumulate only the valid sub-rect, flipping rows (gl bottom-up -> top-down)
+          for(let yy=0; yy<th; yy++){
+            const glRow = th-1-yy;                 // row in gl buffer (bottom-up within tile height)
+            for(let xx=0; xx<tw; xx++){
+              const src=((glRow)*tile+xx)*4, dst=(yy*tile+xx)*4;
+              acc[dst]  +=px[src];   acc[dst+1]+=px[src+1];
+              acc[dst+2]+=px[src+2]; acc[dst+3]+=px[src+3];
+            }
+          }
+        }
+      }
+      const img=octxOut.createImageData(tw,th);
+      const inv=1/(ss*ss);
+      for(let yy=0; yy<th; yy++){
+        for(let xx=0; xx<tw; xx++){
+          const s=(yy*tile+xx)*4, d=(yy*tw+xx)*4;
+          img.data[d]  =Math.round(acc[s]*inv);   img.data[d+1]=Math.round(acc[s+1]*inv);
+          img.data[d+2]=Math.round(acc[s+2]*inv); img.data[d+3]=255;
+        }
+      }
+      octxOut.putImageData(img, tx, ty);
+      doneTiles++;
+      toast(`Rendering ${outW}×${outH}… tile ${doneTiles}/${totalTiles}`);
+      await nextFrame();        // yield so the toast animates and the page stays responsive
+    }
+  }
+  await new Promise(res=>{
+    out.toBlob(b=>{ if(b){ download(b, `rootbloom-${outW}x${outH}-${stamp()}.png`); toast("Saved "+outW+"×"+outH+" PNG"); } res(); }, 'image/png');
+  });
+}
+
+/* ---------- URL hash (de)serialization ------------------------------------ */
+function round(x,p){ const f=Math.pow(10,p); return Math.round(x*f)/f; }
+function getShareState(){
+  return {
+    r: state.roots.map(v=>[round(v[0],5),round(v[1],5)]),
+    m: state.method, am:round(state.aMag,4), aa:round(state.aAng,4),
+    cr:round(state.cRe,4), ci:round(state.cIm,4),
+    it:state.maxIter, p:state.palette, ct:state.contours?1:0,
+    c:[round(state.center[0],6),round(state.center[1],6)], w:round(state.viewW,7)
+  };
+}
+function b64urlEnc(s){ return btoa(unescape(encodeURIComponent(s))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+function b64urlDec(s){ s=s.replace(/-/g,'+').replace(/_/g,'/'); return decodeURIComponent(escape(atob(s))); }
+
+let hashTimer=null, ignoreHash=false;
+function scheduleHash(){
+  if(tour.playing) return;
+  clearTimeout(hashTimer);
+  hashTimer=setTimeout(writeHash, 250);
+}
+function writeHash(){
+  try{
+    const enc=b64urlEnc(JSON.stringify(getShareState()));
+    ignoreHash=true;
+    history.replaceState(null,'','#'+enc);
+    setTimeout(()=>ignoreHash=false, 50);
+  }catch(e){}
+}
+function applyShareState(s){
+  try{
+    if(Array.isArray(s.r)&&s.r.length>=1) state.roots=s.r.slice(0,MAX_ROOTS).map(v=>[+v[0],+v[1]]);
+    if(typeof s.m==='string') state.method=s.m;
+    if(isFinite(s.am)) state.aMag=+s.am;
+    if(isFinite(s.aa)) state.aAng=+s.aa;
+    if(isFinite(s.cr)) state.cRe=+s.cr;
+    if(isFinite(s.ci)) state.cIm=+s.ci;
+    if(isFinite(s.it)) state.maxIter=Math.max(20,Math.min(300,s.it|0));
+    if(isFinite(s.p))  state.palette=s.p|0;
+    if('ct' in s) state.contours=!!s.ct;
+    if(Array.isArray(s.c)) state.center=[+s.c[0],+s.c[1]];
+    if(isFinite(s.w)) state.viewW=Math.max(3e-5,Math.min(40,+s.w));
+    return true;
+  }catch(e){ return false; }
+}
+function loadHash(){
+  const h=location.hash.slice(1);
+  if(!h) return false;
+  try{ const s=JSON.parse(b64urlDec(h)); return applyShareState(s); }
+  catch(e){ return false; }
+}
+window.addEventListener('hashchange', ()=>{
+  if(ignoreHash) return;
+  if(loadHash()){ dirty=true; syncUI(); }
+});
+
+/* ---------- Gallery presets ----------------------------------------------- */
+const PRESETS = [
+  { name:'Classic Cubic', sub:'z³ − 1',
+    r:cubeRoots(3), m:'newton', p:0, w:3.0 },
+  { name:'Quintic Star', sub:'5 roots · Neon',
+    r:cubeRoots(5), m:'newton', p:1, w:3.0 },
+  { name:'Relaxed Spiral', sub:'a spun off-axis',
+    r:cubeRoots(4), m:'relaxed', am:1.0, aa:0.9, p:2, w:3.0 },
+  { name:'Halley Bloom', sub:'third-order petals',
+    r:cubeRoots(5), m:'halley', am:1.0, aa:0.0, p:3, w:3.0 },
+  { name:'Nova Drift', sub:'constant c offset',
+    r:cubeRoots(3), m:'nova', am:1.0, aa:0.0, cr:0.28, ci:0.12, p:5, w:3.2 },
+  { name:'Septic Rose', sub:'7 roots · Spectral',
+    r:cubeRoots(7), m:'newton', p:2, w:3.0 },
+  { name:'Asymmetry', sub:'jittered roots',
+    r:[[1.1,0.15],[-0.35,1.0],[-0.9,-0.5],[0.5,-1.05]], m:'relaxed', am:1.05, aa:-0.5, p:6, w:3.4 },
+  { name:'Frontier Zoom', sub:'triple-point detail',
+    r:cubeRoots(3), m:'newton', p:7, c:[0.0,0.62], w:0.16 }
+];
+
+function presetToState(pr){
+  return {
+    r: pr.r.map(v=>v.slice()),
+    m: pr.m||'newton', am: pr.am!=null?pr.am:1, aa: pr.aa!=null?pr.aa:0,
+    cr: pr.cr||0, ci: pr.ci||0, it: pr.it||90, p: pr.p||0, ct:1,
+    c: pr.c||[0,0], w: pr.w||3.0
+  };
+}
+function applyPreset(pr){
+  applyShareState(presetToState(pr));
+  orbit.active=false;
+  dirty=true; syncUI(); writeHash();
+  if(tour.playing) toggleTour();
+}
+
+function buildGallery(){
+  const gal=$('gallery');
+  const saved=snapshot(), savedScale=unitsPerPixel;
+  const TW=132*Math.min(dpr,1.5), THh=84*Math.min(dpr,1.5); // thumb resolution
+  PRESETS.forEach(pr=>{
+    const card=document.createElement('div'); card.className='thumb';
+    const tc=document.createElement('canvas'); tc.width=TW; tc.height=THh;
+    // render this preset into gl at thumb size, read back
+    applyShareState(presetToState(pr));
+    unitsPerPixel = state.viewW / TW;
+    glCanvas.width=TW; glCanvas.height=THh; gl.viewport(0,0,TW,THh);
+    renderScene(TW, THh, 0, 0, 0, 0);
+    const buf=new Uint8Array(TW*THh*4);
+    gl.readPixels(0,0,TW,THh,gl.RGBA,gl.UNSIGNED_BYTE,buf);
+    const t2d=tc.getContext('2d'); const img=t2d.createImageData(TW,THh);
+    for(let y=0;y<THh;y++){ const gy=THh-1-y;
+      for(let x=0;x<TW;x++){ const s=(gy*TW+x)*4, d=(y*TW+x)*4;
+        img.data[d]=buf[s];img.data[d+1]=buf[s+1];img.data[d+2]=buf[s+2];img.data[d+3]=255; } }
+    t2d.putImageData(img,0,0);
+    const cap=document.createElement('div'); cap.className='cap';
+    cap.innerHTML=pr.name+'<br><small>'+pr.sub+'</small>';
+    card.appendChild(tc); card.appendChild(cap);
+    card.addEventListener('click', ()=>applyPreset(pr));
+    gal.appendChild(card);
+  });
+  // restore live state + canvas
+  Object.assign(state, {roots:saved.roots.map(r=>r.slice()), method:saved.method, aMag:saved.aMag,
+    aAng:saved.aAng, cRe:saved.cRe, cIm:saved.cIm, palette:saved.palette, contours:saved.contours,
+    maxIter:saved.maxIter, center:saved.center.slice(), viewW:saved.viewW});
+  unitsPerPixel=savedScale;
+  resize();
+}
+
+/* ---------- Toast --------------------------------------------------------- */
+let toastTimer=null;
+function toast(msg){
+  const t=$('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'), 1800);
+}
+
+/* ---------- HUD / resize -------------------------------------------------- */
+function updateHud(){
+  $('zoom').textContent=(3.0/state.viewW).toFixed(state.viewW<0.1?0:1)+'×';
+  $('iterHud').textContent=state.maxIter;
+}
+function resize(){
+  dpr=Math.min(window.devicePixelRatio||1, 2);
+  CW=window.innerWidth; CH=window.innerHeight;
+  FW=Math.round(CW*dpr); FH=Math.round(CH*dpr);
+  glCanvas.width=FW; glCanvas.height=FH;
+  glCanvas.style.width=CW+'px'; glCanvas.style.height=CH+'px';
+  ovCanvas.width=Math.round(CW*dpr); ovCanvas.height=Math.round(CH*dpr);
+  ovCanvas.style.width=CW+'px'; ovCanvas.style.height=CH+'px';
+  octx.setTransform(dpr,0,0,dpr,0,0);
+  unitsPerPixel=state.viewW/FW;
+  dirty=true; updateHud();
+}
+window.addEventListener('resize', resize);
+
+/* ---------- Main loop ----------------------------------------------------- */
+let dirty=true;
+let hiresBusy=false;             // suspend live drawing/animation during hi-res export
+let lastT=performance.now(), fpsAcc=0, fpsN=0, lastFpsShow=0;
+
+function frame(now){
+  const dt=Math.min((now-lastT)/1000, 0.05); lastT=now;
+  if(hiresBusy){ requestAnimationFrame(frame); return; }
+
+  // animated 'a' around unit circle
+  if(state.orbitA && !tour.playing){
+    state.aAng += dt*0.6;
+    if(state.aAng>Math.PI) state.aAng-=2*Math.PI;
+    $('aAng').value=state.aAng; $('aAngV').textContent=fmtDeg(state.aAng);
+    dirty=true;
+  }
+  // shimmer palette rotation
+  if(state.shimmer){ shift=(shift+dt*0.08)%1; dirty=true; }
+  else shift=0;
+
+  // tour
+  if(tour.playing){ applyTour(dt); }
+
+  // orbit animation
+  if(orbit.active){
+    orbit.t += dt*7;               // ~7 hops/sec
+    if(orbit.t > orbit.pts.length-1 + 2.5){ orbit.t=0; } // pause then loop
+  }
+
+  if(dirty){ drawMain(); dirty=false; }
+  drawOverlay();
+
+  // fps
+  fpsAcc+=dt; fpsN++;
+  if(now-lastFpsShow>400){ $('fps').textContent=Math.round(fpsN/fpsAcc); fpsAcc=0; fpsN=0; lastFpsShow=now; }
+
+  requestAnimationFrame(frame);
+}
+
+/* ---------- Fallback ------------------------------------------------------ */
+function showFallback(msg){
+  const fb=document.getElementById('fallback');
+  if(msg) document.getElementById('fbMsg').textContent=msg;
+  fb.classList.add('show');
+  const p=document.getElementById('panel'); if(p) p.style.display='none';
+  const g=document.getElementById('gallery'); if(g) g.style.display='none';
+  const h=document.getElementById('hud'); if(h) h.style.display='none';
+}
+
+/* ---------- Boot ---------------------------------------------------------- */
+try {
+  initGL();
+  resize();
+  loadHash();
+  syncUI();
+  buildGallery();
+  requestAnimationFrame(frame);
+  if(!location.hash){ writeHash(); }
+} catch(e){
+  showFallback("Initialization failed: "+(e&&e.message?e.message:e));
+}
+
+})();
+</script>
+</body>
+</html>

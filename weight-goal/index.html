@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WeightGoal — Weight Loss Timeline & Calorie Deficit</title>
+<meta name="description" content="Estimate weeks to your goal weight, the target date, and the daily calorie deficit needed, in kg or lb. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('weight-goal-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#10b981;
+    --bg:#f4f7f6; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e2e6e4; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#0f1512; --card:#18201c; --fg:#eef4f0; --muted:#93a29a; --line:#26302b; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:720px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#047857);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:720px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .toggle{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:14px}
+  .toggle button{padding:8px 16px;border:0;background:var(--bg);color:var(--fg);cursor:pointer;font:inherit}
+  .toggle button.on{background:var(--c);color:#fff;font-weight:700}
+  .rate{margin-top:14px}
+  .rate input[type=range]{width:100%;accent-color:var(--c)}
+  .rate .row{display:flex;justify-content:space-between;align-items:baseline}
+  .out{text-align:center;margin-top:4px}
+  .big{font-size:3rem;font-weight:800;color:var(--c);letter-spacing:-1px}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+  .stat{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+  .stat span{display:block;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .stat b{font-size:1.15rem}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">⚖️</div>
+    <div><h1>WeightGoal</h1><div class="sub">Timeline &amp; calorie deficit to your goal weight</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <div class="toggle" id="unitToggle">
+      <button type="button" data-u="kg">kg</button>
+      <button type="button" data-u="lb">lb</button>
+    </div>
+    <div class="grid">
+      <div><label for="current">Current weight</label><input type="number" id="current" value="80" step="any"></div>
+      <div><label for="goal">Goal weight</label><input type="number" id="goal" value="72" step="any"></div>
+    </div>
+    <div class="rate">
+      <label class="row"><span>Weekly rate</span><b id="rateV">0.5 kg/wk</b></label>
+      <input type="range" id="rate" min="1" max="15" value="5">
+    </div>
+  </div>
+  <div class="card out">
+    <div class="big" id="weeks">—</div>
+    <div class="sub">weeks to goal</div>
+    <div class="stats">
+      <div class="stat"><span>Target date</span><b id="date">—</b></div>
+      <div class="stat"><span>Daily calorie change</span><b id="deficit">—</b></div>
+    </div>
+  </div>
+</main>
+<footer>
+  Rough estimates (7700 kcal/kg · 3500 kcal/lb) — not medical or dietary advice. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/weight-goal">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  const CAL_PER_UNIT = { kg: 7700, lb: 3500 };
+
+  function weeksToGoal(current, goal, weeklyRate){
+    if(!(weeklyRate > 0)) throw new Error('weekly rate must be positive');
+    return Math.abs(Number(current) - Number(goal)) / weeklyRate;
+  }
+
+  function dailyDeficit(weeklyRate, unit){
+    const cal = CAL_PER_UNIT[unit];
+    if(!cal) throw new Error('unit must be kg or lb');
+    if(!(weeklyRate >= 0)) throw new Error('weekly rate must be non-negative');
+    return weeklyRate * cal / 7;
+  }
+
+  function weeklyRateFromDeficit(dailyKcal, unit){
+    const cal = CAL_PER_UNIT[unit];
+    if(!cal) throw new Error('unit must be kg or lb');
+    return dailyKcal * 7 / cal;
+  }
+
+  function projectDate(startMs, weeks){
+    return startMs + weeks * 7 * 86400000;
+  }
+
+  // ---- UI ----
+  if(typeof document !== 'undefined' && document.getElementById('weeks')){
+    const $ = id => document.getElementById(id);
+    let unit = 'kg';
+
+    function render(){
+      const rate = +$('rate').value / 10; // slider 1..15 → 0.1..1.5
+      $('rateV').textContent = rate.toFixed(1) + ' ' + unit + '/wk';
+      const current = +$('current').value, goal = +$('goal').value;
+      let weeks;
+      try{ weeks = weeksToGoal(current, goal, rate); }catch(e){ return; }
+      $('weeks').textContent = weeks === 0 ? '0' : weeks.toFixed(1);
+      const ms = projectDate(Date.now(), weeks);
+      $('date').textContent = new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+      const kcal = dailyDeficit(rate, unit);
+      const losing = goal <= current;
+      $('deficit').textContent = (losing ? '−' : '+') + Math.round(kcal).toLocaleString() + ' kcal';
+    }
+
+    $('unitToggle').addEventListener('click', e => {
+      const b = e.target.closest('button'); if(!b) return;
+      unit = b.dataset.u;
+      [...$('unitToggle').children].forEach(x => x.classList.toggle('on', x === b));
+      render();
+    });
+    $('unitToggle').querySelector('[data-u="kg"]').classList.add('on');
+    ['current', 'goal', 'rate'].forEach(id => $(id).addEventListener('input', render));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('weight-goal-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { CAL_PER_UNIT, weeksToGoal, dailyDeficit, weeklyRateFromDeficit, projectDate };
+</script>
+</body>
+</html>

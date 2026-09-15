@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pinion — gear sandbox</title>
+<style>
+  :root{ --bg:#0d1017; --panel:#161b26; --ink:#e7ecf5; --dim:#8b96ab; --acc:#ffb347; --gold:#ffcf5c; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family:ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif; overflow:hidden; }
+  #cv{ display:block; position:fixed; inset:0; cursor:crosshair; touch-action:none; }
+  #panel{ position:fixed; top:14px; left:14px; width:268px; background:rgba(22,27,38,.92);
+    border:1px solid #2a3244; border-radius:14px; padding:14px 15px;
+    -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+    box-shadow:0 10px 40px rgba(0,0,0,.5); font-size:13px; z-index:5; }
+  #panel h1{ margin:0 0 2px; font-size:19px; letter-spacing:.5px; }
+  #panel h1 span{ color:var(--acc); }
+  #panel .tag{ color:var(--dim); font-size:11px; margin-bottom:10px; line-height:1.35; }
+  .row{ display:flex; align-items:center; gap:8px; margin:7px 0; }
+  .row label{ flex:0 0 74px; color:var(--dim); font-size:11px; }
+  .row input[type=range]{ flex:1; accent-color:var(--acc); }
+  .row .val{ flex:0 0 52px; text-align:right; font-variant-numeric:tabular-nums; font-size:11px; }
+  .btns{ display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+  button{ background:#232c3d; color:var(--ink); border:1px solid #33405a; border-radius:8px;
+    padding:6px 9px; font-size:11px; cursor:pointer; transition:.12s; }
+  button:hover{ background:#2f3a51; border-color:var(--acc); }
+  button.p{ background:#2a2213; border-color:#4a3b1a; color:var(--gold); }
+  #hud{ margin-top:11px; border-top:1px solid #2a3244; padding-top:9px; font-size:11px;
+    max-height:170px; overflow:auto; }
+  #hud .train{ margin:3px 0; display:flex; justify-content:space-between; }
+  #hud .jam{ color:#ff5d5d; font-weight:600; }
+  #hud b{ color:var(--gold); font-variant-numeric:tabular-nums; }
+  #help{ position:fixed; bottom:12px; left:14px; color:var(--dim); font-size:11px; z-index:5;
+    background:rgba(13,16,23,.6); padding:8px 11px; border-radius:9px; line-height:1.55; max-width:520px; }
+  #help kbd{ background:#232c3d; border:1px solid #33405a; border-radius:4px; padding:0 5px; color:var(--ink); }
+  #b-mute{ line-height:1; }
+  @media (prefers-reduced-motion: reduce){ button{ transition:none; } }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="panel">
+  <h1><span>&#9881;</span> Pinion</h1>
+  <div class="tag">Click to drop gears. They auto-mesh. Flick a rim to spin the train and watch the ratios cascade.</div>
+  <div class="row"><label for="s-mod">Module</label><input id="s-mod" type="range" min="4" max="16" step="1" value="9"><span class="val" id="v-mod"></span></div>
+  <div class="row"><label for="s-fri">Friction</label><input id="s-fri" type="range" min="0" max="100" step="1" value="12"><span class="val" id="v-fri"></span></div>
+  <div class="row"><label for="s-rpm">Motor RPM</label><input id="s-rpm" type="range" min="-400" max="400" step="5" value="90"><span class="val" id="v-rpm"></span></div>
+  <div class="row"><label for="s-teeth">New gear</label><input id="s-teeth" type="range" min="6" max="40" step="1" value="14"><span class="val" id="v-teeth"></span></div>
+  <div class="btns">
+    <button id="b-rand">Randomize</button>
+    <button id="b-reset">Clear</button>
+    <button class="p" data-preset="gearbox">Gearbox</button>
+    <button class="p" data-preset="idler">Idler chain</button>
+    <button class="p" data-preset="planet">Planetary</button>
+    <button id="b-mute" title="Mute/unmute the hum" aria-label="Mute sound">&#128266;</button>
+  </div>
+  <div id="hud"></div>
+</div>
+<div id="help">
+  <kbd>click</kbd> drop &nbsp; <kbd>drag rim</kbd> flick-spin &nbsp; <kbd>drag centre</kbd> move &nbsp;
+  <kbd>shift+drag</kbd> belt link &nbsp; <kbd>dbl-click</kbd> set motor &nbsp;
+  <kbd>scroll</kbd> teeth &nbsp; <kbd>del</kbd> remove
+</div>
+<script>
+"use strict";
+const TAU = Math.PI*2, cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+let W=0,H=0,DPR=Math.min(2,devicePixelRatio||1);
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function resize(){ W=innerWidth; H=innerHeight; cv.width=W*DPR; cv.height=H*DPR; cv.style.width=W+'px'; cv.style.height=H+'px'; ctx.setTransform(DPR,0,0,DPR,0,0); }
+addEventListener('resize',resize); resize();
+
+// ---- state ----
+let gears=[];            // {x,y,teeth,rot,omega}
+let belts=[];            // [i,j]
+let motor=0;             // motor gear index (-1 none)
+let module=9, friction=0.12, motorRPM=90, newTeeth=14;
+let sparks=[], prevJam=new Set();
+const R = g => module*g.teeth/2;                 // pitch radius
+const rpmOf = g => g.omega*60/TAU;
+
+// ---- meshing / graph ----
+const MTOL = () => Math.max(5, module*0.7);
+function meshes(a,b){ const d=Math.hypot(a.x-b.x,a.y-b.y); return Math.abs(d-(R(a)+R(b)))<MTOL(); }
+function buildAdj(){
+  const n=gears.length, adj=Array.from({length:n},()=>[]);
+  for(let i=0;i<n;i++)for(let j=i+1;j<n;j++) if(meshes(gears[i],gears[j])){ adj[i].push({to:j,t:'m'}); adj[j].push({to:i,t:'m'}); }
+  for(const [i,j] of belts){ if(gears[i]&&gears[j]){ adj[i].push({to:j,t:'b'}); adj[j].push({to:i,t:'b'}); } }
+  return adj;
+}
+
+// per-frame simulation: assign omega via BFS from a driver, detect jams, then integrate + phase-snap
+function simulate(dt){
+  const n=gears.length; if(!n) return {trains:[]};
+  const adj=buildAdj(), comp=new Array(n).fill(-1), groups=[];
+  for(let i=0;i<n;i++){ if(comp[i]>=0) continue; const id=groups.length,q=[i],g=[]; comp[i]=id;
+    while(q.length){ const u=q.pop(); g.push(u); for(const e of adj[u]) if(comp[e.to]<0){ comp[e.to]=id; q.push(e.to); } }
+    groups.push(g); }
+
+  const trains=[], order=[], parent=new Array(n).fill(-1), pedge=new Array(n);
+  for(const g of groups){
+    // choose root: the motor if present, else fastest-spinning gear (carries momentum)
+    let root = g.includes(motor) ? motor : g.reduce((a,b)=>Math.abs(gears[b].omega)>Math.abs(gears[a].omega)?b:a, g[0]);
+    // drive dynamics on the root
+    if(root===motor){ const tgt=motorRPM*TAU/60; gears[root].omega += (tgt-gears[root].omega)*Math.min(1,dt*4); }
+    gears[root].omega *= Math.max(0, 1-friction*dt*1.6);
+    if(Math.abs(gears[root].omega)<1e-4) gears[root].omega=0;
+    // BFS assign omega + spanning tree; detect over-constraint (odd loops / conflicts) -> jam
+    const seen=new Set([root]), q=[root], om={[root]:gears[root].omega}; let jam=false;
+    parent[root]=-1; order.push(root);
+    while(q.length){ const u=q.shift();
+      for(const e of adj[u]){ const rr=R(gears[u])/R(gears[e.to]);
+        const val = e.t==='m' ? -om[u]*rr : om[u]*rr;
+        if(seen.has(e.to)){ if(Math.abs(val-om[e.to])>1e-3+Math.abs(val)*0.02) jam=true; }
+        else{ seen.add(e.to); om[e.to]=val; parent[e.to]=u; pedge[e.to]=e.t; q.push(e.to); order.push(e.to); }
+      } }
+    if(jam){ for(const k of g) gears[k].omega=0; }
+    else for(const k of g) gears[k].omega=om[k];
+    // train readout
+    let mx=0,mn=Infinity; for(const k of g){ const a=Math.abs(gears[k].omega); mx=Math.max(mx,a); if(a>0) mn=Math.min(mn,a); }
+    trains.push({nodes:g, root, jam, rpm:Math.abs(rpmOf(gears[root])), ratio: (mn<Infinity&&mn>0)? mx/mn : 1, hasMotor:g.includes(motor)});
+  }
+  // integrate rotation
+  for(const gg of gears) gg.rot += gg.omega*dt;
+  // phase-snap meshing children so teeth visibly interlock (small correction, choose nearest tooth)
+  for(const c of order){ const p=parent[c]; if(p<0||pedge[c]!=='m') continue;
+    const P=gears[p], C=gears[c], phi=Math.atan2(C.y-P.y,C.x-P.x), Np=P.teeth, Nc=C.teeth;
+    const K = 0.5 - Np*(phi-P.rot)/TAU, base = phi+Math.PI - (TAU/Nc)*K, step=TAU/Nc;
+    C.rot = base - step*Math.round((base-C.rot)/step);
+  }
+  // jam spark bursts
+  const nowJam=new Set();
+  for(const t of trains) if(t.jam){ for(const k of t.nodes) nowJam.add(k); if(![...t.nodes].some(k=>prevJam.has(k))){ const g0=gears[t.nodes[0]]; for(let i=0;i<18;i++){ const a=Math.random()*TAU,s=60+Math.random()*180; sparks.push({x:g0.x,y:g0.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:1}); } } }
+  prevJam=nowJam;
+  return {trains};
+}
+
+// ---- rendering ----
+function drawGear(g,i,jam){
+  const r=R(g), N=g.teeth, add=r+module*0.55, ded=Math.max(r*0.55, r-module*0.85), rpm=Math.abs(rpmOf(g));
+  const isMotor=i===motor;
+  // motion-blur ghosts for fast pinions
+  if(rpm>150 && !jam && !reducedMotion){ const gh=Math.min(3,Math.floor(rpm/220)+1);
+    for(let k=1;k<=gh;k++){ ctx.save(); ctx.globalAlpha=0.10; toothPath(g,N,add,ded,g.rot-Math.sign(g.omega)*k*0.05); ctx.fillStyle=isMotor?'#ffcf5c':'#9fb2d6'; ctx.fill(); ctx.restore(); } }
+  toothPath(g,N,add,ded,g.rot);
+  const grad=ctx.createRadialGradient(g.x-r*0.3,g.y-r*0.3,r*0.1,g.x,g.y,add);
+  if(jam){ grad.addColorStop(0,'#ff7b7b'); grad.addColorStop(1,'#9c1f1f'); }
+  else if(isMotor){ grad.addColorStop(0,'#ffe08a'); grad.addColorStop(1,'#c8891f'); }
+  else{ grad.addColorStop(0,'#b9c8e6'); grad.addColorStop(1,'#5a6d92'); }
+  ctx.fillStyle=grad; ctx.fill();
+  ctx.lineWidth=1.4; ctx.strokeStyle=jam?'#ff3d3d':(isMotor?'#8a5c10':'#39496a'); ctx.stroke();
+  // hub + spoke marker (so rotation is legible)
+  ctx.beginPath(); ctx.arc(g.x,g.y,r*0.28,0,TAU); ctx.fillStyle='#0d1017'; ctx.fill();
+  ctx.beginPath(); ctx.moveTo(g.x,g.y); ctx.lineTo(g.x+Math.cos(g.rot)*r*0.72, g.y+Math.sin(g.rot)*r*0.72);
+  ctx.strokeStyle=jam?'#ff8585':(isMotor?'#ffcf5c':'#cdd8ee'); ctx.lineWidth=2.4; ctx.stroke();
+  ctx.beginPath(); ctx.arc(g.x,g.y,r*0.1,0,TAU); ctx.fillStyle=ctx.strokeStyle; ctx.fill();
+  if(jam){ ctx.beginPath(); ctx.arc(g.x,g.y,add+4,0,TAU); ctx.strokeStyle='rgba(255,60,60,'+(0.4+0.4*Math.sin(performance.now()/90))+')'; ctx.lineWidth=2; ctx.stroke(); }
+}
+function toothPath(g,N,add,ded,rot){ ctx.beginPath();
+  for(let k=0;k<=2*N;k++){ const a=rot+k*Math.PI/N, rr=(k%2===0)?add:ded, x=g.x+Math.cos(a)*rr, y=g.y+Math.sin(a)*rr; k?ctx.lineTo(x,y):ctx.moveTo(x,y); }
+  ctx.closePath();
+}
+function drawBelt(a,b){ const A=gears[a],B=gears[b]; if(!A||!B) return;
+  const dx=B.x-A.x,dy=B.y-A.y,d=Math.hypot(dx,dy)||1, px=-dy/d, py=dx/d, ra=R(A)*0.82, rb=R(B)*0.82;
+  ctx.strokeStyle='#4c5872'; ctx.lineWidth=4; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(A.x+px*ra,A.y+py*ra); ctx.lineTo(B.x+px*rb,B.y+py*rb); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(A.x-px*ra,A.y-py*ra); ctx.lineTo(B.x-px*rb,B.y-py*rb); ctx.stroke();
+}
+function render(state){
+  ctx.clearRect(0,0,W,H);
+  // subtle grid
+  ctx.strokeStyle='rgba(255,255,255,.03)'; ctx.lineWidth=1;
+  for(let x=0;x<W;x+=40){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  for(let y=0;y<H;y+=40){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+  for(const [i,j] of belts) drawBelt(i,j);
+  const jamSet=new Set(); for(const t of state.trains) if(t.jam) t.nodes.forEach(k=>jamSet.add(k));
+  // drag ghost + valid-mesh highlights
+  if(drag && drag.mode==='move'){ const g=gears[drag.i], r=R(g);
+    for(let k=0;k<gears.length;k++){ if(k===drag.i) continue; const o=gears[k], d=Math.hypot(g.x-o.x,g.y-o.y);
+      if(Math.abs(d-(r+R(o)))<MTOL()*2.2){ ctx.beginPath(); ctx.arc(o.x,o.y,R(o)+r,0,TAU); ctx.strokeStyle='rgba(255,179,71,.55)'; ctx.setLineDash([5,6]); ctx.lineWidth=1.5; ctx.stroke(); ctx.setLineDash([]); } } }
+  if(beltDrag){ const A=gears[beltDrag.i]; ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(mouse.x,mouse.y); ctx.strokeStyle='rgba(255,179,71,.7)'; ctx.setLineDash([6,6]); ctx.lineWidth=3; ctx.stroke(); ctx.setLineDash([]); }
+  for(let i=0;i<gears.length;i++) drawGear(gears[i],i,jamSet.has(i));
+  // hover ghost for placement
+  if(hover<0 && !drag && !beltDrag && overCanvas){ ctx.save(); ctx.globalAlpha=0.28;
+    toothPath({x:mouse.x,y:mouse.y,rot:0}, newTeeth, module*newTeeth/2+module*0.55, module*newTeeth/2-module*0.85, 0);
+    ctx.fillStyle='#ffb347'; ctx.fill(); ctx.restore(); }
+  // sparks
+  for(const s of sparks){ ctx.globalAlpha=Math.max(0,s.life); ctx.fillStyle='#ffd36b'; ctx.beginPath(); ctx.arc(s.x,s.y,2.2,0,TAU); ctx.fill(); }
+  ctx.globalAlpha=1;
+}
+
+// ---- audio: mechanical hum scaled to fastest gear ----
+let actx,osc,filt,gain, soundOn = localStorage.getItem('pinion.mute')!=='1';
+function initAudio(){ if(actx||!soundOn) return; actx=new (window.AudioContext||window.webkitAudioContext)();
+  osc=actx.createOscillator(); filt=actx.createBiquadFilter(); gain=actx.createGain();
+  osc.type='sawtooth'; filt.type='lowpass'; filt.frequency.value=520; gain.gain.value=0;
+  osc.connect(filt); filt.connect(gain); gain.connect(actx.destination); osc.start(); }
+function audioUpdate(maxRpm){ if(!actx) return; const t=actx.currentTime, r=soundOn?Math.min(600,maxRpm):0;
+  osc.frequency.setTargetAtTime(38+r*0.55, t, 0.08);
+  gain.gain.setTargetAtTime(soundOn?Math.min(0.09, r/600*0.09):0, t, 0.1);
+  filt.frequency.setTargetAtTime(400+r*1.2, t, 0.1); }
+function updateMuteBtn(){ const b=document.getElementById('b-mute');
+  b.innerHTML = soundOn ? '&#128266;' : '&#128263;'; b.setAttribute('aria-label', soundOn?'Mute sound':'Unmute sound'); }
+document.getElementById('b-mute').onclick=()=>{ soundOn=!soundOn; localStorage.setItem('pinion.mute', soundOn?'0':'1');
+  if(soundOn) initAudio(); else if(gain) gain.gain.setTargetAtTime(0, actx.currentTime, 0.05); updateMuteBtn(); };
+updateMuteBtn();
+
+// ---- HUD ----
+const hud=document.getElementById('hud');
+function updateHUD(state){ let html='', k=1, maxRpm=0;
+  for(const t of state.trains){ if(t.nodes.length<2 && !t.hasMotor) continue; maxRpm=Math.max(maxRpm,t.rpm);
+    if(t.jam) html+=`<div class="train jam">Train ${k} &#128274; JAMMED (odd loop)</div>`;
+    else html+=`<div class="train"><span>Train ${k}${t.hasMotor?' &#9881;':''}</span><b>${t.rpm.toFixed(0)} rpm · ${t.ratio.toFixed(2)}:1</b></div>`;
+    k++; }
+  hud.innerHTML = html || '<div class="train" style="color:#8b96ab">Drop two gears and flick to begin.</div>';
+  audioUpdate(maxRpm);
+}
+
+// ---- input ----
+let drag=null, beltDrag=null, hover=-1, overCanvas=false, mouse={x:0,y:0}, lastMove=null;
+function at(x,y){ for(let i=gears.length-1;i>=0;i--){ const g=gears[i]; if(Math.hypot(g.x-x,g.y-y)<=R(g)+module*0.6) return i; } return -1; }
+function pos(e){ const r=cv.getBoundingClientRect(); return {x:e.clientX-r.left, y:e.clientY-r.top}; }
+
+cv.addEventListener('pointerdown',e=>{ initAudio(); overCanvas=true; const p=pos(e); mouse=p; const i=at(p.x,p.y);
+  if(i<0){ if(e.shiftKey) return; gears.push({x:p.x,y:p.y,teeth:newTeeth,rot:0,omega:0}); if(motor<0)motor=gears.length-1; save(); return; }
+  cv.setPointerCapture(e.pointerId);
+  if(e.shiftKey){ beltDrag={i}; return; }
+  const g=gears[i], dr=Math.hypot(g.x-p.x,g.y-p.y);
+  if(dr>R(g)*0.55){ drag={i,mode:'flick'}; lastMove={x:p.x,y:p.y,t:performance.now()}; }
+  else drag={i,mode:'move',ox:g.x-p.x,oy:g.y-p.y};
+  cv.style.cursor='grabbing';
+});
+cv.addEventListener('pointermove',e=>{ const p=pos(e); mouse=p; overCanvas=true;
+  if(beltDrag){ return; }
+  if(!drag){ hover=at(p.x,p.y); cv.style.cursor=hover>=0?'grab':'crosshair'; return; }
+  const g=gears[drag.i];
+  if(drag.mode==='move'){ g.x=p.x+drag.ox; g.y=p.y+drag.oy; }
+  else{ const now=performance.now(), dt=Math.max(8,now-lastMove.t)/1000; const rx=p.x-g.x, ry=p.y-g.y, r2=rx*rx+ry*ry;
+    if(r2>1){ const w=(rx*(p.y-lastMove.y)-ry*(p.x-lastMove.x))/(r2*dt); g.omega=0.7*g.omega+0.3*Math.max(-80,Math.min(80,w)); }
+    lastMove={x:p.x,y:p.y,t:now}; }
+});
+addEventListener('pointerup',e=>{ const p=pos(e);
+  if(beltDrag){ const j=at(p.x,p.y); if(j>=0 && j!==beltDrag.i && !meshes(gears[beltDrag.i],gears[j])){
+      const ex=belts.findIndex(b=>(b[0]===beltDrag.i&&b[1]===j)||(b[0]===j&&b[1]===beltDrag.i));
+      if(ex>=0) belts.splice(ex,1); else belts.push([beltDrag.i,j]); save(); } beltDrag=null; return; }
+  if(drag && drag.mode==='move'){ // snap to exact mesh with nearest candidate
+    const g=gears[drag.i]; let best=null,bd=1e9;
+    for(let k=0;k<gears.length;k++){ if(k===drag.i)continue; const o=gears[k], want=R(g)+R(o), d=Math.hypot(g.x-o.x,g.y-o.y);
+      if(Math.abs(d-want)<MTOL()*2.2 && Math.abs(d-want)<bd){ bd=Math.abs(d-want); best={o,want,d}; } }
+    if(best){ const {o,want,d}=best, ux=(g.x-o.x)/(d||1), uy=(g.y-o.y)/(d||1); g.x=o.x+ux*want; g.y=o.y+uy*want; }
+    save(); }
+  drag=null; cv.style.cursor=at(p.x,p.y)>=0?'grab':'crosshair';
+});
+cv.addEventListener('dblclick',e=>{ const p=pos(e), i=at(p.x,p.y); if(i>=0){ motor=i; save(); } });
+cv.addEventListener('mouseleave',()=>{ overCanvas=false; hover=-1; });
+cv.addEventListener('wheel',e=>{ e.preventDefault(); const d=e.deltaY<0?1:-1, i=at(mouse.x,mouse.y);
+  if(i>=0){ gears[i].teeth=Math.max(6,Math.min(40,gears[i].teeth+d)); save(); }
+  else{ newTeeth=Math.max(6,Math.min(40,newTeeth+d)); document.getElementById('s-teeth').value=newTeeth; syncLabels(); }
+},{passive:false});
+addEventListener('keydown',e=>{ if(e.key==='Delete'||e.key==='Backspace'||e.key==='x'){ const i=at(mouse.x,mouse.y);
+    if(i>=0){ e.preventDefault(); gears.splice(i,1); belts=belts.filter(b=>b[0]!==i&&b[1]!==i).map(b=>[b[0]>i?b[0]-1:b[0], b[1]>i?b[1]-1:b[1]]);
+      if(motor===i) motor=gears.length?0:-1; else if(motor>i) motor--; save(); } }
+});
+
+// ---- controls ----
+const $=id=>document.getElementById(id);
+function syncLabels(){ $('v-mod').textContent=module; $('v-fri').textContent=(friction*100|0)+'%';
+  $('v-rpm').textContent=motorRPM; $('v-teeth').textContent=newTeeth+'T'; }
+$('s-mod').oninput=e=>{ module=+e.target.value; syncLabels(); save(); };
+$('s-fri').oninput=e=>{ friction=+e.target.value/100; syncLabels(); save(); };
+$('s-rpm').oninput=e=>{ motorRPM=+e.target.value; syncLabels(); save(); };
+$('s-teeth').oninput=e=>{ newTeeth=+e.target.value; syncLabels(); };
+$('b-reset').onclick=()=>{ gears=[]; belts=[]; motor=-1; save(); };
+$('b-rand').onclick=()=>randomize();
+document.querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>preset(b.dataset.preset));
+
+// ---- builders ----
+function chain(cx,cy,teethArr){ gears=[]; belts=[]; let x=cx, prev=null;
+  for(let k=0;k<teethArr.length;k++){ const t=teethArr[k], r=module*t/2, y=cy+(k%2?18:-18);
+    if(prev){ const sum=module*prev/2+r, dy=y-gears[k-1].y;
+      // solve horizontal spacing so the true centre distance == sum (exact mesh despite the zig-zag)
+      x = gears[k-1].x + Math.sqrt(Math.max(1, sum*sum - dy*dy)); }
+    gears.push({x, y, teeth:t, rot:0, omega:0}); prev=t; }
+  motor=0; motorRPM=90; $('s-rpm').value=90; }
+function preset(name){
+  if(name==='gearbox'){ module=10; chain(W/2-260, H/2, [10,26,12,30,14]); }
+  else if(name==='idler'){ module=9; chain(W/2-240, H/2, [16,16,16,16,16,16]); }
+  else if(name==='planet'){ module=9; gears=[]; belts=[]; const cx=W/2,cy=H/2,ts=22,tp=12,rs=module*ts/2,rp=module*tp/2;
+    gears.push({x:cx,y:cy,teeth:ts,rot:0,omega:0});
+    for(let k=0;k<4;k++){ const a=k*TAU/4; gears.push({x:cx+Math.cos(a)*(rs+rp),y:cy+Math.sin(a)*(rs+rp),teeth:tp,rot:0,omega:0}); }
+    motor=0; motorRPM=120; $('s-rpm').value=120; }
+  $('s-mod').value=module; syncLabels(); save();
+}
+function randomize(){ const n=4+(Math.random()*4|0), arr=[]; for(let k=0;k<n;k++) arr.push(8+(Math.random()*24|0));
+  module=8+(Math.random()*6|0); $('s-mod').value=module; chain(W/2-n*40, H/2, arr);
+  motorRPM=60+(Math.random()*260|0); $('s-rpm').value=motorRPM; syncLabels(); save(); }
+
+// ---- hash serialization ----
+let saveT;
+function save(){ clearTimeout(saveT); saveT=setTimeout(()=>{
+  const g=gears.map(x=>`${Math.round(x.x)}.${Math.round(x.y)}.${x.teeth}`).join('_');
+  const b=belts.map(x=>x.join('-')).join('_');
+  location.replace('#'+[module,motor,g,b,motorRPM,Math.round(friction*100)].join('/'));
+},250); }
+function load(){ const h=decodeURIComponent(location.hash.slice(1)); if(!h) return false;
+  try{ const [m,mo,g,b,rpm,fri]=h.split('/'); module=+m||9; motor=+mo; motorRPM=+rpm||90;
+    if(fri!==undefined && fri!=='') friction=Math.max(0,Math.min(1,+fri/100))||0;
+    gears=(g?g.split('_'):[]).filter(Boolean).map(s=>{ const [x,y,t]=s.split('.').map(Number); return {x,y,teeth:t,rot:0,omega:0}; });
+    belts=(b?b.split('_'):[]).filter(Boolean).map(s=>s.split('-').map(Number));
+    $('s-mod').value=module; $('s-rpm').value=motorRPM; $('s-fri').value=Math.round(friction*100); return gears.length>0;
+  }catch(_){ return false; } }
+
+// ---- main loop ----
+let last=performance.now();
+function frame(now){ const dt=Math.min(0.05,(now-last)/1000); last=now;
+  for(const s of sparks){ s.x+=s.vx*dt; s.y+=s.vy*dt; s.vy+=260*dt; s.life-=dt*1.7; }
+  sparks=sparks.filter(s=>s.life>0);
+  const state=simulate(dt); render(state); updateHUD(state);
+  requestAnimationFrame(frame);
+}
+if(!load()) preset('gearbox');
+syncLabels();
+// touch devices lack wheel / dbl-click / shift+drag / keyboard — tell the truth about what works
+if(matchMedia('(hover: none), (pointer: coarse)').matches){
+  document.getElementById('help').innerHTML =
+    '<kbd>tap</kbd> drop &nbsp; <kbd>drag rim</kbd> flick-spin &nbsp; <kbd>drag centre</kbd> move &nbsp; '+
+    'set-motor / teeth / belts / delete are desktop-only (mouse + keyboard)';
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

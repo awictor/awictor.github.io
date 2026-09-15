@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NoteFrequency — Musical Note ⇄ Frequency &amp; Tuning</title>
+<meta name="description" content="Convert musical notes to frequencies (equal temperament, adjustable A4) and back — with the nearest note and cents-off for tuning. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('notefreq-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#d946ef;
+    --bg:#faf3fb; --card:#ffffff; --fg:#1f1622; --muted:#68586c; --line:#f0e2f2; --shadow:0 1px 3px rgba(0,0,0,.08);
+    --ok:#16a34a; --no:#dc2626;
+  }
+  [data-theme="dark"]{
+    --bg:#140a16; --card:#1e1220; --fg:#f4ecf6; --muted:#a88faf; --line:#2c1c30; --shadow:0 1px 3px rgba(0,0,0,.5);
+    --ok:#4ade80; --no:#f87171;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:640px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#a21caf);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:640px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.2rem;text-align:center}
+  input.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  .big{text-align:center;font-size:2.6rem;font-weight:800;color:var(--c);line-height:1}
+  .u{text-align:center;color:var(--muted);font-size:.85rem}
+  .cents{text-align:center;margin-top:8px;font-weight:700}
+  .cents.ok{color:var(--ok)} .cents.off{color:var(--no)}
+  .a4{margin-top:14px}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:640px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🎵</div>
+    <div><h1>NoteFrequency</h1><div class="sub">Note ⇄ frequency &amp; tuning</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="a4">Reference pitch A4 (Hz)</label>
+    <input type="number" id="a4" value="440" min="400" max="480" step="1">
+  </div>
+  <div class="card">
+    <label for="note">Note (e.g. A4, C#5, Eb3)</label>
+    <input class="mono" id="note" value="A4" spellcheck="false">
+    <div class="big" id="freq">—</div>
+    <div class="u">Hz</div>
+    <div class="err" id="err1"></div>
+  </div>
+  <div class="card">
+    <label for="hz">Frequency (Hz) → nearest note</label>
+    <input type="number" id="hz" value="261.6" step="0.1" min="1">
+    <div class="big" id="noteOut">—</div>
+    <div class="cents" id="cents"></div>
+    <div class="err" id="err2"></div>
+  </div>
+</main>
+<footer>
+  Equal temperament: frequency = A4 × 2^((MIDI − 69) / 12). "Cents" measures how sharp/flat you are from the nearest note (100 cents = one semitone). Standard concert pitch is A4 = 440 Hz. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/note-frequency">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  const NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const BASE = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+
+  // Note name (e.g. "A4", "C#5", "Eb3") → MIDI number.
+  function noteToMidi(name){
+    const m = /^([A-Ga-g])([#b]?)(-?\d+)$/.exec(String(name).trim());
+    if(!m) throw new Error('invalid note (use e.g. A4, C#5, Eb3)');
+    const semitone = BASE[m[1].toUpperCase()] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0);
+    return (Number(m[3]) + 1) * 12 + semitone;
+  }
+
+  const midiToName = midi => NAMES[((Math.round(midi) % 12) + 12) % 12] + (Math.floor(Math.round(midi) / 12) - 1);
+
+  const midiToFreq = (midi, a4 = 440) => Number(a4) * Math.pow(2, (Number(midi) - 69) / 12);
+  const noteToFreq = (name, a4 = 440) => midiToFreq(noteToMidi(name), a4);
+
+  // Frequency → nearest note, with cents off (+sharp / −flat).
+  function freqToNote(hz, a4 = 440){
+    const f = Number(hz);
+    if(!(f > 0)) throw new Error('frequency must be > 0');
+    const midi = 69 + 12 * Math.log2(f / Number(a4));
+    const nearest = Math.round(midi);
+    return { name: midiToName(nearest), midi: nearest, cents: Math.round((midi - nearest) * 100) };
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('freq')){
+    const $ = id => document.getElementById(id);
+    const a4 = () => +$('a4').value || 440;
+
+    function fromNote(){
+      try{ $('freq').textContent = noteToFreq($('note').value, a4()).toFixed(2); $('err1').textContent = ''; }
+      catch(e){ $('freq').textContent = '—'; $('err1').textContent = e.message; }
+    }
+    function fromHz(){
+      try{
+        const r = freqToNote($('hz').value, a4());
+        $('noteOut').textContent = r.name;
+        const off = r.cents;
+        $('cents').className = 'cents ' + (Math.abs(off) <= 2 ? 'ok' : 'off');
+        $('cents').textContent = off === 0 ? 'in tune' : `${off > 0 ? '+' : ''}${off} cents (${off > 0 ? 'sharp' : 'flat'})`;
+        $('err2').textContent = '';
+      }catch(e){ $('noteOut').textContent = '—'; $('cents').textContent = ''; $('err2').textContent = e.message; }
+    }
+    $('note').addEventListener('input', fromNote);
+    $('hz').addEventListener('input', fromHz);
+    $('a4').addEventListener('input', () => { fromNote(); fromHz(); });
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('notefreq-theme', cur); }catch(e){}
+    });
+    fromNote(); fromHz();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { noteToMidi, midiToName, midiToFreq, noteToFreq, freqToNote };
+</script>
+</body>
+</html>

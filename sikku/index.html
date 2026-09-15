@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sikku — kolam pad</title>
+<style>
+  :root{ --ink:#231a12; --paper:#efe6d3; --accent:#c8622f; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; }
+  body{
+    font-family:"Segoe UI",system-ui,sans-serif;
+    background:radial-gradient(circle at 50% -10%,#2b2114,#140f0a 70%);
+    color:var(--paper); display:flex; flex-direction:column; align-items:center;
+    min-height:100%; padding:14px 12px 30px;
+  }
+  header{ text-align:center; margin-bottom:8px; }
+  h1{ font-size:26px; margin:0; letter-spacing:.28em; font-weight:600;
+      color:#f3d9b0; text-transform:uppercase; }
+  .tag{ font-size:12px; opacity:.65; margin-top:3px; max-width:560px; }
+  .stage{ position:relative; }
+  canvas#main{ border-radius:14px; box-shadow:0 14px 40px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.06);
+    touch-action:none; cursor:pointer; display:block; max-width:100%; height:auto; }
+  #status{ position:absolute; top:10px; left:10px; background:rgba(20,15,10,.55);
+    -webkit-backdrop-filter:blur(4px); backdrop-filter:blur(4px); padding:6px 12px; border-radius:20px; font-size:13px;
+    font-weight:600; pointer-events:none; transition:.3s; }
+  #status.solved{ background:linear-gradient(90deg,#c8622f,#e8b04b); color:#20140a; box-shadow:0 0 22px #e8b04b88; }
+  .bar{ display:flex; flex-wrap:wrap; gap:6px; justify-content:center; margin-top:12px; max-width:760px; }
+  button,.seg{ background:#2c2114; color:#f0e2c9; border:1px solid #55402a; padding:7px 12px;
+    border-radius:9px; font-size:13px; cursor:pointer; transition:.15s; font-weight:500; }
+  button:hover{ background:#3d2d1b; border-color:var(--accent); color:#fff; }
+  button:active{ transform:translateY(1px); }
+  .seg{ padding:0; display:flex; overflow:hidden; }
+  .seg:hover,.seg:focus-visible{ border-color:var(--accent); outline:none; }
+  .seg span{ padding:7px 10px; }
+  .seg b{ padding:7px 12px; background:var(--accent); color:#20140a; font-weight:700; }
+  .seg b::after{ content:" \21bb"; opacity:.6; font-weight:600; }
+  .thumbs{ display:flex; gap:10px; margin-top:14px; flex-wrap:wrap; justify-content:center; }
+  .thumbs figure{ margin:0; text-align:center; cursor:pointer; opacity:.82; transition:.15s; }
+  .thumbs figure:hover{ opacity:1; transform:translateY(-2px); }
+  .thumbs canvas{ border-radius:9px; box-shadow:0 4px 12px rgba(0,0,0,.5); display:block; }
+  .thumbs figcaption{ font-size:11px; margin-top:4px; letter-spacing:.06em; opacity:.8; }
+  #toast{ position:fixed; bottom:22px; left:50%; transform:translateX(-50%) translateY(60px);
+    background:var(--accent); color:#20140a; padding:9px 18px; border-radius:22px; font-weight:600;
+    font-size:13px; transition:.35s; opacity:0; pointer-events:none; }
+  #toast.show{ transform:translateX(-50%) translateY(0); opacity:1; }
+  .hint{ font-size:11px; opacity:.55; margin-top:8px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Sikku</h1>
+    <div class="tag">Tap the diamonds to flip their arcs. One unbroken thread is a perfect kolam &mdash; can you weave it?</div>
+  </header>
+
+  <div class="stage">
+    <canvas id="main" width="620" height="620"></canvas>
+    <div id="status">Threads: 1</div>
+  </div>
+
+  <div class="bar">
+    <button id="bRand">Randomize</button>
+    <button id="bClear">Clear</button>
+    <button id="bHint">Hint</button>
+    <button id="bReplay">Replay trace</button>
+    <div class="seg" id="segSym" role="button" tabindex="0" title="Mirror symmetry (click to cycle)"><span>Sym</span><b>4-fold</b></div>
+    <div class="seg" id="segSize" role="button" tabindex="0" title="Grid size (click to cycle)"><span>Grid</span><b>10&times;10</b></div>
+    <div class="seg" id="segPal" role="button" tabindex="0" title="Palette (click to cycle)"><span>Theme</span><b>Rice &amp; Earth</b></div>
+    <div class="seg" id="segBord" role="button" tabindex="0" title="Framing (click to cycle)"><span>Frame</span><b>Diamond</b></div>
+    <button id="bShare">Copy link</button>
+    <button id="bPNG">PNG</button>
+    <button id="bSVG">SVG</button>
+  </div>
+
+  <div class="thumbs" id="thumbs"></div>
+  <div class="hint">Goal: reduce the design to a single continuous thread. Hint highlights the flip that merges the most threads.</div>
+  <div id="toast"></div>
+
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const canvas=$("main"), ctx=canvas.getContext("2d"), W=canvas.width, H=canvas.height;
+
+const PAL=[
+  {name:"Rice & Earth", bg:"#9e3b24", dot:"#f7edd6", col:i=>`hsl(${(38+i*53)%50+22},70%,${84-(i%4)*8}%)`},
+  {name:"Festival",     bg:"#160f2e", dot:"#ffd76a", col:i=>`hsl(${(i*67)%360},82%,64%)`},
+  {name:"Ink",          bg:"#f2ebdb", dot:"#c6bca0", col:i=>`hsl(${(i*61)%360},46%,30%)`}
+];
+const BORD=["None","Square","Diamond"];
+const SYMS=[1,2,4], SYMLBL={1:"None",2:"Mirror",4:"4-fold"};
+
+// ---- state ----
+const st={ R:10, C:10, sym:4, pal:0, bord:2, grid:null, loops:null, hint:-1 };
+
+// ---- kolam graph engine ----
+// Node ids: horizontal edge H(i,j)=i*C+j (i:0..R,j:0..C-1); vertical V(i,j)=HB+i*(C+1)+j (i:0..R-1,j:0..C)
+function graph(R,C,grid){
+  const HB=(R+1)*C, NN=HB+R*(C+1);
+  const H=(i,j)=>i*C+j, V=(i,j)=>HB+i*(C+1)+j;
+  const pos=id=>{ if(id<HB){const i=(id/C)|0; return [id%C+0.5,i];}
+                  const k=id-HB,i=(k/(C+1))|0; return [k%(C+1),i+0.5]; };
+  const segs=[], deg=new Int32Array(NN);
+  const add=(a,b,g)=>{ g.a=a; g.b=b; segs.push(g); deg[a]++; deg[b]++; };
+  for(let i=0;i<R;i++)for(let j=0;j<C;j++){
+    const top=H(i,j),bot=H(i+1,j),lef=V(i,j),rig=V(i,j+1);
+    if(grid[i*C+j]===0){ add(top,lef,{k:"a",cx:j,cy:i});   add(bot,rig,{k:"a",cx:j+1,cy:i+1}); }
+    else               { add(top,rig,{k:"a",cx:j+1,cy:i}); add(bot,lef,{k:"a",cx:j,cy:i+1}); }
+  }
+  // border closure: pair dangling (degree-1) nodes ordered around the centre -> loops always close
+  const gx=C/2, gy=R/2, dang=[];
+  for(let n=0;n<NN;n++) if(deg[n]===1) dang.push(n);
+  dang.sort((p,q)=>{ const a=pos(p),b=pos(q);
+    return Math.atan2(a[1]-gy,a[0]-gx)-Math.atan2(b[1]-gy,b[0]-gx); });
+  for(let k=0;k+1<dang.length;k+=2) add(dang[k],dang[k+1],{k:"c",gx,gy});
+  return {segs,pos,NN};
+}
+// sample a segment into cell-unit points, ordered a->b
+function sample(s,pos){
+  const A=pos(s.a), B=pos(s.b), p=[];
+  if(s.k==="a"){
+    let a0=Math.atan2(A[1]-s.cy,A[0]-s.cx), a1=Math.atan2(B[1]-s.cy,B[0]-s.cx), d=a1-a0;
+    while(d> Math.PI)d-=2*Math.PI; while(d<-Math.PI)d+=2*Math.PI;
+    for(let t=0;t<=8;t++){ const a=a0+d*t/8; p.push([s.cx+0.5*Math.cos(a),s.cy+0.5*Math.sin(a)]); }
+  } else {
+    const mx=(A[0]+B[0])/2,my=(A[1]+B[1])/2, dx=mx-s.gx,dy=my-s.gy, L=Math.hypot(dx,dy)||1;
+    const cx=mx+dx/L*0.55, cy=my+dy/L*0.55;
+    for(let t=0;t<=10;t++){ const u=t/10,v=1-u;
+      p.push([v*v*A[0]+2*v*u*cx+u*u*B[0], v*v*A[1]+2*v*u*cy+u*u*B[1]]); }
+  }
+  return p;
+}
+// trace closed loops (every node has degree 2 -> disjoint cycles), ordered for the pen animation
+function trace(g){
+  g.segs.forEach(s=>s.p=sample(s,g.pos));
+  const adj={}; g.segs.forEach((s,i)=>{ (adj[s.a]=adj[s.a]||[]).push(i); (adj[s.b]=adj[s.b]||[]).push(i); });
+  const used=new Uint8Array(g.segs.length), loops=[];
+  for(let i=0;i<g.segs.length;i++){ if(used[i])continue;
+    const pts=[]; let cur=g.segs[i].a, si=i;
+    while(si!=null && !used[si]){
+      used[si]=1; const s=g.segs[si], other=s.a===cur?s.b:s.a;
+      const sp=s.a===cur?s.p:s.p.slice().reverse();
+      for(let k=pts.length?1:0;k<sp.length;k++)pts.push(sp[k]);
+      cur=other; const c=(adj[cur]||[]).filter(x=>!used[x]); si=c.length?c[0]:null;
+    }
+    loops.push(pts);
+  }
+  return loops;
+}
+// fast loop COUNT via union-find (used for hint search)
+function countLoops(R,C,grid){
+  const g=graph(R,C,grid), par=new Int32Array(g.NN);
+  for(let i=0;i<g.NN;i++)par[i]=i;
+  const find=x=>{ while(par[x]!==x){ par[x]=par[par[x]]; x=par[x]; } return x; };
+  for(const s of g.segs){ const a=find(s.a),b=find(s.b); if(a!==b)par[a]=b; }
+  let c=0; for(let i=0;i<g.NN;i++)if(find(i)===i)c++;
+  return c;
+}
+function buildLoops(R,C,grid){
+  const loops=trace(graph(R,C,grid));
+  return {loops, total:loops.reduce((s,l)=>s+l.length,0)};
+}
+
+// ---- rendering (pure: reusable for thumbnails + export) ----
+function render(c,cw,ch,R,C,pal,bord,loops,limit,dots,hint){
+  const S=Math.min(cw,ch)/(Math.max(R,C)+1.2), ox=(cw-C*S)/2, oy=(ch-R*S)/2;
+  const T=(x,y)=>[ox+x*S,oy+y*S];
+  c.fillStyle=PAL[pal].bg; c.fillRect(0,0,cw,ch);
+  // frame
+  if(bord){ c.strokeStyle=PAL[pal].dot+"55"; c.lineWidth=Math.max(1,S*0.05);
+    const e=S*0.5, x0=ox-e,y0=oy-e,x1=ox+C*S+e,y1=oy+R*S+e, mx=(x0+x1)/2,my=(y0+y1)/2;
+    c.beginPath();
+    if(bord===1)c.rect(x0,y0,x1-x0,y1-y0);
+    else{ c.moveTo(mx,y0-e*0.4);c.lineTo(x1+e*0.4,my);c.lineTo(mx,y1+e*0.4);c.lineTo(x0-e*0.4,my);c.closePath(); }
+    c.stroke();
+  }
+  // pulli dots (cell centres, the seeds the thread weaves around)
+  if(dots){ c.fillStyle=PAL[pal].dot;
+    for(let i=0;i<R;i++)for(let j=0;j<C;j++){ const [x,y]=T(j+0.5,i+0.5);
+      c.beginPath(); c.arc(x,y,Math.max(1,S*0.055),0,7); c.fill(); } }
+  // hint highlight
+  if(hint>=0){ const i=(hint/C)|0,j=hint%C,[x,y]=T(j+0.5,i+0.5);
+    c.fillStyle="#ffe08a55"; c.beginPath(); c.arc(x,y,S*0.55,0,7); c.fill(); }
+  // threads
+  const single=loops.length===1;
+  c.lineJoin="round"; c.lineCap="round";
+  let rem=(limit==null)?Infinity:limit;
+  loops.forEach((pts,li)=>{
+    const draw=(limit==null)?pts.length:Math.max(0,Math.min(pts.length,rem));
+    if(limit!=null)rem-=pts.length;
+    if(draw<2)return;
+    c.strokeStyle=PAL[pal].col(li); c.lineWidth=Math.max(1.5,S*0.14);
+    if(single){ c.shadowColor=PAL[pal].col(li); c.shadowBlur=S*0.5; } else c.shadowBlur=0;
+    c.beginPath(); let [x,y]=T(pts[0][0],pts[0][1]); c.moveTo(x,y);
+    for(let k=1;k<draw;k++){ [x,y]=T(pts[k][0],pts[k][1]); c.lineTo(x,y); }
+    c.stroke();
+  });
+  c.shadowBlur=0;
+}
+
+// ---- main app ----
+function rebuild(){
+  st.loops=buildLoops(st.R,st.C,st.grid);
+  const n=st.loops.loops.length, s=$("status");
+  s.textContent = n===1 ? "Single thread!" : "Threads: "+n;
+  s.classList.toggle("solved", n===1);
+}
+function drawMain(limit){ render(ctx,W,H,st.R,st.C,st.pal,st.bord,st.loops.loops,limit,true,st.hint); }
+
+let anim=0;
+const reduceMotion=()=>window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+function reveal(){
+  cancelAnimationFrame(anim); rebuild();
+  if(reduceMotion()){ drawMain(null); return; }
+  const total=st.loops.total; let drawn=0;
+  const step=()=>{ drawn+=Math.max(5,total/130); drawMain(drawn);
+    if(drawn<total)anim=requestAnimationFrame(step); else drawMain(null); };
+  step();
+}
+
+// build a grid from a value fn, folded through the active symmetry
+function buildGrid(R,C,sym,fn){
+  const g=new Uint8Array(R*C);
+  for(let i=0;i<R;i++)for(let j=0;j<C;j++){
+    let ci=i,cj=j,par=0;
+    if(sym>=2 && j>=Math.ceil(C/2)){ cj=C-1-j; par^=1; }
+    if(sym>=4 && i>=Math.ceil(R/2)){ ci=R-1-i; par^=1; }
+    g[i*C+j]=(fn(ci,cj)&1)^par;
+  }
+  return g;
+}
+function randomize(){
+  const rnd=Array.from({length:st.R*st.C},()=>Math.random()<0.5?0:1);
+  st.grid=buildGrid(st.R,st.C,st.sym,(i,j)=>rnd[i*st.C+j]); st.hint=-1; reveal();
+}
+// symmetric edit — mutates `grid` in place, flipping the clicked cell plus its
+// mirror images. Mirror writes are guarded so they can never overwrite the
+// just-flipped primary cell (matters for odd R/C, where a mirror index can
+// collide with the primary).
+function applySymEdit(grid,R,C,sym,i,j){
+  const P=i*C+j, no=1-grid[P];
+  const set=(a,b,o)=>{ if(a>=0&&a<R&&b>=0&&b<C && a*C+b!==P) grid[a*C+b]=o; };
+  grid[P]=no;
+  if(sym>=2) set(i,C-1-j,no^1);
+  if(sym>=4){ set(R-1-i,j,no^1); set(R-1-i,C-1-j,no); }
+}
+function edit(i,j){
+  applySymEdit(st.grid,st.R,st.C,st.sym,i,j);
+  st.hint=-1; rebuild(); drawMain(null);
+}
+// Hint search mirrors the REAL edit: for each candidate cell we apply the same
+// symmetric flip to a trial copy before counting, so both the highlighted cell
+// and the reported merge count match what actually happens on click.
+function doHint(){
+  const cur=countLoops(st.R,st.C,st.grid); if(cur<=1){ toast("Already one thread!"); return; }
+  let best=-1,bestGain=0;
+  for(let i=0;i<st.R;i++)for(let j=0;j<st.C;j++){
+    const trial=st.grid.slice(); applySymEdit(trial,st.R,st.C,st.sym,i,j);
+    const nc=countLoops(st.R,st.C,trial);
+    if(cur-nc>bestGain){ bestGain=cur-nc; best=i*st.C+j; }
+  }
+  st.hint=best; drawMain(null);
+  toast(best<0?"No single move merges threads — try another spot":"This flip merges "+bestGain+" thread(s)");
+}
+
+// ---- hash sharing ----
+function encode(){
+  const n=st.R*st.C, bytes=new Uint8Array(Math.ceil(n/8));
+  for(let k=0;k<n;k++)if(st.grid[k])bytes[k>>3]|=1<<(k&7);
+  let s=""; bytes.forEach(b=>s+=String.fromCharCode(b));
+  return [st.R,st.C,st.sym,st.pal,st.bord,btoa(s)].join(".");
+}
+function decode(h){
+  try{ const p=h.replace(/^#/,"").split("."); if(p.length<6)return false;
+    const R=+p[0],C=+p[1];
+    // even dims only: the editor never emits odd grids, and odd R/C break the
+    // mirror-symmetry edit, so reject them rather than load a broken board.
+    if(!(R>=4&&R<=16&&C>=4&&C<=16&&R%2===0&&C%2===0))return false;
+    st.R=R; st.C=C; st.sym=+p[2]||1; st.pal=+p[3]||0; st.bord=+p[4]||0;
+    const bin=atob(p[5]), g=new Uint8Array(R*C);
+    for(let k=0;k<R*C;k++) g[k]=(bin.charCodeAt(k>>3)>>(k&7))&1;
+    st.grid=g; return true;
+  }catch(e){ return false; }
+}
+let selfHash=null;
+function share(){
+  const h=encode(); selfHash=h; location.replace("#"+h);
+  const ok=()=>toast("Link copied — share your kolam");
+  const fb=()=>toast("Link is in the address bar — copy it to share");
+  if(navigator.clipboard) navigator.clipboard.writeText(location.href).then(ok,fb);
+  else fb();
+}
+
+// ---- export ----
+function dl(name,href){ const a=document.createElement("a"); a.download=name; a.href=href; a.click(); }
+function exportPNG(){ dl("sikku.png",canvas.toDataURL("image/png")); }
+function exportSVG(){
+  const Z=900, S=Z/(Math.max(st.R,st.C)+1.2), ox=(Z-st.C*S)/2, oy=(Z-st.R*S)/2;
+  const loops=st.loops.loops, single=loops.length===1; let body="";
+  loops.forEach((pts,i)=>{ const d="M"+pts.map((p,k)=>(k?"L":"")+(ox+p[0]*S).toFixed(1)+" "+(oy+p[1]*S).toFixed(1)).join(" ")+"Z";
+    body+=`<path d="${d}" fill="none" stroke="${PAL[st.pal].col(i)}" stroke-width="${(S*0.14).toFixed(1)}" stroke-linecap="round" stroke-linejoin="round"/>`; });
+  const note=single?"<!-- single continuous thread: one path -->":"";
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${Z}" height="${Z}" viewBox="0 0 ${Z} ${Z}">${note}<rect width="100%" height="100%" fill="${PAL[st.pal].bg}"/>${body}</svg>`;
+  dl("sikku.svg","data:image/svg+xml;charset=utf-8,"+encodeURIComponent(svg));
+}
+
+// ---- toast ----
+let tt=0; function toast(m){ const t=$("toast"); t.textContent=m; t.classList.add("show");
+  clearTimeout(tt); tt=setTimeout(()=>t.classList.remove("show"),2200); }
+
+// ---- presets ----
+const PRESETS=[
+  {name:"Lotus",  R:10,C:10,sym:4,pal:0,bord:2, gen:(i,j)=>(i+j)%2},
+  {name:"Festival",R:12,C:12,sym:4,pal:1,bord:1, gen:(i,j)=>((i*i+j*j)%3===0)?1:0},
+  {name:"Ink Knot",R:8,C:8,sym:2,pal:2,bord:0, gen:(i,j)=>(i^j)&1},
+  {name:"Star",   R:14,C:14,sym:4,pal:0,bord:2, gen:(i,j)=>Math.floor(Math.abs(i-6.5)+Math.abs(j-6.5))%2}
+];
+function loadPreset(p){ st.R=p.R; st.C=p.C; st.sym=p.sym; st.pal=p.pal; st.bord=p.bord;
+  st.grid=buildGrid(p.R,p.C,p.sym,p.gen); st.hint=-1; syncLabels(); reveal(); }
+function buildThumbs(){
+  const box=$("thumbs"); box.innerHTML="";
+  PRESETS.forEach(p=>{
+    const fig=document.createElement("figure"), tc=document.createElement("canvas");
+    tc.width=tc.height=84; const g=buildGrid(p.R,p.C,p.sym,p.gen);
+    render(tc.getContext("2d"),84,84,p.R,p.C,p.pal,p.bord,trace(graph(p.R,p.C,g)),null,false,-1);
+    fig.appendChild(tc); const cap=document.createElement("figcaption"); cap.textContent=p.name; fig.appendChild(cap);
+    fig.onclick=()=>loadPreset(p); box.appendChild(fig);
+  });
+}
+
+// ---- labels + controls ----
+function syncLabels(){
+  $("segSym").querySelector("b").textContent=SYMLBL[st.sym];
+  $("segSize").querySelector("b").innerHTML=st.R+"&times;"+st.C;
+  $("segPal").querySelector("b").textContent=PAL[st.pal].name;
+  $("segBord").querySelector("b").textContent=BORD[st.bord];
+  $("segSym").setAttribute("aria-label","Symmetry: "+SYMLBL[st.sym]+" (click to cycle)");
+  $("segSize").setAttribute("aria-label","Grid size: "+st.R+" by "+st.C+" (click to cycle)");
+  $("segPal").setAttribute("aria-label","Palette: "+PAL[st.pal].name+" (click to cycle)");
+  $("segBord").setAttribute("aria-label","Frame: "+BORD[st.bord]+" (click to cycle)");
+}
+canvas.addEventListener("pointerdown",e=>{
+  const r=canvas.getBoundingClientRect(), S=Math.min(W,H)/(Math.max(st.R,st.C)+1.2);
+  const ox=(W-st.C*S)/2, oy=(H-st.R*S)/2;
+  const px=(e.clientX-r.left)*(W/r.width), py=(e.clientY-r.top)*(H/r.height);
+  const j=Math.floor((px-ox)/S), i=Math.floor((py-oy)/S);
+  if(i>=0&&i<st.R&&j>=0&&j<st.C) edit(i,j);
+});
+$("bRand").onclick=randomize;
+$("bClear").onclick=()=>{ st.grid=new Uint8Array(st.R*st.C); st.hint=-1; reveal(); };
+$("bHint").onclick=doHint;
+$("bReplay").onclick=reveal;
+$("bShare").onclick=share;
+$("bPNG").onclick=exportPNG;
+$("bSVG").onclick=exportSVG;
+$("segSym").onclick=()=>{ st.sym=SYMS[(SYMS.indexOf(st.sym)+1)%3]; syncLabels();
+  st.grid=buildGrid(st.R,st.C,st.sym,(i,j)=>st.grid[i*st.C+j]); rebuild(); drawMain(null); };
+$("segSize").onclick=()=>{ let n=st.R+2; if(n>16)n=6; st.R=st.C=n; syncLabels(); randomize(); };
+$("segPal").onclick=()=>{ st.pal=(st.pal+1)%PAL.length; syncLabels(); drawMain(null); };
+$("segBord").onclick=()=>{ st.bord=(st.bord+1)%BORD.length; syncLabels(); drawMain(null); };
+// keyboard: Enter/Space cycles a focused segment (role=button)
+["segSym","segSize","segPal","segBord"].forEach(id=>{
+  $(id).addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); $(id).onclick(); } });
+});
+
+// ---- boot ----
+buildThumbs();
+if(!(location.hash.length>1 && decode(location.hash))) loadPreset(PRESETS[0]);
+else { syncLabels(); reveal(); }
+window.addEventListener("hashchange",()=>{
+  // ignore the hashchange we triggered ourselves in share() — copying a link
+  // shouldn't restart the draw animation.
+  if(location.hash.replace(/^#/,"")===selfHash){ selfHash=null; return; }
+  if(decode(location.hash)){ syncLabels(); reveal(); }
+});
+</script>
+</body>
+</html>

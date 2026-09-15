@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CvssCalc — CVSS v3.1 Base Score Calculator</title>
+<meta name="description" content="Compute a CVSS v3.1 base score and severity rating from the eight base metrics, with a live vector string. 100% offline, nothing leaves your browser.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('cvss-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#6d28d9;
+    --bg:#f6f4fb; --card:#ffffff; --fg:#1b1723; --muted:#635a70; --line:#e7e2f0; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#100c17; --card:#191320; --fg:#efe9f6; --muted:#9a8fac; --line:#271f33; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:720px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#4c1d95);display:flex;align-items:center;justify-content:center;font-size:20px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:720px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  .metric{margin-bottom:16px}
+  .metric:last-child{margin-bottom:0}
+  .metric > .name{font-size:.82rem;color:var(--muted);font-weight:600;margin-bottom:6px}
+  .opts{display:flex;flex-wrap:wrap;gap:6px}
+  .opts button{padding:7px 12px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;cursor:pointer;font:inherit;font-size:.9rem}
+  .opts button.active{background:var(--c);color:#fff;border-color:var(--c)}
+  .score{text-align:center}
+  .num{font-size:3.6rem;font-weight:800;letter-spacing:-1px;line-height:1}
+  .rating{display:inline-block;margin-top:8px;padding:4px 16px;border-radius:999px;color:#fff;font-weight:700;text-transform:uppercase;font-size:.8rem;letter-spacing:.06em}
+  .vec{margin-top:14px;word-break:break-all;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:.85rem}
+  .copy{margin-top:10px;background:var(--c);color:#fff;border:0;border-radius:8px;padding:9px 16px;cursor:pointer;font:inherit}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:720px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🛡️</div>
+    <div><h1>CvssCalc</h1><div class="sub">CVSS v3.1 base score</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card score">
+    <div class="num" id="num">—</div>
+    <div><span class="rating" id="rating"></span></div>
+    <div class="vec mono" id="vec"></div>
+    <button class="copy" id="copyBtn" type="button">Copy vector</button>
+  </div>
+  <div class="card" id="metrics"></div>
+</main>
+<footer>
+  Implements the official <strong>CVSS v3.1</strong> base-score equations (FIRST.org). Base metrics only — temporal and environmental scores are out of scope. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/cvss-calc">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic (CVSS v3.1 base score) ----------
+  const METRICS = [
+    { key:'AV', name:'Attack Vector',       opts:[['N','Network'],['A','Adjacent'],['L','Local'],['P','Physical']] },
+    { key:'AC', name:'Attack Complexity',   opts:[['L','Low'],['H','High']] },
+    { key:'PR', name:'Privileges Required',  opts:[['N','None'],['L','Low'],['H','High']] },
+    { key:'UI', name:'User Interaction',     opts:[['N','None'],['R','Required']] },
+    { key:'S',  name:'Scope',                opts:[['U','Unchanged'],['C','Changed']] },
+    { key:'C',  name:'Confidentiality',      opts:[['N','None'],['L','Low'],['H','High']] },
+    { key:'I',  name:'Integrity',            opts:[['N','None'],['L','Low'],['H','High']] },
+    { key:'A',  name:'Availability',         opts:[['N','None'],['L','Low'],['H','High']] }
+  ];
+
+  const W = {
+    AV: { N:0.85, A:0.62, L:0.55, P:0.2 },
+    AC: { L:0.77, H:0.44 },
+    UI: { N:0.85, R:0.62 },
+    CIA:{ N:0, L:0.22, H:0.56 },
+    PR_unchanged: { N:0.85, L:0.62, H:0.27 },
+    PR_changed:   { N:0.85, L:0.68, H:0.5 }
+  };
+
+  // CVSS "roundup": smallest 1-decimal value >= input (avoids float error).
+  function roundup(input){
+    const i = Math.round(input * 100000);
+    if(i % 10000 === 0) return i / 100000;
+    return (Math.floor(i / 10000) + 1) / 10;
+  }
+
+  function baseScore(m){
+    for(const { key } of METRICS) if(!(key in m)) throw new Error('missing metric: ' + key);
+    const changed = m.S === 'C';
+    const c = W.CIA[m.C], i = W.CIA[m.I], a = W.CIA[m.A];
+    if([c, i, a].some(v => v === undefined)) throw new Error('invalid C/I/A value');
+    const iss = 1 - (1 - c) * (1 - i) * (1 - a);
+    const impact = changed
+      ? 7.52 * (iss - 0.029) - 3.25 * Math.pow(iss - 0.02, 15)
+      : 6.42 * iss;
+
+    const av = W.AV[m.AV], ac = W.AC[m.AC], ui = W.UI[m.UI];
+    const pr = (changed ? W.PR_changed : W.PR_unchanged)[m.PR];
+    if([av, ac, ui, pr].some(v => v === undefined)) throw new Error('invalid metric value');
+    const exploitability = 8.22 * av * ac * ui * pr;
+
+    if(impact <= 0) return 0;
+    const raw = changed ? 1.08 * (impact + exploitability) : (impact + exploitability);
+    return roundup(Math.min(raw, 10));
+  }
+
+  function severityRating(score){
+    const s = Number(score);
+    if(s === 0) return 'None';
+    if(s < 4.0) return 'Low';
+    if(s < 7.0) return 'Medium';
+    if(s < 9.0) return 'High';
+    return 'Critical';
+  }
+
+  function toVector(m){
+    return 'CVSS:3.1/' + METRICS.map(({ key }) => `${key}:${m[key]}`).join('/');
+  }
+
+  function parseVector(str){
+    const parts = String(str).trim().split('/').filter(p => p && !/^CVSS:/i.test(p));
+    const m = {};
+    for(const p of parts){ const [k, v] = p.split(':'); if(k && v) m[k.toUpperCase()] = v.toUpperCase(); }
+    for(const { key } of METRICS) if(!(key in m)) throw new Error('vector missing metric: ' + key);
+    return m;
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('metrics')){
+    const $ = id => document.getElementById(id);
+    const RATING_COLORS = { None:'#6b7280', Low:'#16a34a', Medium:'#ca8a04', High:'#ea580c', Critical:'#b91c1c' };
+    const state = { AV:'N', AC:'L', PR:'N', UI:'N', S:'U', C:'H', I:'H', A:'H' };
+
+    $('metrics').innerHTML = METRICS.map(mt => `
+      <div class="metric">
+        <div class="name">${mt.name} (${mt.key})</div>
+        <div class="opts" data-key="${mt.key}">
+          ${mt.opts.map(([v, lbl]) => `<button type="button" data-val="${v}">${lbl}</button>`).join('')}
+        </div>
+      </div>`).join('');
+
+    function render(){
+      document.querySelectorAll('.opts').forEach(row => {
+        const key = row.dataset.key;
+        row.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.val === state[key]));
+      });
+      const score = baseScore(state);
+      const rating = severityRating(score);
+      $('num').textContent = score.toFixed(1);
+      $('num').style.color = RATING_COLORS[rating];
+      $('rating').textContent = rating;
+      $('rating').style.background = RATING_COLORS[rating];
+      $('vec').textContent = toVector(state);
+    }
+    document.querySelectorAll('.opts').forEach(row => {
+      row.addEventListener('click', e => {
+        const btn = e.target.closest('button'); if(!btn) return;
+        state[row.dataset.key] = btn.dataset.val;
+        render();
+      });
+    });
+    $('copyBtn').addEventListener('click', () => {
+      navigator.clipboard?.writeText(toVector(state));
+      $('copyBtn').textContent = 'Copied!';
+      setTimeout(() => $('copyBtn').textContent = 'Copy vector', 1200);
+    });
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('cvss-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { roundup, baseScore, severityRating, toVector, parseVector };
+</script>
+</body>
+</html>

@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WACC Calculator — weighted average cost of capital</title>
+<meta name="description" content="Calculate the weighted average cost of capital (WACC) from equity, debt, cost of equity, cost of debt, and tax rate — with capital-structure weights. Offline, no tracking.">
+<style>
+  :root{
+    --c:#4338ca;
+    --bg:#f1f1fb; --card:#ffffff; --fg:#111233; --muted:#565881;
+    --line:#dedef2; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#09091c; --card:#13132c; --fg:#e8e8f8; --muted:#9494bf;
+    --line:#232346; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:560px){.grid{grid-template-columns:1fr}}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin:10px 0 5px}
+  input{width:100%;font:inherit;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--fg)}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .hero{margin-top:20px;text-align:center;padding:20px;border-radius:12px;background:var(--bg);border:1px solid var(--line)}
+  .hero .n{font-size:2.8rem;font-weight:800;color:var(--c);line-height:1}
+  .hero .k{color:var(--muted);font-size:.82rem;text-transform:uppercase;letter-spacing:.05em;margin-top:4px}
+  .rows{margin-top:14px}
+  .row{display:flex;justify-content:space-between;padding:10px 0;border-top:1px solid var(--line);font-size:.95rem}
+  .row .k{color:var(--muted)}
+  .row .v{font-weight:700;font-variant-numeric:tabular-nums}
+  .err{color:#dc2626;font-size:.86rem;margin-top:12px;min-height:1em}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🏦</div>
+  <div>
+    <h1>WACC Calculator</h1>
+    <p>Weighted average cost of capital</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div><label>Market value of equity (E)</label><input id="equity" type="number" step="any" value="600000"></div>
+      <div><label>Market value of debt (D)</label><input id="debt" type="number" step="any" value="400000"></div>
+      <div><label>Cost of equity (%)</label><input id="re" type="number" step="any" value="10"></div>
+      <div><label>Cost of debt (%)</label><input id="rd" type="number" step="any" value="5"></div>
+      <div><label>Tax rate (%)</label><input id="tax" type="number" step="any" value="30"></div>
+    </div>
+    <div class="err" id="err"></div>
+    <div class="hero"><div class="n" id="wacc">—</div><div class="k">WACC</div></div>
+    <div class="rows" id="rows"></div>
+  </div>
+
+  <div class="card">
+    <h2>About WACC</h2>
+    <p class="note">The <b>weighted average cost of capital</b> is a company's blended cost of financing — the minimum return its investments must earn to satisfy both shareholders and lenders. Each source is weighted by its share of total capital: <code>WACC = (E/V)·Re + (D/V)·Rd·(1−Tc)</code>, where V = E + D. Debt is multiplied by <b>(1 − tax rate)</b> because interest is tax-deductible (the "tax shield"), making debt cheaper than its headline rate. WACC is the standard discount rate for valuing a firm or a project. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function nonNeg(v, name){ if(typeof v !== 'number' || !isFinite(v) || v < 0) throw new Error(name + ' must be zero or more'); return v; }
+  function rate(v, name){ if(typeof v !== 'number' || !isFinite(v)) throw new Error(name + ' must be a number'); return v; }
+  // Weighted average cost of capital. Rates are decimals (0.10 = 10%).
+  function wacc(o){
+    var E = nonNeg(o.equity, 'equity'), D = nonNeg(o.debt, 'debt');
+    var Re = rate(o.costEquity, 'cost of equity'), Rd = rate(o.costDebt, 'cost of debt');
+    var Tc = o.taxRate == null ? 0 : rate(o.taxRate, 'tax rate');
+    if(Tc < 0 || Tc > 1) throw new Error('tax rate must be between 0 and 1');
+    var V = E + D;
+    if(V <= 0) throw new Error('total capital (equity + debt) must be positive');
+    return (E / V) * Re + (D / V) * Rd * (1 - Tc);
+  }
+  function analyze(o){
+    var E = nonNeg(o.equity, 'equity'), D = nonNeg(o.debt, 'debt'), V = E + D;
+    if(V <= 0) throw new Error('total capital (equity + debt) must be positive');
+    var Tc = o.taxRate == null ? 0 : o.taxRate;
+    return {
+      totalCapital: V,
+      weightEquity: E / V,
+      weightDebt: D / V,
+      afterTaxCostDebt: o.costDebt * (1 - Tc),
+      wacc: wacc(o)
+    };
+  }
+
+  if(typeof module !== 'undefined') module.exports = { wacc:wacc, analyze:analyze };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var pct = function(x){ return (x * 100).toLocaleString(undefined, { maximumFractionDigits: 2 }) + '%'; };
+    var money = function(x){ return '$' + x.toLocaleString(undefined, { maximumFractionDigits: 0 }); };
+    function render(){
+      var err = document.getElementById('err');
+      err.textContent = '';
+      try{
+        var o = {
+          equity: parseFloat(document.getElementById('equity').value),
+          debt: parseFloat(document.getElementById('debt').value),
+          costEquity: parseFloat(document.getElementById('re').value) / 100,
+          costDebt: parseFloat(document.getElementById('rd').value) / 100,
+          taxRate: parseFloat(document.getElementById('tax').value) / 100
+        };
+        var r = analyze(o);
+        document.getElementById('wacc').textContent = pct(r.wacc);
+        var items = [
+          ['Total capital (V)', money(r.totalCapital)],
+          ['Equity weight (E/V)', pct(r.weightEquity)],
+          ['Debt weight (D/V)', pct(r.weightDebt)],
+          ['After-tax cost of debt', pct(r.afterTaxCostDebt)]
+        ];
+        document.getElementById('rows').innerHTML = items.map(function(it){
+          return '<div class="row"><span class="k">' + it[0] + '</span><span class="v">' + it[1] + '</span></div>';
+        }).join('');
+      }catch(e){ document.getElementById('wacc').textContent = '—'; document.getElementById('rows').innerHTML = ''; err.textContent = e.message; }
+    }
+    ['equity','debt','re','rd','tax'].forEach(function(id){ document.getElementById(id).addEventListener('input', render); });
+    render();
+
+    var root=document.documentElement, tb=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); tb.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('wacc-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('wacc-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

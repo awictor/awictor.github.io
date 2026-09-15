@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Talus — press-your-luck dice climb</title>
+<style>
+  :root{
+    --bg:#1a1e26; --panel:#232935; --panel2:#2b3240; --ink:#e8ecf2; --dim:#93a0b4;
+    --you:#3aa0ff;      /* Okabe-Ito-ish blue (colorblind-safe) */
+    --ai:#f07a2b;       /* vermillion/orange */
+    --good:#37c98b; --bad:#e0556b; --line:#3a4354; --gold:#f4c430;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:radial-gradient(1200px 700px at 50% -10%,#242c3a,#12151b);color:var(--ink);
+    font:14px/1.5 ui-sans-serif,system-ui,"Segoe UI",Roboto,Arial;display:flex;justify-content:center}
+  .wrap{width:1080px;max-width:98vw;padding:14px}
+  header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+  h1{font-size:22px;margin:0;letter-spacing:.5px}
+  h1 .t{color:var(--dim);font-size:13px;font-weight:400;letter-spacing:0}
+  .grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,320px);gap:14px}
+  @media(max-width:720px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}
+  :focus-visible{outline:2px solid var(--you);outline-offset:2px}
+  #stage{position:relative}
+  canvas{display:block;width:100%;border-radius:8px;background:linear-gradient(#20252f,#171b22)}
+  #cliffWrap.shake{animation:shk .42s cubic-bezier(.36,.07,.19,.97)}
+  @keyframes shk{10%,90%{transform:translate(-2px,0)}20%,80%{transform:translate(4px,-2px)}
+    30%,50%,70%{transform:translate(-7px,2px)}40%,60%{transform:translate(7px,-1px)}}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .btn{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:9px;
+    padding:9px 14px;font-size:14px;font-weight:600;cursor:pointer;transition:.12s}
+  .btn:hover:not(:disabled){border-color:#5b6b86;background:#333c4d}
+  .btn:disabled{opacity:.4;cursor:default}
+  .btn.pri{background:var(--you);border-color:var(--you);color:#04121f}
+  .btn.bank{background:var(--good);border-color:var(--good);color:#042014}
+  .pair{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:8px 10px;
+    cursor:pointer;text-align:center;min-width:96px;transition:.12s;font:inherit;color:inherit}
+  .pair b{font-size:16px} .pair small{display:block;color:var(--dim)}
+  .pair:hover:not(:disabled){border-color:var(--you);transform:translateY(-1px)}
+  .pair:disabled{opacity:.32;cursor:default}
+  .pair .k{display:inline-block;min-width:14px;color:var(--dim);font-size:11px}
+  .meter{height:12px;border-radius:7px;background:#161a22;overflow:hidden;border:1px solid var(--line)}
+  .meter>i{display:block;height:100%;background:linear-gradient(90deg,var(--good),var(--gold),var(--bad))}
+  .kv{display:flex;justify-content:space-between;font-variant-numeric:tabular-nums}
+  .kv b{font-variant-numeric:tabular-nums}
+  .rec{font-weight:700}
+  .bubble{background:#171b22;border:1px solid var(--line);border-radius:10px;padding:8px 10px;
+    min-height:38px;font-size:13px;color:var(--dim)}
+  .bubble b{color:var(--ai)}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .seg button{background:transparent;color:var(--dim);border:0;padding:6px 10px;cursor:pointer;font-weight:600}
+  .seg button.on{background:var(--ai);color:#1a0f04}
+  .sub{color:var(--dim);font-size:12px}
+  input[type=text]{background:#161a22;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:7px 9px;width:120px}
+  #over{position:absolute;inset:0;background:rgba(12,15,20,.9);border-radius:8px;display:none;
+    flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px}
+  #over.show{display:flex}
+  .grade{font-size:64px;font-weight:800;line-height:1}
+  .turnpill{color:#04121f;background:var(--you);border-radius:20px;padding:2px 12px;font-weight:700;font-size:12px}
+  .turnpill.ai{background:var(--ai)}
+  .statline{font-variant-numeric:tabular-nums}
+  a{color:var(--you)}
+  details.help{margin-left:auto}
+  details.help summary{cursor:pointer;color:var(--dim);font-size:12px;list-style:none;
+    border:1px solid var(--line);border-radius:9px;padding:4px 10px;user-select:none}
+  details.help summary::-webkit-details-marker{display:none}
+  details.help[open] summary{color:var(--ink);border-color:#5b6b86}
+  .helpbody{margin-top:8px;max-width:640px;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;padding:6px 14px;font-size:13px;color:var(--dim);flex-basis:100%}
+  .helpbody b{color:var(--ink)}
+  .helpbody p{margin:8px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>TALUS <span class="t">— climb the scree, press your luck, don't slip</span></h1>
+    <span id="turnpill" class="turnpill">Your climb</span>
+    <details class="help">
+      <summary>How to play</summary>
+      <div class="helpbody">
+        <p><b>Goal:</b> be the first climber to permanently anchor <b>3 couloirs</b> (the gullies numbered 2–12) to the summit.</p>
+        <p><b>Each turn:</b> roll four dice, split them into two sums, and slide a temporary <b>piton</b> up each matching couloir. You get up to <b>3 active pitons</b> per turn. Keep rolling to climb higher — but if a roll can place none of your active pitons you <b>slip</b> and lose everything gained this turn. <b>Bank &amp; anchor</b> at any point to lock in your progress and end your turn safely.</p>
+        <p><b>Geometry:</b> center couloirs (7) are the tallest climbs but easiest to hit; edge couloirs (2/12) are short but rarely rolled, so pressing on the edges is riskier.</p>
+        <p><b>Nerve meter:</b> shows the exact bust chance, expected gain, and roll-vs-bank EV for your current position — the same math the AI plays.</p>
+        <p><b>Markers:</b> <span style="color:var(--you)">●</span> you · <span style="color:var(--ai)">●</span> AI · dashed ring = an unbanked piton · flag = a claimed couloir.</p>
+      </div>
+    </details>
+  </header>
+
+  <div class="grid">
+    <div class="card" id="stage">
+      <div id="cliffWrap"><canvas id="cliff" width="720" height="470"></canvas></div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn pri" id="roll">Roll dice</button>
+        <button class="btn bank" id="bank" disabled>Bank &amp; anchor</button>
+        <span id="pairs" class="row"></span>
+        <span id="hint" class="sub" style="margin-left:auto"></span>
+      </div>
+      <div id="over">
+        <div class="grade" id="gGrade">A</div>
+        <div id="gTitle" style="font-size:20px;font-weight:700"></div>
+        <div class="statline" id="gStats"></div>
+        <div class="row" style="justify-content:center;margin-top:6px">
+          <button class="btn pri" id="again">Play again</button>
+          <button class="btn" id="share">Share result</button>
+        </div>
+        <div class="sub" id="shareMsg"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="font-weight:700;margin-bottom:6px">Nerve meter <span class="sub">— the exact math</span></div>
+      <div class="kv"><span>Bust chance next roll</span><b id="mBust">—</b></div>
+      <div class="meter" style="margin:5px 0 9px"><i id="mBar" style="width:0%"></i></div>
+      <div class="kv"><span>At stake this turn</span><b id="mStake">0 steps</b></div>
+      <div class="kv"><span>Expected gain if you roll</span><b id="mGain">—</b></div>
+      <div class="kv" style="margin-top:4px"><span>EV of rolling vs banking</span><b id="mEV">—</b></div>
+      <div class="rec" id="mRec" style="margin-top:6px">Roll to begin your climb.</div>
+      <canvas id="ev" width="296" height="76" style="margin-top:8px;background:#161a22"></canvas>
+      <div class="sub">Your turn's EV curve. <span style="color:var(--good)">●</span> optimal stop · <span style="color:var(--you)">●</span> where you are.</div>
+
+      <hr style="border:0;border-top:1px solid var(--line);margin:12px 0">
+      <div style="font-weight:700;margin-bottom:4px">AI opponent</div>
+      <div class="seg" id="pers">
+        <button data-p="cautious">Cautious</button>
+        <button data-p="balanced" class="on">Balanced</button>
+        <button data-p="reckless">Reckless</button>
+      </div>
+      <div class="bubble" id="bubble" style="margin-top:8px">Waiting for your move…</div>
+
+      <hr style="border:0;border-top:1px solid var(--line);margin:12px 0">
+      <div class="kv sub"><span>Seed</span><span><input type="text" id="seed"><button class="btn" id="newgame" style="padding:6px 9px">New</button></span></div>
+      <div class="kv sub" style="margin-top:5px"><span>Today's daily cliff</span><a href="#" id="daily">load</a></div>
+      <div class="statline sub" id="lifetime" style="margin-top:8px"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ---------- seeded PRNG (mulberry32) ---------- */
+function hashStr(s){let h=2166136261>>>0;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+let rng=mulberry32(1);
+
+/* ---------- board model ---------- */
+const COLS=[2,3,4,5,6,7,8,9,10,11,12];
+const HEIGHT={2:3,3:5,4:7,5:9,6:11,7:13,8:11,9:9,10:7,11:5,12:3};
+const WIN=3;
+let G; // game state
+
+function newGame(seedStr){
+  rng=mulberry32(hashStr(seedStr));
+  G={seed:seedStr,claimedBy:{},you:{},ai:{},markers:{},cur:'you',dice:[1,1,1,1],
+     phase:'roll',turnEVs:[],curEV:0,youSlips:0,aiSlips:0,decMatch:0,decTotal:0,anim:false};
+  COLS.forEach(c=>{G.claimedBy[c]=null;G.you[c]=0;G.ai[c]=0;});
+  document.getElementById('seed').value=seedStr;
+  document.getElementById('over').classList.remove('show');
+  setTurn('you'); resetTurn(); draw(); updateMeter(); renderPairs([]);
+  bubble("Waiting for your move…"); hint("Roll four dice, then pair them into two couloir climbs.");
+  syncButtons();
+}
+function resetTurn(){G.markers={};G.turnEVs=[];G.phase='roll';G.dice=[1,1,1,1];}
+function anchOf(who){return who==='you'?G.you:G.ai;}
+
+/* Try to resolve one pairing (s1,s2) against current markers for current player.
+   Returns {m:newMarkers, gained} choosing the order that advances the most, or null. */
+function resolve(markers,anch,s1,s2){
+  let best=null;
+  for(const order of [[s1,s2],[s2,s1]]){
+    const m=Object.assign({},markers); let gained=0,played=0;
+    for(const s of order){
+      if(G.claimedBy[s]) continue;
+      const count=Object.keys(m).length;
+      if(s in m){ if(m[s]<HEIGHT[s]){m[s]++;gained++;played++;} }
+      else if(count<3){ m[s]=Math.min(anch[s]+1,HEIGHT[s]); gained++;played++; }
+    }
+    if(played>0 && (!best||gained>best.gained)) best={m,gained};
+  }
+  return best;
+}
+function pairingsFor(dice,markers,anch){
+  const[a,b,c,d]=dice;
+  const specs=[[a+b,c+d],[a+c,b+d],[a+d,b+c]];
+  return specs.map(([s1,s2])=>({s1,s2,res:resolve(markers,anch,s1,s2)}));
+}
+
+/* Enumerate all 1296 rolls -> exact bust prob + expected best-gain for current markers */
+function analyze(markers,anch){
+  let bust=0,safe=0,sumGain=0;
+  for(let a=1;a<=6;a++)for(let b=1;b<=6;b++)for(let c=1;c<=6;c++)for(let d=1;d<=6;d++){
+    const s=[[a+b,c+d],[a+c,b+d],[a+d,b+c]]; let best=0,ok=false;
+    for(const[x,y]of s){const r=resolve(markers,anch,x,y);if(r){ok=true;if(r.gained>best)best=r.gained;}}
+    if(ok){safe++;sumGain+=best;}else bust++;
+  }
+  const pBust=bust/1296, expGain=safe?sumGain/safe:0;
+  const stake=turnProgress(markers,anch);
+  const ev=(1-pBust)*expGain - pBust*stake;
+  return {pBust,expGain,stake,ev};
+}
+function turnProgress(markers,anch){let t=0;for(const c in markers)t+=markers[c]-anch[c];return t;}
+
+/* ---------- turn flow ---------- */
+function syncButtons(){
+  const me=G.cur==='you'&&!G.anim;
+  document.getElementById('roll').disabled=!(me&&(G.phase==='roll'||G.phase==='decide'));
+  document.getElementById('bank').disabled=!(me&&G.phase==='decide');
+}
+async function playerRoll(){
+  if(G.cur!=='you'||G.anim) return;
+  if(G.phase==='decide'){ recordDecision('roll'); }   // this was a real stop/go decision
+  await doRoll('you');
+}
+function playerBank(){ if(G.cur!=='you'||G.phase!=='decide'||G.anim)return; recordDecision('bank'); bank('you'); }
+
+function recordDecision(actual){
+  const optimal=G.curEV>0?'roll':'bank';
+  G.decTotal++; if(actual===optimal)G.decMatch++;
+}
+
+async function doRoll(who){
+  G.anim=true; syncButtons();
+  const anch=anchOf(who);
+  const final=[d(),d(),d(),d()];
+  await rollAnim(final);
+  G.dice=final;
+  const pr=pairingsFor(final,G.markers,anch);
+  const legal=pr.filter(p=>p.res);
+  if(legal.length===0){ await slip(who); return; }
+  if(who==='you'){
+    G.phase='pick'; renderPairs(pr);
+    hint("Pick a pairing — dashed columns are your active pitons.");
+    G.anim=false; syncButtons();
+  } else {
+    await aiPick(pr); // ai auto
+  }
+}
+function d(){return 1+Math.floor(rng()*6);}
+
+function applyPairing(who,p){
+  const anch=anchOf(who);
+  G.markers=p.res.m;
+  const a=analyze(G.markers,anch); G.curEV=a.ev; G.turnEVs.push(a.ev);
+  G.phase='decide'; renderPairs([]); draw(); updateMeter(a);
+  if(who==='you'){
+    hint("Roll again to climb higher, or bank to anchor "+turnProgress(G.markers,anch)+" step(s).");
+    G.anim=false; syncButtons();
+  }
+}
+
+async function slip(who){
+  playSlip(); const wrap=document.getElementById('cliffWrap');
+  wrap.classList.add('shake'); setTimeout(()=>wrap.classList.remove('shake'),450);
+  if(who==='you')G.youSlips++; else G.aiSlips++;
+  const lost=turnProgress(G.markers,anchOf(who));
+  hint("");
+  if(who==='ai')bubble("<b>Slipped on the scree!</b> Lost "+lost+" step(s) this turn.");
+  else hint("You slipped! Lost "+lost+" step(s) this turn.");
+  G.markers={}; draw(); updateMeter();
+  await wait(900);
+  endTurn(who);
+}
+
+function bank(who){
+  const anch=anchOf(who); let claimed=0;
+  for(const c in G.markers){
+    anch[c]=G.markers[c];
+    if(anch[c]>=HEIGHT[c]&&!G.claimedBy[c]){G.claimedBy[c]=who;}
+  }
+  for(const c of COLS) if(G.claimedBy[c]===who)claimed++;
+  playAnchor(); G.markers={}; draw(); updateMeter();
+  if(claimed>=WIN){ gameOver(who); return; }
+  endTurn(who);
+}
+
+function endTurn(who){
+  resetTurn();
+  const next=who==='you'?'ai':'you';
+  G.anim=false;            // clear anim flag so the human can act again (aiTurn re-sets it)
+  setTurn(next);
+  if(next==='ai'){ setTimeout(aiTurn,700); }
+  else { hint("Your climb. Roll to begin."); bubble("Your move."); draw(); updateMeter(); }
+  syncButtons();
+}
+function setTurn(who){
+  G.cur=who;
+  const p=document.getElementById('turnpill');
+  p.textContent=who==='you'?'Your climb':'AI climbing…';
+  p.className='turnpill'+(who==='ai'?' ai':'');
+}
+
+/* ---------- AI ---------- */
+const PROFILE={cautious:{thr:1.6,label:"plays it safe"},balanced:{thr:0.45,label:"weighs the odds"},reckless:{thr:-1.1,label:"loves the edge"}};
+let personality='balanced';
+
+async function aiTurn(){
+  if(G.cur!=='ai')return;
+  resetTurn();
+  const anch=G.ai;
+  while(true){
+    G.anim=true; syncButtons();
+    await doRollAI(anch);
+    if(G.phase!=='decide') return; // slip already ended turn
+    // decide
+    const a=analyze(G.markers,anch);
+    const claimedNow=COLS.filter(c=>G.ai[c]>=HEIGHT[c]?false:(G.markers[c]>=HEIGHT[c])).length
+                    + COLS.filter(c=>G.claimedBy[c]==='ai').length;
+    const youClaims=COLS.filter(c=>G.claimedBy[c]==='you').length;
+    let thr=PROFILE[personality].thr;
+    let reason=PROFILE[personality].label;
+    // press harder if opponent is close to winning
+    if(youClaims>=2){thr-=1.5;reason="pressing — you're one couloir from the summit";}
+    // secure a win: if banking now would claim the 3rd column, always bank
+    if(claimedNow>=WIN){bubble("<b>Banking for the win.</b> Anchoring "+turnProgress(G.markers,anch)+" steps to claim column three.");await wait(800);bank('ai');return;}
+    const go=a.ev>thr;
+    bubble("Bust <b>"+pct(a.pBust)+"</b> · EV <b>"+sign(a.ev)+"</b> · "+turnProgress(G.markers,anch)+" at stake — "+
+           (go?"climbing on ("+reason+").":"banking ("+reason+")."));
+    await wait(950);
+    if(!go){ bank('ai'); return; }
+  }
+}
+async function doRollAI(anch){
+  const final=[d(),d(),d(),d()]; await rollAnim(final); G.dice=final;
+  const pr=pairingsFor(final,G.markers,anch);
+  const legal=pr.filter(p=>p.res);
+  if(legal.length===0){ await slip('ai'); return; }
+  await aiPick(pr);
+}
+function aiPick(pr){
+  const anch=G.ai;
+  const legal=pr.map((p,i)=>({p,i})).filter(o=>o.p.res);
+  // choose pairing maximizing gain, tie-break: progress on column closest to its summit
+  legal.sort((x,y)=>{
+    const dg=y.p.res.gained-x.p.res.gained; if(dg)return dg;
+    return closeness(y.p.res.m,anch)-closeness(x.p.res.m,anch);
+  });
+  applyPairing('ai',legal[0].p);
+}
+function closeness(m,anch){ // higher = markers nearer their summits
+  let s=0; for(const c in m) s+=(m[c]/HEIGHT[c]); return s;
+}
+
+/* ---------- rendering ---------- */
+const cv=document.getElementById('cliff'),cx=cv.getContext('2d');
+const CW=720,CH=470;                 // logical drawing size (device-independent units)
+const M={l:34,t:14,b:90}; // margins; bottom band for dice
+let displayDice=[1,1,1,1];
+/* Scale each canvas' backing store to the device pixel ratio for crisp rendering,
+   while keeping the drawing code in fixed logical units (CW×CH / EW×EH). */
+function fitCanvas(canvas,ctx,lw,lh){
+  const dpr=Math.max(1,window.devicePixelRatio||1);
+  const cssW=canvas.clientWidth||lw, cssH=cssW*lh/lw;
+  canvas.width=Math.round(cssW*dpr); canvas.height=Math.round(cssH*dpr);
+  ctx.setTransform(canvas.width/lw,0,0,canvas.height/lh,0,0);
+}
+function fitAll(){ fitCanvas(cv,cx,CW,CH); fitCanvas(evc,ex,EW,EH); }
+function draw(){
+  const W=CW,H=CH;
+  cx.clearRect(0,0,W,H);
+  const cliffH=H-M.t-M.b, colW=(W-M.l*2)/COLS.length, maxS=13;
+  const cellH=cliffH/maxS;
+  const baseY=M.t+cliffH;
+  // scree texture dots
+  cx.fillStyle="#232935";
+  COLS.forEach((c,i)=>{
+    const x=M.l+i*colW, cxp=x+colW/2, h=HEIGHT[c];
+    // gully
+    const top=baseY-h*cellH;
+    cx.fillStyle= G.claimedBy[c]? (G.claimedBy[c]==='you'?'rgba(58,160,255,.16)':'rgba(240,122,43,.16)') : '#1c212b';
+    cx.fillRect(x+6,top,colW-12,h*cellH);
+    cx.strokeStyle="#333c4d"; cx.lineWidth=1;
+    // rungs
+    for(let s=1;s<=h;s++){const y=baseY-s*cellH; cx.beginPath();cx.moveTo(x+8,y);cx.lineTo(x+colW-8,y);cx.stroke();}
+    // player anchored dots (left) + ai (right)
+    drawMark(cxp-9,baseY,cellH,G.you[c],'#3aa0ff',false);
+    drawMark(cxp+9,baseY,cellH,G.ai[c],'#f07a2b',false);
+    // temp piton for current player
+    if(c in G.markers){
+      const who=G.cur, col=who==='you'?'#7fc4ff':'#ffb27a';
+      drawMark(who==='you'?cxp-9:cxp+9,baseY,cellH,G.markers[c],col,true);
+    }
+    // claimed flag
+    if(G.claimedBy[c]){cx.fillStyle=G.claimedBy[c]==='you'?'#3aa0ff':'#f07a2b';
+      cx.beginPath();cx.moveTo(cxp-8,top-3);cx.lineTo(cxp+8,top-6);cx.lineTo(cxp+8,top-13);cx.lineTo(cxp-8,top-10);cx.closePath();cx.fill();}
+    // label
+    cx.fillStyle="#93a0b4";cx.font="12px ui-sans-serif";cx.textAlign="center";
+    cx.fillText(c,cxp,baseY+16);
+  });
+  // dice
+  const dy=H-M.b+26, dw=52, gap=14, tot=dw*4+gap*3, dx0=(W-tot)/2;
+  for(let i=0;i<4;i++)drawDie(dx0+i*(dw+gap),dy,dw,displayDice[i]);
+}
+function drawMark(x,baseY,cellH,step,color,temp){
+  if(step<=0&&!temp)return; if(temp&&step<=0)return;
+  const y=baseY-step*cellH+cellH/2;
+  cx.beginPath();cx.arc(x,y,6,0,7);
+  if(temp){cx.strokeStyle=color;cx.lineWidth=2.5;cx.setLineDash([3,3]);cx.stroke();cx.setLineDash([]);}
+  else{cx.fillStyle=color;cx.fill();}
+}
+function drawDie(x,y,s,v){
+  cx.fillStyle="#eef2f8";roundRect(x,y,s,s,9);cx.fill();
+  cx.fillStyle="#1a1e26";
+  const p=s/4, o=[[2,2],[1,1,3,3],[1,1,2,2,3,3],[1,1,1,3,3,1,3,3],[1,1,1,3,2,2,3,1,3,3],[1,1,1,2,1,3,3,1,3,2,3,3]][v-1];
+  for(let i=0;i<o.length;i+=2){cx.beginPath();cx.arc(x+o[i]*p,y+o[i+1]*p,s*0.09,0,7);cx.fill();}
+}
+function roundRect(x,y,w,h,r){cx.beginPath();cx.moveTo(x+r,y);cx.arcTo(x+w,y,x+w,y+h,r);cx.arcTo(x+w,y+h,x,y+h,r);cx.arcTo(x,y+h,x,y,r);cx.arcTo(x,y,x+w,y,r);cx.closePath();}
+
+function rollAnim(final){
+  return new Promise(res=>{
+    const t0=performance.now(),dur=560;
+    (function frame(t){
+      const k=Math.min(1,(t-t0)/dur);
+      if(k<1){displayDice=[d(),d(),d(),d()];draw();requestAnimationFrame(frame);}
+      else{displayDice=final.slice();draw();res();}
+    })(t0);
+  });
+}
+
+/* ---------- panels ---------- */
+function renderPairs(pr){
+  const box=document.getElementById('pairs');box.innerHTML='';
+  pr.forEach((p,i)=>{
+    const el=document.createElement('button');
+    const live=!!p.res;
+    el.className='pair';
+    el.type='button';
+    el.disabled=!live;
+    el.setAttribute('aria-label','Pairing '+(i+1)+': '+p.s1+' plus '+p.s2+(live?', gains '+p.res.gained+' step'+(p.res.gained>1?'s':''):', no legal move'));
+    el.innerHTML='<b><span class="k">'+(i+1)+'</span> '+p.s1+' + '+p.s2+'</b><small>'+(live?('+'+p.res.gained+' step'+(p.res.gained>1?'s':'')):'no move')+'</small>';
+    if(live)el.onclick=()=>{applyPairing('you',p);};
+    box.appendChild(el);
+  });
+}
+function updateMeter(a){
+  if(!a){ if(G.cur==='you'&&Object.keys(G.markers).length) a=analyze(G.markers,G.you); }
+  if(!a){document.getElementById('mBust').textContent='—';document.getElementById('mBar').style.width='0%';
+    document.getElementById('mStake').textContent='0 steps';document.getElementById('mGain').textContent='—';
+    document.getElementById('mEV').textContent='—';document.getElementById('mRec').textContent=
+      G.cur==='you'?'Roll to begin your climb.':'AI is climbing…';drawEV();return;}
+  document.getElementById('mBust').textContent=pct(a.pBust);
+  document.getElementById('mBar').style.width=(a.pBust*100).toFixed(0)+'%';
+  document.getElementById('mStake').textContent=a.stake+' step'+(a.stake===1?'':'s');
+  document.getElementById('mGain').textContent='+'+a.expGain.toFixed(2)+' steps';
+  const rec=document.getElementById('mEV');rec.textContent=sign(a.ev)+' steps';
+  rec.style.color=a.ev>0?'var(--good)':'var(--bad)';
+  const r=document.getElementById('mRec');
+  r.textContent=a.ev>0?'Optimal play: keep climbing (EV positive).':'Optimal play: BANK now (EV negative).';
+  r.style.color=a.ev>0?'var(--good)':'var(--bad)';
+  drawEV();
+}
+const evc=document.getElementById('ev'),ex=evc.getContext('2d');
+const EW=296,EH=76;
+function drawEV(){
+  const W=EW,H=EH;ex.clearRect(0,0,W,H);
+  const d=G.turnEVs;if(d.length===0){ex.fillStyle="#5b6b86";ex.font="11px ui-sans-serif";ex.fillText("EV curve appears as you climb.",8,H/2);return;}
+  const max=Math.max(2,...d.map(v=>Math.abs(v))),pad=8;
+  const xAt=i=>pad+(W-2*pad)*(d.length===1?0.5:i/(d.length-1));
+  const yAt=v=>H/2 - (v/max)*(H/2-pad);
+  ex.strokeStyle="#3a4354";ex.beginPath();ex.moveTo(pad,H/2);ex.lineTo(W-pad,H/2);ex.stroke(); // zero line
+  ex.strokeStyle="#3aa0ff";ex.lineWidth=2;ex.beginPath();
+  d.forEach((v,i)=>{const x=xAt(i),y=yAt(v);i?ex.lineTo(x,y):ex.moveTo(x,y);});ex.stroke();
+  // optimal stop = first index where EV<=0
+  let opt=d.findIndex(v=>v<=0); if(opt<0)opt=d.length-1;
+  ex.fillStyle="#37c98b";ex.beginPath();ex.arc(xAt(opt),yAt(d[opt]),4,0,7);ex.fill();
+  const last=d.length-1;ex.fillStyle="#3aa0ff";ex.beginPath();ex.arc(xAt(last),yAt(d[last]),4,0,7);ex.fill();
+}
+function bubble(html){document.getElementById('bubble').innerHTML=html;}
+function hint(t){document.getElementById('hint').textContent=t;}
+function pct(x){return (x*100).toFixed(0)+'%';}
+function sign(x){return (x>=0?'+':'')+x.toFixed(2);}
+function wait(ms){return new Promise(r=>setTimeout(r,ms));}
+
+/* ---------- audio ---------- */
+let AC;function ac(){return AC||(AC=new (window.AudioContext||window.webkitAudioContext)());}
+function playAnchor(){try{const c=ac(),o=c.createOscillator(),g=c.createGain();o.type='triangle';
+  o.frequency.setValueAtTime(440,c.currentTime);o.frequency.exponentialRampToValueAtTime(880,c.currentTime+.12);
+  g.gain.setValueAtTime(.001,c.currentTime);g.gain.exponentialRampToValueAtTime(.25,c.currentTime+.02);
+  g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.28);o.connect(g).connect(c.destination);o.start();o.stop(c.currentTime+.3);}catch(e){}}
+function playSlip(){try{const c=ac(),b=c.createBuffer(1,c.sampleRate*.4,c.sampleRate),dd=b.getChannelData(0);
+  for(let i=0;i<dd.length;i++)dd[i]=(Math.random()*2-1)*Math.pow(1-i/dd.length,2);
+  const s=c.createBufferSource();s.buffer=b;const g=c.createGain();g.gain.value=.35;
+  const f=c.createBiquadFilter();f.type='lowpass';f.frequency.setValueAtTime(1600,c.currentTime);
+  f.frequency.exponentialRampToValueAtTime(200,c.currentTime+.4);s.connect(f).connect(g).connect(c.destination);s.start();}catch(e){}}
+
+/* ---------- game over + grade + share ---------- */
+function gameOver(winner){
+  const acc=G.decTotal?G.decMatch/G.decTotal:1;
+  const grade=acc>=.9?'A+':acc>=.8?'A':acc>=.7?'B':acc>=.6?'C':'D';
+  const stats=loadStats();stats.games++;if(winner==='you')stats.wins++;
+  stats.decMatch+=G.decMatch;stats.decTotal+=G.decTotal;saveStats(stats);
+  document.getElementById('gGrade').textContent=grade;
+  // Grade color reflects optimal-stopping accuracy (what the letter measures), NOT win/loss.
+  document.getElementById('gGrade').style.color=acc>=.8?'var(--good)':acc>=.6?'var(--gold)':'var(--bad)';
+  // Win/loss is conveyed by the title text + accent icon instead.
+  document.getElementById('gTitle').textContent=winner==='you'?'▲ You reached the summit!':'▽ The AI beat you up the cliff.';
+  document.getElementById('gTitle').style.color=winner==='you'?'var(--you)':'var(--ai)';
+  const yc=COLS.filter(c=>G.claimedBy[c]==='you').length,ac2=COLS.filter(c=>G.claimedBy[c]==='ai').length;
+  document.getElementById('gStats').innerHTML=
+    'Couloirs anchored — You '+yc+' · AI '+ac2+'<br>'+
+    'Slips: you '+G.youSlips+', AI '+G.aiSlips+'<br>'+
+    'Quit-while-ahead accuracy: <b>'+pct(acc)+'</b> of '+G.decTotal+' decisions';
+  document.getElementById('shareMsg').textContent='';
+  document.getElementById('over').classList.add('show');
+  G._result={winner,yc,ac2,acc,grade};
+  renderLifetime();
+}
+function shareCard(){
+  const r=G._result;if(!r)return;
+  const hash='#s='+encodeURIComponent(G.seed);
+  // Only build a real link when served over http(s); on file:// location.origin is "null".
+  const link=(location.protocol==='http:'||location.protocol==='https:')
+    ? location.origin+location.pathname+hash : hash;
+  const txt='TALUS '+G.seed+'\n'+
+    (r.winner==='you'?'▲ Summited':'▽ Slipped short')+' · Grade '+r.grade+'\n'+
+    'You '+'🟦'.repeat(r.yc)+'⬜'.repeat(WIN-r.yc)+'  AI '+'🟧'.repeat(r.ac2)+'⬜'.repeat(WIN-r.ac2)+'\n'+
+    'Slips '+G.youSlips+' · Optimal play '+pct(r.acc)+'\n'+link;
+  (navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject())
+    .then(()=>document.getElementById('shareMsg').textContent='Copied result card to clipboard!')
+    .catch(()=>{document.getElementById('shareMsg').textContent=txt;});
+}
+function loadStats(){try{return JSON.parse(localStorage.getItem('talus_stats'))||{games:0,wins:0,decMatch:0,decTotal:0};}catch(e){return{games:0,wins:0,decMatch:0,decTotal:0};}}
+function saveStats(s){try{localStorage.setItem('talus_stats',JSON.stringify(s));}catch(e){}}
+function renderLifetime(){
+  const s=loadStats();
+  document.getElementById('lifetime').innerHTML= s.games?
+    'Lifetime — '+s.games+' games · '+pct(s.wins/s.games)+' win rate · '+
+    (s.decTotal?pct(s.decMatch/s.decTotal):'—')+' optimal-stopping accuracy' : 'No games recorded yet.';
+}
+
+/* ---------- wiring ---------- */
+document.getElementById('roll').onclick=playerRoll;
+document.getElementById('bank').onclick=playerBank;
+document.getElementById('newgame').onclick=()=>{const v=document.getElementById('seed').value.trim()||randSeed();location.hash='s='+encodeURIComponent(v);start(v);};
+document.getElementById('again').onclick=()=>start(randSeed(),true);
+document.getElementById('share').onclick=shareCard;
+document.getElementById('daily').onclick=e=>{e.preventDefault();const v=dailySeed();location.hash='s='+encodeURIComponent(v);start(v);};
+document.querySelectorAll('#pers button').forEach(b=>b.onclick=()=>{
+  personality=b.dataset.p;document.querySelectorAll('#pers button').forEach(x=>x.classList.toggle('on',x===b));
+});
+/* Enter in the seed field starts a new game */
+document.getElementById('seed').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();document.getElementById('newgame').click();}
+});
+/* keyboard play: Space/Enter = Roll, B = Bank, 1/2/3 = pick a pairing */
+document.addEventListener('keydown',e=>{
+  const tag=(e.target.tagName||'').toLowerCase();
+  if(tag==='input'||tag==='textarea'||tag==='summary')return;
+  if(tag==='button'&&(e.key==='Enter'||e.key===' '))return; // let a focused button self-activate
+  if(e.key===' '||e.key==='Enter'){
+    const r=document.getElementById('roll'); if(!r.disabled){e.preventDefault();r.click();}
+  }else if(e.key==='b'||e.key==='B'){
+    const b=document.getElementById('bank'); if(!b.disabled)b.click();
+  }else if(e.key==='1'||e.key==='2'||e.key==='3'){
+    if(G.cur==='you'&&G.phase==='pick'){
+      const el=document.querySelectorAll('#pairs .pair')[+e.key-1];
+      if(el&&!el.disabled)el.click();
+    }
+  }
+});
+function randSeed(){return Math.random().toString(36).slice(2,8).toUpperCase();}
+function dailySeed(){const d=new Date();return 'DAILY-'+d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');}
+function start(seed,keepHash){ if(!keepHash&&!location.hash)location.hash='s='+encodeURIComponent(seed); newGame(seed); renderLifetime(); }
+
+let _rz;
+window.addEventListener('resize',()=>{ clearTimeout(_rz); _rz=setTimeout(()=>{ fitAll(); draw(); drawEV(); },120); });
+
+(function init(){
+  fitAll();
+  const m=location.hash.match(/s=([^&]+)/);
+  const seed=m?decodeURIComponent(m[1]):dailySeed();
+  start(seed,true);
+})();
+</script>
+</body>
+</html>

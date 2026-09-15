@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UmaskCalc — umask to Default Permissions Calculator</title>
+<meta name="description" content="Enter a umask to see the default permissions new files and directories will get, in octal and symbolic (rwx) form. 100% offline, nothing leaves your browser.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('umask-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#4338ca;
+    --bg:#f3f4fb; --card:#ffffff; --fg:#161824; --muted:#5c6070; --line:#e3e5f0; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#0c0d16; --card:#161824; --fg:#eef0f7; --muted:#9296ab; --line:#252838; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  header{max-width:660px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#3730a3);display:flex;align-items:center;justify-content:center;font-size:18px;color:#fff;font-weight:800}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:660px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  input{width:100%;padding:14px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:1.6rem;text-align:center;letter-spacing:.2em}
+  .presets{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+  .presets button{flex:1;padding:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;cursor:pointer;font:inherit;font-size:.85rem}
+  .presets button:hover{border-color:var(--c);color:var(--c)}
+  .res{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .box{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:16px;text-align:center}
+  .box .t{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px}
+  .box .oct{font-size:2.4rem;font-weight:800;color:var(--c);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  .box .sym{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:1.1rem;margin-top:4px;letter-spacing:.08em}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:660px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo mono">u\</div>
+    <div><h1>UmaskCalc</h1><div class="sub">umask → default permissions</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="umask">umask (octal)</label>
+    <input class="mono" id="umask" value="022" spellcheck="false" maxlength="4">
+    <div class="presets">
+      <button data-u="022" type="button">022</button>
+      <button data-u="002" type="button">002</button>
+      <button data-u="077" type="button">077</button>
+      <button data-u="027" type="button">027</button>
+      <button data-u="000" type="button">000</button>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card">
+    <div class="res">
+      <div class="box"><div class="t">New files (base 666)</div><div class="oct" id="fileOct">—</div><div class="sym" id="fileSym"></div></div>
+      <div class="box"><div class="t">New directories (base 777)</div><div class="oct" id="dirOct">—</div><div class="sym" id="dirSym"></div></div>
+    </div>
+  </div>
+</main>
+<footer>
+  A umask <em>removes</em> permission bits from the base mode — 666 for files, 777 for directories. Result = base AND NOT umask. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/umask-calc">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  function parseUmask(str){
+    const s = String(str).trim();
+    if(!/^[0-7]{1,4}$/.test(s)) throw new Error('umask must be 1–4 octal digits (0–7)');
+    const v = parseInt(s, 8);
+    if(v > 0o777) throw new Error('umask out of range (permission bits 000–777)');
+    return v;
+  }
+
+  // Apply a umask to a base mode: base AND NOT umask (within 9 permission bits).
+  function resultPerms(base, umask){
+    return base & (~umask & 0o777);
+  }
+
+  const toOctal = perms => (perms & 0o777).toString(8).padStart(3, '0');
+
+  function toSymbolic(perms){
+    const rwx = n => (n & 4 ? 'r' : '-') + (n & 2 ? 'w' : '-') + (n & 1 ? 'x' : '-');
+    return rwx((perms >> 6) & 7) + rwx((perms >> 3) & 7) + rwx(perms & 7);
+  }
+
+  const fileDefault = umask => resultPerms(0o666, umask);
+  const dirDefault  = umask => resultPerms(0o777, umask);
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('fileOct')){
+    const $ = id => document.getElementById(id);
+
+    function render(){
+      try{
+        const u = parseUmask($('umask').value);
+        const f = fileDefault(u), d = dirDefault(u);
+        $('fileOct').textContent = toOctal(f);
+        $('fileSym').textContent = toSymbolic(f);
+        $('dirOct').textContent = toOctal(d);
+        $('dirSym').textContent = toSymbolic(d);
+        $('err').textContent = '';
+      }catch(e){
+        ['fileOct','dirOct'].forEach(id => $(id).textContent = '—');
+        ['fileSym','dirSym'].forEach(id => $(id).textContent = '');
+        $('err').textContent = e.message;
+      }
+    }
+    $('umask').addEventListener('input', render);
+    document.querySelectorAll('.presets button').forEach(b =>
+      b.addEventListener('click', () => { $('umask').value = b.dataset.u; render(); }));
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('umask-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { parseUmask, resultPerms, toOctal, toSymbolic, fileDefault, dirDefault };
+</script>
+</body>
+</html>

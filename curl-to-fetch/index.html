@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CurlToFetch — Convert curl to JavaScript fetch()</title>
+<meta name="description" content="Paste a curl command and get the equivalent JavaScript fetch() call — method, headers, body, and auth. Fully offline, no signup.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('curl-to-fetch-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#0f766e;
+    --bg:#f4f7f6; --card:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#e2e6e5; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#0e1414; --card:#171f1e; --fg:#edf4f3; --muted:#92a19f; --line:#25302e; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:820px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#115e59);display:flex;align-items:center;justify-content:center;font-size:20px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:820px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600}
+  textarea{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.85rem;min-height:110px;resize:vertical}
+  pre{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px;overflow:auto;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.85rem;margin:0;white-space:pre}
+  .btns{display:flex;gap:10px;margin:0 0 12px}
+  button.act{background:var(--c);color:#fff;border:0;border-radius:8px;padding:9px 15px;cursor:pointer;font:inherit;font-weight:600}
+  button.ghost{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:9px 15px;cursor:pointer;font:inherit}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:820px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.85rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🔁</div>
+    <div><h1>CurlToFetch</h1><div class="sub">Turn a curl command into JavaScript fetch()</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label for="curl">curl command</label>
+    <textarea id="curl" spellcheck="false"></textarea>
+    <div class="btns" style="margin-top:12px"><button class="ghost" id="ex" type="button">Load example</button></div>
+  </div>
+  <div class="card">
+    <div class="btns"><button class="act" id="copy" type="button">Copy fetch()</button></div>
+    <pre id="out"></pre>
+  </div>
+</main>
+<footer>
+  100% offline. Nothing leaves your browser. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/curl-to-fetch">Source</a>.
+</footer>
+
+<script>
+  // ---- pure logic ----
+  // shell-ish tokenizer: respects single/double quotes and line continuations
+  function tokenize(cmd){
+    const str = String(cmd).replace(/\\\r?\n/g, ' ').trim();
+    const tokens = [];
+    let cur = '', quote = null, started = false;
+    for(let k = 0; k < str.length; k++){
+      const c = str[k];
+      if(quote){
+        if(c === quote) quote = null;
+        else cur += c;
+      } else if(c === "'" || c === '"'){ quote = c; started = true; }
+      else if(/\s/.test(c)){ if(started){ tokens.push(cur); cur = ''; started = false; } }
+      else { cur += c; started = true; }
+    }
+    if(started) tokens.push(cur);
+    return tokens;
+  }
+
+  function parseCurl(cmd){
+    const toks = tokenize(cmd);
+    if(toks[0] === 'curl') toks.shift();
+    const out = { method: null, url: null, headers: {}, body: null };
+    const dataFlags = ['-d', '--data', '--data-raw', '--data-binary', '--data-ascii'];
+    for(let i = 0; i < toks.length; i++){
+      const t = toks[i];
+      if(t === '-X' || t === '--request') out.method = toks[++i];
+      else if(t === '-H' || t === '--header'){
+        const h = toks[++i] || '';
+        const idx = h.indexOf(':');
+        if(idx > 0) out.headers[h.slice(0, idx).trim()] = h.slice(idx + 1).trim();
+      }
+      else if(dataFlags.includes(t)) out.body = toks[++i];
+      else if(t === '-A' || t === '--user-agent') out.headers['User-Agent'] = toks[++i];
+      else if(t === '-b' || t === '--cookie') out.headers['Cookie'] = toks[++i];
+      else if(t === '-e' || t === '--referer') out.headers['Referer'] = toks[++i];
+      else if(t === '-u' || t === '--user') out.headers['Authorization'] = 'Basic ' + btoa(toks[++i]);
+      else if(t.startsWith('-')){ /* ignore boolean flags like -s, -L, --compressed */ }
+      else if(!out.url) out.url = t;
+    }
+    if(!out.method) out.method = out.body != null ? 'POST' : 'GET';
+    return out;
+  }
+
+  function toFetch(p){
+    const lines = [];
+    lines.push(`fetch(${JSON.stringify(p.url || '')}, {`);
+    lines.push(`  method: ${JSON.stringify(p.method)},`);
+    if(Object.keys(p.headers).length){
+      const hs = JSON.stringify(p.headers, null, 2).split('\n').join('\n  ');
+      lines.push(`  headers: ${hs},`);
+    }
+    if(p.body != null) lines.push(`  body: ${JSON.stringify(p.body)},`);
+    lines.push(`})`);
+    lines.push(`  .then(res => res.json())`);
+    lines.push(`  .then(data => console.log(data));`);
+    return lines.join('\n');
+  }
+
+  function curlToFetch(cmd){
+    return toFetch(parseCurl(cmd));
+  }
+
+  // ---- UI ----
+  const EXAMPLE = `curl -X POST https://api.example.com/v1/users \\
+  -H 'Content-Type: application/json' \\
+  -H 'Authorization: Bearer TOKEN' \\
+  -d '{"name":"Ada","role":"admin"}'`;
+
+  if(typeof document !== 'undefined' && document.getElementById('out')){
+    const $ = id => document.getElementById(id);
+
+    function render(){
+      const cmd = $('curl').value.trim();
+      $('out').textContent = cmd ? curlToFetch(cmd) : '';
+    }
+
+    $('curl').addEventListener('input', render);
+    $('ex').addEventListener('click', () => { $('curl').value = EXAMPLE; render(); });
+    $('copy').addEventListener('click', async () => {
+      try{ await navigator.clipboard.writeText($('out').textContent); $('copy').textContent = 'Copied!'; setTimeout(() => $('copy').textContent = 'Copy fetch()', 1200); }catch(e){}
+    });
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('curl-to-fetch-theme', cur); }catch(e){}
+    });
+
+    $('curl').value = EXAMPLE;
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { tokenize, parseCurl, toFetch, curlToFetch };
+</script>
+</body>
+</html>

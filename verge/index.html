@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Verge — a double-pendulum chaos lab</title>
+<style>
+  :root{
+    --bg:#05060a; --panel:#0c1018; --edge:#1c2433; --ink:#e8edf6;
+    --dim:#8494ab; --accent:#5ff2c4; --hot:#ff6a8b; --warn:#ffd166;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;overflow:hidden}
+  #app{display:flex;height:100vh;width:100vw}
+  #stage{position:relative;flex:1;min-width:0}
+  canvas{display:block}
+  #trail,#pend{position:absolute;inset:0;width:100%;height:100%}
+  #pend{cursor:grab}
+  #pend.grab{cursor:grabbing}
+  #brand{position:absolute;top:14px;left:18px;pointer-events:none;z-index:3}
+  #brand h1{margin:0;font-size:22px;letter-spacing:.32em;font-weight:700;
+    color:var(--accent);text-shadow:0 0 18px rgba(95,242,196,.5)}
+  #brand p{margin:2px 0 0;font-size:10.5px;color:var(--dim);letter-spacing:.06em;max-width:340px}
+  #hud{position:absolute;left:18px;bottom:16px;z-index:3;font-size:11px;
+    background:rgba(8,10,16,.55);border:1px solid var(--edge);border-radius:10px;
+    padding:10px 12px;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);line-height:1.7}
+  #hud b{color:var(--accent);font-weight:600}
+  #hud .hot{color:var(--hot)} #hud .warn{color:var(--warn)}
+  #panel{width:322px;flex:none;background:var(--panel);border-left:1px solid var(--edge);
+    display:flex;flex-direction:column;overflow-y:auto}
+  #panel::-webkit-scrollbar{width:8px}#panel::-webkit-scrollbar-thumb{background:#1e2635;border-radius:8px}
+  .sec{padding:12px 16px;border-bottom:1px solid var(--edge)}
+  .sec h2{margin:0 0 10px;font-size:10px;letter-spacing:.22em;color:var(--dim);text-transform:uppercase;font-weight:600}
+  .ctrl{margin:8px 0}
+  .ctrl label{display:flex;justify-content:space-between;font-size:11px;color:var(--dim);margin-bottom:3px}
+  .ctrl label span{color:var(--ink)}
+  input[type=range]{width:100%;-webkit-appearance:none;height:4px;border-radius:4px;
+    background:#1c2433;outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
+    border-radius:50%;background:var(--accent);cursor:pointer;box-shadow:0 0 8px rgba(95,242,196,.6)}
+  input[type=range]:focus-visible{box-shadow:0 0 0 2px rgba(95,242,196,.45)}
+  input[type=range]:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 3px rgba(95,242,196,.85)}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  button{font-family:inherit;font-size:11px;color:var(--ink);background:#141a26;
+    border:1px solid var(--edge);border-radius:7px;padding:7px 11px;cursor:pointer;transition:.15s}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button.on{background:var(--accent);color:#04120c;border-color:var(--accent);font-weight:600}
+  .presets button{flex:1 0 auto;font-size:10.5px;padding:6px 8px}
+  #minis{display:flex;gap:8px}
+  .mini{flex:1;background:#080b12;border:1px solid var(--edge);border-radius:8px;overflow:hidden}
+  .mini h3{margin:0;font-size:9px;letter-spacing:.14em;color:var(--dim);padding:5px 7px 0;text-transform:uppercase}
+  .mini canvas{width:100%;height:112px}
+  #toast{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:5;
+    background:var(--accent);color:#04120c;font-size:11px;font-weight:600;padding:7px 14px;
+    border-radius:20px;opacity:0;transition:opacity .3s;pointer-events:none}
+  #toast.show{opacity:1}
+  body.clean #panel,body.clean #brand,body.clean #hud{display:none}
+  .hint{font-size:10px;color:var(--dim);margin-top:6px;line-height:1.5}
+  #panelToggle{display:none;position:absolute;top:12px;right:12px;z-index:4}
+  @media (max-width:720px){
+    html,body{overflow:auto}
+    #app{flex-direction:column;height:auto;min-height:100vh}
+    #stage{height:60vh;min-height:320px;flex:none}
+    #panel{width:100%;border-left:none;border-top:1px solid var(--edge);max-height:none}
+    #panelToggle{display:block}
+    body.panel-hidden #panel{display:none}
+    body.panel-hidden #stage{height:100vh}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <canvas id="trail"></canvas>
+    <canvas id="pend"></canvas>
+    <div id="brand">
+      <h1>VERGE</h1>
+      <p>Release a swarm of double pendulums split by a whisper. Watch determinism unravel.</p>
+    </div>
+    <div id="hud"></div>
+    <div id="toast"></div>
+    <button id="panelToggle">Controls</button>
+  </div>
+  <div id="panel">
+    <div class="sec">
+      <h2>Playback</h2>
+      <div class="row">
+        <button id="bPause">Pause</button>
+        <button id="bStep">Step</button>
+        <button id="bReset">Reset</button>
+        <button id="bClean" title="Hide UI (press C)">Clean</button>
+      </div>
+      <div class="hint">Drag the highlighted bob on the canvas to set a new start, then release. Keys: <b>Space</b> play/pause · <b>C</b> clean mode.</div>
+    </div>
+    <div class="sec">
+      <h2>Swarm &amp; Divergence</h2>
+      <div class="ctrl"><label>Swarm size <span id="vN"></span></label><input type="range" id="swarmN" min="1" max="400" step="1"></div>
+      <div class="ctrl"><label>Angle spread ε (rad) <span id="vEps"></span></label><input type="range" id="epsilon" min="-9" max="-1" step="0.1"></div>
+      <div class="ctrl"><label>Trail persistence <span id="vFade"></span></label><input type="range" id="trailFade" min="0.001" max="0.2" step="0.001"></div>
+      <div class="ctrl"><label>Time scale <span id="vTs"></span></label><input type="range" id="timeScale" min="0.1" max="3" step="0.05"></div>
+    </div>
+    <div class="sec">
+      <h2>Physics</h2>
+      <div class="ctrl"><label>Arm 1 length <span id="vL1"></span></label><input type="range" id="L1" min="0.2" max="2" step="0.01"></div>
+      <div class="ctrl"><label>Arm 2 length <span id="vL2"></span></label><input type="range" id="L2" min="0.2" max="2" step="0.01"></div>
+      <div class="ctrl"><label>Mass 1 <span id="vM1"></span></label><input type="range" id="M1" min="0.2" max="5" step="0.05"></div>
+      <div class="ctrl"><label>Mass 2 <span id="vM2"></span></label><input type="range" id="M2" min="0.2" max="5" step="0.05"></div>
+      <div class="ctrl"><label>Gravity g <span id="vg"></span></label><input type="range" id="g" min="0" max="30" step="0.1"></div>
+      <div class="ctrl"><label>Damping <span id="vDamp"></span></label><input type="range" id="damping" min="0" max="0.5" step="0.001"></div>
+    </div>
+    <div class="sec">
+      <h2>Analysis</h2>
+      <div id="minis">
+        <div class="mini"><h3>Phase θ₁ vs ω₁</h3><canvas id="phase"></canvas></div>
+        <div class="mini"><h3>ln(spread) vs t</h3><canvas id="spread"></canvas></div>
+      </div>
+    </div>
+    <div class="sec presets">
+      <h2>Preset gallery</h2>
+      <div class="row" id="presets"></div>
+      <div class="row" style="margin-top:10px">
+        <button id="bCopy">Copy shareable link</button>
+        <button id="bRec">● Record WebM</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+"use strict";
+(function(){
+const $=id=>document.getElementById(id);
+// ---- parameter model -------------------------------------------------------
+const DEF={L1:1,L2:1,M1:1,M2:1,g:9.81,damping:0,theta1:2.3,theta2:2.6,
+           swarmN:120,epsilon:-6,trailFade:0.06,timeScale:1};
+const P=Object.assign({},DEF);
+const SLIDERS=["swarmN","epsilon","trailFade","timeScale","L1","L2","M1","M2","g","damping"];
+// valid ranges (mirror the slider min/max); theta1/theta2 are free angles
+const BOUNDS={swarmN:[1,400],epsilon:[-9,-1],trailFade:[0.001,0.2],timeScale:[0.1,3],
+  L1:[0.2,2],L2:[0.2,2],M1:[0.2,5],M2:[0.2,5],g:[0,30],damping:[0,0.5]};
+function readHash(){
+  const h=location.hash.slice(1); if(!h)return;
+  h.split("&").forEach(kv=>{const[k,v]=kv.split("=");
+    if(!(k in P)||v===undefined||v===""||!isFinite(+v))return;
+    let val=+v;
+    const b=BOUNDS[k]; if(b)val=Math.min(b[1],Math.max(b[0],val));
+    if(k==="swarmN")val=Math.round(val);
+    P[k]=val;});
+}
+let hashTimer=0;
+function writeHash(){
+  clearTimeout(hashTimer);
+  hashTimer=setTimeout(()=>{
+    const s=Object.keys(DEF).map(k=>k+"="+(+P[k].toFixed(6))).join("&");
+    history.replaceState(null,"","#"+s);
+  },120);
+}
+// ---- physics: exact coupled double-pendulum EOM, RK4 -----------------------
+function deriv(s,o){ // s=[t1,w1,t2,w2] -> ds/dt ; o=params
+  const[t1,w1,t2,w2]=s, {L1,L2,M1,M2,g,damping}=o;
+  const d=t1-t2, cd=Math.cos(d), sd=Math.sin(d);
+  const den=2*M1+M2-M2*Math.cos(2*t1-2*t2);
+  const a1=(-g*(2*M1+M2)*Math.sin(t1)-M2*g*Math.sin(t1-2*t2)
+            -2*sd*M2*(w2*w2*L2+w1*w1*L1*cd))/(L1*den)-damping*w1;
+  const a2=(2*sd*(w1*w1*L1*(M1+M2)+g*(M1+M2)*Math.cos(t1)
+            +w2*w2*L2*M2*cd))/(L2*den)-damping*w2;
+  return[w1,a1,w2,a2];
+}
+function rk4(s,h,o){
+  const k1=deriv(s,o);
+  const s2=s.map((x,i)=>x+0.5*h*k1[i]), k2=deriv(s2,o);
+  const s3=s.map((x,i)=>x+0.5*h*k2[i]), k3=deriv(s3,o);
+  const s4=s.map((x,i)=>x+h*k3[i]),     k4=deriv(s4,o);
+  return s.map((x,i)=>x+(h/6)*(k1[i]+2*k2[i]+2*k3[i]+k4[i]));
+}
+function energy(s,o){
+  const[t1,w1,t2,w2]=s,{L1,L2,M1,M2,g}=o;
+  const y1=-L1*Math.cos(t1), y2=y1-L2*Math.cos(t2);
+  const v1sq=L1*L1*w1*w1;
+  const v2sq=L1*L1*w1*w1+L2*L2*w2*w2+2*L1*L2*w1*w2*Math.cos(t1-t2);
+  return 0.5*M1*v1sq+0.5*M2*v2sq+M1*g*y1+M2*g*y2;
+}
+// ---- swarm state -----------------------------------------------------------
+let swarm=[], t=0, E0=0, running=true;
+let phaseHist=[], spreadHist=[], divTime=null, lyap=null;
+function buildSwarm(){
+  const n=Math.max(1,Math.round(P.swarmN)), eps=Math.pow(10,P.epsilon);
+  swarm=[];
+  for(let i=0;i<n;i++){
+    const f=n>1?(i/(n-1)-0.5):0;
+    swarm.push([P.theta1+f*eps, 0, P.theta2, 0]);
+  }
+  t=0; E0=energy(swarm[0],P);
+  phaseHist=[]; spreadHist=[]; divTime=null; lyap=null;
+  clearTrail();
+}
+// spread = RMS 4D state distance from swarm mean
+function swarmSpread(){
+  const n=swarm.length; if(n<2)return 0;
+  const m=[0,0,0,0];
+  for(const s of swarm)for(let j=0;j<4;j++)m[j]+=s[j];
+  for(let j=0;j<4;j++)m[j]/=n;
+  let acc=0;
+  for(const s of swarm){let d=0;for(let j=0;j<4;j++){const e=s[j]-m[j];d+=e*e;}acc+=d;}
+  return Math.sqrt(acc/n);
+}
+// ---- canvases --------------------------------------------------------------
+const stage=$("stage"), pend=$("pend"), trail=$("trail");
+const pctx=pend.getContext("2d"), tctx=trail.getContext("2d");
+const phaseC=$("phase"), phCtx=phaseC.getContext("2d");
+const spreadC=$("spread"), spCtx=spreadC.getContext("2d");
+let W=0,H=0,cx=0,cy=0,scale=1,DPR=Math.min(devicePixelRatio||1,2);
+function fit(c){const r=c.getBoundingClientRect();c.width=r.width*DPR;c.height=r.height*DPR;return r;}
+function resize(){
+  DPR=Math.min(devicePixelRatio||1,2);
+  const r=stage.getBoundingClientRect();
+  W=r.width;H=r.height;
+  [pend,trail].forEach(c=>{c.width=W*DPR;c.height=H*DPR;});
+  pctx.setTransform(DPR,0,0,DPR,0,0);
+  tctx.setTransform(DPR,0,0,DPR,0,0);
+  cx=W/2; cy=H*0.38;
+  scale=Math.min(W,H)/(2*(P.L1+P.L2)+0.6);
+  fit(phaseC); fit(spreadC);
+  clearTrail();
+}
+function clearTrail(){tctx.setTransform(1,0,0,1,0,0);tctx.clearRect(0,0,trail.width,trail.height);tctx.setTransform(DPR,0,0,DPR,0,0);}
+function pos(s){
+  const x1=cx+P.L1*Math.sin(s[0])*scale, y1=cy+P.L1*Math.cos(s[0])*scale;
+  const x2=x1+P.L2*Math.sin(s[2])*scale, y2=y1+P.L2*Math.cos(s[2])*scale;
+  return[x1,y1,x2,y2];
+}
+const hue=i=>swarm.length>1?(i/swarm.length)*300:160;
+const TRAIL_CAP=220; // above this, trails are thinned (every Nth) to stay fast
+// ---- render ----------------------------------------------------------------
+function drawTrail(){
+  // exponential fade of the phosphor layer
+  tctx.globalCompositeOperation="destination-out";
+  tctx.fillStyle="rgba(0,0,0,"+P.trailFade+")";
+  tctx.fillRect(0,0,W,H);
+  tctx.globalCompositeOperation="lighter";
+  // above TRAIL_CAP, thin the trails (draw every Nth pendulum) so the bloom
+  // degrades gracefully instead of disappearing
+  const stepN=swarm.length<=TRAIL_CAP?1:Math.ceil(swarm.length/TRAIL_CAP);
+  for(let i=0;i<swarm.length;i+=stepN){
+    const p=pos(swarm[i]);
+    tctx.fillStyle="hsla("+hue(i)+",90%,62%,0.9)";
+    tctx.beginPath();tctx.arc(p[2],p[3],1.5,0,7);tctx.fill();
+  }
+  tctx.globalCompositeOperation="source-over";
+}
+function drawPend(){
+  pctx.clearRect(0,0,W,H);
+  // pivot
+  pctx.fillStyle="#2a3446";pctx.beginPath();pctx.arc(cx,cy,4,0,7);pctx.fill();
+  const single=swarm.length<=3;
+  for(let i=0;i<swarm.length;i++){
+    const p=pos(swarm[i]);
+    const alpha=single?1:Math.max(0.12,0.9-swarm.length*0.004);
+    pctx.strokeStyle="hsla("+hue(i)+",85%,60%,"+(single?0.9:alpha*0.5)+")";
+    pctx.lineWidth=single?2:1;
+    pctx.beginPath();pctx.moveTo(cx,cy);pctx.lineTo(p[0],p[1]);pctx.lineTo(p[2],p[3]);pctx.stroke();
+    if(single){
+      pctx.fillStyle="hsl("+hue(i)+",85%,65%)";
+      pctx.beginPath();pctx.arc(p[0],p[1],5,0,7);pctx.fill();
+      pctx.beginPath();pctx.arc(p[2],p[3],6,0,7);pctx.fill();
+    }
+  }
+  // persistent grab handle: always draw swarm[0]'s two bobs on top so there is
+  // a visible thing to grab regardless of swarm size
+  if(!single && swarm.length){
+    const p=pos(swarm[0]);
+    pctx.fillStyle="hsl("+hue(0)+",85%,66%)";
+    pctx.beginPath();pctx.arc(p[0],p[1],4,0,7);pctx.fill();
+    pctx.beginPath();pctx.arc(p[2],p[3],5,0,7);pctx.fill();
+    if(hoverGrab||drag){ // affordance ring when the pointer can pick a bob
+      pctx.strokeStyle="hsla("+hue(0)+",85%,72%,0.85)";pctx.lineWidth=1.5;
+      pctx.beginPath();pctx.arc(p[drag===1?0:2],p[drag===1?1:3],11,0,7);pctx.stroke();
+    }
+  }
+}
+function drawPhase(){
+  const c=phaseC,x=phCtx,w=c.width,h=c.height;
+  x.fillStyle="#080b12";x.fillRect(0,0,w,h);
+  x.fillStyle="rgba(95,242,196,0.55)";
+  const wmax=Math.max(4,...phaseHist.map(p=>Math.abs(p[1]))||[4]);
+  for(const p of phaseHist){
+    let a=((p[0]%(2*Math.PI))+2*Math.PI)%(2*Math.PI); // wrap θ1
+    const px=(a/(2*Math.PI))*w, py=h/2-(p[1]/wmax)*(h/2-4);
+    x.fillRect(px,py,1.4*DPR,1.4*DPR);
+  }
+  x.strokeStyle="#1c2433";x.beginPath();x.moveTo(0,h/2);x.lineTo(w,h/2);x.stroke();
+}
+function drawSpread(){
+  const c=spreadC,x=spCtx,w=c.width,h=c.height;
+  x.fillStyle="#080b12";x.fillRect(0,0,w,h);
+  if(spreadHist.length<2){
+    x.fillStyle="#4a5670";x.font=(11*DPR)+"px ui-monospace,monospace";
+    x.textAlign="center";x.textBaseline="middle";
+    x.fillText(swarm.length>1?"gathering…":"needs swarm > 1",w/2,h/2);
+    x.textAlign="start";x.textBaseline="alphabetic";
+    return;
+  }
+  const tmax=spreadHist[spreadHist.length-1][0]||1;
+  const ys=spreadHist.map(p=>Math.log(Math.max(p[1],1e-12)));
+  let lo=Math.min(...ys), hi=Math.max(...ys); if(hi-lo<1)hi=lo+1;
+  const X=t=>(t/tmax)*w, Y=v=>h-((v-lo)/(hi-lo))*(h-6)-3;
+  x.strokeStyle=var_hot();x.lineWidth=1.6;x.beginPath();
+  spreadHist.forEach((p,i)=>{const px=X(p[0]),py=Y(Math.log(Math.max(p[1],1e-12)));i?x.lineTo(px,py):x.moveTo(px,py);});
+  x.stroke();
+  if(lyap!=null&&lyap.b!=null){ // fitted line y=a+b t
+    x.strokeStyle="rgba(255,209,102,0.85)";x.lineWidth=1;x.setLineDash([4,3]);x.beginPath();
+    x.moveTo(X(0),Y(lyap.a));x.lineTo(X(tmax),Y(lyap.a+lyap.b*tmax));x.stroke();x.setLineDash([]);
+  }
+}
+function var_hot(){return getComputedStyle(document.documentElement).getPropertyValue('--hot')||'#ff6a8b';}
+// ---- Lyapunov fit (least squares on growth window) -------------------------
+function fitLyap(){
+  const pts=spreadHist.filter(p=>p[1]>Math.pow(10,P.epsilon)*3 && p[1]<Math.PI/2);
+  if(pts.length<6){lyap=null;return;}
+  let n=pts.length,sx=0,sy=0,sxx=0,sxy=0;
+  for(const p of pts){const y=Math.log(p[1]);sx+=p[0];sy+=y;sxx+=p[0]*p[0];sxy+=p[0]*y;}
+  const b=(n*sxy-sx*sy)/(n*sxx-sx*sx), a=(sy-b*sx)/n;
+  lyap={a,b};
+}
+// ---- HUD -------------------------------------------------------------------
+function updateHud(){
+  const E=energy(swarm[0],P);
+  const drift=E0!==0?((E-E0)/Math.abs(E0)*100):0;
+  const dc=Math.abs(drift)>2?"warn":"";
+  $("hud").innerHTML=
+    "sim&nbsp;t &nbsp;<b>"+t.toFixed(2)+"s</b><br>"+
+    "energy&nbsp;drift &nbsp;<b class='"+dc+"'>"+(drift>=0?"+":"")+drift.toFixed(3)+"%</b><br>"+
+    "divergence&nbsp;t &nbsp;"+(divTime?"<b class='hot'>"+divTime.toFixed(2)+"s</b>":"<b>—</b>")+"<br>"+
+    "λ&nbsp;(Lyapunov) &nbsp;"+(lyap&&lyap.b>0?"<b>"+lyap.b.toFixed(2)+"</b> /s":"<b>—</b>")+
+    (swarm.length>TRAIL_CAP?"<br><span class='warn'>trails thinned &gt;"+TRAIL_CAP+" for speed</span>":"");
+}
+// ---- main loop -------------------------------------------------------------
+const DT=1/1000; // fixed physics step
+let acc=0,last=performance.now(),sampleT=0;
+function step(frameDt){
+  const target=frameDt*P.timeScale;
+  acc+=target;
+  let guard=0;
+  while(acc>=DT && guard<4000){
+    for(let i=0;i<swarm.length;i++)swarm[i]=rk4(swarm[i],DT,P);
+    t+=DT;acc-=DT;guard++;
+  }
+  // sample analysis ~60Hz
+  sampleT+=target;
+  if(sampleT>=1/60){
+    sampleT=0;
+    phaseHist.push([swarm[0][0],swarm[0][1]]);
+    if(phaseHist.length>1400)phaseHist.shift();
+    const sp=swarmSpread();
+    if(swarm.length>1){
+      spreadHist.push([t,sp]);
+      if(spreadHist.length>1400)spreadHist.shift();
+      if(divTime===null && sp>0.5)divTime=t;
+      if(spreadHist.length%12===0)fitLyap();
+    }
+  }
+}
+function frame(now){
+  const dt=Math.min((now-last)/1000,0.05);last=now;
+  if(running)step(dt);
+  drawTrail();drawPend();drawPhase();drawSpread();updateHud();
+  requestAnimationFrame(frame);
+}
+// ---- pointer interaction (grab a bob) --------------------------------------
+let drag=null,hoverGrab=false;
+function evtXY(e){const r=pend.getBoundingClientRect();return[e.clientX-r.left,e.clientY-r.top];}
+pend.addEventListener("pointerdown",e=>{
+  const[mx,my]=evtXY(e), p=pos(swarm[0]);
+  const d1=Math.hypot(mx-p[0],my-p[1]), d2=Math.hypot(mx-p[2],my-p[3]);
+  if(Math.min(d1,d2)>40)return;
+  drag=d2<d1?2:1; running=false; pend.classList.add("grab");
+  pend.setPointerCapture(e.pointerId);
+});
+pend.addEventListener("pointermove",e=>{
+  const[mx,my]=evtXY(e), s=swarm[0];
+  if(!drag){ // track hover so we can show the pickup affordance ring
+    if(s){const p=pos(s);hoverGrab=Math.min(Math.hypot(mx-p[0],my-p[1]),Math.hypot(mx-p[2],my-p[3]))<=40;}
+    return;
+  }
+  if(drag===1){
+    s[0]=Math.atan2(mx-cx,my-cy);s[1]=0; // arm2 angle left untouched
+  }else{
+    const p=pos(s);s[2]=Math.atan2(mx-p[0],my-p[1]);s[3]=0;
+  }
+  P.theta1=s[0];P.theta2=s[2];
+});
+pend.addEventListener("pointerleave",()=>{if(!drag)hoverGrab=false;});
+pend.addEventListener("pointerup",()=>{
+  if(!drag)return;drag=null;pend.classList.remove("grab");
+  writeHash();buildSwarm();running=true;highlightPreset();
+});
+// ---- controls wiring -------------------------------------------------------
+const fmt={epsilon:v=>Math.pow(10,v).toExponential(0),swarmN:v=>Math.round(v),
+  trailFade:v=>(+v).toFixed(3),timeScale:v=>(+v).toFixed(2)+"×"};
+const label={swarmN:"vN",epsilon:"vEps",trailFade:"vFade",timeScale:"vTs",
+  L1:"vL1",L2:"vL2",M1:"vM1",M2:"vM2",g:"vg",damping:"vDamp"};
+function syncLabels(){
+  for(const k of SLIDERS){
+    $(k).value=P[k];
+    const el=$(label[k]); if(el)el.textContent=fmt[k]?fmt[k](P[k]):(+P[k]).toFixed(2);
+  }
+}
+SLIDERS.forEach(k=>{
+  $(k).addEventListener("input",e=>{
+    P[k]=+e.target.value;
+    const el=$(label[k]); if(el)el.textContent=fmt[k]?fmt[k](P[k]):(+P[k]).toFixed(2);
+    if(k==="L1"||k==="L2")resize();
+    writeHash();
+    if(k==="swarmN"||k==="epsilon")buildSwarm();
+    highlightPreset();
+  });
+});
+$("bPause").onclick=e=>{running=!running;e.target.textContent=running?"Pause":"Resume";e.target.classList.toggle("on",!running);};
+$("bStep").onclick=()=>{running=false;$("bPause").textContent="Resume";$("bPause").classList.add("on");step(1/60);};
+$("bReset").onclick=()=>{buildSwarm();running=true;$("bPause").textContent="Pause";$("bPause").classList.remove("on");};
+$("bClean").onclick=()=>document.body.classList.toggle("clean");
+addEventListener("keydown",e=>{if(e.key==="c"||e.key==="C")document.body.classList.toggle("clean");
+  if(e.key===" "){e.preventDefault();$("bPause").click();}});
+// ---- presets ---------------------------------------------------------------
+const PRESETS={
+  "Classic bloom":{theta1:2.3,theta2:2.6,swarmN:160,epsilon:-6,g:9.81,damping:0,L1:1,L2:1,M1:1,M2:1,trailFade:0.05,timeScale:1},
+  "Near-vertical":{theta1:3.05,theta2:3.1,swarmN:200,epsilon:-8,g:9.81,damping:0,L1:1,L2:1,M1:1,M2:1,trailFade:0.04,timeScale:1},
+  "Heavy tip":{theta1:1.9,theta2:2.4,swarmN:120,epsilon:-5,g:9.81,damping:0,L1:1,L2:1.2,M1:1,M2:3,trailFade:0.06,timeScale:1},
+  "Lunar drift":{theta1:2.6,theta2:2.9,swarmN:220,epsilon:-7,g:1.62,damping:0,L1:1,L2:1,M1:1,M2:1,trailFade:0.03,timeScale:1.4},
+  "Single trace":{theta1:2.3,theta2:2.6,swarmN:1,epsilon:-6,g:9.81,damping:0,L1:1,L2:1,M1:1,M2:1,trailFade:0.02,timeScale:1},
+  "Slow decay":{theta1:2.8,theta2:2.2,swarmN:80,epsilon:-4,g:9.81,damping:0.05,L1:1,L2:1,M1:1,M2:1,trailFade:0.05,timeScale:1}
+};
+const pbox=$("presets"), presetBtns={};
+Object.keys(PRESETS).forEach(name=>{
+  const b=document.createElement("button");b.textContent=name;presetBtns[name]=b;
+  b.onclick=()=>{Object.assign(P,PRESETS[name]);syncLabels();resize();writeHash();buildSwarm();running=true;
+    $("bPause").textContent="Pause";$("bPause").classList.remove("on");highlightPreset();};
+  pbox.appendChild(b);
+});
+// mark the preset button whose parameters currently match P (if any)
+function highlightPreset(){
+  const keys=Object.keys(DEF);
+  for(const name in presetBtns){
+    const pv=PRESETS[name];
+    const match=keys.every(k=>!(k in pv)||Math.abs(P[k]-pv[k])<1e-9);
+    presetBtns[name].classList.toggle("on",match);
+  }
+}
+function toast(msg){const el=$("toast");el.textContent=msg;el.classList.add("show");setTimeout(()=>el.classList.remove("show"),1600);}
+$("bCopy").onclick=async()=>{
+  const url=location.href;
+  try{await navigator.clipboard.writeText(url);toast("Link copied");}
+  catch{toast("Copy: "+url.slice(0,40)+"…");}
+};
+// ---- WebM recording --------------------------------------------------------
+let rec=null,chunks=[];
+$("bRec").onclick=e=>{
+  if(rec&&rec.state==="recording"){rec.stop();return;}
+  if(!pend.captureStream||typeof MediaRecorder==="undefined"){toast("Recording unsupported");return;}
+  // composite trail+pend by capturing an offscreen mix each frame
+  const mix=document.createElement("canvas");mix.width=pend.width;mix.height=pend.height;
+  const mctx=mix.getContext("2d");let mixOn=true;
+  (function pump(){if(!mixOn)return;mctx.fillStyle="#05060a";mctx.fillRect(0,0,mix.width,mix.height);
+    mctx.drawImage(trail,0,0);mctx.drawImage(pend,0,0);requestAnimationFrame(pump);})();
+  const mstream=mix.captureStream(60);
+  let mime="video/webm";
+  try{rec=new MediaRecorder(mstream,{mimeType:"video/webm;codecs=vp9"});}
+  catch{try{rec=new MediaRecorder(mstream,{mimeType:mime});}catch{toast("Recording unsupported");return;}}
+  chunks=[];
+  rec.ondataavailable=ev=>{if(ev.data.size)chunks.push(ev.data);};
+  rec.onstop=()=>{mixOn=false;const blob=new Blob(chunks,{type:"video/webm"});
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+    a.download="verge-bloom.webm";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+    e.target.textContent="● Record WebM";e.target.classList.remove("on");toast("Saved verge-bloom.webm");};
+  rec.start();e.target.textContent="■ Stop";e.target.classList.add("on");toast("Recording…");
+};
+// ---- panel toggle (small screens) ------------------------------------------
+$("panelToggle").onclick=()=>{document.body.classList.toggle("panel-hidden");resize();};
+// ---- boot ------------------------------------------------------------------
+readHash();
+addEventListener("resize",resize);
+resize();syncLabels();writeHash();buildSwarm();highlightPreset();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

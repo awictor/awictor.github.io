@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Statistics Calculator — mean, median, mode, standard deviation, quartiles</title>
+<meta name="description" content="Paste numbers and get descriptive statistics: count, sum, mean, median, mode, range, variance, standard deviation (population and sample), and quartiles. Offline, no tracking.">
+<style>
+  :root{
+    --c:#2563eb;
+    --bg:#eff4fd; --card:#ffffff; --fg:#0d1526; --muted:#54607a;
+    --line:#dae3f5; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#080d19; --card:#111828; --fg:#e6ecf8; --muted:#94a3c4;
+    --line:#1e2740; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:840px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:840px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  textarea{width:100%;min-height:90px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.95rem;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);resize:vertical}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:18px}
+  @media(max-width:600px){.stats{grid-template-columns:1fr 1fr}}
+  .stat{background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:13px}
+  .stat .k{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .stat .v{font-size:1.3rem;font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px}
+  .err{color:#dc2626;font-size:.86rem;margin-top:10px;min-height:1em}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">📊</div>
+  <div>
+    <h1>Statistics Calculator</h1>
+    <p>Descriptive statistics for a list of numbers</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <label>Numbers (separated by commas, spaces, or new lines)</label>
+    <textarea id="in" spellcheck="false">2, 4, 4, 4, 5, 5, 7, 9</textarea>
+    <div class="err" id="err"></div>
+    <div class="stats" id="stats"></div>
+  </div>
+
+  <div class="card">
+    <h2>Population vs sample</h2>
+    <p class="note">Variance and standard deviation come in two flavours. <b>Population</b> statistics (dividing by <em>n</em>) treat your numbers as the entire group. <b>Sample</b> statistics (dividing by <em>n−1</em>, "Bessel's correction") treat them as a sample drawn from a larger population and give an unbiased estimate — this is the one you usually want for experimental data. <b>Quartiles</b> split the sorted data into four equal parts (Q1/median/Q3), and the interquartile range (IQR = Q3−Q1) measures the spread of the middle half. Everything runs locally; nothing leaves your browser.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  // Parse a free-form string into an array of finite numbers.
+  function parseNumbers(str){
+    return String(str == null ? '' : str).split(/[\s,]+/).filter(function(t){ return t.length; })
+      .map(Number).filter(function(x){ return isFinite(x); });
+  }
+  function need(a){ if(!Array.isArray(a) || a.length === 0) throw new Error('enter at least one number'); return a; }
+  function sum(a){ return a.reduce(function(s, x){ return s + x; }, 0); }
+  function mean(a){ need(a); return sum(a) / a.length; }
+  function median(a){ need(a); var s = a.slice().sort(function(x, y){ return x - y; }); var n = s.length, m = Math.floor(n / 2); return n % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
+  // Most-frequent value(s); [] when every value is unique.
+  function mode(a){
+    need(a); var f = {}, max = 0;
+    a.forEach(function(x){ f[x] = (f[x] || 0) + 1; if(f[x] > max) max = f[x]; });
+    if(max <= 1) return [];
+    return Object.keys(f).filter(function(k){ return f[k] === max; }).map(Number).sort(function(x, y){ return x - y; });
+  }
+  function variance(a, sample){
+    need(a); var m = mean(a);
+    var ss = a.reduce(function(s, x){ return s + (x - m) * (x - m); }, 0);
+    var d = sample ? a.length - 1 : a.length;
+    if(d <= 0) throw new Error('sample variance needs at least two values');
+    return ss / d;
+  }
+  function stdev(a, sample){ return Math.sqrt(variance(a, sample)); }
+  // Q1/Q2/Q3 via the median-split method (median excluded for odd n).
+  function quartiles(a){
+    need(a); var s = a.slice().sort(function(x, y){ return x - y; }); var n = s.length, m = Math.floor(n / 2);
+    var lower = s.slice(0, m), upper = n % 2 ? s.slice(m + 1) : s.slice(m);
+    return { q1: median(lower.length ? lower : s), q2: median(s), q3: median(upper.length ? upper : s) };
+  }
+  // Everything at once.
+  function summary(a){
+    need(a); var s = a.slice().sort(function(x, y){ return x - y; }); var q = quartiles(a);
+    return {
+      count: a.length, sum: sum(a), min: s[0], max: s[s.length - 1], range: s[s.length - 1] - s[0],
+      mean: mean(a), median: median(a), mode: mode(a),
+      populationVariance: variance(a, false), populationStdev: stdev(a, false),
+      sampleVariance: a.length > 1 ? variance(a, true) : null, sampleStdev: a.length > 1 ? stdev(a, true) : null,
+      q1: q.q1, q3: q.q3, iqr: q.q3 - q.q1
+    };
+  }
+
+  if(typeof module !== 'undefined') module.exports = { parseNumbers:parseNumbers, sum:sum, mean:mean, median:median, mode:mode, variance:variance, stdev:stdev, quartiles:quartiles, summary:summary };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var fmt = function(x){ return x == null ? '—' : (Math.round(x * 1e6) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 6 }); };
+    function render(){
+      var err = document.getElementById('err'), grid = document.getElementById('stats');
+      err.textContent = ''; grid.innerHTML = '';
+      var nums = parseNumbers(document.getElementById('in').value);
+      try{
+        var r = summary(nums);
+        var items = [
+          ['Count', r.count], ['Sum', fmt(r.sum)], ['Mean', fmt(r.mean)],
+          ['Median', fmt(r.median)], ['Mode', r.mode.length ? r.mode.join(', ') : 'none'], ['Range', fmt(r.range)],
+          ['Min', fmt(r.min)], ['Max', fmt(r.max)], ['IQR', fmt(r.iqr)],
+          ['Q1', fmt(r.q1)], ['Q3', fmt(r.q3)], ['Std dev (pop)', fmt(r.populationStdev)],
+          ['Std dev (sample)', fmt(r.sampleStdev)], ['Variance (pop)', fmt(r.populationVariance)], ['Variance (sample)', fmt(r.sampleVariance)]
+        ];
+        items.forEach(function(it){
+          var d = document.createElement('div'); d.className = 'stat';
+          d.innerHTML = '<div class="k">' + it[0] + '</div><div class="v">' + it[1] + '</div>';
+          grid.appendChild(d);
+        });
+      }catch(e){ err.textContent = e.message; }
+    }
+    document.getElementById('in').addEventListener('input', render);
+    render();
+
+    var root=document.documentElement, tb=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); tb.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('stats-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('stats-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    tb.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Roundel — feel consistent hashing</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --edge:#262b36; --ink:#e7ebf2; --dim:#8b93a3;
+    --accent:#ff7a3d; --good:#4fd18b; --warn:#ff5d6c; --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 700px at 70% -10%,#1a2030,#0f1115);color:var(--ink);
+    font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{padding:18px 22px 8px}
+  h1{margin:0;font-size:26px;letter-spacing:.3px}
+  h1 span{color:var(--accent)}
+  .tag{color:var(--dim);margin:2px 0 0;font-size:14px}
+  .wrap{display:grid;grid-template-columns:1fr 320px;gap:16px;padding:12px 22px 28px;align-items:start}
+  @media(max-width:860px){.wrap{grid-template-columns:1fr}}
+  .stage{background:var(--panel);border:1px solid var(--edge);border-radius:14px;padding:10px}
+  canvas{width:100%;height:auto;display:block;border-radius:8px}
+  .panel{background:var(--panel);border:1px solid var(--edge);border-radius:14px;padding:14px;display:flex;
+    flex-direction:column;gap:14px}
+  .grp{display:flex;flex-direction:column;gap:7px}
+  .grp h3{margin:0;font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:var(--dim);font-weight:700}
+  .row{display:flex;gap:7px;flex-wrap:wrap}
+  input[type=text]{flex:1;min-width:0;background:#0e1016;border:1px solid var(--edge);color:var(--ink);
+    border-radius:8px;padding:8px 10px;font-size:14px}
+  button{background:#20242e;border:1px solid var(--edge);color:var(--ink);border-radius:8px;padding:8px 11px;
+    font-size:13px;cursor:pointer;transition:.12s;white-space:nowrap}
+  button:hover{border-color:var(--accent);color:#fff}
+  button:focus-visible,input:focus-visible,.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  button.p{background:var(--accent);border-color:var(--accent);color:#141414;font-weight:600}
+  .seg{display:flex;border:1px solid var(--edge);border-radius:8px;overflow:hidden}
+  .seg button{flex:1;border:0;border-radius:0;background:transparent}
+  .seg button.on{background:var(--accent);color:#141414;font-weight:600}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .stat{display:flex;justify-content:space-between;align-items:baseline;font-size:13px}
+  .stat b{font:600 20px/1 var(--mono)}
+  .big{font:700 30px/1 var(--mono);color:var(--accent)}
+  .hist{display:flex;gap:4px;align-items:flex-end;height:74px;padding-top:4px}
+  .barcol{flex:1;min-width:3px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:3px}
+  .bar{width:100%;border-radius:3px 3px 0 0;transition:height .3s}
+  .blab{font:600 10px/1 var(--mono);color:var(--dim)}
+  .hint{font-size:12px;color:var(--dim)}
+  .kbd{font:600 11px var(--mono);background:#0e1016;border:1px solid var(--edge);border-radius:4px;padding:1px 5px}
+  a.gh{color:var(--dim);text-decoration:none;font-size:12px}
+  @media (prefers-reduced-motion: reduce){.bar{transition:none}button{transition:none}}
+</style>
+</head>
+<body>
+<header>
+  <h1><span>Roundel</span> — the consistent-hashing ring you can feel</h1>
+  <p class="tag">Drop keys on the ring, kill a node, and watch how few keys actually move. Flip to naive mod-N to see the difference.</p>
+</header>
+<div class="wrap">
+  <div class="stage"><canvas id="cv" width="920" height="540"></canvas>
+    <p class="hint" id="caption" style="margin:6px 4px 2px"></p>
+  </div>
+  <div class="panel">
+    <div class="grp">
+      <h3>View</h3>
+      <div class="seg" id="mode">
+        <button data-m="ring" class="on">Ring</button>
+        <button data-m="naive">Naive mod-N</button>
+        <button data-m="both">Side by side</button>
+      </div>
+    </div>
+    <div class="grp">
+      <h3>Add to the ring</h3>
+      <div class="row"><input id="txt" type="text" placeholder="name…" maxlength="18">
+        <button id="addKey">+ key</button><button id="addNode">+ node</button></div>
+      <div class="row"><button id="rmNode">kill a node</button><button id="rmKey">− key</button>
+        <button id="clear">reset</button></div>
+    </div>
+    <div class="grp">
+      <h3>Virtual nodes / replicas <span id="repVal" style="color:var(--accent)"></span></h3>
+      <input id="rep" type="range" min="1" max="100" value="1">
+      <p class="hint">More replicas spread each server around the ring, evening out load.</p>
+    </div>
+    <div class="grp">
+      <h3>The payoff</h3>
+      <div class="stat"><span>keys moved on last change</span><b><span id="moved" class="big">0</span> <span style="font-size:14px;color:var(--dim)">/ <span id="total">0</span></span></b></div>
+      <div class="stat" id="naiveStat" style="display:none"><span>naive would move</span><b id="naiveMoved">0</b></div>
+    </div>
+    <div class="grp">
+      <h3>Load balance</h3>
+      <div class="hist" id="hist"></div>
+      <div class="stat"><span>balance score</span><b id="balance">0%</b></div>
+      <div class="stat"><span>load std-dev</span><b id="std">0</b></div>
+    </div>
+    <div class="grp">
+      <h3>Try to break it</h3>
+      <div class="row"><button id="worst">worst-case removal</button><button id="busiest">kill busiest</button></div>
+      <div class="row"><button id="preset0">balanced</button><button id="preset1">hotspot</button>
+        <button id="daily" class="p">daily challenge</button></div>
+      <p class="hint">Step scenarios with <span class="kbd">←</span> <span class="kbd">→</span>. <button id="share" style="padding:4px 8px">copy share link</button></p>
+    </div>
+  </div>
+</div>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const cv=$("cv"), ctx=cv.getContext("2d"), TAU=Math.PI*2;
+// ---- deterministic hashing (FNV-1a 32-bit) -> position in [0,1) ----
+function fnv(s){let h=0x811c9dc5;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,0x01000193);}return h>>>0;}
+const pos=s=>fnv(s)/4294967296;
+function mul32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+// ---- node colour (stable by name) ----
+function hsl2rgb(h,s,l){h/=360;const q=l<.5?l*(1+s):l+s-l*s,p=2*l-q,f=t=>{t=(t+1)%1;return t<1/6?p+(q-p)*6*t:t<.5?q:t<2/3?p+(q-p)*(2/3-t)*6:p;};return[f(h+1/3)*255,f(h)*255,f(h-1/3)*255];}
+const colorCache={};
+function rgbOf(name){if(!colorCache[name])colorCache[name]=hsl2rgb(fnv("hue:"+name)%360,.62,.60);return colorCache[name];}
+const css=c=>`rgb(${c[0]|0},${c[1]|0},${c[2]|0})`;
+const DIM=[139,147,163]; // --dim, for orphan keys with no owning node
+const lerp=(a,b,t)=>a+(b-a)*t, mix=(a,b,t)=>[lerp(a[0],b[0],t),lerp(a[1],b[1],t),lerp(a[2],b[2],t)];
+
+// ---- state ----
+let nodes=[], keys=[], replicas=1, mode="ring", ring=[], lastMoved=0, lastNaive=0, movedDisplay=0;
+// keys entries: {name,p, node,ang, fromNode,fromAng, nNode,fromNNode, t, changed}
+
+function buildRing(){ring=[];for(const n of nodes)for(let i=0;i<replicas;i++)ring.push({a:pos(n+"#"+i),n});ring.sort((x,y)=>x.a-y.a);}
+function ownerRing(p){if(!ring.length)return null;let lo=0,hi=ring.length-1,r=ring[0];while(lo<=hi){const m=(lo+hi)>>1;if(ring[m].a>=p){r=ring[m];hi=m-1;}else lo=m+1;}return r;} // first vnode clockwise
+function ownerNaive(name){if(!nodes.length)return null;const idx=fnv(name)%nodes.length;const s=[...nodes].sort();return s[idx];}
+
+function recompute(animate){
+  buildRing();
+  const sortedForNaive=[...nodes].sort();
+  let moved=0,naiveMoved=0;
+  for(const k of keys){
+    const own=ownerRing(k.p);
+    const newNode=own?own.n:null, newAng=own?own.a:k.p;
+    const newN=ownerNaive(k.name);
+    const changed=animate&&(k.node!==newNode);
+    if(changed)moved++;
+    if(animate&&k.nNode!==newN)naiveMoved++;
+    k.fromNode=k.node||newNode; k.fromAng=(k.ang==null?newAng:k.ang);
+    k.fromNNode=k.nNode||newN;
+    k.node=newNode; k.ang=newAng; k.nNode=newN;
+    k.changed=changed||(animate&&k.nNode!==k.fromNNode);
+    k.t=(animate&&(changed||k.nNode!==k.fromNNode))?0:1;
+  }
+  if(animate){lastMoved=moved;lastNaive=naiveMoved;movedDisplay=0;}
+  updatePanel();syncHash();requestRedraw();
+}
+
+// ---- load stats ----
+function loads(){const m={};for(const n of nodes)m[n]=0;for(const k of keys)if(k.node!=null)m[k.node]++;return m;}
+function stats(){const l=loads(),v=Object.values(l);if(!v.length)return{std:0,bal:0,l};const mean=v.reduce((a,b)=>a+b,0)/v.length;
+  const varr=v.reduce((a,b)=>a+(b-mean)*(b-mean),0)/v.length,std=Math.sqrt(varr);
+  const cv=mean>0?std/mean:0;return{std,bal:Math.max(0,Math.min(1,1-cv)),l};}
+
+function updatePanel(){
+  const s=stats();
+  $("moved").textContent=movedDisplay; $("total").textContent=keys.length;
+  $("balance").textContent=(nodes.length?Math.round(s.bal*100):0)+"%";
+  $("std").textContent=s.std.toFixed(2);
+  $("repVal").textContent="× "+replicas;
+  $("naiveStat").style.display=mode==="both"?"flex":"none";
+  $("naiveMoved").textContent=lastNaive;
+  const h=$("hist");h.innerHTML="";
+  const max=Math.max(1,...Object.values(s.l));
+  for(const n of nodes){const col=document.createElement("div");col.className="barcol";
+    const b=document.createElement("div");b.className="bar";
+    b.style.height=(6+52*s.l[n]/max)+"px";b.style.background=css(rgbOf(n));b.title=n+": "+s.l[n]+" keys";
+    const lab=document.createElement("span");lab.className="blab";lab.textContent=n[0].toUpperCase();lab.style.color=css(rgbOf(n));
+    col.appendChild(b);col.appendChild(lab);h.appendChild(col);}
+  $("caption").textContent=`${nodes.length} nodes · ${keys.length} keys · ${replicas} replica${replicas>1?"s":""} each · ${ring.length} points on the ring`;
+}
+
+// ---- rendering ----
+function angTheta(a){return a*TAU-Math.PI/2;}
+function drawRing(cx,cy,R,useNaive,arcs,label){
+  ctx.strokeStyle="#2b3140";ctx.lineWidth=2;ctx.beginPath();ctx.arc(cx,cy,R,0,TAU);ctx.stroke();
+  // vnode ticks
+  for(const v of ring){const th=angTheta(v.a),c=rgbOf(v.n);ctx.strokeStyle=`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${replicas>1?.35:.7})`;
+    ctx.lineWidth=replicas>1?1.5:3;ctx.beginPath();ctx.moveTo(cx+(R-7)*Math.cos(th),cy+(R-7)*Math.sin(th));
+    ctx.lineTo(cx+(R+7)*Math.cos(th),cy+(R+7)*Math.sin(th));ctx.stroke();}
+  // keys
+  for(const k of keys){
+    const owner=useNaive?k.nNode:k.node;
+    const cur=owner==null?DIM:(useNaive?mix(rgbOf(k.fromNNode||k.nNode),rgbOf(k.nNode),k.t):mix(rgbOf(k.fromNode||k.node),rgbOf(k.node),k.t));
+    const kth=angTheta(k.p),kr=R+18,kx=cx+kr*Math.cos(kth),ky=cy+kr*Math.sin(kth);
+    if(arcs&&!useNaive&&k.node!=null){
+      let a1=k.p, a2=lerpAng(k.fromAng,k.ang,k.t); if(a2<a1)a2+=1;
+      ctx.strokeStyle=`rgba(${cur[0]|0},${cur[1]|0},${cur[2]|0},.5)`;ctx.lineWidth=k.changed?2.4:1;
+      ctx.beginPath();ctx.arc(cx,cy,R,angTheta(a1),angTheta(a2));ctx.stroke();
+    }
+    ctx.fillStyle=css(cur);ctx.beginPath();ctx.arc(kx,ky,k.changed&&k.t<1?5.5:4,0,TAU);ctx.fill();
+    if(k.changed&&k.t<1){ctx.strokeStyle="#fff";ctx.lineWidth=1;ctx.stroke();}
+  }
+  // real node labels at their densest / first vnode
+  ctx.font="600 12px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+  for(const n of nodes){const a=pos(n+"#0"),th=angTheta(a),lr=R-24;
+    ctx.fillStyle=css(rgbOf(n));ctx.beginPath();ctx.arc(cx+lr*Math.cos(th),cy+lr*Math.sin(th),9,0,TAU);ctx.fill();
+    ctx.fillStyle="#0f1115";ctx.fillText(n[0].toUpperCase(),cx+lr*Math.cos(th),cy+lr*Math.sin(th)+.5);}
+  if(nodes.length===0){
+    ctx.fillStyle="#8b93a3";ctx.font="600 14px system-ui";
+    ctx.fillText("No nodes on the ring —",cx,cy-9);ctx.fillText("add one to see keys land",cx,cy+9);
+  }else{
+    ctx.fillStyle="#cfd6e2";ctx.font="700 14px system-ui";ctx.fillText(label,cx,cy);
+    if(keys.length===0){ctx.fillStyle="#8b93a3";ctx.font="600 12px system-ui";
+      ctx.fillText("Add keys to watch them hash onto the ring",cx,cy+20);}
+  }
+}
+function lerpAng(a,b,t){let d=b-a;if(d>.5)d-=1;if(d<-.5)d+=1;return a+d*t;}
+
+let rafPending=false;
+function requestRedraw(){if(!rafPending){rafPending=true;requestAnimationFrame(frame);}}
+const reducedMotion=()=>window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+function frame(){
+  rafPending=false;
+  const dpr=Math.min(2,window.devicePixelRatio||1),W=cv.clientWidth,H=Math.round(W*0.585);
+  const bw=Math.round(W*dpr),bh=Math.round(H*dpr);
+  if(cv.width!==bw){cv.width=bw;cv.height=bh;}
+  cv.style.height=H+"px";ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,W,H);
+  const reduce=reducedMotion();
+  let anim=false;
+  for(const k of keys)if(k.t<1){if(reduce){k.t=1;}else{k.t=Math.min(1,k.t+0.035);anim=true;}}
+  movedDisplay=anim?keys.filter(k=>k.changed&&k.node!==k.fromNode&&k.t>0.85).length:lastMoved;
+  const cy=H/2;
+  if(mode==="both"){const R=Math.min(H,W/2)*0.34;drawRing(W*0.27,cy,R,false,true,"consistent");drawRing(W*0.73,cy,R,true,false,"naive mod-N");}
+  else{const R=Math.min(H,W)*0.36;drawRing(W/2,cy,R,mode==="naive",mode==="ring",mode==="naive"?"naive mod-N":"consistent");}
+  $("moved").textContent=movedDisplay;
+  if(anim)requestRedraw(); // only keep the rAF loop alive while something is actually tweening
+}
+
+// ---- mutations ----
+function nextNodeName(){const A="ABCDEFGHIJKLMNOP";for(const c of A)if(!nodes.includes(c))return c;return "N"+nodes.length;}
+function addNode(name){if(nodes.length>=12)return;name=name||nextNodeName();if(nodes.includes(name))return;nodes.push(name);recompute(true);}
+function addKey(name){if(keys.length>=44)return;name=name||("key-"+(keys.length+1));if(keys.some(k=>k.name===name))name+="'";
+  keys.push({name,p:pos(name),node:null,ang:null,nNode:null,t:1,changed:false});recompute(true);}
+function rmNode(name){name=name||nodes[nodes.length-1];const i=nodes.indexOf(name);if(i<0)return;nodes.splice(i,1);recompute(true);}
+function rmKey(){if(keys.length){keys.pop();recompute(true);}}
+
+// ---- break-it ----
+function busiest(){const l=loads();let best=null,mx=-1;for(const n of nodes)if(l[n]>mx){mx=l[n];best=n;}return best;}
+function worstCase(){let best=null,mx=-1;for(const n of nodes){let cnt=0;for(const k of keys)if(k.node===n)cnt++;if(cnt>mx){mx=cnt;best=n;}}return{best,mx};}
+
+// ---- presets & daily ----
+function setState(ns,ks,rep,md){nodes=ns.slice();keys=ks.map(name=>({name,p:pos(name),node:null,ang:null,nNode:null,t:1,changed:false}));
+  replicas=rep;$("rep").value=rep;mode=md;[...$("mode").children].forEach(b=>b.classList.toggle("on",b.dataset.m===md));
+  recompute(false);}
+function presetBalanced(){setState(["A","B","C","D"],Array.from({length:24},(_,i)=>"key-"+(i+1)),24,"ring");}
+function presetHotspot(){setState(["A","B","C","D","E"],Array.from({length:28},(_,i)=>"item-"+(i+1)),1,"ring");}
+function dailyBoard(){const d=new Date(),seed=fnv(d.getFullYear()+"-"+d.getMonth()+"-"+d.getDate()),rnd=mul32(seed);
+  const nn=3+Math.floor(rnd()*3),ns=[];for(let i=0;i<nn;i++)ns.push("ABCDEFGH"[i]);
+  const km=18+Math.floor(rnd()*14),ks=[];for(let i=0;i<km;i++)ks.push("u"+(1000+Math.floor(rnd()*8999)));
+  setState(ns,ks,1+Math.floor(rnd()*8),"both");}
+const scenarios=[presetBalanced,presetHotspot,dailyBoard,()=>setState(["A","B","C"],Array.from({length:16},(_,i)=>"sess-"+(i+1)),40,"both")];
+let scIx=0;
+
+// ---- URL hash ----
+function syncHash(){const h="#n="+nodes.map(encodeURIComponent).join(",")+"&k="+keys.map(k=>encodeURIComponent(k.name)).join(",")+"&r="+replicas+"&m="+mode;
+  history.replaceState(null,"",h);}
+function loadHash(){try{const h=location.hash.slice(1);if(!h)return false;const q={};
+  h.split("&").forEach(p=>{const i=p.indexOf("=");q[i<0?p:p.slice(0,i)]=i<0?"":p.slice(i+1);});
+  if(!q.n&&!q.k)return false;
+  const dec=s=>{try{return decodeURIComponent(s);}catch(_){return s;}};
+  const ns=(q.n||"").split(",").filter(Boolean).map(dec),ks=(q.k||"").split(",").filter(Boolean).map(dec);
+  setState(ns,ks,Math.max(1,Math.min(100,+q.r||1)),["ring","naive","both"].includes(q.m)?q.m:"ring");return true;}
+  catch(_){return false;}}
+
+// ---- wire up ----
+$("addKey").onclick=()=>{addKey($("txt").value.trim());$("txt").value="";};
+$("addNode").onclick=()=>{addNode($("txt").value.trim()||null);$("txt").value="";};
+$("txt").onkeydown=e=>{if(e.key==="Enter")$("addKey").click();};
+$("rmNode").onclick=()=>rmNode();
+$("rmKey").onclick=rmKey;
+$("clear").onclick=()=>setState(["A","B","C"],["key-1","key-2","key-3","key-4","key-5","key-6"],1,"ring");
+$("rep").oninput=e=>{replicas=+e.target.value;recompute(true);};
+$("worst").onclick=()=>{const w=worstCase();if(w.best){lastMoved=w.mx;rmNode(w.best);$("caption").textContent=`worst case: killing ${w.best} moves ${w.mx} keys to its neighbour.`;}};
+$("busiest").onclick=()=>{const b=busiest();if(b)rmNode(b);};
+$("preset0").onclick=presetBalanced;
+$("preset1").onclick=presetHotspot;
+$("daily").onclick=dailyBoard;
+$("share").onclick=()=>{
+  const url=location.href,done=t=>{$("share").textContent=t;setTimeout(()=>$("share").textContent="copy share link",1400);};
+  const fallback=()=>{try{const ta=document.createElement("textarea");ta.value=url;ta.style.position="fixed";ta.style.opacity="0";
+    document.body.appendChild(ta);ta.select();const ok=document.execCommand("copy");document.body.removeChild(ta);done(ok?"copied!":"press Ctrl+C");}
+    catch(_){done("press Ctrl+C");}};
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(url).then(()=>done("copied!")).catch(fallback);
+  else fallback();
+};
+[...$("mode").children].forEach(b=>b.onclick=()=>{mode=b.dataset.m;[...$("mode").children].forEach(x=>x.classList.toggle("on",x===b));updatePanel();syncHash();requestRedraw();});
+window.addEventListener("resize",requestRedraw);
+window.addEventListener("keydown",e=>{if(e.target.tagName==="INPUT")return;
+  if(e.key==="ArrowRight"){scIx=(scIx+1)%scenarios.length;scenarios[scIx]();}
+  if(e.key==="ArrowLeft"){scIx=(scIx-1+scenarios.length)%scenarios.length;scenarios[scIx]();}});
+window.addEventListener("hashchange",()=>loadHash());
+
+// ---- boot ----
+if(!loadHash())dailyBoard();
+requestRedraw();
+</script>
+</body>
+</html>

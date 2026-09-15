@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fence Calculator — posts, rails & pickets</title>
+<meta name="description" content="Estimate how many posts, sections, rails and pickets a fence needs from its length, post spacing and picket size. Offline, no tracking.">
+<style>
+  :root{
+    --c:#854d0e;
+    --bg:#faf6ee; --card:#ffffff; --fg:#231a09; --muted:#6e5c3f;
+    --line:#ede2cc; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#140f05; --card:#1e170a; --fg:#f5edda; --muted:#b69c72;
+    --line:#332810; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:800px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:22px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.3rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:800px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:560px){.grid{grid-template-columns:1fr}}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px}
+  .unit{font-weight:400;text-transform:none}
+  input[type=number]{width:100%;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .breakdown{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px}
+  .bd{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:16px;text-align:center}
+  .bd b{display:block;font-size:1.9rem;color:var(--c);font-variant-numeric:tabular-nums;line-height:1}
+  .bd span{font-size:.8rem;color:var(--muted)}
+  h2{font-size:1rem;margin:0 0 8px}
+  .note{color:var(--muted);font-size:.86rem}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+  .err{color:#dc2626;font-size:.85rem;margin-top:8px;min-height:1em;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🚧</div>
+  <div>
+    <h1>Fence Calculator</h1>
+    <p>Posts, sections, rails &amp; pickets</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid">
+      <div><label>Fence length <span class="unit">(ft)</span></label><input type="number" id="length" value="100" min="0" step="any"></div>
+      <div><label>Post spacing <span class="unit">(ft)</span></label><input type="number" id="spacing" value="8" min="0.1" step="any"></div>
+      <div><label>Rails per section</label><input type="number" id="rails" value="3" min="0" step="1"></div>
+      <div><label>Picket width <span class="unit">(in)</span></label><input type="number" id="pwidth" value="5.5" min="0.1" step="any"></div>
+      <div><label>Gap between pickets <span class="unit">(in)</span></label><input type="number" id="gap" value="0.5" min="0" step="any"></div>
+    </div>
+    <div class="breakdown">
+      <div class="bd"><b id="posts">—</b><span>posts</span></div>
+      <div class="bd"><b id="sections">—</b><span>sections</span></div>
+      <div class="bd"><b id="railsOut">—</b><span>rails</span></div>
+      <div class="bd"><b id="pickets">—</b><span>pickets</span></div>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>How it estimates</h2>
+    <p class="note">The fence is divided into <b>sections</b> = ceil(length ÷ post spacing); a straight run needs one more <b>post</b> than sections (line posts plus the two ends). <b>Rails</b> = sections × rails-per-section (2 for short fences, 3 for taller privacy fences). <b>Pickets</b> = the run length ÷ (picket width + gap), rounded up. Order ~10% extra for waste, gates and cuts, and check local setback/height rules. Everything runs locally.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  function toNum(x){ var n = Number(x); if(!isFinite(n)) throw new Error('inputs must be numbers'); return n; }
+  // Number of fence sections between posts.
+  function sectionCount(lengthFt, spacingFt){
+    lengthFt = toNum(lengthFt); spacingFt = toNum(spacingFt);
+    if(lengthFt < 0) throw new Error('length must be non-negative');
+    if(spacingFt <= 0) throw new Error('spacing must be positive');
+    return Math.ceil(lengthFt / spacingFt);
+  }
+  // Posts for a straight run: sections + 1.
+  function postCount(lengthFt, spacingFt){
+    var s = sectionCount(lengthFt, spacingFt);
+    return s === 0 ? 0 : s + 1;
+  }
+  // Rails total.
+  function railCount(sections, railsPerSection){
+    sections = toNum(sections); railsPerSection = toNum(railsPerSection);
+    if(sections < 0 || railsPerSection < 0) throw new Error('values must be non-negative');
+    return sections * railsPerSection;
+  }
+  // Pickets across the run length (feet) given picket width & gap (inches).
+  function picketCount(lengthFt, picketWidthIn, gapIn){
+    lengthFt = toNum(lengthFt); picketWidthIn = toNum(picketWidthIn); gapIn = toNum(gapIn);
+    if(lengthFt < 0) throw new Error('length must be non-negative');
+    if(picketWidthIn + gapIn <= 0) throw new Error('picket width + gap must be positive');
+    return Math.ceil((lengthFt * 12) / (picketWidthIn + gapIn));
+  }
+
+  if(typeof module !== 'undefined') module.exports = { sectionCount:sectionCount, postCount:postCount, railCount:railCount, picketCount:picketCount };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    function val(id){ return Number(document.getElementById(id).value); }
+    function render(){
+      document.getElementById('err').textContent = '';
+      try{
+        var s = sectionCount(val('length'), val('spacing'));
+        document.getElementById('sections').textContent = s;
+        document.getElementById('posts').textContent = postCount(val('length'), val('spacing'));
+        document.getElementById('railsOut').textContent = railCount(s, Math.max(0, Math.floor(val('rails'))));
+        document.getElementById('pickets').textContent = picketCount(val('length'), val('pwidth'), val('gap'));
+      }catch(e){
+        ['posts','sections','railsOut','pickets'].forEach(function(id){ document.getElementById(id).textContent = '—'; });
+        document.getElementById('err').textContent = e.message;
+      }
+    }
+    ['length','spacing','rails','pwidth','gap'].forEach(function(id){ document.getElementById(id).addEventListener('input', render); });
+    render();
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('fence-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('fence-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>

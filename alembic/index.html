@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alembic — Reaction-Diffusion Lab</title>
+<style>
+  :root{
+    --bg:#0a0d10; --glass:rgba(24,32,38,.72); --edge:rgba(120,200,180,.16);
+    --ink:#cfe6dd; --dim:#7f958e; --acc:#3fd6a8; --gold:#d8b25a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(1200px 700px at 25% -10%,#12201f 0%,var(--bg) 60%) fixed;
+    color:var(--ink); font:14px/1.4 "Segoe UI",system-ui,sans-serif;
+    display:flex; align-items:flex-start; justify-content:center; flex-wrap:wrap; gap:22px;
+    padding:24px; min-height:100%;
+  }
+  h1{font:600 20px/1 "Segoe UI",sans-serif; letter-spacing:.14em; margin:0 0 2px;
+     background:linear-gradient(90deg,var(--gold),var(--acc)); -webkit-background-clip:text;
+     background-clip:text; color:transparent; text-transform:uppercase}
+  .sub{color:var(--dim); font-size:11px; letter-spacing:.05em; margin-bottom:14px}
+  .vesselwrap{position:relative; border-radius:14px; overflow:hidden;
+    box-shadow:0 0 0 1px var(--edge),0 24px 60px -20px #000,inset 0 0 80px -30px var(--acc);
+    background:#000}
+  #vessel{display:block; width:min(560px,92vw); height:auto; aspect-ratio:1/1; image-rendering:pixelated; cursor:crosshair; touch-action:none}
+  #histo{position:absolute; left:12px; bottom:12px; width:184px; height:74px;
+    background:rgba(6,10,12,.72); border:1px solid var(--edge); border-radius:8px; display:none}
+  #plabel{position:absolute; left:12px; top:12px; padding:5px 10px; font-size:11px; letter-spacing:.08em;
+    background:rgba(6,10,12,.7); border:1px solid var(--edge); border-radius:20px; color:var(--acc); display:none}
+  .panel{width:288px; display:flex; flex-direction:column; gap:14px}
+  @media (max-width:920px){.panel{width:min(560px,92vw)}}
+  .card{background:var(--glass); border:1px solid var(--edge); border-radius:12px; padding:14px;
+    -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px)}
+  .card h2{margin:0 0 8px; font:600 10px/1 sans-serif; letter-spacing:.16em; color:var(--dim); text-transform:uppercase}
+  #phase{display:block; width:260px; height:180px; border-radius:8px; cursor:crosshair; background:#05100e}
+  .maplbl{color:var(--dim); font-size:10px; margin-top:6px; display:flex; justify-content:space-between}
+  .row{display:flex; align-items:center; gap:8px; margin:7px 0}
+  .row label{width:78px; color:var(--dim); font-size:11px; letter-spacing:.03em}
+  .row input[type=range]{flex:1; accent-color:var(--acc); height:3px}
+  .row .val{width:52px; text-align:right; font:11px/1 "Consolas",monospace; color:var(--acc)}
+  .btns{display:flex; flex-wrap:wrap; gap:6px}
+  button,select,input[type=number]{
+    font:11px/1 sans-serif; color:var(--ink); background:rgba(60,90,80,.22);
+    border:1px solid var(--edge); border-radius:7px; padding:7px 9px; cursor:pointer; letter-spacing:.04em}
+  button:hover{background:rgba(63,214,168,.2); border-color:var(--acc)}
+  button.on{background:var(--acc); color:#04120d; border-color:var(--acc); font-weight:600}
+  button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--acc); outline-offset:2px}
+  select,input[type=number]{cursor:default}
+  input[type=number]{width:74px}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:6px}
+  .fine{color:var(--dim); font-size:10px; line-height:1.5}
+</style>
+</head>
+<body>
+<div>
+  <h1>Alembic</h1>
+  <div class="sub">Gray-Scott reaction-diffusion &middot; click the phase map to transmute</div>
+  <div class="vesselwrap">
+    <canvas id="vessel" width="200" height="200"></canvas>
+    <div id="plabel">—</div>
+    <canvas id="histo" width="184" height="74"></canvas>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="card">
+    <h2>Phase-space map (Pearson)</h2>
+    <canvas id="phase" width="260" height="180"></canvas>
+    <div class="maplbl"><span>f 0.010</span><span>feed &rarr;</span><span>0.100</span></div>
+    <div class="btns" style="margin-top:8px">
+      <button id="tour">▶ Tour the zoo</button>
+      <button id="trailclr">Clear trail</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Reagents</h2>
+    <div class="row"><label>feed f</label><input type="range" id="sf" min="0.005" max="0.100" step="0.0005"><span class="val" id="vf"></span></div>
+    <div class="row"><label>kill k</label><input type="range" id="sk" min="0.030" max="0.075" step="0.0005"><span class="val" id="vk"></span></div>
+    <div class="row"><label>diffuse A</label><input type="range" id="sda" min="0.4" max="1.2" step="0.01"><span class="val" id="vda"></span></div>
+    <div class="row"><label>diffuse B</label><input type="range" id="sdb" min="0.2" max="0.7" step="0.01"><span class="val" id="vdb"></span></div>
+    <div class="row"><label>steps/frame</label><input type="range" id="ss" min="1" max="20" step="1"><span class="val" id="vs"></span></div>
+  </div>
+
+  <div class="card">
+    <h2>Brush &amp; seeds</h2>
+    <div class="row"><label>symmetry</label>
+      <select id="sym"><option value="1">1× none</option><option value="2">2× mirror</option><option value="4">4×</option><option value="6" selected>6×</option><option value="k">kaleido</option></select>
+    </div>
+    <div class="btns">
+      <button data-seed="dot">Center dot</button>
+      <button data-seed="ring">Ring</button>
+      <button data-seed="grid">Spore grid</button>
+      <button data-seed="text">Text stamp</button>
+    </div>
+    <div class="fine" style="margin-top:8px">Drag on the vessel to paint reagent B.</div>
+  </div>
+
+  <div class="card">
+    <h2>Vessel</h2>
+    <div class="row"><label>palette</label>
+      <select id="pal"><option value="0">patina</option><option value="1">ferrofluid</option><option value="2">ink</option><option value="3">bone</option></select>
+    </div>
+    <div class="row"><label>seed</label><input type="number" id="seed" min="0" step="1"></div>
+    <div class="grid2" style="margin-top:2px">
+      <button id="pause">⏸ Pause</button>
+      <button id="reset">↻ Re-seed</button>
+      <button id="analysis">📊 Analysis</button>
+      <button id="rec">● Record</button>
+      <button id="png">⬇ PNG</button>
+      <button id="share">🔗 Copy link</button>
+    </div>
+  </div>
+  <div class="fine card">Deterministic from seed &middot; full state lives in the URL hash &middot; zero dependencies.</div>
+</div>
+
+<script>
+"use strict";
+const W=200,H=200,N=W*H;
+const vessel=document.getElementById('vessel'), vctx=vessel.getContext('2d');
+const img=vctx.createImageData(W,H), pix=img.data;
+const phase=document.getElementById('phase'), pctx=phase.getContext('2d');
+const histo=document.getElementById('histo'), hctx=histo.getContext('2d');
+const plabel=document.getElementById('plabel');
+
+// fields (double buffered)
+let A=new Float32Array(N), B=new Float32Array(N), A2=new Float32Array(N), B2=new Float32Array(N);
+// precomputed wrap neighbour offsets
+const xm=new Int32Array(W), xp=new Int32Array(W), ym=new Int32Array(H), yp=new Int32Array(H);
+for(let x=0;x<W;x++){xm[x]=(x-1+W)%W; xp[x]=(x+1)%W;}
+for(let y=0;y<H;y++){ym[y]=((y-1+H)%H)*W; yp[y]=((y+1)%H)*W;}
+
+// --- state ---
+const S={f:0.0367,k:0.0649,dA:1.0,dB:0.5,steps:8,pal:0,seed:1337,sym:'6'};
+let paused=false, showHisto=false;
+
+// --- PRNG ---
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+// --- palettes ---
+const PALS=[
+  [[0,10,18,20],[.4,20,70,65],[.62,46,140,120],[.85,130,196,164],[1,228,242,222]],   // patina
+  [[0,3,4,8],[.5,20,32,74],[.76,74,96,156],[.9,164,178,208],[1,236,241,250]],          // ferrofluid
+  [[0,245,240,225],[.5,124,112,152],[.76,52,42,92],[1,10,8,24]],                       // ink (inverted)
+  [[0,15,12,10],[.5,92,72,56],[.8,192,166,140],[1,241,233,216]]                        // bone
+];
+let LUTr=new Uint8ClampedArray(256),LUTg=new Uint8ClampedArray(256),LUTb=new Uint8ClampedArray(256);
+function buildLUT(p){const st=PALS[p]||PALS[0];for(let i=0;i<256;i++){const t=i/255;let j=0;while(j<st.length-1&&t>st[j+1][0])j++;const a=st[j],b=st[Math.min(j+1,st.length-1)];const span=(b[0]-a[0])||1,u=(t-a[0])/span;LUTr[i]=a[1]+(b[1]-a[1])*u;LUTg[i]=a[2]+(b[2]-a[2])*u;LUTb[i]=a[3]+(b[3]-a[3])*u;}}
+
+// --- seeding ---
+function clear(){A.fill(1);B.fill(0);}
+function stampAt(cx,cy,r){for(let y=-r;y<=r;y++)for(let x=-r;x<=r;x++){if(x*x+y*y>r*r)continue;const gx=(cx+x+W)%W,gy=(cy+y+H)%H;B[gy*W+gx]=1;A[gy*W+gx]=0.2;}}
+function stampMask(mask){for(let i=0;i<N;i++)if(mask[i]){B[i]=1;A[i]=0.2;}}
+let lastSeed='grid';
+function seedPreset(kind){
+  lastSeed=kind;
+  clear();
+  const rng=mulberry32(S.seed);
+  // faint noise to break symmetry
+  for(let i=0;i<N;i++)B[i]+=rng()*0.02;
+  if(kind==='dot'){stampAt(W>>1,H>>1,10);}
+  else if(kind==='ring'){for(let a=0;a<360;a+=3){const rr=62;stampAt((W>>1)+Math.cos(a*Math.PI/180)*rr|0,(H>>1)+Math.sin(a*Math.PI/180)*rr|0,3);}}
+  else if(kind==='grid'){for(let gy=1;gy<6;gy++)for(let gx=1;gx<6;gx++)stampAt(gx*W/6|0,gy*H/6|0,4);}
+  else if(kind==='text'){
+    const o=document.createElement('canvas');o.width=W;o.height=H;const oc=o.getContext('2d');
+    oc.fillStyle='#000';oc.fillRect(0,0,W,H);oc.fillStyle='#fff';oc.textAlign='center';oc.textBaseline='middle';
+    oc.font='bold 62px Georgia';oc.fillText('Al',W/2,H/2);
+    const d=oc.getImageData(0,0,W,H).data,mask=new Uint8Array(N);
+    for(let i=0;i<N;i++)mask[i]=d[i*4]>128?1:0;stampMask(mask);
+  }
+}
+
+// --- Gray-Scott step (9-point Laplacian, toroidal) ---
+function step(){
+  const f=S.f,k=S.k,da=S.dA,db=S.dB;
+  for(let y=0;y<H;y++){
+    const row=y*W,ru=ym[y],rd=yp[y];
+    for(let x=0;x<W;x++){
+      const i=row+x,xl=xm[x],xr=xp[x];
+      const a=A[i],b=B[i];
+      const la=A[ru+xl]*.05+A[ru+x]*.2+A[ru+xr]*.05+A[row+xl]*.2-a+A[row+xr]*.2+A[rd+xl]*.05+A[rd+x]*.2+A[rd+xr]*.05;
+      const lb=B[ru+xl]*.05+B[ru+x]*.2+B[ru+xr]*.05+B[row+xl]*.2-b+B[row+xr]*.2+B[rd+xl]*.05+B[rd+x]*.2+B[rd+xr]*.05;
+      const r=a*b*b;
+      let na=a+(da*la-r+f*(1-a)), nb=b+(db*lb+r-(k+f)*b);
+      A2[i]=na<0?0:na>1?1:na; B2[i]=nb<0?0:nb>1?1:nb;
+    }
+  }
+  let t=A;A=A2;A2=t; t=B;B=B2;B2=t;
+}
+
+function render(){
+  for(let i=0,p=0;i<N;i++,p+=4){
+    let t=B[i]*2.6; if(t>1)t=1;
+    const idx=(t*255)|0;
+    pix[p]=LUTr[idx];pix[p+1]=LUTg[idx];pix[p+2]=LUTb[idx];pix[p+3]=255;
+  }
+  vctx.putImageData(img,0,0);
+}
+
+// --- phase map: zones + trail + crosshair ---
+const FX0=0.010,FX1=0.100,KY0=0.030,KY1=0.075;
+const ZONES=[
+  {n:'spots',f:0.026,k:0.061},{n:'solitons',f:0.030,k:0.0625},{n:'mitosis',f:0.0367,k:0.0649},
+  {n:'coral',f:0.0545,k:0.062},{n:'maze',f:0.029,k:0.057},{n:'worms',f:0.078,k:0.061}
+];
+const fToX=f=>(f-FX0)/(FX1-FX0)*phase.width;
+const kToY=kk=>(kk-KY0)/(KY1-KY0)*phase.height;
+const xToF=px=>FX0+px/phase.width*(FX1-FX0);
+const yToK=py=>KY0+py/phase.height*(KY1-KY0);
+let trail=[];
+function drawPhase(){
+  const w=phase.width,h=phase.height;
+  const g=pctx.createLinearGradient(0,0,w,h);
+  g.addColorStop(0,'#07130f');g.addColorStop(1,'#0d0a14');
+  pctx.fillStyle=g;pctx.fillRect(0,0,w,h);
+  // subtle grid
+  pctx.strokeStyle='rgba(120,200,180,.08)';pctx.lineWidth=1;
+  for(let gx=0;gx<=5;gx++){pctx.beginPath();pctx.moveTo(gx/5*w,0);pctx.lineTo(gx/5*w,h);pctx.stroke();}
+  for(let gy=0;gy<=4;gy++){pctx.beginPath();pctx.moveTo(0,gy/4*h);pctx.lineTo(w,gy/4*h);pctx.stroke();}
+  // zones
+  pctx.font='9px sans-serif';pctx.textBaseline='middle';
+  for(const z of ZONES){const x=fToX(z.f),y=kToY(z.k);
+    pctx.fillStyle='rgba(216,178,90,.85)';pctx.beginPath();pctx.arc(x,y,2.6,0,7);pctx.fill();
+    pctx.fillStyle='rgba(207,230,221,.7)';pctx.fillText(z.n,x+5,y);
+  }
+  // breadcrumb trail
+  if(trail.length){
+    pctx.lineWidth=1.4;
+    for(let i=1;i<trail.length;i++){const al=i/trail.length;
+      pctx.strokeStyle='rgba(63,214,168,'+(0.15+al*0.55)+')';
+      pctx.beginPath();pctx.moveTo(fToX(trail[i-1].f),kToY(trail[i-1].k));pctx.lineTo(fToX(trail[i].f),kToY(trail[i].k));pctx.stroke();}
+    trail.forEach((p,i)=>{const x=fToX(p.f),y=kToY(p.k),al=(i+1)/trail.length;
+      pctx.fillStyle='rgba(63,214,168,'+(0.3+al*0.6)+')';pctx.beginPath();pctx.arc(x,y,6,0,7);pctx.fill();
+      pctx.fillStyle='#04120d';pctx.textAlign='center';pctx.font='bold 8px sans-serif';pctx.fillText(String(i+1),x,y+.5);pctx.textAlign='left';pctx.font='9px sans-serif';});
+  }
+  // crosshair (current)
+  const cx=fToX(S.f),cy=kToY(S.k);
+  pctx.strokeStyle='#3fd6a8';pctx.lineWidth=1;
+  pctx.beginPath();pctx.moveTo(cx-8,cy);pctx.lineTo(cx+8,cy);pctx.moveTo(cx,cy-8);pctx.lineTo(cx,cy+8);pctx.stroke();
+  pctx.beginPath();pctx.arc(cx,cy,4,0,7);pctx.stroke();
+}
+function pushTrail(f,kk){trail.push({f,k:kk});if(trail.length>8)trail.shift();}
+
+// --- analysis overlay ---
+function analyze(){
+  const bins=new Float32Array(40);let cover=0,cross=0;
+  for(let y=0;y<H;y++){let prev=B[y*W]>0.25;for(let x=0;x<W;x++){const b=B[y*W+x];let bi=(b*40)|0;if(bi>39)bi=39;bins[bi]++;if(b>0.25)cover++;const cur=b>0.25;if(cur!==prev)cross++;prev=cur;}}
+  cover/=N; const freq=cross/(N);
+  let lab;
+  if(cover<0.02)lab='dissolving / empty';
+  else if(freq>0.05)lab='labyrinth / worms';
+  else if(cover<0.12)lab='spots / solitons';
+  else if(cover<0.34)lab='coral / fingers';
+  else lab='bubbles / inverse';
+  plabel.textContent=lab+'  ·  cover '+(cover*100).toFixed(0)+'%';
+  if(showHisto){
+    hctx.clearRect(0,0,histo.width,histo.height);
+    let mx=1;for(const v of bins)if(v>mx)mx=v;
+    const bw=histo.width/40;
+    for(let i=0;i<40;i++){const hh=Math.pow(bins[i]/mx,0.5)*(histo.height-4);
+      hctx.fillStyle=`rgb(${LUTr[i*6]},${LUTg[i*6]},${LUTb[i*6]})`;
+      hctx.fillRect(i*bw,histo.height-hh,bw-.5,hh);}
+  }
+}
+
+// --- painting with symmetry ---
+let painting=false;
+function paintGrid(gx,gy){
+  const cx=W/2,cy=H/2,dx=gx-cx,dy=gy-cy;const base=Math.atan2(dy,dx),rad=Math.hypot(dx,dy);
+  let n=S.sym==='k'?6:parseInt(S.sym),mirror=S.sym==='k'||S.sym==='2';
+  const pts=[];
+  for(let i=0;i<n;i++){const a=base+i*2*Math.PI/n;pts.push([cx+Math.cos(a)*rad,cy+Math.sin(a)*rad]);
+    if(mirror){const am=-base+i*2*Math.PI/n;pts.push([cx+Math.cos(am)*rad,cy+Math.sin(am)*rad]);}}
+  const R=7;
+  for(const[px,py]of pts)for(let y=-R;y<=R;y++)for(let x=-R;x<=R;x++){const d=Math.hypot(x,y);if(d>R)continue;
+    const gX=(Math.round(px)+x+W)%W,gY=(Math.round(py)+y+H)%H,i=gY*W+gX,wgt=(1-d/R);
+    B[i]=Math.min(1,B[i]+wgt*0.9);A[i]=Math.max(0,A[i]-wgt*0.5);}
+}
+function evtToGrid(e){const r=vessel.getBoundingClientRect();const cx=(e.touches?e.touches[0].clientX:e.clientX)-r.left,cy=(e.touches?e.touches[0].clientY:e.clientY)-r.top;return[Math.floor(cx/r.width*W),Math.floor(cy/r.height*H)];}
+vessel.addEventListener('pointerdown',e=>{painting=true;const[x,y]=evtToGrid(e);paintGrid(x,y);});
+vessel.addEventListener('pointermove',e=>{if(painting){const[x,y]=evtToGrid(e);paintGrid(x,y);}});
+addEventListener('pointerup',()=>painting=false);
+
+// phase-map click
+phase.addEventListener('pointerdown',e=>{const r=phase.getBoundingClientRect();
+  const px=(e.clientX-r.left)/r.width*phase.width,py=(e.clientY-r.top)/r.height*phase.height;
+  S.f=Math.max(FX0,Math.min(FX1,xToF(px)));S.k=Math.max(KY0,Math.min(KY1,yToK(py)));
+  syncSliders();pushTrail(S.f,S.k);saveHash();});
+
+// --- tour ---
+let tour=null;
+function startTour(){
+  if(tour){tour=null;document.getElementById('tour').classList.remove('on');document.getElementById('tour').textContent='▶ Tour the zoo';return;}
+  const path=['spots','worms','mitosis','maze','coral','solitons'].map(n=>ZONES.find(z=>z.n===n));
+  tour={path,i:0,t:0,from:{f:S.f,k:S.k}};trail=[];
+  document.getElementById('tour').classList.add('on');document.getElementById('tour').textContent='■ Stop tour';
+}
+function tourStep(){
+  if(!tour)return;
+  tour.t+=0.014;
+  if(tour.t>=1){tour.t=0;tour.from={f:S.f,k:S.k};pushTrail(S.f,S.k);tour.i++;
+    if(tour.i>=tour.path.length){startTour();return;}}
+  const tgt=tour.path[tour.i],e=tour.t*tour.t*(3-2*tour.t);
+  S.f=tour.from.f+(tgt.f-tour.from.f)*e;S.k=tour.from.k+(tgt.k-tour.from.k)*e;
+  syncSliders(false);
+}
+
+// --- recording ---
+let recorder=null,recTimer=null;
+const REC_SECS=6;
+function toggleRec(){
+  const btn=document.getElementById('rec');
+  if(recorder){recorder.stop();return;}
+  if(!vessel.captureStream||typeof MediaRecorder==='undefined'){alert('Recording not supported in this browser.');return;}
+  const stream=vessel.captureStream(30);
+  let mime=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'].find(m=>MediaRecorder.isTypeSupported(m));
+  if(!mime){alert('WebM encoding unavailable.');return;}
+  const chunks=[];recorder=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:6e6});
+  recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};
+  recorder.onstop=()=>{clearInterval(recTimer);recTimer=null;
+    const blob=new Blob(chunks,{type:'video/webm'});const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);a.download='alembic.webm';a.click();
+    recorder=null;btn.classList.remove('on');btn.textContent='● Record';};
+  recorder.start();btn.classList.add('on');
+  let left=REC_SECS;btn.textContent='■ Stop ('+left+'s)';
+  recTimer=setInterval(()=>{left--;if(left<=0){if(recorder)recorder.stop();}else if(recorder)btn.textContent='■ Stop ('+left+'s)';},1000);
+}
+
+// --- PNG export (upscaled) ---
+function exportPNG(){
+  const o=document.createElement('canvas');o.width=W*4;o.height=H*4;const oc=o.getContext('2d');
+  oc.imageSmoothingEnabled=false;oc.drawImage(vessel,0,0,o.width,o.height);
+  const a=document.createElement('a');a.href=o.toDataURL('image/png');a.download='alembic.png';a.click();
+}
+
+// --- URL hash ---
+function saveHash(){
+  const s=[S.f.toFixed(4),S.k.toFixed(4),S.dA,S.dB,S.pal,S.seed,S.steps,S.sym].join(',');
+  history.replaceState(null,'','#'+s);
+}
+function loadHash(){
+  if(!location.hash)return false;
+  const p=location.hash.slice(1).split(',');if(p.length<8)return false;
+  const num=(v,lo,hi,d)=>{v=+v;return Number.isFinite(v)?Math.min(hi,Math.max(lo,v)):d;};
+  S.f=num(p[0],FX0,FX1,S.f);
+  S.k=num(p[1],KY0,KY1,S.k);
+  S.dA=num(p[2],0.4,1.2,S.dA);
+  S.dB=num(p[3],0.2,0.7,S.dB);
+  S.pal=num(p[4],0,PALS.length-1,S.pal)|0;
+  S.seed=num(p[5],0,4294967295,S.seed)|0;
+  S.steps=num(p[6],1,20,S.steps)|0;
+  S.sym=['1','2','4','6','k'].includes(p[7])?p[7]:S.sym;
+  return true;
+}
+
+// --- UI wiring ---
+const el=id=>document.getElementById(id);
+function syncSliders(hash=true){
+  el('sf').value=S.f;el('vf').textContent=S.f.toFixed(4);
+  el('sk').value=S.k;el('vk').textContent=S.k.toFixed(4);
+  el('sda').value=S.dA;el('vda').textContent=(+S.dA).toFixed(2);
+  el('sdb').value=S.dB;el('vdb').textContent=(+S.dB).toFixed(2);
+  el('ss').value=S.steps;el('vs').textContent=S.steps;
+  el('pal').value=S.pal;el('sym').value=S.sym;el('seed').value=S.seed;
+  if(hash)saveHash();
+}
+el('sf').oninput=e=>{S.f=+e.target.value;el('vf').textContent=S.f.toFixed(4);saveHash();};
+el('sk').oninput=e=>{S.k=+e.target.value;el('vk').textContent=S.k.toFixed(4);saveHash();};
+el('sda').oninput=e=>{S.dA=+e.target.value;el('vda').textContent=S.dA.toFixed(2);saveHash();};
+el('sdb').oninput=e=>{S.dB=+e.target.value;el('vdb').textContent=S.dB.toFixed(2);saveHash();};
+el('ss').oninput=e=>{S.steps=+e.target.value;el('vs').textContent=S.steps;saveHash();};
+el('pal').onchange=e=>{S.pal=+e.target.value;buildLUT(S.pal);saveHash();};
+el('sym').onchange=e=>{S.sym=e.target.value;saveHash();};
+el('seed').onchange=e=>{S.seed=+e.target.value|0;seedPreset(lastSeed);saveHash();};
+el('pause').onclick=e=>{paused=!paused;e.target.classList.toggle('on',paused);e.target.textContent=paused?'▶ Play':'⏸ Pause';};
+el('reset').onclick=()=>seedPreset(lastSeed);
+el('tour').onclick=startTour;
+el('trailclr').onclick=()=>trail=[];
+el('rec').onclick=toggleRec;
+el('png').onclick=exportPNG;
+el('share').onclick=()=>{saveHash();const b=el('share');const reset=()=>setTimeout(()=>b.textContent='🔗 Copy link',1600);
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(location.href).then(()=>{b.textContent='✓ Copied';reset();}).catch(()=>{b.textContent='⚠ Copy the URL manually';reset();});}
+  else{b.textContent='⚠ Copy the URL manually';reset();}};
+el('analysis').onclick=e=>{showHisto=!showHisto;e.target.classList.toggle('on',showHisto);histo.style.display=showHisto?'block':'none';plabel.style.display=showHisto?'block':'none';};
+document.querySelectorAll('[data-seed]').forEach(b=>b.onclick=()=>seedPreset(b.dataset.seed));
+
+// --- boot ---
+loadHash();
+buildLUT(S.pal);
+syncSliders();
+seedPreset('grid');
+pushTrail(S.f,S.k);
+
+let frame=0;
+function loop(){
+  if(!paused){for(let s=0;s<S.steps;s++)step();tourStep();}
+  render();
+  drawPhase();
+  if(frame%12===0)analyze();
+  frame++;
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>

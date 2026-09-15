@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PetAge — Dog &amp; Cat Age in Human Years</title>
+<meta name="description" content="Convert your dog's or cat's age to human years using the AKC size-based table, plus the 2020 epigenetic formula for dogs. 100% offline.">
+<script>
+  (function(){ try{
+    var t = localStorage.getItem('petage-theme');
+    if(!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){} })();
+</script>
+<style>
+  :root{
+    --c:#b45309;
+    --bg:#fbf6f0; --card:#ffffff; --fg:#211810; --muted:#6b5b48; --line:#efe4d6; --shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  [data-theme="dark"]{
+    --bg:#140f08; --card:#1e160d; --fg:#f5efe6; --muted:#a89176; --line:#2c2216; --shadow:0 1px 3px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  header{max-width:620px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--c),#92400e);display:flex;align-items:center;justify-content:center;font-size:22px}
+  h1{font-size:1.4rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem}
+  main{max-width:620px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px}
+  label{display:block;font-size:.78rem;color:var(--muted);margin-bottom:5px;font-weight:600}
+  input{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:1.05rem}
+  .field{margin-bottom:14px}
+  .btns{display:flex;gap:6px;margin-bottom:6px}
+  .btns button{flex:1;padding:9px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;cursor:pointer;font:inherit}
+  .btns button.active{background:var(--c);color:#fff;border-color:var(--c)}
+  .out{text-align:center}
+  .big{font-size:3.2rem;font-weight:800;color:var(--c);line-height:1}
+  .u{color:var(--muted);font-size:.85rem}
+  .extra{margin-top:12px;color:var(--muted);font-size:.95rem}
+  .extra b{color:var(--fg)}
+  .err{color:#dc2626;font-size:.85rem;margin-top:10px;text-align:center}
+  .theme{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem}
+  footer{max-width:620px;margin:0 auto;padding:0 20px 50px;color:var(--muted);font-size:.8rem}
+  footer a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">🐾</div>
+    <div><h1>PetAge</h1><div class="sub">Dog &amp; cat age in human years</div></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ Theme</button>
+</header>
+<main>
+  <div class="card">
+    <label>Pet</label>
+    <div class="btns" id="species"><button data-s="dog" class="active" type="button">🐕 Dog</button><button data-s="cat" type="button">🐈 Cat</button></div>
+    <div id="sizeWrap">
+      <label>Dog size</label>
+      <div class="btns" id="size"><button data-z="small" type="button">Small</button><button data-z="medium" class="active" type="button">Medium</button><button data-z="large" type="button">Large</button></div>
+    </div>
+    <div class="field"><label for="age">Pet's age (years)</label><input type="number" id="age" value="5" min="0" step="0.5"></div>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card out">
+    <div class="big" id="human">—</div>
+    <div class="u">human years (AKC table)</div>
+    <div class="extra" id="epi"></div>
+  </div>
+</main>
+<footer>
+  The AKC guideline: a dog's first year ≈ 15 human years, the second ≈ 9 more, then 4–6 per year by size; cats add ~4/year after age two. The 2020 epigenetic formula (UCSD) is <span style="font-family:ui-monospace,monospace">16·ln(age)+31</span>. A fun estimate, not veterinary advice. 100% offline. Part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a>. <a href="https://github.com/awictor/pet-age">Source</a>.
+</footer>
+
+<script>
+  // ---------- pure logic ----------
+  function chkAge(age){
+    const a = Number(age);
+    if(!Number.isFinite(a) || a < 0) throw new Error('age must be ≥ 0');
+    return a;
+  }
+
+  // AKC-style: year 1 = 15, year 2 = +9, then +4/5/6 per year by size.
+  const PER_YEAR = { small: 4, medium: 5, large: 6 };
+  function dogYears(age, size = 'medium'){
+    const a = chkAge(age);
+    if(!(size in PER_YEAR)) throw new Error('size must be small, medium or large');
+    if(a <= 1) return a * 15;
+    if(a <= 2) return 15 + (a - 1) * 9;
+    return 24 + (a - 2) * PER_YEAR[size];
+  }
+
+  // Cats: year 1 = 15, year 2 = +9, then +4 per year.
+  function catYears(age){
+    const a = chkAge(age);
+    if(a <= 1) return a * 15;
+    if(a <= 2) return 15 + (a - 1) * 9;
+    return 24 + (a - 2) * 4;
+  }
+
+  // 2020 epigenetic clock (dogs), valid roughly for age ≥ 1.
+  function epigenetic(dogAge){
+    const a = chkAge(dogAge);
+    if(a <= 0) throw new Error('age must be > 0');
+    return 16 * Math.log(a) + 31;
+  }
+
+  // ---------- UI ----------
+  if(typeof document !== 'undefined' && document.getElementById('human')){
+    const $ = id => document.getElementById(id);
+    let species = 'dog', size = 'medium';
+    const r = n => Math.round(n);
+
+    function render(){
+      try{
+        const age = $('age').value;
+        const human = species === 'dog' ? dogYears(age, size) : catYears(age);
+        $('human').textContent = r(human);
+        if(species === 'dog' && Number(age) >= 1){
+          $('epi').innerHTML = `Epigenetic formula (2020): <b>${r(epigenetic(age))}</b> human years`;
+        }else $('epi').textContent = '';
+        $('err').textContent = '';
+      }catch(e){ $('human').textContent = '—'; $('epi').textContent = ''; $('err').textContent = e.message; }
+    }
+    $('species').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+      species = b.dataset.s;
+      $('species').querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
+      $('sizeWrap').style.display = species === 'dog' ? '' : 'none';
+      render();
+    }));
+    $('size').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+      size = b.dataset.z;
+      $('size').querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
+      render();
+    }));
+    $('age').addEventListener('input', render);
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try{ localStorage.setItem('petage-theme', cur); }catch(e){}
+    });
+    render();
+  }
+
+  if(typeof module !== 'undefined') module.exports = { PER_YEAR, dogYears, catYears, epigenetic };
+</script>
+</body>
+</html>

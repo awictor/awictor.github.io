@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Amortize — loan amortization schedule calculator</title>
+<meta name="description" content="Free offline loan amortization calculator. Enter loan amount, interest rate, and term to get the monthly payment, total interest, and a full principal/interest/balance schedule. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/amortize/">
+<style>
+  :root{
+    --c:#065f46; --bg:#f5faf8; --fg:#0e2019; --muted:#4f7166;
+    --card:#ffffff; --border:#d6e8e1; --code:#e6f2ee;
+  }
+  [data-theme="dark"]{
+    --bg:#0a1613; --fg:#e3efea; --muted:#82a498; --card:#102420;
+    --border:#20393200; --border:#203932; --code:#152c26;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:760px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#10b981);display:grid;place-items:center;color:#fff;font-size:20px}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:760px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .fld{flex:1;min-width:120px}
+  input{width:100%;padding:11px 13px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:1rem;font-family:ui-monospace,monospace}
+  input:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .err{color:#dc2626;font-size:.86rem;margin:12px 0 0;min-height:1.1em}
+  .summary{margin-top:18px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;
+    background:var(--border);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .cell{background:var(--card);padding:13px 15px}
+  .cell .k{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .cell .v{font-family:ui-monospace,monospace;font-weight:700;font-size:1.15rem;margin-top:2px;color:var(--c)}
+  .tbl-wrap{margin-top:18px;max-height:340px;overflow:auto;border:1px solid var(--border);border-radius:12px}
+  table{width:100%;border-collapse:collapse;font-family:ui-monospace,monospace;font-size:.84rem}
+  th,td{padding:8px 12px;text-align:right;border-bottom:1px solid var(--border)}
+  th:first-child,td:first-child{text-align:left}
+  thead th{position:sticky;top:0;background:var(--code);font-size:.72rem;text-transform:uppercase;letter-spacing:.03em}
+  .hint{color:var(--muted);font-size:.82rem;margin:14px 0 0}
+  footer{max-width:760px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+  @media(max-width:520px){.summary{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('amz.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">▤</div>
+  <div>
+    <h1>Amortize</h1>
+    <p class="sub">Loan amortization schedule</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <div class="row">
+      <div class="fld">
+        <label for="principal">Loan amount</label>
+        <input id="principal" value="250000" inputmode="decimal" spellcheck="false">
+      </div>
+      <div class="fld">
+        <label for="rate">Annual rate (%)</label>
+        <input id="rate" value="6.5" inputmode="decimal" spellcheck="false">
+      </div>
+      <div class="fld">
+        <label for="years">Term (years)</label>
+        <input id="years" value="30" inputmode="decimal" spellcheck="false">
+      </div>
+    </div>
+    <p class="err" id="err"></p>
+    <div class="summary" id="summary"></div>
+    <div class="tbl-wrap" id="tblwrap"><table id="tbl"></table></div>
+    <p class="hint">Standard fixed-rate amortization: each payment covers the month's interest first,
+      then reduces principal. The final payment is adjusted so the balance lands exactly at zero.
+      Runs entirely in your browser.</p>
+  </div>
+</main>
+<footer>
+  Amortize is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/amortize">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function monthlyPayment(principal, annualPct, months){
+  var P = Number(principal), n = Math.round(Number(months));
+  var r = Number(annualPct) / 100 / 12;
+  if(!(P > 0) || !(n > 0)) return null;
+  if(r === 0) return P / n;
+  return P * r / (1 - Math.pow(1 + r, -n));
+}
+function schedule(principal, annualPct, months){
+  var P = Number(principal), n = Math.round(Number(months));
+  var pay = monthlyPayment(P, annualPct, n);
+  if(pay === null) return null;
+  var r = Number(annualPct) / 100 / 12;
+  var bal = P, rows = [], totalInterest = 0;
+  for(var i = 1; i <= n; i++){
+    var interest = bal * r;
+    var principalPaid = pay - interest;
+    if(i === n) principalPaid = bal;      // clear any rounding residue on the last payment
+    var thisPay = interest + principalPaid;
+    bal -= principalPaid;
+    if(Math.abs(bal) < 1e-9) bal = 0;
+    totalInterest += interest;
+    rows.push({ period: i, payment: thisPay, interest: interest, principal: principalPaid, balance: bal });
+  }
+  return { rows: rows, payment: pay, months: n, totalInterest: totalInterest, totalPaid: P + totalInterest };
+}
+
+if(typeof module !== 'undefined') module.exports = { monthlyPayment, schedule };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var pEl = document.getElementById('principal');
+  var rEl = document.getElementById('rate');
+  var yEl = document.getElementById('years');
+  var errEl = document.getElementById('err');
+  var summaryEl = document.getElementById('summary');
+  var tblEl = document.getElementById('tbl');
+  function money(x){ return '$' + x.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function render(){
+    var months = Math.round(Number(yEl.value) * 12);
+    var s = schedule(pEl.value, rEl.value, months);
+    if(s === null){
+      errEl.textContent = 'Enter a positive loan amount and term.';
+      summaryEl.innerHTML = ''; tblEl.innerHTML = '';
+      return;
+    }
+    errEl.textContent = '';
+    summaryEl.innerHTML =
+      '<div class="cell"><div class="k">Monthly payment</div><div class="v">' + money(s.payment) + '</div></div>' +
+      '<div class="cell"><div class="k">Total interest</div><div class="v">' + money(s.totalInterest) + '</div></div>' +
+      '<div class="cell"><div class="k">Total paid</div><div class="v">' + money(s.totalPaid) + '</div></div>';
+    var head = '<thead><tr><th>#</th><th>Payment</th><th>Interest</th><th>Principal</th><th>Balance</th></tr></thead>';
+    var body = s.rows.map(function(r){
+      return '<tr><td>' + r.period + '</td><td>' + money(r.payment) + '</td><td>' + money(r.interest) +
+        '</td><td>' + money(r.principal) + '</td><td>' + money(r.balance) + '</td></tr>';
+    }).join('');
+    tblEl.innerHTML = head + '<tbody>' + body + '</tbody>';
+    try{
+      localStorage.setItem('amz.p', pEl.value);
+      localStorage.setItem('amz.r', rEl.value);
+      localStorage.setItem('amz.y', yEl.value);
+    }catch(e){}
+  }
+  [pEl, rEl, yEl].forEach(function(e){ e.addEventListener('input', render); });
+  try{
+    var sp = localStorage.getItem('amz.p'); if(sp !== null) pEl.value = sp;
+    var sr = localStorage.getItem('amz.r'); if(sr !== null) rEl.value = sr;
+    var sy = localStorage.getItem('amz.y'); if(sy !== null) yEl.value = sy;
+  }catch(e){}
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('amz.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('amz.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>

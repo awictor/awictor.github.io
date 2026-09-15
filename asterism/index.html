@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Asterism — draw your own constellations</title>
+<style>
+  :root{
+    --ink:#e9edff; --dim:#8b93b8; --accent:#cbb8ff; --panel:rgba(14,17,34,.62);
+    --serif:"Iowan Old Style",Palatino,"Palatino Linotype","Book Antiqua",Georgia,serif;
+    --sans:ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#02030a;overflow:hidden;font-family:var(--sans);
+    color:var(--ink);-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+  canvas{position:fixed;inset:0;display:block;touch-action:none}
+  #hud{position:fixed;inset:0;pointer-events:none;padding:16px;display:flex;flex-direction:column;
+    justify-content:space-between}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;pointer-events:none}
+  #title{font-family:var(--serif);font-size:22px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--accent);opacity:.9;text-shadow:0 0 18px rgba(120,110,220,.5)}
+  #hint{font-size:12.5px;color:var(--dim);margin-top:4px;max-width:min(60vw,420px);line-height:1.5;
+    transition:opacity .8s}
+  #hint.gone{opacity:0}
+  #title{cursor:pointer;pointer-events:auto}
+  #controls{gap:6px}
+  button{pointer-events:auto;cursor:pointer;font-family:var(--sans);font-size:12.5px;color:var(--ink);
+    background:var(--panel);border:1px solid rgba(160,170,220,.18);border-radius:999px;
+    padding:7px 13px;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);transition:.18s;white-space:nowrap}
+  button:hover{border-color:rgba(180,170,255,.6);color:#fff;box-shadow:0 0 16px rgba(120,110,220,.25)}
+  button[aria-pressed="true"]{background:rgba(120,105,210,.32);border-color:rgba(190,175,255,.7);color:#fff}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  #count{font-size:12px;color:var(--dim);margin-left:auto;pointer-events:none}
+  #pop{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(.96);pointer-events:auto;
+    background:var(--panel);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border:1px solid rgba(180,170,255,.28);
+    border-radius:16px;padding:18px 18px 16px;width:min(340px,86vw);opacity:0;visibility:hidden;
+    transition:.2s;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+  #pop.on{opacity:1;visibility:visible;transform:translate(-50%,-50%) scale(1)}
+  #pop h3{margin:0 0 4px;font-family:var(--serif);font-weight:500;font-size:16px;color:var(--accent)}
+  #pop p{margin:0 0 12px;font-size:11.5px;color:var(--dim)}
+  #pop input{width:100%;margin-bottom:9px;background:rgba(255,255,255,.06);border:1px solid rgba(160,170,220,.22);
+    color:var(--ink);border-radius:9px;padding:9px 11px;font-size:13px;font-family:var(--sans)}
+  #pop input:focus{outline:none;border-color:var(--accent)}
+  #pop .pr{display:flex;gap:8px;justify-content:flex-end;margin-top:2px}
+  #live{position:fixed;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(14px);pointer-events:none;
+    background:var(--panel);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);border:1px solid rgba(160,170,220,.2);border-radius:999px;
+    padding:8px 16px;font-size:12.5px;opacity:0;transition:.28s;color:var(--accent)}
+  #toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+  @media (pointer:coarse){ button{padding:11px 15px} }
+  @media (max-width:560px){
+    #controls{flex-wrap:nowrap;overflow-x:auto;max-width:100%;pointer-events:auto;
+      padding-bottom:2px;-ms-overflow-style:none;scrollbar-width:none}
+    #controls::-webkit-scrollbar{display:none}
+    #count{margin-left:8px}
+  }
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="Night sky. Use arrow keys to move between stars, Enter to connect a star, N to name a constellation, Escape to cancel."></canvas>
+<div id="hud">
+  <div class="row" style="flex-direction:column;align-items:flex-start">
+    <div id="title">Asterism</div>
+    <div id="hint">Click stars to connect them. Press <b>N</b> to name your constellation. Keyboard: arrows to move, Enter to link, Esc to cancel.</div>
+  </div>
+  <div class="row" id="controls">
+    <button id="bNew" title="Generate a new random sky">New Sky</button>
+    <button id="bUndo" title="Remove the last segment">Undo</button>
+    <button id="bFinish" title="Finish and name the current figure">Finish (N)</button>
+    <button id="bLabels" aria-pressed="true" title="Toggle constellation names">Labels</button>
+    <button id="bGuide" aria-pressed="false" title="Suggest real constellations to trace">Guide</button>
+    <button id="bSound" aria-pressed="false" title="Ambient tones mapped to star color">Sound</button>
+    <button id="bSave" title="Download this sky as an image">Save Sky</button>
+    <button id="bCopy" title="Copy a link that reproduces this exact sky">Copy Link</button>
+    <span id="count"></span>
+  </div>
+</div>
+<div id="pop" role="dialog" aria-modal="true" aria-label="Name your constellation">
+  <h3>Name your constellation</h3>
+  <p>A soft label will glow at its center. Add a caption to narrate a shared sky.</p>
+  <input id="pName" maxlength="28" placeholder="e.g. The Wanderer" autocomplete="off">
+  <input id="pCap" maxlength="60" placeholder="Caption (optional)" autocomplete="off">
+  <div class="pr">
+    <button id="pCancel">Cancel</button>
+    <button id="pOk">Save</button>
+  </div>
+</div>
+<div id="toast"></div>
+<div id="live" aria-live="polite"></div>
+<script>
+"use strict";
+// ============================================================================
+// SECTION 1 — PRNG + hash seed parse/serialize
+// ============================================================================
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+const B36="0123456789abcdefghijklmnopqrstuvwxyz";
+function to36(n){n=Math.floor(n);if(n<=0)return"0";let s="";while(n>0){s=B36[n%36]+s;n=Math.floor(n/36);}return s;}
+function from36(s){return parseInt(s,36)||0;}
+
+// Sky state
+let SEED=0, stars=[], asterisms=[], milky=[];
+let W=0,H=0,DPR=1;
+const C=document.getElementById("c"), ctx=C.getContext("2d");
+const static_c=document.createElement("canvas"), sctx=static_c.getContext("2d");
+let D=ctx; // active draw context for shared helpers (main canvas or export canvas)
+
+// Encode the whole sky (seed + figures) into a compact, URL-safe hash.
+function encodeHash(){
+  const parts=[to36(SEED)];
+  for(const a of asterisms){
+    const idx=a.stars.map(to36).join(",");
+    parts.push(idx+":"+encodeURIComponent(a.name||"")+":"+encodeURIComponent(a.cap||""));
+  }
+  return "#"+parts.join(";");
+}
+function decodeHash(h){
+  h=(h||"").replace(/^#/,"");
+  if(!h)return null;
+  const seg=h.split(";"), seed=from36(seg[0]), figs=[];
+  for(let i=1;i<seg.length;i++){
+    const f=seg[i]; if(!f)continue;
+    const p=f.split(":");
+    const idx=p[0].split(",").filter(x=>x!=="").map(from36).filter(i=>i>=0&&i<STAR_N);
+    if(idx.length<2)continue;
+    figs.push({stars:idx,name:decodeURIComponent(p[1]||""),cap:decodeURIComponent(p[2]||"")});
+  }
+  return {seed,figs};
+}
+
+// ============================================================================
+// SECTION 2 — starfield / Milky Way / meteor generation
+// ============================================================================
+const STAR_N=760;
+function tempColor(t){ // t 0=amber .. 1=blue-white
+  const r=Math.round(255-40*t), g=Math.round(186+34*t), b=Math.round(120+135*t);
+  return [r,g,b];
+}
+function buildSky(seed){
+  SEED=seed>>>0; const rng=mulberry32(SEED); stars=[]; milky=[];
+  // Milky Way band geometry (seed-stable), a diagonal glow.
+  const bandA=(-0.35-rng()*0.5), bx=0.5, by=0.5;
+  for(let i=0;i<STAR_N;i++){
+    let x,y;
+    if(i%3===0){ // cluster a third of stars along the band for density
+      const along=(rng()-0.5)*1.7, across=(rng()-0.5)*(rng()-0.5)*0.34;
+      x=bx+along*Math.cos(bandA)-across*Math.sin(bandA);
+      y=by+along*Math.sin(bandA)+across*Math.cos(bandA);
+      if(x<0||x>1||y<0||y>1){x=rng();y=rng();}
+    }else{ x=rng(); y=rng(); }
+    const mag=Math.pow(rng(),2.7);               // long-tailed brightness
+    stars.push({x,y,mag,col:tempColor(rng()),ph:rng()*6.283,sp:0.5+rng()*1.6,
+      r:0.5+mag*2.4, a:0.35+mag*0.6});
+  }
+  // Milky Way micro-star dust (drawn to static layer)
+  const mr=mulberry32(SEED^0x9e37);
+  for(let i=0;i<520;i++){
+    const along=(mr()-0.5)*1.9, across=(mr()-0.5)*(mr()-0.5)*0.22;
+    milky.push({x:bx+along*Math.cos(bandA)-across*Math.sin(bandA),
+      y:by+along*Math.sin(bandA)+across*Math.cos(bandA), a:0.05+mr()*0.28});
+  }
+  computeGuide();
+  drawStatic(); // repaint the static layer (gradient + Milky Way dust) for this seed
+}
+// Meteor scheduler
+let meteor=null, nextMeteor=6000;
+function maybeMeteor(t,dt){
+  nextMeteor-=dt;
+  if(!meteor&&nextMeteor<=0){
+    const r=Math.random();
+    meteor={x:r*W*0.7,y:Math.random()*H*0.4,vx:(3+Math.random()*3)*(120),
+      vy:(1+Math.random()*1.5)*120,life:0,dur:0.9+Math.random()*0.5};
+    nextMeteor=9000+Math.random()*16000;
+  }
+  if(meteor){ meteor.life+=dt/1000; if(meteor.life>meteor.dur)meteor=null; }
+}
+
+// ============================================================================
+// Layout / static layer
+// ============================================================================
+function resize(){
+  DPR=Math.min(2,window.devicePixelRatio||1);
+  W=window.innerWidth; H=window.innerHeight;
+  for(const cv of [C,static_c]){cv.width=W*DPR;cv.height=H*DPR;}
+  C.style.width=static_c.style.width=W+"px"; C.style.height=static_c.style.height=H+"px";
+  ctx.setTransform(DPR,0,0,DPR,0,0); sctx.setTransform(DPR,0,0,DPR,0,0);
+  computeGuide(); // re-fit guide templates to the new W/H
+  drawStatic();
+}
+function drawStatic(){
+  sctx.clearRect(0,0,W,H);
+  const g=sctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#0a0e26"); g.addColorStop(.5,"#050718"); g.addColorStop(1,"#01020a");
+  sctx.fillStyle=g; sctx.fillRect(0,0,W,H);
+  // Milky Way dust
+  for(const m of milky){ sctx.fillStyle="rgba(200,210,255,"+m.a.toFixed(3)+")";
+    sctx.fillRect(m.x*W,m.y*H,1.1,1.1); }
+  // vignette
+  const vg=sctx.createRadialGradient(W/2,H*0.46,Math.min(W,H)*0.2,W/2,H*0.5,Math.max(W,H)*0.75);
+  vg.addColorStop(0,"rgba(0,0,0,0)"); vg.addColorStop(1,"rgba(0,0,0,0.62)");
+  sctx.fillStyle=vg; sctx.fillRect(0,0,W,H);
+}
+
+// ============================================================================
+// SECTION 3 — render loop
+// ============================================================================
+const HUES=[265,200,150,42,330,95,15,180];
+let labelsOn=true, guideOn=false, reveal=Infinity, lastT=0;
+function px(s){return {x:s.x*W,y:s.y*H};}
+
+function segList(){ // flattened [ai, from, to] for reveal animation
+  const L=[]; asterisms.forEach((a,ai)=>{for(let i=0;i<a.stars.length-1;i++)L.push([ai,a.stars[i],a.stars[i+1]]);});
+  return L;
+}
+function frame(t){
+  const dt=Math.min(60,t-lastT||16); lastT=t; const ts=t/1000; D=ctx;
+  maybeMeteor(t,dt);
+  ctx.clearRect(0,0,W,H);
+  ctx.drawImage(static_c,0,0,W,H);
+  // stars with twinkle
+  for(const s of stars){
+    const p=px(s), tw=0.5+0.5*Math.sin(ts*s.sp+s.ph);
+    const a=Math.min(1,s.a*(0.55+0.55*tw));
+    ctx.beginPath(); ctx.fillStyle="rgba("+s.col[0]+","+s.col[1]+","+s.col[2]+","+a.toFixed(3)+")";
+    ctx.arc(p.x,p.y,s.r,0,6.283); ctx.fill();
+    if(s.mag>0.72){ ctx.beginPath();
+      ctx.fillStyle="rgba("+s.col[0]+","+s.col[1]+","+s.col[2]+","+(a*0.14).toFixed(3)+")";
+      ctx.arc(p.x,p.y,s.r*3.4,0,6.283); ctx.fill(); }
+  }
+  // guide suggestions
+  if(guideOn) drawGuide();
+  // asterisms (with optional line-by-line reveal)
+  const segs=segList(); let gi=0;
+  asterisms.forEach((a,ai)=>{
+    const hue=HUES[ai%HUES.length], col="hsla("+hue+",65%,74%,";
+    for(let i=0;i<a.stars.length-1;i++,gi++){
+      const s0=px(stars[a.stars[i]]), s1o=px(stars[a.stars[i+1]]); let s1=s1o;
+      if(reveal!==Infinity){ if(gi+1<=reveal){} else if(gi<reveal){const f=reveal-gi;
+        s1={x:s0.x+(s1o.x-s0.x)*f,y:s0.y+(s1o.y-s0.y)*f};} else continue; }
+      drawSeg(s0,s1,col);
+    }
+    if(labelsOn&&a.name&&(reveal===Infinity||gi<=reveal)) drawLabel(a,hue);
+  });
+  // current chain being drawn
+  if(chain.length){
+    for(let i=0;i<chain.length-1;i++) drawSeg(px(stars[chain[i]]),px(stars[chain[i+1]]),"hsla(255,70%,80%,");
+    const last=px(stars[chain[chain.length-1]]);
+    ctx.setLineDash([2,7]); ctx.strokeStyle="rgba(200,190,255,.5)"; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(last.x,last.y); ctx.lineTo(mouse.x,mouse.y); ctx.stroke(); ctx.setLineDash([]);
+  }
+  // selection / focus rings
+  drawRing(hover,"rgba(200,195,255,.5)",1);
+  if(chain.length) drawRing(chain[chain.length-1],"rgba(210,200,255,.9)",1.6);
+  if(focus>=0) drawRing(focus,"rgba(255,240,190,.95)",1.6,true);
+  // meteor
+  if(meteor){ const f=meteor.life/meteor.dur, x=meteor.x+meteor.vx*meteor.life, y=meteor.y+meteor.vy*meteor.life;
+    const tx=x-meteor.vx*0.16, ty=y-meteor.vy*0.16;
+    const grad=ctx.createLinearGradient(tx,ty,x,y);
+    grad.addColorStop(0,"rgba(255,255,255,0)"); grad.addColorStop(1,"rgba(255,255,255,"+((1-f)*0.85).toFixed(2)+")");
+    ctx.strokeStyle=grad; ctx.lineWidth=1.6; ctx.beginPath(); ctx.moveTo(tx,ty); ctx.lineTo(x,y); ctx.stroke();
+    ctx.beginPath(); ctx.fillStyle="rgba(255,255,255,"+((1-f)*0.9).toFixed(2)+")"; ctx.arc(x,y,1.8,0,6.283); ctx.fill(); }
+  // reveal advance
+  if(reveal!==Infinity){ reveal+=dt/1000*2.2; if(reveal>=segs.length)reveal=Infinity; }
+  requestAnimationFrame(frame);
+}
+function drawSeg(a,b,colBase){
+  D.lineCap="round";
+  D.strokeStyle=colBase+"0.28)"; D.lineWidth=3.4; line(a,b);
+  D.strokeStyle=colBase+"0.92)"; D.lineWidth=1; line(a,b);
+}
+function line(a,b){D.beginPath();D.moveTo(a.x,a.y);D.lineTo(b.x,b.y);D.stroke();}
+function drawRing(i,col,w,sq){
+  if(i<0||i>=stars.length)return; const p=px(stars[i]);
+  ctx.strokeStyle=col; ctx.lineWidth=w; ctx.beginPath();
+  if(sq)ctx.rect(p.x-7,p.y-7,14,14); else ctx.arc(p.x,p.y,7,0,6.283); ctx.stroke();
+}
+function centroid(a){let x=0,y=0;for(const i of a.stars){const p=px(stars[i]);x+=p.x;y+=p.y;}
+  return {x:x/a.stars.length,y:y/a.stars.length};}
+function drawLabel(a,hue){
+  const c=centroid(a); D.font="500 15px "+getComputedStyle(document.body).getPropertyValue("--serif");
+  D.textAlign="center"; D.textBaseline="middle";
+  const w=D.measureText(a.name).width;
+  D.fillStyle="hsla("+hue+",55%,85%,.92)"; D.shadowColor="hsla("+hue+",70%,60%,.7)"; D.shadowBlur=12;
+  D.fillText(a.name,c.x,c.y); D.shadowBlur=0;
+  D.strokeStyle="hsla("+hue+",55%,80%,.4)"; D.lineWidth=1;
+  D.beginPath(); D.moveTo(c.x-w/2,c.y+11); D.lineTo(c.x+w/2,c.y+11); D.stroke();
+  if(a.cap){ D.font="italic 11px "+getComputedStyle(document.body).getPropertyValue("--serif");
+    D.fillStyle="hsla("+hue+",40%,80%,.6)"; D.fillText(a.cap,c.x,c.y+24); }
+}
+
+// ============================================================================
+// Guided mode — fit real asterisms to nearest bright stars in the seed
+// ============================================================================
+const TEMPLATES={
+  "Big Dipper":[[0,.5],[.22,.42],[.44,.46],[.6,.34],[.7,.55],[.55,.66],[.42,.6]],
+  "Orion's Belt":[[.2,.5],[.5,.46],[.8,.42]],
+  "Southern Cross":[[.5,.1],[.5,.9],[.5,.5],[.2,.55],[.8,.48]]
+};
+let guide=[];
+function computeGuide(){
+  guide=[]; const rng=mulberry32(SEED^0x51ed);
+  const bright=stars.map((s,i)=>[i,s.mag]).filter(o=>o[1]>0.45).sort((a,b)=>b[1]-a[1]).map(o=>o[0]);
+  const names=Object.keys(TEMPLATES);
+  for(const name of names){
+    const pts=TEMPLATES[name], scale=0.16+rng()*0.12;
+    const ox=0.12+rng()*0.62, oy=0.14+rng()*0.6, used=new Set(), idx=[];
+    for(const[px_,py_]of pts){
+      const tx=(ox+px_*scale)*W, ty=(oy+py_*scale)*H; let best=-1,bd=1e9;
+      for(const bi of bright){ if(used.has(bi))continue; const p=px(stars[bi]);
+        const d=(p.x-tx)**2+(p.y-ty)**2; if(d<bd){bd=d;best=bi;} }
+      if(best<0)break; used.add(best); idx.push(best);
+    }
+    if(idx.length===pts.length) guide.push({name,stars:idx});
+  }
+}
+function drawGuide(){
+  ctx.setLineDash([1,6]); ctx.lineWidth=1;
+  for(const g of guide){
+    ctx.strokeStyle="rgba(150,160,210,.32)";
+    for(let i=0;i<g.stars.length-1;i++){const a=px(stars[g.stars[i]]),b=px(stars[g.stars[i+1]]);line(a,b);}
+    const c=centroid(g); ctx.setLineDash([]);
+    ctx.font="italic 11px "+getComputedStyle(document.body).getPropertyValue("--serif");
+    ctx.textAlign="center"; ctx.fillStyle="rgba(160,170,215,.5)"; ctx.fillText(g.name,c.x,c.y);
+    ctx.setLineDash([1,6]);
+  }
+  ctx.setLineDash([]);
+}
+
+// ============================================================================
+// SECTION 4 — interaction (hit test, connect state machine, keyboard)
+// ============================================================================
+let chain=[], hover=-1, focus=-1, mouse={x:-99,y:-99};
+function nearest(mx,my,rad){
+  let best=-1,bd=(rad||18)**2;
+  for(let i=0;i<stars.length;i++){const p=px(stars[i]);const d=(p.x-mx)**2+(p.y-my)**2;if(d<bd){bd=d;best=i;}}
+  return best;
+}
+function connect(i){
+  if(i<0)return;
+  if(chain.length&&chain[chain.length-1]===i)return; // ignore double
+  chain.push(i); reveal=Infinity; pluck(stars[i]); hideHint();
+  say(chain.length===1?"Star selected. Choose another to draw a line.":"Segment "+(chain.length-1)+" drawn.");
+}
+C.addEventListener("pointermove",e=>{mouse={x:e.clientX,y:e.clientY};hover=nearest(e.clientX,e.clientY,16);
+  C.style.cursor=hover>=0?"pointer":"crosshair";});
+C.addEventListener("pointerdown",e=>{ensureAudio();
+  if(reveal!==Infinity){reveal=Infinity;say("Sky revealed.");return;} // a tap during the reveal skips to the finished sky
+  const i=nearest(e.clientX,e.clientY,20);if(i>=0){focus=i;connect(i);}});
+C.addEventListener("pointerleave",()=>{mouse={x:-99,y:-99};hover=-1;});
+
+function finishChain(){
+  if(chain.length<2){say("Link at least two stars first.");toast("Link at least two stars first");return;}
+  openPop();
+}
+function undo(){ if(chain.length){chain.pop();}
+  else if(asterisms.length){const a=asterisms[asterisms.length-1];
+    if(a.stars.length>2)a.stars.pop(); else asterisms.pop(); syncHash();}
+}
+document.addEventListener("keydown",e=>{
+  if(pop.classList.contains("on")){ if(e.key==="Escape")closePop(); if(e.key==="Enter")savePop(); return; }
+  const k=e.key;
+  if(reveal!==Infinity&&!e.ctrlKey&&!e.metaKey){ reveal=Infinity; say("Sky revealed."); return; } // any key skips the reveal
+  if(k==="Escape"){chain=[];say("Cancelled.");}
+  else if(k==="n"||k==="N"){finishChain();}
+  else if(k==="z"&&(e.ctrlKey||e.metaKey)){undo();}
+  else if(k==="Enter"){ if(focus<0)focus=brightestVisible(); connect(focus); }
+  else if(k.startsWith("Arrow")){ e.preventDefault(); moveFocus(k); }
+  else return;
+});
+function brightestVisible(){let b=-1,m=-1;stars.forEach((s,i)=>{if(s.mag>m){m=s.mag;b=i;}});return b;}
+function moveFocus(k){
+  if(focus<0){focus=brightestVisible();announceFocus();return;}
+  const o=px(stars[focus]); const dir={ArrowRight:[1,0],ArrowLeft:[-1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[k];
+  let best=-1,bd=1e18;
+  for(let i=0;i<stars.length;i++){ if(i===focus)continue; const p=px(stars[i]);
+    const dx=p.x-o.x,dy=p.y-o.y, proj=dx*dir[0]+dy*dir[1]; if(proj<=4)continue;
+    const off=Math.abs(dx*dir[1]-dy*dir[0]); const cost=proj+off*2.4; if(cost<bd){bd=cost;best=i;} }
+  if(best>=0){focus=best;announceFocus();}
+}
+function announceFocus(){const s=stars[focus];const p=px(s);mouse=p;
+  say("Star "+focus+", brightness "+Math.round(s.mag*100)+"%. Enter to connect.");}
+
+// Naming popover
+const pop=document.getElementById("pop"),pName=document.getElementById("pName"),pCap=document.getElementById("pCap");
+function openPop(){pName.value="";pCap.value="";pop.classList.add("on");setTimeout(()=>pName.focus(),60);}
+function closePop(){pop.classList.remove("on");}
+function savePop(){
+  const name=pName.value.trim()||("Asterism "+(asterisms.length+1));
+  asterisms.push({stars:chain.slice(),name,cap:pCap.value.trim()});
+  chain=[]; closePop(); syncHash(); updateCount(); say('Named "'+name+'".');
+}
+document.getElementById("pOk").onclick=savePop;
+document.getElementById("pCancel").onclick=closePop;
+
+// ============================================================================
+// SECTION 5 — hash codec wiring, controls, export, boot
+// ============================================================================
+function syncHash(){ history.replaceState(null,"",encodeHash()); }
+function updateCount(){document.getElementById("count").textContent=
+  stars.length+" stars · "+asterisms.length+" drawn";}
+function say(m){const l=document.getElementById("live");l.textContent="";l.textContent=m;}
+let toastT;
+function toast(m){const t=document.getElementById("toast");t.textContent=m;t.classList.add("on");
+  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("on"),1700);}
+
+function newSky(seed){
+  buildSky(seed===undefined?(Math.random()*4294967296)>>>0:seed);
+  chain=[];asterisms=[];focus=-1;reveal=Infinity;syncHash();updateCount();
+}
+let hintGone=false;
+function hideHint(){ if(hintGone)return; hintGone=true; document.getElementById("hint").classList.add("gone"); }
+let pendingNew=false, pendingT;
+document.getElementById("bNew").onclick=()=>{
+  if(asterisms.length>0 && !pendingNew){ // don't silently wipe the user's work
+    pendingNew=true;
+    toast("Discard "+asterisms.length+" constellation"+(asterisms.length>1?"s":"")+"? Tap New Sky again to confirm");
+    clearTimeout(pendingT); pendingT=setTimeout(()=>{pendingNew=false;},3500);
+    return;
+  }
+  pendingNew=false; clearTimeout(pendingT);
+  newSky(); toast("New sky seeded");
+};
+document.getElementById("title").onclick=()=>{ // replay the reveal of a shared/drawn sky
+  if(asterisms.length){ reveal=0; say("Replaying the sky."); }
+};
+document.getElementById("bUndo").onclick=undo;
+document.getElementById("bFinish").onclick=finishChain;
+const bLabels=document.getElementById("bLabels");
+bLabels.onclick=()=>{labelsOn=!labelsOn;bLabels.setAttribute("aria-pressed",labelsOn);};
+const bGuide=document.getElementById("bGuide");
+bGuide.onclick=()=>{guideOn=!guideOn;bGuide.setAttribute("aria-pressed",guideOn);
+  toast(guideOn?"Tracing suggestions on":"Suggestions off");};
+document.getElementById("bCopy").onclick=async()=>{
+  const url=location.href.split("#")[0]+encodeHash(); // protocol-agnostic: works on file://, http, https
+  try{await navigator.clipboard.writeText(url);toast("Link copied — share your sky");}
+  catch(e){prompt("Copy this link:",url);}
+};
+
+// PNG postcard export (2x, with seed watermark)
+document.getElementById("bSave").onclick=()=>{
+  const s=2, ex=document.createElement("canvas"); ex.width=W*s; ex.height=H*s;
+  const g=ex.getContext("2d"); g.scale(s,s);
+  g.drawImage(static_c,0,0,W,H);
+  for(const st of stars){const p=px(st);g.beginPath();
+    g.fillStyle="rgba("+st.col[0]+","+st.col[1]+","+st.col[2]+","+st.a.toFixed(2)+")";
+    g.arc(p.x,p.y,st.r,0,6.283);g.fill();}
+  D=g; // redirect shared helpers to the export canvas
+  asterisms.forEach((a,ai)=>{const hue=HUES[ai%HUES.length],col="hsla("+hue+",65%,74%,";
+    for(let i=0;i<a.stars.length-1;i++)drawSeg(px(stars[a.stars[i]]),px(stars[a.stars[i+1]]),col);
+    if(a.name)drawLabel(a,hue);});
+  D=ctx;
+  g.font="12px "+getComputedStyle(document.body).getPropertyValue("--sans");
+  g.textAlign="right"; g.fillStyle="rgba(180,185,220,.5)";
+  g.fillText("asterism · seed "+to36(SEED),W-14,H-14);
+  ex.toBlob(b=>{const u=URL.createObjectURL(b),a=document.createElement("a");
+    a.href=u;a.download="asterism-"+to36(SEED)+".png";a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);
+    toast("Sky saved as PNG");});
+};
+
+// Web Audio — pluck per connection + optional ambient drone
+let AC=null,drone=null,droneOsc=[],soundOn=false;
+function ensureAudio(){ if(AC)return; try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} }
+function pluck(star){ if(!AC||!soundOn)return;
+  const t=AC.currentTime, o=AC.createOscillator(), g=AC.createGain();
+  const temp=Math.max(0,Math.min(1,(star.col[2]-star.col[0]+135)/175)); // 0 amber .. 1 blue
+  o.type="triangle"; o.frequency.value=220+temp*660;
+  g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(0.09,t+0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+1.1);
+  o.connect(g).connect(AC.destination); o.start(t); o.stop(t+1.15);
+}
+const bSound=document.getElementById("bSound");
+bSound.onclick=()=>{ ensureAudio(); soundOn=!soundOn; bSound.setAttribute("aria-pressed",soundOn);
+  if(soundOn&&AC){ if(AC.state==="suspended")AC.resume();
+    drone=AC.createGain(); drone.gain.value=0.028; drone.connect(AC.destination); droneOsc=[];
+    [55,82.4,110].forEach((f,i)=>{const o=AC.createOscillator();o.type="sine";
+      o.frequency.value=f*(1+i*0.003); o.connect(drone); o.start(); droneOsc.push(o); });
+    toast("Ambient sound on");
+  } else if(drone){ const dg=drone; dg.gain.setValueAtTime(dg.gain.value,AC.currentTime);
+    dg.gain.exponentialRampToValueAtTime(0.0001,AC.currentTime+0.6);
+    droneOsc.forEach(o=>{try{o.stop(AC.currentTime+0.62);o.onended=()=>{try{o.disconnect();}catch(e){}};}catch(e){}});
+    droneOsc=[]; setTimeout(()=>{try{dg.disconnect();}catch(e){}},700); drone=null; toast("Sound off"); }
+};
+
+window.addEventListener("resize",resize);
+window.addEventListener("hashchange",()=>{ const d=decodeHash(location.hash);
+  if(d&&d.seed!==SEED){ loadFrom(d); } });
+
+function loadFrom(d){
+  buildSky(d.seed); asterisms=d.figs||[]; chain=[]; focus=-1; updateCount();
+  if(asterisms.length){ reveal=0; hideHint(); say("Revealing a shared sky of "+asterisms.length+" constellations."); }
+}
+
+// ---- boot ----
+resize();
+const boot=decodeHash(location.hash);
+if(boot){ loadFrom(boot); } else { newSky(); }
+requestAnimationFrame(function loop(t){ frame(t); });
+</script>
+</body>
+</html>

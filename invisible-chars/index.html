@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Invisible Characters — find & remove hidden Unicode</title>
+<meta name="description" content="Detect and strip zero-width spaces, non-breaking spaces, BOMs, soft hyphens, and directional marks hidden in text. Cleans copy-paste and AI-generated gremlins. Offline, no tracking.">
+<style>
+  :root{
+    --c:#be185d;
+    --bg:#fbf5f8; --card:#ffffff; --fg:#221720; --muted:#7a6572;
+    --line:#efe2ea; --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.05);
+    --radius:14px;
+  }
+  [data-theme="dark"]{
+    --bg:#1b131a; --card:#261b24; --fg:#f6ecf2; --muted:#b39aa8;
+    --line:#3a2b36; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  header{max-width:860px;margin:0 auto;padding:28px 20px 8px;display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--c);display:grid;place-items:center;
+    font-size:24px;color:#fff;flex:0 0 auto}
+  h1{font-size:1.4rem;margin:0}
+  header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+  .theme{margin-left:auto;background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:8px 12px;cursor:pointer;font-size:1rem}
+  main{max-width:860px;margin:0 auto;padding:12px 20px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px;margin:16px 0}
+  label{display:block;font-size:.82rem;font-weight:600;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+  textarea{width:100%;font:inherit;font-family:ui-monospace,Menlo,Consolas,monospace;padding:12px;
+    border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);min-height:120px;resize:vertical}
+  textarea:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .status{margin:14px 0;font-size:1.05rem;font-weight:700}
+  .status.clean{color:#16a34a}
+  .status.dirty{color:var(--c)}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
+  button.act{background:var(--c);color:#fff;border:0;border-radius:10px;padding:10px 16px;cursor:pointer;font-weight:600}
+  button.ghost{background:var(--bg);color:var(--fg);border:1px solid var(--line)}
+  .viz{font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all;background:var(--bg);
+    border:1px solid var(--line);border-radius:10px;padding:14px;margin-top:12px;line-height:2}
+  .chip{display:inline-block;background:var(--c);color:#fff;border-radius:5px;padding:0 5px;font-size:.72rem;
+    font-weight:700;margin:0 1px;vertical-align:middle}
+  table{width:100%;border-collapse:collapse;margin-top:10px;font-size:.9rem}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.04em}
+  td.n{font-variant-numeric:tabular-nums;font-family:ui-monospace,monospace}
+  .cat{display:inline-block;padding:2px 8px;border-radius:999px;font-size:.74rem;font-weight:700}
+  .cat.zw{background:#fee2e2;color:#b91c1c}
+  .cat.sp{background:#dbeafe;color:#1d4ed8}
+  .cat.dir{background:#fef3c7;color:#a16207}
+  .cat.other{background:#e5e7eb;color:#374151}
+  [data-theme="dark"] .cat.zw{background:#4c1d1d;color:#fca5a5}
+  [data-theme="dark"] .cat.sp{background:#1e3a5f;color:#93c5fd}
+  [data-theme="dark"] .cat.dir{background:#4a3a12;color:#fcd34d}
+  [data-theme="dark"] .cat.other{background:#374151;color:#d1d5db}
+  h2{font-size:1rem;margin:0 0 8px}
+  .foot{color:var(--muted);font-size:.82rem;text-align:center;margin-top:26px}
+  .foot a{color:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">👻</div>
+  <div>
+    <h1>Invisible Characters</h1>
+    <p>Find &amp; remove hidden Unicode in your text</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="card">
+    <label for="in">Paste your text</label>
+    <textarea id="in" spellcheck="false" placeholder="Paste text that might contain hidden characters…"></textarea>
+    <div class="status" id="status"></div>
+    <div class="actions">
+      <button class="act" id="clean">Clean &amp; copy</button>
+      <button class="act ghost" id="sample">Load sample</button>
+      <button class="act ghost" id="clear">Clear</button>
+    </div>
+    <div class="viz" id="viz" style="display:none"></div>
+  </div>
+
+  <div class="card" id="report" style="display:none">
+    <h2>Hidden characters found</h2>
+    <table>
+      <thead><tr><th>#</th><th>At</th><th>Code</th><th>Name</th><th>Type</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>What it catches</h2>
+    <p style="color:var(--muted);font-size:.92rem;margin:0">
+      Zero-width spaces/joiners (U+200B–200D), word joiner &amp; BOM (U+2060, U+FEFF),
+      soft hyphen (U+00AD), non-breaking &amp; exotic spaces (U+00A0, U+2000–200A, U+202F, U+205F, U+3000),
+      and bidirectional control marks (U+200E–200F, U+202A–202E, U+2066–2069). Cleaning removes
+      zero-width and directional marks and normalizes exotic spaces to a regular space.</p>
+  </div>
+
+  <p class="foot">100% offline · nothing leaves your browser · part of the
+    <a href="https://awictor.github.io/toolkit/">Toolkit</a></p>
+</main>
+
+<script>
+  var TABLE = {};
+  function add(code, name, cat, repl){ TABLE[code] = { name:name, cat:cat, repl:repl }; }
+  // zero-width (removed)
+  add(0x200B,'ZERO WIDTH SPACE','zw','');
+  add(0x200C,'ZERO WIDTH NON-JOINER','zw','');
+  add(0x200D,'ZERO WIDTH JOINER','zw','');
+  add(0x2060,'WORD JOINER','zw','');
+  add(0xFEFF,'ZERO WIDTH NO-BREAK SPACE (BOM)','zw','');
+  add(0x00AD,'SOFT HYPHEN','zw','');
+  add(0x180E,'MONGOLIAN VOWEL SEPARATOR','zw','');
+  // spaces (normalized to regular space)
+  add(0x00A0,'NO-BREAK SPACE','sp',' ');
+  add(0x1680,'OGHAM SPACE MARK','sp',' ');
+  add(0x2000,'EN QUAD','sp',' '); add(0x2001,'EM QUAD','sp',' ');
+  add(0x2002,'EN SPACE','sp',' '); add(0x2003,'EM SPACE','sp',' ');
+  add(0x2004,'THREE-PER-EM SPACE','sp',' '); add(0x2005,'FOUR-PER-EM SPACE','sp',' ');
+  add(0x2006,'SIX-PER-EM SPACE','sp',' '); add(0x2007,'FIGURE SPACE','sp',' ');
+  add(0x2008,'PUNCTUATION SPACE','sp',' '); add(0x2009,'THIN SPACE','sp',' ');
+  add(0x200A,'HAIR SPACE','sp',' ');
+  add(0x202F,'NARROW NO-BREAK SPACE','sp',' ');
+  add(0x205F,'MEDIUM MATHEMATICAL SPACE','sp',' ');
+  add(0x3000,'IDEOGRAPHIC SPACE','sp',' ');
+  // directional (removed)
+  add(0x200E,'LEFT-TO-RIGHT MARK','dir','');
+  add(0x200F,'RIGHT-TO-LEFT MARK','dir','');
+  add(0x202A,'LEFT-TO-RIGHT EMBEDDING','dir','');
+  add(0x202B,'RIGHT-TO-LEFT EMBEDDING','dir','');
+  add(0x202C,'POP DIRECTIONAL FORMATTING','dir','');
+  add(0x202D,'LEFT-TO-RIGHT OVERRIDE','dir','');
+  add(0x202E,'RIGHT-TO-LEFT OVERRIDE','dir','');
+  add(0x2066,'LEFT-TO-RIGHT ISOLATE','dir','');
+  add(0x2067,'RIGHT-TO-LEFT ISOLATE','dir','');
+  add(0x2068,'FIRST STRONG ISOLATE','dir','');
+  add(0x2069,'POP DIRECTIONAL ISOLATE','dir','');
+  // other (removed)
+  add(0xFFFC,'OBJECT REPLACEMENT CHARACTER','other','');
+  add(0xFFFD,'REPLACEMENT CHARACTER','other','');
+
+  var CAT_LABEL = { zw:'zero-width', sp:'space', dir:'directional', other:'other' };
+
+  function toHex(code){ return 'U+' + code.toString(16).toUpperCase().padStart(4,'0'); }
+
+  function scan(text){
+    var s = String(text), out = [];
+    for(var i=0;i<s.length;i++){
+      var code = s.charCodeAt(i), info = TABLE[code];
+      if(info) out.push({ index:i, code:code, hex:toHex(code), name:info.name, cat:info.cat });
+    }
+    return out;
+  }
+  function clean(text){
+    var s = String(text), out = '';
+    for(var i=0;i<s.length;i++){
+      var info = TABLE[s.charCodeAt(i)];
+      out += info ? info.repl : s[i];
+    }
+    return out;
+  }
+  function summarize(findings){
+    var by = { zw:0, sp:0, dir:0, other:0 };
+    findings.forEach(function(f){ by[f.cat] = (by[f.cat]||0) + 1; });
+    return { total: findings.length, byCat: by };
+  }
+
+  if(typeof module !== 'undefined') module.exports = { scan:scan, clean:clean, summarize:summarize, toHex:toHex };
+
+  // ---- UI ----
+  if(typeof document !== 'undefined'){
+    var inp=document.getElementById('in'), status=document.getElementById('status');
+    var viz=document.getElementById('viz'), report=document.getElementById('report'), rows=document.getElementById('rows');
+
+    function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    function render(){
+      var text=inp.value, found=scan(text), sum=summarize(found);
+      if(!text){ status.textContent=''; status.className='status'; viz.style.display='none'; report.style.display='none'; return; }
+      if(sum.total===0){
+        status.textContent='✓ Clean — no hidden characters found.'; status.className='status clean';
+        viz.style.display='none'; report.style.display='none'; return;
+      }
+      status.textContent='⚠ '+sum.total+' hidden character'+(sum.total>1?'s':'')+' found'
+        + ' ('+['zw','sp','dir','other'].filter(function(k){return sum.byCat[k];})
+            .map(function(k){return sum.byCat[k]+' '+CAT_LABEL[k];}).join(', ')+').';
+      status.className='status dirty';
+      // visualize
+      var marks={}; found.forEach(function(f){ marks[f.index]=f; });
+      var html='';
+      for(var i=0;i<text.length;i++){
+        if(marks[i]) html+='<span class="chip" title="'+marks[i].name+'">'+marks[i].hex+'</span>';
+        else html+=esc(text[i]);
+      }
+      viz.innerHTML=html; viz.style.display='block';
+      rows.innerHTML=found.map(function(f,i){
+        return '<tr><td class="n">'+(i+1)+'</td><td class="n">'+f.index+'</td><td class="n">'+f.hex
+          +'</td><td>'+f.name+'</td><td><span class="cat '+f.cat+'">'+CAT_LABEL[f.cat]+'</span></td></tr>';
+      }).join('');
+      report.style.display='block';
+    }
+    inp.addEventListener('input', render);
+    document.getElementById('clean').addEventListener('click', function(){
+      inp.value=clean(inp.value); render();
+      if(navigator.clipboard) navigator.clipboard.writeText(inp.value);
+    });
+    document.getElementById('clear').addEventListener('click', function(){ inp.value=''; render(); });
+    document.getElementById('sample').addEventListener('click', function(){
+      inp.value='Hello​world this has‎hidden­chars﻿.';
+      render();
+    });
+
+    var root=document.documentElement, btn=document.getElementById('theme');
+    function setTheme(t){ root.setAttribute('data-theme',t); btn.textContent=t==='dark'?'☀️':'🌙'; try{localStorage.setItem('invchars-theme',t);}catch(e){} }
+    var saved; try{ saved=localStorage.getItem('invchars-theme'); }catch(e){}
+    setTheme(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'));
+    btn.addEventListener('click', function(){ setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark'); });
+  }
+</script>
+</body>
+</html>
